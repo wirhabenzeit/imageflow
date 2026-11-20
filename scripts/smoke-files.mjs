@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { createRouteFixture } from './route-fixture.mjs';
-import { testBook, menuAction, clickPage } from './ui-actions.mjs';
+import { clickPage, closeApp, menuAction, testBook } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { cp, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -299,6 +299,6 @@ try {
   assert.ok((await readdir(join(moved, 'files'))).includes('senja-road.gpx'));
   console.log('ImageFlow file parameters passed.');
 } finally {
-  await app.close();
+  await closeApp(app);
   await rm(work, { recursive: true, force: true });
 }

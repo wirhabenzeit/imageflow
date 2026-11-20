@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
 import sharp from 'sharp';
-import { clickClosingWindow, clickPage } from './ui-actions.mjs';
+import { clickClosingWindow, clickPage, closeApp } from './ui-actions.mjs';
 
 // The template library: import from its own window, live updates in an open New Book picker, removal, a failed import,
 // creating books from a library template and from the built-in starter's example or opening spreads, and Save Template to Library.
@@ -304,5 +304,5 @@ try {
   console.error('Template library workflow failed:', error);
   throw error;
 } finally {
-  await app.close();
+  await closeApp(app);
 }

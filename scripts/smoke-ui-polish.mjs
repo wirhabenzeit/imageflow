@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { testBook, menuAction } from './ui-actions.mjs';
+import { closeApp, menuAction, testBook } from './ui-actions.mjs';
 import { createRouteFixture } from './route-fixture.mjs';
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
@@ -146,4 +146,4 @@ try {
 } catch (error) {
   console.error('UI diagnostic:', await Promise.all(app.windows().filter((page) => page.url() === 'imageflow://editor/').map(async (page) => ({ status: await page.locator('.status').innerText(), book: await current(page) }))));
   throw error;
-} finally { await app.close(); await rm(work, { recursive: true, force: true }); }
+} finally { await closeApp(app); await rm(work, { recursive: true, force: true }); }

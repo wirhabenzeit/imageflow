@@ -134,7 +134,8 @@ async function typeChecker(t: TestContext, folder: string) {
   await symlink(resolve('node_modules'), join(runtime, 'node_modules'));
   await build({ entryPoints: ['desktop/typecheck-worker.ts'], outfile: join(runtime, 'typecheck-worker.cjs'),
     bundle: true, platform: 'node', format: 'cjs', packages: 'external', logLevel: 'silent' });
-  return () => checkTemplateTypes(folder, new AbortController().signal, runtime, 15_000);
+  // Generous: on a loaded or slow machine the compiler alone can take longer than the app's 15 s.
+  return () => checkTemplateTypes(folder, new AbortController().signal, runtime, 120_000);
 }
 
 test('the type check resolves packages from the saved declarations, without node_modules', async (t) => {

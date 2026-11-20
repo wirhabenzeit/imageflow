@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { nextPresentation, testBook } from './ui-actions.mjs';
+import { closeApp, nextPresentation, testBook } from './ui-actions.mjs';
 import { copySample } from '../desktop/sample-book.mjs';
 
 // Presentation must reuse the maps the book view drew, and show all of each: a map drawn as a large raster layer
@@ -128,6 +128,6 @@ try {
   }
   console.log('Presentation pictures: maps are reused from the cache and show their vector layers.');
 } finally {
-  await app.close().catch(() => {});
+  await closeApp(app);
   await rm(work, { recursive: true, force: true });
 }

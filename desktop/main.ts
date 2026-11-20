@@ -1333,6 +1333,8 @@ void app.whenReady().then(async () => {
     Object.defineProperty(globalThis, 'imageflowBenchmarkInputs', { value: () => lastDocument?.projectSession.inputs.metrics });
   }
   let quitApproved = false;
+  // How long Quit waits for a book window to acknowledge that it is saving its input, before asking whether to quit anyway.
+  const quitAcknowledgeMs = 10_000;
   app.on('before-quit', (event) => {
     if (quitApproved) { quitting = true; updates.dispose(); clearInterval(sourceMaintenance); return; }
     event.preventDefault();
@@ -1359,8 +1361,9 @@ void app.whenReady().then(async () => {
         const id = randomUUID();
         const allowed = await new Promise<boolean | undefined>((resolve) => {
           // A live renderer acknowledges at once, then may take as long as its pending save needs. Only a missing
-          // acknowledgement, Electron's own hang detection or a very long silence counts as "not responding".
-          let timer = setTimeout(() => finish(undefined), 3000);
+          // acknowledgement, Electron's own hang detection or a very long silence counts as "not responding". A window
+          // in the background of a slow Mac can take several seconds to answer: 3 s asked whether to quit a working window.
+          let timer = setTimeout(() => finish(undefined), quitAcknowledgeMs);
           const hung = () => finish(undefined);
           const finish = (allowed: boolean | undefined) => {
             clearTimeout(timer); quitReplies.delete(id);

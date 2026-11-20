@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { menuAction, nextPresentation, testBook } from './ui-actions.mjs';
+import { closeApp, menuAction, nextPresentation, testBook } from './ui-actions.mjs';
 import { buildMacHeaderState, macHeaderState } from './mac-header-state.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -212,4 +212,4 @@ try {
   }
   console.error('Failure artifacts:', work);
   throw error;
-} finally { await app.close(); }
+} finally { await closeApp(app); }
