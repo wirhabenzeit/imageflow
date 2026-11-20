@@ -92,22 +92,22 @@ try {
   await writeFile(manifest, JSON.stringify(project));
   await page.waitForFunction((old) => document.querySelector('iframe.book-frame-layouts[data-current][data-ready]')?.getAttribute('src') !== old, old);
   await ready('settlements');
-  assert.equal(await draws(), mapLayouts, 'Changed map settings draw fresh thumbnails');
+  // The map layouts are not this spread's own, so their previews show the map last drawn in each, without drawing.
+  assert.equal(await draws(), 0, 'Changed map settings borrow the last map drawn in each layout');
   const color = await layouts().locator('[data-spread="map"] .if-rendered-image img').evaluate((image) => {
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
     const ctx = canvas.getContext('2d'); ctx.drawImage(image, 0, 0, 1, 1);
     return [...ctx.getImageData(0, 0, 1, 1).data];
   });
-  assert.deepEqual(color, [0, 128, 64, 255], 'The fresh map shows its updated coordinates');
+  // The cached copy is WebP, so its colour may be a step off.
+  assert.ok([64, 96, 160].every((value, i) => Math.abs(color[i] - value) <= 3), 'The borrowed map is the one last drawn for the layout: ' + color);
   await page.locator('.spread-thumb[data-spread="arriving"]').click(); await ready('arriving');
-  assert.equal(await draws(), 0, 'The previous map view remains cached separately');
-  await page.locator('.spread-thumb[data-spread="settlements"]').click(); await ready('settlements');
-  assert.equal(await draws(), 0, 'The changed map view is also reusable');
+  assert.equal(await draws(), 0, 'The previous map view remains cached');
   const previous = await page.locator('iframe.book-frame-layouts[data-current]').getAttribute('src');
   await writeFile(mapFile, await readFile(mapFile, 'utf8') + '\n// Template changed\n');
   await page.waitForFunction((old) => document.querySelector('iframe.book-frame-layouts[data-current][data-ready]')?.getAttribute('src') !== old, previous);
-  await ready('settlements');
-  assert.equal(await draws(), mapLayouts, 'Changed template code invalidates cached pictures');
+  await ready('arriving');
+  assert.equal(await draws(), mapLayouts, 'Changed code in the map file draws its pictures again');
 
   // An actual map on page Y must survive editing a different page X in the sidebar's whole-book frame.
   const thumbnails = () => page.frameLocator('iframe.book-frame-thumbs[data-current]');

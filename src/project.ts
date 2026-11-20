@@ -176,10 +176,10 @@ export type RenderProject = {
   problems: string[];
   sources?: Record<string, SourceStatus>;
   // `fonts`: the code points each bundled font file covers, as [first, last] ranges, by its file name under template/.
-  // `hash` identifies the template files as loaded, so a frame that renders newer revisions in place notices an edited template.
-  // Each photo's file revision, by photo ID.
-  photoRevisions?: Record<string, string>;
-  template: { script: string; css?: string; assets: Record<string, string>; warnings?: string[]; fonts?: Record<string, [number, number][]>; hash?: string };
+  // `hash` identifies the template files as loaded. `pictureScopes`: the picture cache scope of each template file that
+  // places drawn pictures, by its path in template/ (desktop/picture-scopes.ts).
+  template: { script: string; css?: string; assets: Record<string, string>; warnings?: string[]; fonts?: Record<string, [number, number][]>; hash?: string;
+    pictureScopes?: Record<string, string> };
   mode: 'edit' | 'export';
   // Where this render is shown, set by the render frame from its URL before rendering (never saved or sent).
   view?: RenderView;

@@ -1263,7 +1263,8 @@ export function SpreadView(props: {
     return <div key={side} data-if-page={side} className="if-page-clip" style={{ position: 'absolute', overflow: 'hidden',
       left: cssMM(side === 'left' ? -outside : format.trim.width), top: cssMM(-format.bleed.top),
       width: cssMM(format.trim.width + outside), height: cssMM(format.height) }}>
-      <div style={{ position: 'absolute', left: cssMM(side === 'left' ? outside : 0), top: cssMM(format.bleed.top) }}>
+      {/* The page's own layout, which a split sheet's `definition` does not name: drawn pictures are cached by it. */}
+      <div data-layout={state?.definition} style={{ position: 'absolute', left: cssMM(side === 'left' ? outside : 0), top: cssMM(format.bleed.top) }}>
         {state?.definition && <LayoutView key={state.definition} {...props} spread={{ ...state, id: spread.id, definition: state.definition }}
           side={side} scopePage={side} page={{ [side]: props.page[side] }} />}
       </div>
