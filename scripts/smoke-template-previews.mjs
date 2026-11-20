@@ -104,7 +104,7 @@ try {
   const page = await testBook(app, book);
   const frame = 'iframe.book-frame-book[data-ready]';
   await page.locator(frame).first().waitFor();
-  // The book as it is now: a book frame that renders newer revisions in place (#210) keeps its first src.
+  // The book as it is now.
   const codes = async () => {
     const result = await page.evaluate(async () => window.imageflow.checkBook((await window.imageflow.currentProject()).value.id, {}));
     assert.ok(result.value, JSON.stringify(result.error));

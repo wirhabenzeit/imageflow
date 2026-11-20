@@ -80,19 +80,14 @@ test('agent access is remembered across reloads and only stored while on', async
   await assert.rejects(store.update({ agentAccess: 'yes' }), /Invalid agent access/);
 });
 
-test('faster book updates are on unless turned off, and only stored while off', async (t) => {
+test('a stored setting for the removed faster book updates is dropped, not a reason to reset the others', async (t) => {
   const folder = await mkdtemp(join(tmpdir(), 'if-updates-'));
   t.after(() => rm(folder, { recursive: true, force: true }));
   const file = join(folder, 'settings.json');
+  await writeFile(file, JSON.stringify({ appearance: 'dark', automaticUpdates: true, updateChannel: 'beta', fasterBookUpdates: false }));
   const store = new SettingsStore(file);
   await store.load();
-  assert.equal(store.value.fasterBookUpdates, undefined, 'on by default');
-  await store.update({ fasterBookUpdates: false });
-  await store.update({ appearance: 'dark' });
-  const reopened = new SettingsStore(file);
-  await reopened.load();
-  assert.equal(reopened.value.fasterBookUpdates, false);
-  await reopened.update({ fasterBookUpdates: true });
-  assert.equal('fasterBookUpdates' in JSON.parse(await readFile(file, 'utf8')), false);
-  await assert.rejects(store.update({ fasterBookUpdates: 'fast' }), /Invalid book update setting/);
+  assert.equal(store.value.appearance, 'dark');
+  assert.equal('fasterBookUpdates' in store.value, false);
+  await assert.rejects(store.update({ fasterBookUpdates: false }), /Invalid app settings/);
 });

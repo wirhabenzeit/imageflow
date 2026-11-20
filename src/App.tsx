@@ -43,7 +43,7 @@ import { ElementEditorDialog } from './ElementEditor';
 import { documentEditorFor, editorOwnedDocument, editorTargetGone } from './editor-session';
 import { anchoredTarget, clickWithin, elementRect, hiddenOccurrence, inlinePlacement, presentationFor } from './inline-editors';
 import type { OpenEditor } from './inline-editors';
-import { LayoutFamilyPicker } from './LayoutFamilyPicker';
+import { HeldPicker, LayoutFamilyPicker } from './LayoutFamilyPicker';
 import { InlineTextEditor } from './InlineTextEditor';
 import { minimumText, textEditorOwner, textExtent, textFits } from './inline-text';
 import { PhotoContent, TextContent } from './BoxContent';
@@ -148,13 +148,6 @@ function EmptyBook({ template, writable, start }: { template?: TemplateInfo; wri
 
 export function App() {
   const api = window.imageflow;
-  // Settings → Faster book updates: the book view and thumbnails render each edit in place (#210).
-  const [fasterUpdates, setFasterUpdates] = useState(true);
-  useEffect(() => {
-    if (!api) return;
-    void api.getSettings().then((result) => { if ('value' in result && result.value) setFasterUpdates(result.value.fasterBookUpdates !== false); });
-    return api.onSettingsChanged((settings) => setFasterUpdates(settings.fasterBookUpdates !== false));
-  }, [api]);
   const [resizing, setResizing] = useState(false);
   const { panels, bottomMaximum, toggle: togglePanelState, show: showPanelState, resize: resizePanelState } = usePanels(resizing);
   const [summary, setSummary] = useState<ProjectSummary>();
@@ -1956,10 +1949,12 @@ export function App() {
         open={openInspectorOwner}
         openTarget={openInspectorTarget} place={placeInspector} chooseLayout={chooseInspectorLayout}
         holdPreviews={!render && !!lastReady}
-        familyPicker={template && layoutFamily && <LayoutFamilyPicker
-          key={JSON.stringify([summary.handle, spread.id, selectedPage, layoutFamily, summary.templateHash, template.format, summary.network])}
-          project={summary.id} template={template} spread={spread} page={selectedPage} chooseLayout={chooseInspectorLayout} params={summary.project.params} family={layoutFamily}
-          readOnly={!writable} blocked={previewNotice || undefined} />}
+        familyPicker={template && layoutFamily && <HeldPicker
+          id={JSON.stringify([summary.handle, spread.id, selectedPage, layoutFamily, summary.templateHash, template.format, summary.network])}>
+          {(showing) => <LayoutFamilyPicker
+            project={summary.id} template={template} spread={spread} page={selectedPage} chooseLayout={chooseInspectorLayout} params={summary.project.params} family={layoutFamily}
+            readOnly={!writable} blocked={previewNotice || undefined} onShowing={showing} />}
+        </HeldPicker>}
         edit={editFromPanel} highlight={setHighlight} select={selectFromPanel} />),
     [summary, spread, selectedSide, selectedPage, sequence, index, writable, selectedSource, template, render, lastReady, usage, focusBox, panelTargets, layoutFamily, previewNotice, quickSource, openInspectorOwner, openInspectorTarget, placeInspector, chooseInspectorLayout, editFromPanel, selectFromPanel]);
 
@@ -2044,10 +2039,17 @@ export function App() {
           <div ref={thumbScroll} className="thumbs-scroll" inert={coverActive} onScroll={measureThumbnails} onDragOver={reorder.over} onDragLeave={reorder.leave} onDrop={reorder.drop}>
             <div ref={thumbList} className={(thumbs ? 'spread-thumbs placed' : 'spread-thumbs') + (opening ? ' opening' : '')} style={{ height: thumbs?.height }}
               role="group" aria-label="Spreads" onKeyDown={thumbKeys}>
-              {spreads.map(({ id }, i) => {
+              {/* The buttons follow the thumbnails on show, as the canvas labels follow the book view: until the
+                  thumbnails of an edit show, a deleted spread keeps its place (covered), and a new one has no button yet.
+                  Then the spreads that moved slide to their new places together with their pictures (beta finding F-036). */}
+              {(thumbs ? thumbs.sheets.map(({ spread }) => spread) : spreads.map(({ id }) => id)).map((id) => {
+                const i = spreads.findIndex((sheet) => sheet.id === id);
                 const rect = thumbs?.sheets.find(({ spread }) => spread === id);
+                if (i < 0) return <div key={id} data-spread={id} className="spread-thumb spread-thumb-removed" aria-hidden="true"
+                  style={rect ? { left: rect.x - 5, top: rect.y - 5, width: rect.width + 10, height: rect.height + 30 } : undefined} />;
                 const displayedLabel = canvasLabels[id] ?? pagesLabel(i) + ' · ' + label(i);
-                const displayedPages = displayedLabel.split(' · ')[0].replace(/^Pages? /, '');
+                const [displayedPagesLabel, ...displayedName] = displayedLabel.split(' · ');
+                const displayedPages = displayedPagesLabel.replace(/^Pages? /, '');
                 const level = spreadIssues.get(id);
                 return <button key={id} data-list-id={id} data-spread={id}
                   aria-pressed={spreadSelected && (awaitingSelection ? id === outlined : selectedSpreads.includes(id))} aria-current={spreadSelected && index === i ? 'page' : undefined} aria-label={displayedLabel}
@@ -2063,12 +2065,12 @@ export function App() {
                   <span className="spread-thumb-label">
                     {level && <span className={'issue-dot issue-' + level} />}
                     <span className="pages">{displayedPages}</span>
-                    <span className="name">{label(i)}</span>
+                    <span className="name">{canvasLabels[id] ? displayedName.join(' · ') : label(i)}</span>
                   </span>
                 </button>;
               })}
               {reorder.indicator && <div className="spread-insertion" aria-hidden="true" style={{ top: reorder.indicator.top }} />}
-              <BookFrame busy={busyCursor} reuse={fasterUpdates} project={summary.id} view="thumbs" onPrepared={pairFrames ? (id) => preparedView(id, 'thumbs') : undefined} onShown={(id) => preparedView(id, 'thumbs')}
+              <BookFrame busy={busyCursor} project={summary.id} view="thumbs" onPrepared={pairFrames ? (id) => preparedView(id, 'thumbs') : undefined} onShown={(id) => preparedView(id, 'thumbs')}
                 release={frameRelease} title="Spread thumbnails" onGeometry={setThumbs}
                 viewport={thumbnailViewport} hold={holdPreview} accept={acceptCandidate} />
             </div>
@@ -2148,7 +2150,7 @@ export function App() {
               >
               <div className="canvas-artwork-clip">
                 <div className="canvas-artwork">
-                  <BookFrame busy={busyCursor} reuse={fasterUpdates} project={summary.id} view="book" onPrepared={pairFrames ? (id) => preparedView(id, 'book') : undefined} onShown={(id) => preparedView(id, 'book')}
+                  <BookFrame busy={busyCursor} project={summary.id} view="book" onPrepared={pairFrames ? (id) => preparedView(id, 'book') : undefined} onShown={(id) => preparedView(id, 'book')}
                     release={frameRelease} title="Book preview" cropPreview={cropPreview} onGeometry={setCanvasGeometry} onStatus={bookStatus} onPictures={bookPictures}
                     viewport={frameViewport} hold={holdPreview} accept={acceptCandidate} inlineEditing={inlineEditing}
                     onInlineEditing={(key) => { if (leavingEditor && key === 'null') leaveEditor(); }} />

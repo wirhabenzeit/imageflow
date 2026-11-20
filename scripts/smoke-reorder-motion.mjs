@@ -20,7 +20,6 @@ try {
     window.reorderSamples = [];
     const sample = () => {
       const frames = ['book', 'thumbs'].map(view => document.querySelector('.book-frame-' + view + ':not(.book-frame-pending)'));
-      // The revision a frame shows: its own, or a newer one it rendered in place (#210).
       window.reorderSamples.push({ revisions: frames.map(frame => frame?.dataset.revision),
         labels: [...document.querySelectorAll('.sheet-label')].map(node => ({ id: node.dataset.canvasSpread, text: node.textContent, top: node.style.top })),
         motions: document.getAnimations().filter(a => a.effect?.target?.matches('[data-canvas-spread]')).map(a => ({ id: a.effect.target.dataset.canvasSpread, start: a.startTime })) });

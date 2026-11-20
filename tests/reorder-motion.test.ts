@@ -14,12 +14,21 @@ test('only displaced spreads move from their previous positions', () => {
   ]);
 });
 
-test('opening, edits, additions, removals and replaced IDs do not animate', () => {
+test('opening, edits and sheets that did not move do not animate', () => {
   const before = geometry(['a', 'b']);
-  for (const after of [undefined, geometry(['a', 'b']), geometry(['b']), geometry(['b', 'a', 'c']), geometry(['c', 'a'])]) {
+  for (const after of [undefined, geometry(['a', 'b']), geometry(['a']), geometry(['a', 'b', 'c']), geometry(['c', 'd'])]) {
     assert.deepEqual(reorderOffsets(before, after), []);
   }
   assert.deepEqual(reorderOffsets(undefined, before), []);
+});
+
+test('after a removal the following spreads slide up, and after an insertion down; the ones above stay (F-036)', () => {
+  assert.deepEqual(reorderOffsets(geometry(['a', 'b', 'c', 'd']), geometry(['a', 'c', 'd'])), [
+    { spread: 'c', x: 0, y: 100 }, { spread: 'd', x: 0, y: 100 },
+  ]);
+  assert.deepEqual(reorderOffsets(geometry(['a', 'b', 'c']), geometry(['a', 'new', 'b', 'c'])), [
+    { spread: 'b', x: 0, y: -100 }, { spread: 'c', x: 0, y: -100 },
+  ]);
 });
 
 test('resizing a sidebar or changing sheet dimensions does not count as reordering', () => {

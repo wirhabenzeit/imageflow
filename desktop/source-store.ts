@@ -105,7 +105,7 @@ export class SourceStore {
     try {
       const actual = await originalPath(folder, source);
       const before = await stat(actual, { bigint: true });
-      // Checks and exports read every photo, owned or linked, from a private copy that lives as long as the job.
+      // Exports read every photo, owned or linked, from a private copy that lives as long as the job. Checks don't pin.
       const privatePin = options.pin && source.kind === 'photo';
       if (source.kind === 'markdown' && extname(source.path).toLowerCase() !== '.md') throw new Error('Expected a Markdown (.md) file.');
       const maximum = source.kind === 'photo' ? source.linked ? 50 : undefined : source.kind === 'markdown' ? 5 : 20;

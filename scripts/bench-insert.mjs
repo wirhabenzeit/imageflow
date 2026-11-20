@@ -2,7 +2,6 @@
 // and its thumbnails show the new revision. Works on a copy of the book, so the original is never changed.
 //
 //   IMAGEFLOW_PROFILE=1 npx vite build && node scripts/stage-desktop.mjs   (or npm run build, without render steps)
-//   Settings → Faster book updates (on by default) renders each insert in place; --cold times new frames instead.
 //   node scripts/bench-insert.mjs --book path/to/Book.imageflow [--repeat 3] [--settle 45000] [--profile out.json]
 //
 // --book     the book to copy; the copy is made next to it, so photos it links by relative path still resolve
@@ -14,7 +13,7 @@
 //
 // The book's map sites are trusted without asking, as for the user's own books. With a profiling build, each run also
 // reports the render steps per view (src/render.tsx) and every picture actually drawn, that is, every cache miss.
-import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -24,7 +23,7 @@ import { testBook, menuAction } from './ui-actions.mjs';
 
 const { values } = parseArgs({ options: {
   book: { type: 'string' }, repeat: { type: 'string', default: '3' }, settle: { type: 'string', default: '20000' },
-  visible: { type: 'boolean' }, double: { type: 'boolean' }, profile: { type: 'string' }, cold: { type: 'boolean' },
+  visible: { type: 'boolean' }, double: { type: 'boolean' }, profile: { type: 'string' },
 } });
 if (!values.book) throw new Error('--book is required.');
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -32,8 +31,6 @@ const work = await mkdtemp(join(dirname(values.book), '.bench-'));
 const project = join(work, basename(values.book));
 await cp(values.book, project, { recursive: true });
 
-// --cold turns Settings → Faster book updates off in the bench's own profile, so each insert renders new frames.
-if (values.cold) { await mkdir(join(work, 'profile'), { recursive: true }); await writeFile(join(work, 'profile', 'settings.json'), JSON.stringify({ fasterBookUpdates: false })); }
 const app = await _electron.launch({
   executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
   env: { ...process.env, ...(values.visible ? {} : { IMAGEFLOW_HIDE_WINDOW: '1' }) },
@@ -51,7 +48,6 @@ const views = ['book', 'thumbs'];
 try {
   await app.evaluate(({ dialog }) => { dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false }); });
   const w = await testBook(app, project);
-  w.on('console', (message) => { if (message.text().startsWith('imageflow.warm')) console.error(message.text()); });
   w.setDefaultTimeout(300000);
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach((window) => window.setContentSize(1400, 900)));
   let start = Date.now();
@@ -95,7 +91,6 @@ try {
     const ms = {};
     await Promise.all(views.map((view) => w.waitForFunction(({ view, old }) => {
       const frame = document.querySelector('iframe.book-frame-' + view + '[data-current][data-ready]');
-      // The revision a frame shows: a new frame's, or a newer one a frame rendered in place (#210).
       return frame && frame.dataset.revision !== old;
     }, { view, old: before[view] }, { polling: 10 }).then(() => { ms[view] = Date.now() - start; })));
     await w.waitForTimeout(3000);
