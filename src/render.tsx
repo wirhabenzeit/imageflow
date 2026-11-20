@@ -21,7 +21,7 @@ import type { BookGeometry, BookView, Issue, Rect, RenderStatus, TemplateInfo } 
 import { cssMM, pageLabel, pageSequence, pagesText, resolveFormat, sheetBleed, sheetPages, spanRequiredAt, toMillimeters } from './format';
 import { coverLayoutsFor, resolveCover } from './cover';
 import type { CoverResolution } from './cover';
-import { animateReorder } from './reorder-motion';
+import { animateReorder, reorderOffsets } from './reorder-motion';
 import type { ReorderOffset } from './reorder-motion';
 import type { PrintSide, ResolvedFormat } from './format';
 import { frameView, scopeSpread, scopeState } from './project';
@@ -443,9 +443,69 @@ function upright(box: HTMLElement, sheet: HTMLElement) {
 // Fits sheets to the frame width and reports where sheets and boxes landed. In book grid mode, each sheet fits
 // one column and book order runs left to right, then continues on the next row. The book grows vertically.
 type GridRequest = { columns: number };
-function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElement }[], view: BookView, format: ResolvedFormat, initial?: GridRequest) {
+// The order of a book's spreads as the app has saved it, before this frame's replacement has rendered it: `added` names
+// the new spreads, each with the spread it is a copy of (duplicated) or looks like (inserted after it).
+export type ProvisionalOrder = { type: 'provisional'; order: string[]; added: Record<string, { like?: string; copy?: boolean }> };
+function layoutBook(root: HTMLElement, initialSheets: { spread: string; sheet: HTMLElement }[], view: BookView, format: ResolvedFormat, initial?: GridRequest) {
+  let sheets = initialSheets;
+  let animations: Animation[] = [];
+  // The geometry last reported, from which a provisional order slides the sheets to their new places.
+  let reported: BookGeometry | undefined;
+  // Until it is replaced, the frame shows a structural edit at once (beta finding: an edit showed nothing until the
+  // whole book had rendered again, seconds in a long book). It moves its spreads into the saved order, hides removed
+  // ones, and stands in for added ones: a copy of a duplicated spread, an empty sheet of the right size for a new one.
+  // What depends on the order inside the pages, such as page numbers and contents, follows with the replacement.
+  const provisional = (request: ProvisionalOrder) => {
+    const known = new Map(sheets.map((item) => [item.spread, item]));
+    const original = new Map(initialSheets.map((item) => [item.spread, item]));
+    const next: { spread: string; sheet: HTMLElement }[] = [];
+    for (const spread of request.order) {
+      const existing = known.get(spread) ?? original.get(spread);
+      if (existing) { next.push(existing); continue; }
+      const added = request.added[spread];
+      const model = (added?.like !== undefined ? known.get(added.like) ?? original.get(added.like) : undefined) ?? next.at(-1) ?? sheets[0];
+      if (!model) continue;
+      const container = document.createElement('div');
+      container.className = 'if-spread-container if-provisional';
+      container.dataset.spread = spread;
+      let sheet: HTMLElement;
+      if (added?.copy) {
+        sheet = model.sheet.cloneNode(true) as HTMLElement;
+        for (const node of sheet.querySelectorAll('[data-edit], [data-box], [data-element]')) {
+          node.removeAttribute('data-edit'); node.removeAttribute('data-box'); node.removeAttribute('data-element');
+        }
+      } else {
+        sheet = document.createElement('div');
+        sheet.className = 'if-sheet if-provisional-sheet';
+        sheet.style.width = model.sheet.offsetWidth + 'px';
+        sheet.style.height = model.sheet.offsetHeight + 'px';
+        const paper = model.sheet.querySelector<HTMLElement>('.paper');
+        sheet.style.background = (paper && getComputedStyle(paper).backgroundColor) || '#fff';
+        sheet.append(Object.assign(document.createElement('div'), { className: 'if-spread' }));
+      }
+      container.append(sheet);
+      next.push({ spread, sheet });
+    }
+    const wanted = new Set(next.map(({ sheet }) => sheet.parentElement!));
+    for (const { sheet } of [...known.values(), ...original.values()]) {
+      const container = sheet.parentElement!;
+      if (!wanted.has(container)) container.hidden = true;
+    }
+    // Stand-ins that a newer order no longer lists go.
+    for (const container of root.querySelectorAll<HTMLElement>(':scope > .if-provisional')) if (!wanted.has(container)) container.remove();
+    for (const { sheet } of next) { const container = sheet.parentElement!; container.hidden = false; root.append(container); }
+    const before = reported;
+    sheets = next;
+    laidOut = '';
+    fit(true);
+    const offsets = reorderOffsets(before, reported);
+    animations.forEach((animation) => animation.cancel());
+    animations = matchMedia('(prefers-reduced-motion: reduce)').matches ? [] : offsets.flatMap((offset) => {
+      const slot = sheets.find((item) => item.spread === offset.spread)?.sheet.parentElement;
+      return slot ? [animateReorder(slot, offset)] : [];
+    });
+  };
   if (view === 'thumbs' || view === 'book') {
-    let animations: Animation[] = [];
     window.addEventListener('message', (event: MessageEvent) => {
       if (event.source !== parent || event.origin !== 'imageflow://editor') return;
       if (event.data?.type === 'prepare-reorder' && Array.isArray(event.data.offsets)) {
@@ -471,6 +531,9 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
       } else if (event.data?.type === 'cancel-reorder') {
         animations.forEach(animation => animation.cancel());
         animations = [];
+      } else if (event.data?.type === 'provisional' && Array.isArray(event.data.order) && event.data.order.every((id: unknown) => typeof id === 'string') &&
+          event.data.added && typeof event.data.added === 'object') {
+        provisional(event.data as ProvisionalOrder);
       }
     });
   }
@@ -485,7 +548,8 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
   };
   let gridColumns = view === 'book' ? initial?.columns ?? 0 : 0;
   let laidOut = '';
-  function fit() {
+  // `moved` reports the geometry as a provisional order (above), so the app slides its labels with the sheets.
+  function fit(moved = false) {
     const width = root.clientWidth;
     const size = gridColumns + 'x' + width;
     if (size === laidOut) return;
@@ -537,7 +601,8 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
         ...ownTarget(node),
       })))),
     };
-    post(geometry);
+    reported = geometry;
+    post(moved ? { ...geometry, motion: performance.timeOrigin + performance.now() } : geometry);
   }
   root.classList.add('if-book', 'if-view-' + view);
   if (view === 'book') {
@@ -577,7 +642,7 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
     });
   }
   fit();
-  new ResizeObserver(fit).observe(root);
+  new ResizeObserver(() => fit()).observe(root);
   // A custom editor consumes actual element sizes, including CSS layout changes within a stable viewport.
   let measuring = false;
   const measure = () => {
@@ -593,7 +658,7 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
   for (const { sheet } of sheets) layout.observe(sheet.querySelector('.if-spread')!, {
     subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'open'],
   });
-  window.addEventListener('resize', fit);
+  window.addEventListener('resize', () => fit());
   return (next: GridRequest) => {
     if (view !== 'book') return;
     gridColumns = next.columns;

@@ -27,3 +27,22 @@ export function animateReorder(node: HTMLElement, { x, y }: ReorderOffset) {
   animation.onfinish = () => animation.cancel();
   return animation;
 }
+
+// The saved order of a book's spreads for a frame that shows an earlier one (`shown`, in its order), until a frame of
+// the saved book replaces it. A spread the frame does not have is added: as a copy of one it does have with the same
+// content (a duplicate), or otherwise looking like the spread before it.
+export function provisionalOrder(spreads: readonly { id: string }[], shown: readonly string[] | undefined) {
+  if (!shown) return undefined;
+  const order = spreads.map(({ id }) => id);
+  if (order.length === shown.length && order.every((id, i) => id === shown[i])) return undefined;
+  const known = new Set(shown);
+  const content = (spread: { id: string }) => JSON.stringify({ ...spread, id: '' });
+  const added: Record<string, { like?: string; copy?: boolean }> = {};
+  spreads.forEach((spread, i) => {
+    if (known.has(spread.id)) return;
+    const twin = spreads.find((other) => other.id !== spread.id && known.has(other.id) && content(other) === content(spread));
+    const before = spreads.slice(0, i).reverse().find(({ id }) => known.has(id)) ?? spreads.slice(i + 1).find(({ id }) => known.has(id));
+    added[spread.id] = twin ? { like: twin.id, copy: true } : before ? { like: before.id } : {};
+  });
+  return { order, added };
+}

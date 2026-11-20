@@ -67,7 +67,7 @@ import type { ProjectFiles, SpreadState } from './project';
 import { useListSelection } from './list-selection';
 import { insertionProblem, spreadOrder, spreadSelectionOrder } from './spread-order';
 import { spreadMime, useSpreadReorder } from './useSpreadReorder';
-import { animateReorder, reorderOffsets, reorderTiming } from './reorder-motion';
+import { animateReorder, provisionalOrder, reorderOffsets, reorderTiming } from './reorder-motion';
 import { useToolbarDrag } from './useToolbarDrag';
 
 type Owner = { page?: PageSide; type: 'photo' | 'markdown' | 'element'; id: string };
@@ -205,6 +205,8 @@ export function App() {
   useEffect(() => {
     if (template && summary && shownRevision.current === summary.id) adoptCanvasLabels();
   }, [template]);
+  // The spreads of an edit that changes their order while it saves, for the book it was made on (`base`).
+  const [pendingSpreads, setPendingSpreads] = useState<{ base: string; spreads: SpreadState[] }>();
   const [thumbnailState, setThumbnailState] = useState<{ geometry?: BookGeometry; animate: boolean; start?: number }>({ animate: true });
   const thumbs = thumbnailState.geometry;
   // Each view can first appear on its own. Once both show artwork, release replacement frames together.
@@ -376,6 +378,16 @@ export function App() {
   const [layout, setLayout] = useCanvasLayout(summary?.folder);
   const columns = layout.mode === 'grid' ? layout.columns : 0;
   const spreads = summary?.project.spreads ?? [];
+  // A structural edit (add, delete, move, duplicate) shows at once in the frames on show, before they are replaced:
+  // from the edited spreads while the edit saves, then from the saved book until its frames show it.
+  const ordered = pendingSpreads && pendingSpreads.base === summary?.id ? pendingSpreads.spreads : spreads;
+  const thumbsProvisional = useMemo(() => provisionalOrder(ordered, thumbs?.sheets.map(({ spread }) => spread)), [ordered, thumbs]);
+  const bookProvisional = useMemo(() => provisionalOrder(ordered, fittedGeometry?.sheets.map(({ spread }) => spread)), [ordered, fittedGeometry]);
+  // The label of a spread that is not saved yet: its layout's, or the one it copies.
+  const pendingLabel = (id: string) => {
+    const spread = ordered.find((item) => item.id === id);
+    return spread ? sheetLayoutLabel(template?.spreads ?? {}, spread) ?? spread.definition : '';
+  };
   const spreadSelection = useListSelection(spreads.map(({ id }) => id), (id) => template?.spreads[spreads.find((spread) => spread.id === id)?.definition ?? '']?.label ?? id);
   const selectedSpreads = spreadSelection.selected.length ? spreadSelection.selected : spreadId ? [spreadId] : [];
   useEffect(() => {
@@ -574,7 +586,13 @@ export function App() {
       if (JSON.stringify(files.project) === JSON.stringify(before.project) &&
           JSON.stringify(files.photoIndex) === JSON.stringify(before.photoIndex)) { applied = true; return; }
       const label = (typeof notice === 'function' ? notice() : notice) ?? 'Project edit';
-      const result = await persist(() => api.saveProject(before.id, files, label));
+      // A structural edit shows in the book view and thumbnails while it saves (provisionalOrder).
+      const ids = (spreads: readonly { id: string }[]) => spreads.map(({ id }) => id).join(' ');
+      const structural = ids(files.project.spreads) !== ids(before.project.spreads);
+      if (structural) setPendingSpreads({ base: before.id, spreads: files.project.spreads });
+      let result: Awaited<ReturnType<typeof api.saveProject>>;
+      try { result = await persist(() => api.saveProject(before.id, files, label)); }
+      finally { if (structural) setPendingSpreads((pending) => pending?.base === before.id ? undefined : pending); }
       if ('error' in result) throw new Error(result.error);
       if (current.current !== before) return;
       adopt(result.value, false, selected);
@@ -2045,8 +2063,12 @@ export function App() {
               {(thumbs ? thumbs.sheets.map(({ spread }) => spread) : spreads.map(({ id }) => id)).map((id) => {
                 const i = spreads.findIndex((sheet) => sheet.id === id);
                 const rect = thumbs?.sheets.find(({ spread }) => spread === id);
-                if (i < 0) return <div key={id} data-spread={id} className="spread-thumb spread-thumb-removed" aria-hidden="true"
-                  style={rect ? { left: rect.x - 5, top: rect.y - 5, width: rect.width + 10, height: rect.height + 30 } : undefined} />;
+                const removed = !ordered.some((sheet) => sheet.id === id);
+                // A spread that is saving shows its picture and layout name; one deleted meanwhile is covered.
+                if (i < 0) return <div key={id} data-spread={id} className={'spread-thumb ' + (removed ? 'spread-thumb-removed' : 'spread-thumb-pending')} aria-hidden="true"
+                  style={rect ? { left: rect.x - 5, top: rect.y - 5, width: rect.width + 10, height: rect.height + 30 } : undefined}>
+                  {!removed && <span className="spread-thumb-label"><span className="name">{pendingLabel(id)}</span></span>}
+                </div>;
                 const displayedLabel = canvasLabels[id] ?? pagesLabel(i) + ' · ' + label(i);
                 const [displayedPagesLabel, ...displayedName] = displayedLabel.split(' · ');
                 const displayedPages = displayedPagesLabel.replace(/^Pages? /, '');
@@ -2070,7 +2092,7 @@ export function App() {
                 </button>;
               })}
               {reorder.indicator && <div className="spread-insertion" aria-hidden="true" style={{ top: reorder.indicator.top }} />}
-              <BookFrame busy={busyCursor} project={summary.id} view="thumbs" onPrepared={pairFrames ? (id) => preparedView(id, 'thumbs') : undefined} onShown={(id) => preparedView(id, 'thumbs')}
+              <BookFrame busy={busyCursor} provisional={thumbsProvisional} project={summary.id} view="thumbs" onPrepared={pairFrames ? (id) => preparedView(id, 'thumbs') : undefined} onShown={(id) => preparedView(id, 'thumbs')}
                 release={frameRelease} title="Spread thumbnails" onGeometry={setThumbs}
                 viewport={thumbnailViewport} hold={holdPreview} accept={acceptCandidate} />
             </div>
@@ -2150,7 +2172,7 @@ export function App() {
               >
               <div className="canvas-artwork-clip">
                 <div className="canvas-artwork">
-                  <BookFrame busy={busyCursor} project={summary.id} view="book" onPrepared={pairFrames ? (id) => preparedView(id, 'book') : undefined} onShown={(id) => preparedView(id, 'book')}
+                  <BookFrame busy={busyCursor} provisional={bookProvisional} project={summary.id} view="book" onPrepared={pairFrames ? (id) => preparedView(id, 'book') : undefined} onShown={(id) => preparedView(id, 'book')}
                     release={frameRelease} title="Book preview" cropPreview={cropPreview} onGeometry={setCanvasGeometry} onStatus={bookStatus} onPictures={bookPictures}
                     viewport={frameViewport} hold={holdPreview} accept={acceptCandidate} inlineEditing={inlineEditing}
                     onInlineEditing={(key) => { if (leavingEditor && key === 'null') leaveEditor(); }} />
@@ -2159,7 +2181,7 @@ export function App() {
               {geometry?.sheets.map(({ spread: id, x, y, width }) => {
                 const level = spreadIssues.get(id);
                 const at = spreads.findIndex(sheet => sheet.id === id);
-                const displayedLabel = canvasLabels[id] ?? (at >= 0 ? pagesLabel(at) + ' · ' + label(at) : id);
+                const displayedLabel = canvasLabels[id] ?? (at >= 0 ? pagesLabel(at) + ' · ' + label(at) : pendingLabel(id));
                 return <div key={id} data-canvas-spread={id} className={'sheet-label' + (spreadSelected && id === outlined ? ' selected' : '')} style={{ left: x, top: y - 26, width }}>
                   {level && <span className={'issue-dot issue-' + level} />}<span className="sheet-label-name" title={displayedLabel}>{displayedLabel}</span>
                   {spreadSelected && id === outlined && <span className="sheet-layout-mode" data-layout-mode={selectedLayoutMode} aria-label={selectedLayoutMode === 'pages' ? 'Two page layouts' : selectedLayoutMode === 'spread' ? 'Spread layout' : 'Single page'} title={selectedLayoutMode === 'pages' ? 'Two page layouts' : selectedLayoutMode === 'spread' ? 'Spread layout' : 'Single page'}>

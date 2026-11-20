@@ -320,7 +320,8 @@ export default defineTemplate({ id: 'only-pages', version: '1', contract: 1,
       assert.equal(onlySaved.spreads[0].split, undefined);
     }
     await onlyWindow.getByRole('button', { name: 'Add', exact: true }).click();
-    await onlyFrame.locator('.if-sheet').nth(1).waitFor();
+    // The book view shows an added spread at once with a stand-in (.if-provisional); its render follows the save.
+    await onlyFrame.locator('.if-spread-container:not(.if-provisional) .if-sheet').nth(1).waitFor();
     onlySaved = JSON.parse(await readFile(join(onlyFolder, 'project.json'), 'utf8'));
     assert.equal(onlySaved.spreads.length, 2);
     assert.equal(onlySaved.spreads[1].split, endStyle === 'inside-covers' ? true : undefined);
@@ -328,7 +329,7 @@ export default defineTemplate({ id: 'only-pages', version: '1', contract: 1,
     else {
       assert.equal(onlySaved.spreads[1].definition, 'only');
       await onlyWindow.getByRole('button', { name: 'Add', exact: true }).click();
-      await onlyFrame.locator('.if-sheet').nth(2).waitFor();
+      await onlyFrame.locator('.if-spread-container:not(.if-provisional) .if-sheet').nth(2).waitFor();
       onlySaved = JSON.parse(await readFile(join(onlyFolder, 'project.json'), 'utf8'));
       assert.equal(onlySaved.spreads.length, 3);
       assert.equal(onlySaved.spreads[0].split, undefined);

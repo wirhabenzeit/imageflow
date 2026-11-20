@@ -55,7 +55,10 @@ try {
   assert.ok(samples.some(sample => sample.motions.length >= 2), 'canvas labels and overlays animate');
   assert.ok(samples.every(sample => sample.revisions[0] === sample.revisions[1]), 'canvas and sidebar publish the same revision on every painted frame');
   for (let i = 1; i < samples.length; i++) {
-    if (samples[i].revisions[0] === samples[i - 1].revisions[0]) assert.deepEqual(samples[i].labels, samples[i - 1].labels, 'labels stay with displayed artwork while rendering');
+    // A move rearranges the frame on show at once (provisional order), so labels may change places; each keeps the
+    // text of the artwork it labels until the edited book renders.
+    const texts = (sample) => Object.fromEntries(sample.labels.map(({ id, text }) => [id, text]));
+    if (samples[i].revisions[0] === samples[i - 1].revisions[0]) assert.deepEqual(texts(samples[i]), texts(samples[i - 1]), 'labels stay with displayed artwork while rendering');
   }
   await menuAction(app, 'Grid');
   await page.waitForFunction(() => document.querySelector('main.canvas-grid'));
@@ -69,5 +72,33 @@ try {
   await page.waitForFunction(before => document.querySelector('.book-frame-book[data-current]')?.getAttribute('data-revision') !== before, beforeDrag);
   await ready();
   await move('Undo Book Edit');
-  console.log('Canvas reorder, synchronized replacement, Undo/Redo, rapid moves and Reduce Motion passed.');
+  // A structural edit shows at once: the sidebar and the book view's labels list the added spread while the book view
+  // still shows the frame from before the edit, which the edit's render replaces later.
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.locator('.spread-thumb').nth(1).click();
+  await ready();
+  const shownBefore = await page.locator('.book-frame-book[data-ready]:not(.book-frame-pending)').getAttribute('data-revision');
+  const thumbsBefore = await page.locator('.spread-thumb').count();
+  await page.evaluate(() => {
+    window.provisionalSample = new Promise((resolve) => {
+      const sample = () => {
+        const thumbs = document.querySelectorAll('.spread-thumb').length;
+        if (thumbs !== window.thumbsBefore) resolve({ thumbs, labels: document.querySelectorAll('.sheet-label').length,
+          revision: document.querySelector('.book-frame-book[data-ready]:not(.book-frame-pending)')?.dataset.revision });
+        else requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+  });
+  await page.evaluate((count) => { window.thumbsBefore = count; }, thumbsBefore);
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  const provisional = await page.evaluate(() => window.provisionalSample);
+  assert.equal(provisional.thumbs, thumbsBefore + 1, 'the added spread shows in the sidebar');
+  assert.equal(provisional.revision, shownBefore, 'before the edited book has rendered');
+  await page.waitForFunction(before => document.querySelector('.book-frame-book[data-ready]:not(.book-frame-pending)')?.dataset.revision !== before, shownBefore);
+  await ready();
+  assert.equal(await page.locator('.spread-thumb').count(), thumbsBefore + 1);
+  await move('Undo Book Edit');
+  assert.equal(await page.locator('.spread-thumb').count(), thumbsBefore);
+  console.log('Canvas reorder, synchronized replacement, Undo/Redo, rapid moves, Reduce Motion and immediate structural edits passed.');
 } finally { await app.close(); }

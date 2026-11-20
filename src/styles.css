@@ -107,6 +107,7 @@ body { margin: 0; }
 .studio .spread-thumbs.placed .spread-thumb { position: absolute; margin: 0; min-height: 0; }
 /* A deleted spread's thumbnail, until the thumbnails without it show: covered at once, above the picture. */
 .studio .spread-thumbs .spread-thumb-removed { z-index: 2; background: var(--sidebar-surface); pointer-events: none; }
+.studio .spread-thumbs .spread-thumb-pending { pointer-events: none; color: var(--muted); }
 .studio .spread-thumb:hover:not(:disabled) { background: var(--hover-surface); }
 .studio .spread-thumb[aria-current="page"] { background: var(--selection-surface); box-shadow: inset 0 0 0 1.5px var(--selection-border); }
 .studio .spread-thumb:focus-visible { outline-offset: 0; }

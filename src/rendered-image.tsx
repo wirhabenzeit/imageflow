@@ -383,7 +383,8 @@ export function RenderedImage({ draw, inputs, output, label = 'Picture', alt = '
           })();
         });
         const started = import.meta.env.IMAGEFLOW_PROFILE ? performance.now() : 0;
-        try { return await Promise.race([draw({ width, height, pixelRatio, mode, signal: controller.signal }).then(toBlob), timeout]); }
+        // A draw that returns its canvas directly, not a promise of it, works too (and one that throws fails the picture).
+        try { return await Promise.race([Promise.resolve().then(() => draw({ width, height, pixelRatio, mode, signal: controller.signal })).then(toBlob), timeout]); }
         finally {
           stop();
           // Profiling builds time every picture actually drawn, that is, every miss of the preview cache.

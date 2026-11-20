@@ -19,7 +19,7 @@ export type InlineEditing = ({ spread: string; element: string } | { spread: str
 export type CropPreview = { spread: string; box: string; page?: PageSide; placement: { centerX: number; centerY: number; zoom: number } };
 
 // Keep the displayed frame and its geometry until the latest candidate has finished rendering successfully.
-export function BookFrame({ busy = false, project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept, inlineEditing, onInlineEditing, presentation, cropPreview, onPrepared, onShown, release }: {
+export function BookFrame({ busy = false, provisional, project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept, inlineEditing, onInlineEditing, presentation, cropPreview, onPrepared, onShown, release }: {
   // Paired views reveal one revision together, on the shared animation clock.
   onPrepared?: (project: string) => void;
   // Called when a revision is shown, paired or not, so the other view does not wait for this one to prepare it again.
@@ -27,6 +27,10 @@ export function BookFrame({ busy = false, project, view, query = '', title, onGe
   release?: { project: string; start: number };
   // While the app waits for an update, the frames show a progress cursor too.
   busy?: boolean;
+  // The order of the spreads as edited, with the ones added since: the shown frame rearranges what it has into that
+  // order at once, while the edit saves and until a newer frame shows it, so a structural edit shows immediately. An
+  // edit that fails to save returns the order to the saved one.
+  provisional?: { order: string[]; added: Record<string, { like?: string; copy?: boolean }> };
   project: string; view: BookView | 'cover'; query?: string; title: string;
   presentation?: PresentationView;
   hold?: boolean;
@@ -131,7 +135,9 @@ export function BookFrame({ busy = false, project, view, query = '', title, onGe
         (event.source as Window).postMessage({ type: 'inline-editing', key: latestKey.current, ...latestEditing.current }, origin);
       }
       frame.geometry = data;
-      if (id === shown) onGeometry?.(data, false, undefined, projectOf(id));
+      // A provisional order slides the shown sheets into place, from `motion`, on the frame's clock.
+      const motion = (data as { motion?: number }).motion;
+      if (id === shown) onGeometry?.(data, motion !== undefined, motion, projectOf(id));
     } else if ('type' in data && data.type === 'inline-editing-applied') {
       frame.hiding = false;
       if (id === shown && data.key === latestKey.current) latestApplied.current?.(data.key);
@@ -216,6 +222,13 @@ export function BookFrame({ busy = false, project, view, query = '', title, onGe
     }
   }, [shown]);
 
+  const provisionalKey = JSON.stringify(provisional ?? null);
+  useLayoutEffect(() => {
+    if (!provisional || !shown) return;
+    const sheets = latest.current.get(shown)?.geometry?.sheets.map(({ spread }) => spread);
+    if (!sheets || JSON.stringify(sheets) === JSON.stringify(provisional.order)) return;
+    refs.current.get(shown)?.contentWindow?.postMessage({ type: 'provisional', ...provisional }, origin);
+  }, [provisionalKey, shown, target]);
   useLayoutEffect(() => {
     if (presentation && shown) refs.current.get(shown)?.contentWindow?.postMessage({ type: 'present', ...presentation }, origin);
   }, [presentation, shown]);
