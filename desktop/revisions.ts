@@ -2,10 +2,11 @@ import { sourcePath, sourceLinked } from '../src/source-locations';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import type { BigIntStats } from 'node:fs';
-import { access, open, readdir, realpath, stat } from 'node:fs/promises';
+import { access, lstat, open, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { ProjectRevision, RevisionDiagnosticCode } from '../src/authoring';
 import { photoIndexSchema, projectSchema } from '../src/project';
+import { computeBookStateRevision } from '../src/book-revision';
 import { approvedSource } from './source-access';
 
 const manifests = ['project.json', 'photos.json'] as const;
@@ -320,4 +321,31 @@ export async function captureProjectInputs(folder: string, { signal, attempts = 
 
 export async function captureProjectRevision(folder: string, options?: CaptureOptions): Promise<ProjectRevision> {
   return (await captureProjectInputs(folder, options)).revision;
+}
+
+/**
+ * The portable book-state revision of a book folder (ADR 0010; see src/book-revision.ts), for sync. Unlike the local
+ * render-input revision above it ignores machine-local linked paths, local availability, original photo bytes and
+ * `assets-meta.json`, so two Macs agree on it. Reads the manifests and hashes the files of `texts/`, `files/` and
+ * `template/` (not following links); an invalid manifest throws.
+ */
+export async function captureBookStateRevision(folder: string): Promise<string> {
+  const root = await realpath(folder);
+  const parse = async (name: typeof manifests[number]) => JSON.parse(await readFile(join(root, name), 'utf8')) as unknown;
+  const project = projectSchema.parse(await parse('project.json'));
+  const photos = photoIndexSchema.parse(await parse('photos.json'));
+  const contentDigests: Record<string, string> = {};
+  const walk = async (relativePath: string) => {
+    let names: string[];
+    try { names = (await readdir(join(root, relativePath))).filter((name) => !ignoredName(name)).sort(); }
+    catch (error) { if (isMissing(error)) return; throw error; }
+    for (const name of names) {
+      const child = join(relativePath, name);
+      const info = await lstat(join(root, child));
+      if (info.isDirectory()) await walk(child);
+      else if (info.isFile()) contentDigests[portable(child)] = createHash('sha256').update(await readFile(join(root, child))).digest('hex');
+    }
+  };
+  for (const name of ['template', 'texts', 'files'] as const) await walk(name);
+  return computeBookStateRevision({ project, photos, contentDigests });
 }

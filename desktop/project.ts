@@ -21,6 +21,9 @@ import type { SaveCheckpoint } from './persistence';
 import { sourceEntries, sourcePath, sourceLinked, storedFileName } from '../src/source-locations';
 import type { SourceStatus } from '../src/source-locations';
 import { digestBytes, SourceStore } from './source-store';
+import { AssetFacts } from './asset-facts';
+import type { AssetFact } from '../src/asset-facts';
+import { captureFields } from '../src/photo-metadata';
 import { approveSources, sourceBookKey } from './source-access';
 import { runtimeExports } from '../src/runtime-exports';
 import { templateHash } from './template-library';
@@ -216,6 +219,9 @@ export type OpenProject = ProjectFiles & {
   folder: string; viewKey?: string; cache: string; assets: TemplateAssets; photos: Map<string, ProjectPhoto>;
   texts: Record<string, string>; files: Record<string, ProjectFile>; problems: string[]; readOnly: boolean;
   sources?: Record<string, SourceStatus>;
+  // Derived facts (assets-meta.json) of photos whose original is missing and that nothing else stands in for: their size
+  // and capture time still lay out the book, while the source stays missing (ADR 0005, ADR 0010).
+  unavailablePhotos?: Record<string, AssetFact>;
   manifests: Record<ManifestName, Buffer>;
   // Set only on synthetic fixture books rendered by authoring checks.
   fixture?: FixtureMarking;
@@ -249,6 +255,10 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
   const entries = sourceEntries(book);
   if (!entries.length) return { ...book, photos, texts, files, sources, problems };
   const store = await SourceStore.forBook(book.folder, book.cache);
+  const facts = await AssetFacts.forBook(book.folder);
+  // Derived facts follow photos the editor reads in place; a private export read changes nothing.
+  if (!pinSources) store.onDigest = (key, observation, digest) => { if (key.startsWith('photo:')) facts.digest(key.slice('photo:'.length), observation, digest); };
+  const unavailablePhotos: Record<string, AssetFact> = {};
   for (let i = 0; i < entries.length; i += 8) {
     await Promise.all(entries.slice(i, i + 8).map(async (source) => {
       const { status, stored } = await store.resolve(book.folder, source, { pin: pinSources, cache: book.cache });
@@ -260,12 +270,17 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
           const { title, caption, credit, altText } = book.photoIndex[source.id];
           const details = await photoDetails(stored.snapshot, null);
           // Without an EXIF capture time, photo views use the original's modification time, not the snapshot's.
-          const estimate = details.captured ? undefined : stored.modified ?? details.estimatedCapture;
-          photos.set(source.id, { title, caption, credit, altText, ...details, estimatedCapture: estimate, observation: stored.direct && status.state === 'available' ? stored.observation : details.observation,
+          const present = status.state === 'available' && !status.problem;
+          const remembered = present ? undefined : facts.get(source.id);
+          // A rendition has no EXIF block, so a missing original's capture data comes from assets-meta.json.
+          const capture = remembered ? Object.fromEntries(captureFields.flatMap((field) => remembered[field] ? [[field, remembered[field]]] : [])) : {};
+          const estimate = details.captured || remembered?.captured ? undefined : stored.modified ?? details.estimatedCapture;
+          if (present && !pinSources) facts.note(source.id, stored.observation, details, status.digest ?? stored.digest);
+          photos.set(source.id, { title, caption, credit, altText, ...details, ...capture, estimatedCapture: estimate, observation: stored.direct && status.state === 'available' ? stored.observation : details.observation,
             width: stored.width!, height: stored.height!, original: stored.snapshot,
             key: stored.direct ? status.problem ? digestBytes(Buffer.from(stored.key + ':stale')) : stored.key! : digestBytes(Buffer.from(stored.digest + ':rendition-3')),
             cache: renditionCacheFor(book.cache), ...(status.problem ? { problem: status.problem } : {}) });
-        }
+        } else if (facts.get(source.id)) unavailablePhotos[source.id] = facts.get(source.id)!;
       } else if (source.kind === 'markdown') {
         if (stored) texts[source.id] = await readFile(stored.snapshot, 'utf8');
       } else {
@@ -275,7 +290,8 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
     }));
   }
   await store.settled();
-  return { ...book, photos, texts, files, sources, problems: problems.sort() };
+  if (!pinSources) facts.prune(Object.keys(book.photoIndex));
+  return { ...book, photos, texts, files, sources, problems: problems.sort(), ...(Object.keys(unavailablePhotos).length ? { unavailablePhotos } : {}) };
 }
 
 function projectJson(value: unknown) {
@@ -446,8 +462,8 @@ export function projectSummary(book: OpenProject, id: string): ProjectSummary {
     id, folder: basename(book.folder), viewKey: book.viewKey ?? createHash('sha256').update(book.folder).digest('hex'), project: book.project, photoIndex: book.photoIndex,
     photos: Object.fromEntries([...book.photos.keys()].map((photo) => [photo, base + '/thumb/' + photo])),
     photoRevisions: Object.fromEntries([...book.photos].map(([id, photo]) => [id, photo.key])),
-    photoDates: Object.fromEntries([...book.photos].flatMap(([id, photo]) => { const date = photoDate(photo); return date ? [[id, date]] : []; })),
-    photoSizes: Object.fromEntries([...book.photos].map(([photo, { width, height }]) => [photo, { width, height }])),
+    photoDates: Object.fromEntries([...Object.entries(book.unavailablePhotos ?? {}), ...book.photos].flatMap(([id, photo]) => { const date = photoDate(photo); return date ? [[id, date]] : []; })),
+    photoSizes: Object.fromEntries([...Object.entries(book.unavailablePhotos ?? {}), ...book.photos].map(([photo, { width, height }]) => [photo, { width, height }])),
     texts: book.texts, sources: book.sources, ...(book.templateHash ? { templateHash: book.templateHash } : {}),
   };
 }

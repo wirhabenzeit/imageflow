@@ -551,6 +551,14 @@ async function ownerLive(owner: Owner, directory: { device: string; inode: strin
 }
 
 // Call before opening a writable project and keep the returned release function for that editor's lifetime.
+// Books this process holds the writer lock for, by their current folder. Derived files such as assets-meta.json are
+// written only while the lock is held (ADR 0010).
+const heldLocks = new Set<{ folder: string }>();
+export async function holdsProjectLock(folder: string) {
+  const location = await realpath(folder).catch(() => undefined);
+  return !!location && [...heldLocks].some((held) => held.folder === location);
+}
+
 export async function acquireProjectLock(folder: string): Promise<ProjectLock> {
   const location = await realpath(folder);
   const rootInfo = await stat(location, { bigint: true });
@@ -614,6 +622,8 @@ export async function acquireProjectLock(folder: string): Promise<ProjectLock> {
     }
   } catch { /* best effort */ }
   let released = false;
+  const held = { folder: location };
+  heldLocks.add(held);
   const matchesOwner = (current: Awaited<ReturnType<typeof readOwner>>) => current.owner.version === 2 && current.owner.token === token &&
     current.owner.endpoint === proof!.endpoint && current.info.ino === owned!.info.ino && current.info.dev === owned!.info.dev;
   const release = async () => {
@@ -637,6 +647,7 @@ export async function acquireProjectLock(folder: string): Promise<ProjectLock> {
     } finally {
       // Releasing this capability always retires its proof, even when disk metadata needs manual repair.
       released = true;
+      heldLocks.delete(held);
       await proof!.close();
     }
   };
@@ -659,6 +670,7 @@ export async function acquireProjectLock(folder: string): Promise<ProjectLock> {
         if (previousExists && await realpath(current) !== candidate) return false;
         if (released) return false;
         current = candidate;
+        held.folder = candidate;
         return true;
       } catch {
         // An unrelated candidate is validated by its own writable-open attempt. Keep our current proof intact.

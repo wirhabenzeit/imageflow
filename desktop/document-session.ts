@@ -37,6 +37,7 @@ import { ImportReceipts } from './import-receipts';
 import { saveDocumentCopy } from './source-actions';
 import { rebuildTemplateDependencies } from './dependency-install';
 import type { DependencyRebuild } from './dependency-install';
+import { AssetFacts } from './asset-facts';
 import { acquireProjectLock, CommittedProjectSaveError } from './persistence';
 import type { ProjectLock, SaveCheckpoint } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
@@ -347,6 +348,8 @@ export class DocumentSession {
       await this.queue.whenIdle();
       // Published saves must settle before releasing the single-writer capability.
       while (this.busy) await new Promise((resolve) => setTimeout(resolve, 10));
+      // Derived asset facts are written while the lock is still held (ADR 0010); failures never block closing.
+      await AssetFacts.release(this.book.folder).catch(() => {});
       try { await this.unlockProject?.(); }
       finally {
         this.unlockProject = undefined;

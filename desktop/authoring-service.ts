@@ -670,7 +670,7 @@ export function createAuthoringService(hooks: Hooks) {
         }
         let records: Record<string, unknown>[] = view === 'sources' ? [
           // Capture time, location and camera come from the loaded photo file, next to what photos.json records.
-          ...Object.entries(photos ?? {}).map(([id, source]) => ({ kind: 'photo', id, ...source, ...captureOf(session.book.photos.get(id)), usage: sourcePlaces(usage.photo[id]) })),
+          ...Object.entries(photos ?? {}).map(([id, source]) => ({ kind: 'photo', id, ...source, ...captureOf(session.book.photos.get(id) ?? session.book.unavailablePhotos?.[id]), usage: sourcePlaces(usage.photo[id]) })),
           ...Object.entries(project?.texts ?? {}).map(([id, path]) => ({ kind: 'text', id, path: sourcePath(path), linked: sourceLinked(path), usage: sourcePlaces(usage.text[id]) })),
           ...Object.entries(project?.files ?? {}).map(([id, path]) => ({ kind: 'file', id, path: sourcePath(path), linked: sourceLinked(path) })),
         ] : view === 'cover' ? (project?.cover ? [project.cover] : [])
