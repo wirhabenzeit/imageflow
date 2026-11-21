@@ -201,3 +201,10 @@ test('saves keep a bookId, assign one to a legacy book with its first write, and
     assert.equal((await loadProject(folder, join(root, 'cache'))).project.bookId, id);
   } finally { await rm(root, { recursive: true }); }
 });
+
+test('unknown keys of a linked text or file reference survive a parse', () => {
+  const linked = { path: '/Users/a/note.md', linked: true as const, futureKey: { nested: 1 } };
+  const parsed = projectSchema.parse({ ...withUnknown(), texts: { note: linked }, files: { route: { ...linked, path: '/Users/a/r.gpx' } } }) as Record<string, any>;
+  assert.deepEqual(parsed.texts.note, linked);
+  assert.equal(parsed.files.route.futureKey.nested, 1);
+});

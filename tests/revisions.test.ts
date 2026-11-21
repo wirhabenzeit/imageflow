@@ -378,3 +378,23 @@ test('computeBookStateRevision does not depend on key order and drops only linke
   assert.equal(one, two);
   assert.notEqual(one, await computeBookStateRevision(inputs({ a: { path: 'photos/other.jpg', caption: 'x' }, b: { path: '/x/b.jpg', linked: true } }, { 'texts/a.md': '1', 'files/b': '2' })));
 });
+
+test('the portable book-state revision ignores orphaned texts and files but follows referenced ones', async (t) => {
+  const folder = await makeProject(t);
+  const revision = await captureBookStateRevision(folder);
+  // `removeSources` leaves bytes behind for Undo; nothing references them, so they are not book state.
+  await writeFile(join(folder, 'texts', 'orphan.md'), '# Removed');
+  await writeFile(join(folder, 'files', 'orphan.gpx'), '<gpx/>');
+  assert.equal(await captureBookStateRevision(folder), revision);
+  await writeFile(join(folder, 'texts', 'note.md'), '# Changed');
+  assert.notEqual(await captureBookStateRevision(folder), revision);
+});
+
+test('the portable book-state revision refuses a link that leaves the book', async (t) => {
+  const folder = await makeProject(t);
+  const outside = join(folder, '..', 'outside-' + Date.now() + '.css');
+  await writeFile(outside, 'a {}');
+  t.after(() => rm(outside, { force: true }));
+  await symlink(outside, join(folder, 'template', 'linked.css'));
+  await assert.rejects(captureBookStateRevision(folder), { code: 'source-outside-project' });
+});

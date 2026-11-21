@@ -177,3 +177,13 @@ test('every new document gets its own bookId, also from a starter or copy that a
   await cp(first, join(root, 'Finder.imageflow'), { recursive: true });
   assert.equal((await read(join(root, 'Finder.imageflow'))).bookId, a.bookId);
 });
+
+test('a move keeps the bookId while Save a Copy starts a new lineage', async (t) => {
+  const { root, starter } = await fixture(t);
+  const first = await createDocument(join(root, 'First'), starter);
+  const read = async (folder: string) => JSON.parse(await readFile(join(folder, 'project.json'), 'utf8'));
+  const moved = await createDocument(join(root, 'Moved'), first, { keepLineage: true });
+  assert.equal((await read(moved)).bookId, (await read(first)).bookId);
+  assert.equal((await read(moved)).title, 'Moved');
+  assert.notEqual((await read(await createDocument(join(root, 'Copied'), first))).bookId, (await read(first)).bookId);
+});

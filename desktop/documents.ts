@@ -16,7 +16,9 @@ export async function documentIdentity(path: string) {
   return { folder, identity: [info.dev, info.ino].join(':') };
 }
 
-export async function createDocument(destination: string, starter: string | ((stage: string) => Promise<void>)) {
+export async function createDocument(destination: string, starter: string | ((stage: string) => Promise<void>),
+  // A move keeps the book's lineage; every other new document starts its own.
+  { keepLineage = false }: { keepLineage?: boolean } = {}) {
   const folder = join(await realpath(dirname(destination)), basename(documentPath(destination)));
   const staging = join(dirname(folder), '.imageflow-create-' + randomUUID());
   let reserved = false;
@@ -27,9 +29,10 @@ export async function createDocument(destination: string, starter: string | ((st
     const project = JSON.parse(await readFile(file, 'utf8'));
     // Every document made here (New Book, Duplicate, Save a Copy) starts a new lineage, so a copy never shares the
     // `bookId` of the book it was made from (ADR 0010). A Finder copy, which does not pass here, keeps it by design.
-    const { schemaVersion, title: _title, bookId: _inherited, ...rest } = project;
+    const { schemaVersion, title: _title, bookId: inherited, ...rest } = project;
+    const bookId = keepLineage && typeof inherited === 'string' ? inherited : randomUUID();
     await writeFile(file, JSON.stringify({ ...(schemaVersion === undefined ? {} : { schemaVersion }),
-      title: basename(folder).slice(0, -documentExtension.length), bookId: randomUUID(), ...rest }, null, 2) + '\n');
+      title: basename(folder).slice(0, -documentExtension.length), bookId, ...rest }, null, 2) + '\n');
     // Reserve the destination exclusively. Never replace a user's existing book, even an empty package.
     try { await mkdir(folder); }
     catch (error) {

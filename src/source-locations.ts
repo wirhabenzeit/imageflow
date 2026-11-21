@@ -1,10 +1,12 @@
 import { z } from 'zod';
 import type { ProjectFiles } from './project';
 
+// Like the objects of project.json: unknown keys survive a load and save (ADR 0010), but the type strips them.
+const looseObject = <S extends z.ZodRawShape>(shape: S) => z.looseObject(shape) as unknown as z.ZodObject<S, z.core.$strip>;
 export const importModeSchema = z.enum(['copy', 'link']);
 export type ImportMode = z.infer<typeof importModeSchema>;
 // A relative string is document-owned. A linked reference names one explicitly selected external file.
-export const sourceReferenceSchema = z.union([z.string(), z.object({ path: z.string(), linked: z.literal(true) })]);
+export const sourceReferenceSchema = z.union([z.string(), looseObject({ path: z.string(), linked: z.literal(true) })]);
 export type SourceReference = z.infer<typeof sourceReferenceSchema>;
 export type SourceKind = 'photo' | 'markdown' | 'file';
 export type SourceKey = `${SourceKind}:${string}`;

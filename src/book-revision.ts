@@ -6,14 +6,16 @@ import type { PhotoIndex, Project } from './project';
  * and in the browser for the same book state. It is not the local render-input revision of `desktop/revisions.ts`.
  *
  * It covers the canonical JSON of `project.json` and `photos.json` and the SHA-256 digests of the book's `texts/`,
- * `files/` and `template/` files. It leaves out what differs per machine or is derived: the absolute paths of linked
+ * `files/` and `template/` files: for `texts/` and `files/` only the owned files that `project.json` references (bytes an
+ * undo may restore but nothing references do not count), and, like linked photo bytes, never the content of linked texts
+ * and files. It leaves out what differs per machine or is derived: the absolute paths of linked
  * sources (`{ path, linked: true }`: only the fact that they are linked counts), local availability, the originals'
  * bytes and `assets-meta.json`. Pure and host-agnostic: it uses Web Crypto, in Node 22+ and every browser.
  */
 export type BookStateInputs = {
   project: Project;
   photos: PhotoIndex;
-  /** SHA-256 hex digests of the files in `texts/`, `files/` and `template/`, by path relative to the book, with `/`. */
+  /** SHA-256 hex digests of the referenced owned files of `texts/` and `files/`, and of every file of `template/`, by path relative to the book, with `/`. */
   contentDigests: Record<string, string>;
 };
 

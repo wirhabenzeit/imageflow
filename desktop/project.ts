@@ -253,11 +253,18 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
   const sources: Record<string, SourceStatus> = {};
   const problems: string[] = [];
   const entries = sourceEntries(book);
-  if (!entries.length) return { ...book, photos, texts, files, sources, problems };
+  // Only a writable, unpinned load keeps derived facts up to date, and only that one registers them for the session
+  // that owns the book; read-only, pinned and temporary loads just read the file.
+  const writable = !book.readOnly && !pinSources;
+  const facts = writable ? await AssetFacts.forBook(book.folder) : await AssetFacts.readOnly(book.folder);
+  if (!entries.length) {
+    // The last source was removed: its facts go too.
+    if (writable) facts.prune([]);
+    return { ...book, photos, texts, files, sources, problems };
+  }
   const store = await SourceStore.forBook(book.folder, book.cache);
-  const facts = await AssetFacts.forBook(book.folder);
   // Derived facts follow photos the editor reads in place; a private export read changes nothing.
-  if (!pinSources) store.onDigest = (key, observation, digest) => { if (key.startsWith('photo:')) facts.digest(key.slice('photo:'.length), observation, digest); };
+  if (writable) store.onDigest = (key, observation, digest) => { if (key.startsWith('photo:')) facts.digest(key.slice('photo:'.length), observation, digest); };
   const unavailablePhotos: Record<string, AssetFact> = {};
   for (let i = 0; i < entries.length; i += 8) {
     await Promise.all(entries.slice(i, i + 8).map(async (source) => {
@@ -275,7 +282,7 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
           // A rendition has no EXIF block, so a missing original's capture data comes from assets-meta.json.
           const capture = remembered ? Object.fromEntries(captureFields.flatMap((field) => remembered[field] ? [[field, remembered[field]]] : [])) : {};
           const estimate = details.captured || remembered?.captured ? undefined : stored.modified ?? details.estimatedCapture;
-          if (present && !pinSources) facts.note(source.id, stored.observation, details, status.digest ?? stored.digest);
+          if (present && writable) facts.note(source.id, stored.observation, details, status.digest ?? stored.digest);
           photos.set(source.id, { title, caption, credit, altText, ...details, ...capture, estimatedCapture: estimate, observation: stored.direct && status.state === 'available' ? stored.observation : details.observation,
             width: stored.width!, height: stored.height!, original: stored.snapshot,
             key: stored.direct ? status.problem ? digestBytes(Buffer.from(stored.key + ':stale')) : stored.key! : digestBytes(Buffer.from(stored.digest + ':rendition-3')),
@@ -290,7 +297,7 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
     }));
   }
   await store.settled();
-  if (!pinSources) facts.prune(Object.keys(book.photoIndex));
+  if (writable) facts.prune(Object.keys(book.photoIndex));
   return { ...book, photos, texts, files, sources, problems: problems.sort(), ...(Object.keys(unavailablePhotos).length ? { unavailablePhotos } : {}) };
 }
 

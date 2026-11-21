@@ -60,6 +60,12 @@ export class AssetFacts {
     })());
     return registry.get(folder)!;
   }
+  /** The facts of a book that is only read (read-only, pinned or temporary loads): never registered, never written. */
+  static async readOnly(folder: string): Promise<AssetFacts> {
+    const facts = new AssetFacts(folder);
+    facts.facts = await readAssetFacts(folder);
+    return facts;
+  }
   /** Writes what is pending and forgets the book's facts. */
   static async release(folder: string) {
     const loaded = registry.get(folder);
@@ -115,8 +121,15 @@ export class AssetFacts {
       if (!this.dirty.size && !this.removed.size) return;
       const changed = [...this.dirty], removed = [...this.removed];
       this.dirty.clear(); this.removed.clear();
+      // A failed write queues what it took again, without overriding what changed meanwhile.
+      const requeue = () => {
+        for (const id of changed) if (this.facts[id] && !this.removed.has(id)) this.dirty.add(id);
+        for (const id of removed) if (!this.facts[id] && !this.dirty.has(id)) this.removed.add(id);
+        if (this.dirty.size || this.removed.size) this.schedule();
+      };
       // Read-only opens and books another process owns only read.
       if (!await holdsProjectLock(this.folder)) return;
+      try {
       // Merge into what is on disk, so entries another replica or session added are kept.
       const current = await readAssetFacts(this.folder);
       for (const id of removed) delete current[id];
@@ -127,6 +140,7 @@ export class AssetFacts {
         await writeFile(staging, bytes, { flag: 'wx', mode: 0o644 });
         await rename(staging, join(this.folder, assetsMetaFile));
       } finally { await rm(staging, { force: true }); }
+      } catch (error) { requeue(); throw error; }
     }).catch((error) => console.warn('ImageFlow could not write assets-meta.json', error));
     this.writes = task;
     return task;

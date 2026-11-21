@@ -41,6 +41,7 @@ import { PreviewError } from '../src/preview';
 import { DocumentSession } from './document-session';
 import { configureMacHeader, setToolbarDragRegions } from './mac-header';
 import type { RenderSessions } from './document-session';
+import { AssetFacts } from './asset-facts';
 import { createDocument, documentIdentity, documentPath, isDocument, RecentDocuments } from './documents';
 import { SettingsStore } from './settings';
 import { AuthoringError } from './authoring-service';
@@ -584,7 +585,11 @@ async function openDocument(path: string): Promise<DocumentSession | undefined> 
     } finally {
       if (!registered && release) {
         // Releasing the source registry must neither mask the open's own result nor keep the writer lock.
-        if (loadStarted) await SourceStore.release(folder).catch((error) => console.warn('ImageFlow could not release book sources', error));
+        if (loadStarted) {
+          await SourceStore.release(folder).catch((error) => console.warn('ImageFlow could not release book sources', error));
+          // An aborted open leaves no derived facts registered; this flushes them while the writer lock is still held.
+          await AssetFacts.release(folder).catch((error) => console.warn('ImageFlow could not release asset facts', error));
+        }
         if (document) await document.close();
         else await release();
       }

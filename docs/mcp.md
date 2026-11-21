@@ -397,7 +397,7 @@ node_modules/
 
 Keep `template/vendor/` in the repository: it is the saved dependency bundle the book renders.
 
-ImageFlow ignores `.git` folders at any depth: commits do not change the book's input revision, and Save a Copy leaves them out. Committing `project.json` and `photos.json` is optional; while the book is open, change them only through ImageFlow. ImageFlow also keeps a derived `assets-meta.json` in the book (per photo ID: SHA-256 digest of the original, pixel size, capture metadata, last verification time). It is written in the background, outside the saves above, so it never adds an Undo step or checkpoint and does not change the book's input revision. Do not edit it; deleting it is safe, as it regenerates. Commit it if you want a machine without the originals to lay out the book, or `.gitignore` it if you prefer a quieter history.
+ImageFlow ignores `.git` folders at any depth: commits do not change the book's input revision, and Save a Copy leaves them out. Committing `project.json` and `photos.json` is optional; while the book is open, change them only through ImageFlow. ImageFlow also keeps a derived `assets-meta.json` in the book (per photo ID: SHA-256 digest of the original, pixel size, capture metadata, last verification time). It is written in the background, outside the saves above, so it never adds an Undo step or checkpoint and does not change the book's input revision. Do not edit it; deleting it is safe, as it regenerates. Commit it if you want a machine without the originals to still show photo sizes and capture dates in the book summary and listings (rendering the book there needs proxies, which come later), or `.gitignore` it if you prefer a quieter history.
 
 ## Verification
 
