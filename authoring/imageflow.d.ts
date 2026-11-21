@@ -753,7 +753,11 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
     children?: (photo: PhotoRender, box: PhotoBoxState<I, ValuesOf<S['boxes'][I]>>) => ImageFlowNode;
   }): ImageFlowElement;
   /** `MarkdownBox` limited to this layout's Markdown box IDs. */
-  MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: BoxIds<S, 'markdown'>; columns?: Columns }): ImageFlowElement;
+  MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & {
+    id: BoxIds<S, 'markdown'>; columns?: Columns;
+    /** Composes the text yourself from its blocks. See `TextComposition`. */
+    children?: (text: TextComposition) => ImageFlowNode;
+  }): ImageFlowElement;
   /** `Element` limited to this layout's element IDs. */
   Element(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: keyof S['elements'] & string; children?: ImageFlowNode }): ImageFlowElement;
   /**
@@ -817,7 +821,7 @@ export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issu
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
   'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'page-layouts' | 'editor-context' | 'document-editors' |
   'editor-network' | 'rendered-images' | 'rendered-vectors' | 'font-coverage' | 'book-credits' | 'inline-editors' | 'inline-text' | 'list-parameters' | 'template-preview' | 'photo-render' |
-  'formatted-text' | 'app-controls' | 'text-metadata' | 'physical-covers';
+  'formatted-text' | 'app-controls' | 'text-metadata' | 'text-composition' | 'physical-covers';
 /** All features this app provides, including the contract-1 baseline and any later extensions. */
 export const capabilities: readonly Capability[];
 
@@ -1077,12 +1081,40 @@ export type PhotoBoxState<I extends string = string, P = Values> = { id: I; uid:
  * draw the photo at `photo.image` for the printed crop to match. It is not called for an empty box.
  */
 export function PhotoBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: string; children?: (photo: PhotoRender, box: PhotoBoxState) => ImageFlowNode }): ImageFlowElement;
+/** A top-level block of a Markdown text, as a `MarkdownBox` render callback receives it. */
+export type TextBlock = {
+  /** A thematic break is a `rule`; code blocks and raw HTML are not part of the text. */
+  readonly type: 'paragraph' | 'heading' | 'blockquote' | 'list' | 'rule';
+  /** A heading's level, 1–6. */
+  readonly depth?: 1 | 2 | 3 | 4 | 5 | 6;
+  /** Whether a list is numbered. */
+  readonly ordered?: boolean;
+  /** The block's words without Markdown syntax, for reading a date or a title from a heading. */
+  readonly text: string;
+  /** Stable for this block of this text: the `key` of an element rendered in its place. */
+  readonly key: string;
+  /** The block as ImageFlow renders it. Place it once. */
+  readonly node: ImageFlowElement;
+  /** What the block contains without its own element, such as a heading's formatted words, for your own element. */
+  readonly content: ImageFlowElement;
+};
+/** A Markdown text as a `MarkdownBox` render callback receives it: its blocks in order and its header fields. */
+export type TextComposition = {
+  readonly blocks: readonly TextBlock[];
+  /** The fields of the source's YAML header, `{}` without one; also set in layout previews. */
+  readonly meta: Readonly<TextMeta>;
+};
 /**
  * A box that shows its part of the Markdown text assigned to box `id`. `columns` (1–6, default 1) splits it into
  * columns; set the gap with the `columnGap` style. Text fills each column before continuing in the next box.
  * In the editor, clicking it edits the box's parameters and any others it is marked with: `{...ctx.edit('textSize')}`.
+ *
+ * A render callback as children composes the text: it receives the text's blocks and returns what flows, such as
+ * `{({ blocks, meta }) => <><h3>{String(meta.title)}</h3>{blocks.map((block) => block.node)}</>}`. It is called for
+ * the box the text starts in and decides the whole text; what it returns flows through the chain like Markdown.
+ * Mark an element that must stay with the next one with `data-keep-next`.
  */
-export function MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: string; columns?: Columns }): ImageFlowElement;
+export function MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: string; columns?: Columns; children?: (text: TextComposition) => ImageFlowNode }): ImageFlowElement;
 /**
  * Generated content with parameters, such as a calendar grid. In the editor, clicking it edits the element's
  * parameters and any others it is marked with: `<Element id="grid" {...ctx.edit('month')}>`.

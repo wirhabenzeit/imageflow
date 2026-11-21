@@ -78,6 +78,7 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, … })
 | `formatted-text` | `markdown: 'inline'` on string parameters: bold, italic and strikethrough, shown by `ctx.Text` and `<FormattedText>` ([Formatted text](formatted-text.md#formatted-text-formatted-text)). |
 | `app-controls` | `<Choice>`: ImageFlow's own segmented choice for element editors and layout-family pickers ([App controls](layout-families.md#app-controls)). |
 | `text-metadata` | `text.meta` on Markdown boxes: the fields of the source's YAML header, the same on every box of the chain ([Text metadata](boxes-and-elements.md#text-metadata)); every placed text in `ctx.book.texts` ([Texts](anchors-and-index.md#texts)); and `boxes` in `anchors`. |
+| `text-composition` | `MarkdownBox` children: a render callback that composes the box's text from its blocks, adding, replacing or wrapping them ([Composing a text](#composing-a-text)). |
 
 
 Use `requires` for extensions beyond the contract-1 baseline. Unsupported extensions are rejected when the template loads, with an update hint. Listing baseline features in `requires` is also valid.

@@ -116,7 +116,7 @@ html:has(.if-artwork) { overflow: hidden; }
 .if-layout-glyph { color: #b9b2a3; }
 .if-layout-glyph svg { width: 56%; height: 56%; }
 .if-markdown { orphans: 2; widows: 2; }
-.if-markdown :is(h1, h2, h3, h4, h5, h6) { break-after: avoid; }
+.if-markdown :is(h1, h2, h3, h4, h5, h6, [data-keep-next]) { break-after: avoid; }
 .if-markdown .cont { text-indent: 0; }
 .if-markdown li.cont { list-style-type: none; }
 .if-spread > .bleed { position: absolute; inset: calc(-1 * var(--bleed-top)) calc(-1 * var(--bleed-outside)) calc(-1 * var(--bleed-bottom)); }

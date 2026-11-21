@@ -11,6 +11,8 @@
 export const flow = (() => {
   const EPS = 0.5;
   const BLOCKS = 'p,li,h1,h2,h3,h4,h5,h6';
+  // Blocks that stay with the one after them: headings, and whatever a template marks in a composed text.
+  const KEEP_NEXT = 'h1,h2,h3,h4,h5,h6,[data-keep-next]';
   const range = document.createRange();
   const isBlank = (node) => node.nodeType === Node.TEXT_NODE && !/\S/.test(node.data);
 
@@ -205,10 +207,15 @@ export const flow = (() => {
     if (atStart) {
       let anchor = info.block;
       while (anchor.parentNode !== box && firstMeaningfulChild(anchor.parentNode) === anchor) anchor = anchor.parentNode;
-      const previous = anchor.parentNode === box ? previousMeaningfulSibling(anchor) : null;
-      if (previous?.matches?.('h1,h2,h3,h4,h5,h6')) {
-        const headingStart = indexOf(index, firstText(previous));
-        if (headingStart > 0) p = headingStart;
+      let previous = anchor.parentNode === box ? previousMeaningfulSibling(anchor) : null;
+      while (previous?.matches?.(KEEP_NEXT)) {
+        const start = indexOf(index, firstText(previous));
+        if (!(start > 0)) break;
+        p = start;
+        // A marked block is kept by the one before it in turn, such as a date above a title. A heading is not: two
+        // Markdown headings in a row break as they always have.
+        if (!previous.matches('[data-keep-next]')) break;
+        previous = previousMeaningfulSibling(previous);
       }
     }
     return p;
@@ -320,6 +327,10 @@ export const flow = (() => {
     const template = document.createElement('template');
     template.innerHTML = html;
     const queue = template.content;
+    // Elements a template composed into the text have no source offsets; number them, so one split across boxes is
+    // marked like a Markdown block.
+    let composed = 0;
+    for (const element of queue.querySelectorAll(':not([data-s]):not(br)')) element.dataset.s = 'c' + composed++;
     const started = performance.now();
     const results = boxes.map((box, i) => flowBox(box, queue, strategy, boxes[i + 1]));
     const elapsed = performance.now() - started;
@@ -371,7 +382,7 @@ export const flow = (() => {
     if (last?.classList.contains('split') && last.matches('p') && lineCount(last) < 2) violations.push('orphan');
     if (first?.classList.contains('cont') && first.matches('p') && lineCount(first) < 2) violations.push('widow');
     const lastTop = [...box.children].filter((child) => /\S/.test(child.textContent)).pop();
-    if (lastTop?.matches('h1,h2,h3,h4,h5,h6')) violations.push('heading at end');
+    if (lastTop?.matches(KEEP_NEXT)) violations.push('heading at end');
     return violations;
   }
 

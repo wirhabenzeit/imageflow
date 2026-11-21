@@ -35,7 +35,7 @@ import type { Parameters } from './parameters';
 import { flow } from './text-flow';
 import { declarationWarnings, placeControlWarnings } from './declaration-check';
 import type { Schema } from './declaration-check';
-import { bookIndex, chooseFormat, CoverArtwork, currentPhotoRenderFailures, watchPhotoRenderFailures, editorContext, normalizeTemplate, photoNearEvent, refreshedEditorContext, setLivePlacement, withEditorDraft, withEditorGeometry, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
+import { bookIndex, chooseFormat, composedText, CoverArtwork, currentPhotoRenderFailures, watchPhotoRenderFailures, editorContext, normalizeTemplate, photoNearEvent, refreshedEditorContext, setLivePlacement, withEditorDraft, withEditorGeometry, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
 import type { AnchorLookup, PhotoRenderFailure, EditorContext, EditorPresentation } from './template';
 import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
@@ -1213,7 +1213,7 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
       const source = spread.boxes[box]?.text;
       if (source && book.texts[source] !== undefined && boxes.has(box)) sources.set(source, [...sources.get(source) ?? [], boxes.get(box)!]);
     }
-    for (const [source, targets] of sources) flow.run(markdownToHtml(book.texts[source]), targets, 'columns');
+    for (const [source, targets] of sources) flow.run(composedText(targets[0]) ?? markdownToHtml(book.texts[source]), targets, 'columns');
     if (crop) {
       const page = sheetPages(format).find(({ side }) => side === crop)!;
       const artwork = sheet.querySelector<HTMLElement>('.if-spread')!;
@@ -2199,7 +2199,7 @@ export async function startRender(root: HTMLElement) {
           suggestion: 'Fix the YAML between the opening and closing --- lines of ' + path + '. Until then the layout shows it without its header fields.' });
       }
       const boxes = chain.map(({ spread, page, box }) => validated.get(spread)!.boxes.get((page ? page + ':' : '') + box)!);
-      const result = flow.run(markdownToHtml(book.texts[source]), boxes, 'columns');
+      const result = flow.run(composedText(boxes[0]) ?? markdownToHtml(book.texts[source]), boxes, 'columns');
       const overflow = result.overflowText.trim();
       if (overflow || result.results.some(({ failed, unresolved }) => failed || unresolved)) {
         const last = chain.at(-1)!;

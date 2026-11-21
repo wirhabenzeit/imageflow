@@ -1,11 +1,11 @@
 import { layoutFootprint, shownLayoutStates } from './layouts';
-import { Component, createContext, Fragment, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { flushSync } from 'react-dom';
+import { Component, createContext, createElement, Fragment, useContext, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal, flushSync } from 'react-dom';
 import { RenderedImage } from './rendered-image';
 import { Choice } from './choice';
 import { parseFormatted, plainFormatted } from './formatted-text';
 import { renderingSpread } from './purity';
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties, ReactElement, ReactNode } from 'react';
 import { z } from 'zod';
 import { cssMM, formatSchema, hasFacingPages, hasSingleEnds, inch, mm, pageSequence, printFormat, pt, resolveFormat, spanAllowedAt, spanFits, spanRequiredAt } from './format';
 import type { PrintFormat, ResolvedFormat, Span, UnitPages } from './format';
@@ -14,7 +14,10 @@ import type { CoverState, PageSide, Photo, ProjectFile, RenderProject, RenderVie
 import { coverFormatSchema, coverLayoutsFor, printSpecificationSchema } from './cover';
 import type { CoverFormat, ResolvedCover } from './cover';
 import { textAssignments } from './text-assignments';
+import { splitFrontmatter } from './frontmatter';
 import type { TextMeta } from './frontmatter';
+import { composeHtml, markdownBlocks } from './markdown';
+import type { MarkdownBlock } from './markdown';
 import { getCrop, placementIn } from './spread';
 import type { Crop, Placement as CropPlacement } from './spread';
 import { declarationConflicts, familyProblems } from './layouts';
@@ -978,20 +981,66 @@ function LayoutGlyph({ kind }: { kind: 'photo' | 'text' }) {
   </span>;
 }
 
+// A top-level block of a box's Markdown text, as its render callback receives it. `node` is the block as ImageFlow
+// renders it and `content` what is inside it (a heading's words without the heading), for the template's own element.
+export type TextBlock = Pick<MarkdownBlock, 'type' | 'depth' | 'ordered' | 'text'> & { key: string; node: ReactElement; content: ReactElement };
+export type TextComposition = { blocks: readonly TextBlock[]; meta: TextMeta };
+export type MarkdownBoxRender = (text: TextComposition) => ReactNode;
+
+// What each composing box rendered, kept off the page: the flow clears a box before it fills it, and React must keep
+// the nodes it made. The renderer reads it once the book has rendered, before it flows the text.
+const compositions = new WeakMap<Element, { host: HTMLElement; blocks: MarkdownBlock[] }>();
+/** The flow's HTML for the text starting in `box` when its layout composes it; undefined for plain Markdown. */
+export function composedText(box: Element) {
+  const staged = compositions.get(box);
+  return staged && composeHtml(staged.host.innerHTML, staged.blocks);
+}
+
+// Calls a box's render callback as its own component, so it renders under the layout's error boundary and purity guard.
+function ComposeCall({ render, blocks, meta, spread }: { render: MarkdownBoxRender; blocks: MarkdownBlock[]; meta: TextMeta; spread: string }) {
+  const text = useMemo(() => ({
+    meta,
+    blocks: blocks.map(({ type, depth, ordered, text, start }, i): TextBlock => ({
+      type, text, key: String(start), ...(depth ? { depth } : {}), ...(ordered !== undefined ? { ordered } : {}),
+      node: createElement('if-block', { key: start, 'data-i': i }),
+      content: createElement('if-block', { key: start + ':content', 'data-i': i, 'data-part': 'content' }),
+    })),
+  }), [blocks, meta]);
+  renderingSpread(spread);
+  try {
+    return <>{render(text)}</>;
+  } finally {
+    renderingSpread(undefined);
+  }
+}
+
 // `columns` splits the box into that many columns; text flows down each column before moving to the next box.
-export function MarkdownBox({ id, className, style, rect, columns = 1, decorative, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker &
-  IssueMarker & DecorativeMarker & { id: string; columns?: number | `${number}` }) {
-  const { spread, book, definition } = useSpread();
+// `children` composes the text: a callback from its blocks to what flows, called for the box its text starts in.
+export function MarkdownBox({ id, className, style, rect, columns = 1, children, decorative, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker &
+  IssueMarker & DecorativeMarker & { id: string; columns?: number | `${number}`; children?: MarkdownBoxRender }) {
+  const { spread, book, definition, values } = useSpread();
+  if (children !== undefined && typeof children !== 'function') {
+    throw new Error('MarkdownBox ' + id + ': children must be a render function, such as {({ blocks }) => blocks.map((block) => block.node)}.');
+  }
   const text = spread.boxes[id]?.text;
+  const source = text === undefined ? undefined : book.texts[text];
   const count = Math.max(1, Math.min(6, Math.round(Number(columns)) || 1));
+  // A text is composed once, by the box it starts in. Layout previews have no flow position: each starts its text.
+  const position = values.boxes[id]?.text;
+  const [host] = useState(() => typeof document === 'undefined' ? undefined : document.createElement('div'));
+  const composing = children !== undefined && source !== undefined && host !== undefined && (!position || position.part === 1);
+  const blocks = useMemo(() => composing ? markdownBlocks(source) : [], [composing, source]);
+  const meta = useMemo(() => position?.meta ?? (composing ? splitFrontmatter(source).meta : null) ?? {}, [composing, position, source]);
   return (
     <div data-box={id} data-box-type="markdown" data-columns={count > 1 ? count : undefined}
+      ref={(node) => { if (node && composing) compositions.set(node, { host, blocks }); else if (node) compositions.delete(node); }}
       data-edit={editTarget(book, 'boxes.' + id + '.', definition.boxes[id]?.parameters, marked)}
-      data-empty={text !== undefined && book.texts[text] !== undefined ? undefined : ''}
+      data-empty={source !== undefined ? undefined : ''}
       className={['if-markdown', className].filter(Boolean).join(' ')} style={place(rect, style)} {...decorativeOn(decorative)} {...issueOn(marker)}>
-      {renderView(book) === 'canvas' && (!text || book.texts[text] === undefined) &&
+      {renderView(book) === 'canvas' && source === undefined &&
         <span className="if-placeholder">{text ? 'Missing Markdown' : 'Drop a Markdown file'}</span>}
-      {renderView(book) === 'layout-preview' && (!text || book.texts[text] === undefined) && <LayoutGlyph kind="text" />}
+      {renderView(book) === 'layout-preview' && source === undefined && <LayoutGlyph kind="text" />}
+      {composing && createPortal(<ComposeCall render={children} blocks={blocks} meta={meta} spread={spread.id} />, host)}
     </div>
   );
 }
