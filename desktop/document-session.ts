@@ -38,7 +38,7 @@ import { saveDocumentCopy } from './source-actions';
 import { rebuildTemplateDependencies } from './dependency-install';
 import type { DependencyRebuild } from './dependency-install';
 import { AssetFacts } from './asset-facts';
-import { describeSync, downloadOriginals, syncBook } from './sync-engine';
+import { describeLocalChange, describeSync, downloadOriginals, syncBook } from './sync-engine';
 import type { SyncOptions, SyncOutcome } from './sync-engine';
 import { remoteCommits } from './sync-remote';
 import type { SyncRemote } from './sync-remote';
@@ -337,11 +337,22 @@ export class DocumentSession {
   keepOriginals?: () => boolean;
   private syncing = false;
   private syncTimer?: ReturnType<typeof setTimeout>;
-  /** After an edit, a book that syncs shows soon whether it has changes to sync (the status hashes the book state). */
+  /**
+   * After an edit, a book that syncs shows soon whether it has changes to sync. Only the local revision is compared
+   * with the last sync: the remote is read when the book opens, on focus and after a sync, never per edit, since a
+   * sync folder's headers only accumulate and reading them can download evicted files.
+   */
   private scheduleSyncRefresh() {
-    if (!this.syncView || this.syncing) return;
+    if (!this.syncView?.status?.remote || this.syncing) return;
     clearTimeout(this.syncTimer);
-    this.syncTimer = setTimeout(() => { if (!this.closing && !this.busy) void this.refreshSync().catch(() => {}); }, 1500);
+    this.syncTimer = setTimeout(() => void this.refreshLocalSync().catch(() => {}), 1500);
+  }
+  private async refreshLocalSync() {
+    const view = this.syncView;
+    if (this.closing || this.syncing || !view?.status) return;
+    const status = await describeLocalChange(this.book.folder, view.status);
+    // A sync or a remote refresh that started meanwhile publishes its own, newer status.
+    if (this.syncView === view && !this.syncing && status !== view.status) this.publishSync({ folder: view.folder, status });
   }
   private publishSync(view: SyncView | undefined) {
     this.syncView = view;
@@ -363,7 +374,8 @@ export class DocumentSession {
   async refreshSync({ message }: { message?: string } = {}) {
     if (this.closing) return;
     const folder = await this.syncFolder();
-    const abandoned = await takeAbandonedAtOpen(this.book.folder).catch(() => undefined);
+    // While a sync runs, the engine owns the record; its own failures are reported by the sync.
+    const abandoned = this.syncing ? undefined : await takeAbandonedAtOpen(this.book.folder).catch(() => undefined);
     const notice = message ?? (abandoned ? 'The last sync could not be finished: ' + abandoned.error.replace(/\.?$/, '.') +
       ' Sync again to continue with the version in the sync folder; this Mac’s version is kept if it holds anything new.' : undefined);
     if (!folder) {
@@ -395,16 +407,28 @@ export class DocumentSession {
   }
   /** Makes the book sync through `folder` on this Mac. The record of the last sync stays only if the folder has it. */
   async linkSync(folder: string) {
-    const remote = new FolderRemote(folder);
-    const { lastSynced } = await readSyncState(this.book.folder);
-    const bookId = this.book.project.bookId;
-    const known = lastSynced && bookId ? (await remoteCommits(remote, bookId)).some(({ commitId }) => commitId === lastSynced.commitId) : false;
-    await updateSyncState(this.book.folder, ({ lastSynced: previous, ...state }) => ({ ...state, folder, ...(known && previous ? { lastSynced: previous } : {}) }));
+    const result = await this.run(async () => {
+      const remote = new FolderRemote(folder);
+      const bookId = this.book.project.bookId;
+      const commits = bookId ? await remoteCommits(remote, bookId) : [];
+      await updateSyncState(this.book.folder, ({ lastSynced, ...state }) => ({ ...state, folder,
+        ...(lastSynced && commits.some(({ commitId }) => commitId === lastSynced.commitId) ? { lastSynced } : {}) }));
+    });
+    if ('error' in result) throw new Error(result.error);
     await this.refreshSync();
+  }
+  /**
+   * Whether a first sync through `folder` would start the book's history there: the folder has no commit of it. Right
+   * for a book new to the folder, but a folder still downloading what another Mac synced looks the same.
+   */
+  async startsHistory(folder: string) {
+    const bookId = this.book.project.bookId;
+    return !bookId || !(await remoteCommits(new FolderRemote(folder), bookId)).length;
   }
   /** Stops syncing on this Mac; the sync folder and the book are left as they are. */
   async unlinkSync() {
-    await updateSyncState(this.book.folder, ({ folder: _, ...state }) => state);
+    const result = await this.run(() => updateSyncState(this.book.folder, ({ folder: _, ...state }) => state));
+    if ('error' in result) throw new Error(result.error);
     await this.refreshSync();
   }
   /** Downloads the owned originals that are only proxies here, then shows them. */

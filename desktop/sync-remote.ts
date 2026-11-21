@@ -2,7 +2,7 @@ import { constants } from 'node:fs';
 import { copyFile, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
-import { blobKeyPattern, commitHeaderSchema, deriveTips, readCommitHeader } from '../src/sync-snapshot';
+import { blobKeyPattern, commitHeaderSchema, deriveTips, NewerSyncFormatError, readCommitHeader } from '../src/sync-snapshot';
 import type { CommitHeader } from '../src/sync-snapshot';
 
 /**
@@ -35,15 +35,24 @@ export async function remoteCommits(remote: SyncRemote, bookId: string) {
   return (await remote.listCommits(bookId)).map(readCommitHeader).filter((header) => header !== undefined && header.bookId === bookId) as CommitHeader[];
 }
 
-/** The books on a remote with their tips, newest tip first, skipping books whose commits have not arrived yet. */
+/**
+ * The books on a remote with their tips, newest tip first, skipping books whose commits have not arrived yet. A book a
+ * newer ImageFlow synced is listed with `newer` and no tips (last), so it never hides the others.
+ */
 export async function remoteBooks(remote: SyncRemote) {
-  const books: { bookId: string; tips: CommitHeader[]; title: string; updatedAt: string }[] = [];
+  const books: { bookId: string; tips: CommitHeader[]; title: string; updatedAt: string; newer?: true }[] = [];
   for (const bookId of await remote.listBooks()) {
-    const tips = await remoteTips(remote, bookId);
+    let tips: CommitHeader[];
+    try { tips = await remoteTips(remote, bookId); }
+    catch (error) {
+      if (!(error instanceof NewerSyncFormatError)) throw error;
+      books.push({ bookId, tips: [], title: '', updatedAt: '', newer: true });
+      continue;
+    }
     const latest = tips.at(-1);
     if (latest) books.push({ bookId, tips, title: latest.title, updatedAt: latest.createdAt });
   }
-  return books.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.title.localeCompare(b.title));
+  return books.sort((a, b) => Number(!!a.newer) - Number(!!b.newer) || b.updatedAt.localeCompare(a.updatedAt) || a.title.localeCompare(b.title));
 }
 
 /** The tips of a book on a remote: commits that no other commit names as a parent. */

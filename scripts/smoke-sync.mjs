@@ -99,6 +99,8 @@ try {
   // Sync with Folder… links the book and pushes it.
   await choosePaths({ open: folder });
   assert.deepEqual(await sync(desktop, 'link'), { value: undefined });
+  // An empty folder might still be downloading another Mac's copy: starting the book's history there is confirmed.
+  await waitForPrompt((prompt) => prompt.message.startsWith('Start syncing') && prompt.window === desktopWindow);
   await statusIs(desktop, 'in-sync');
   const bookId = (await current(desktop)).project.bookId;
   assert.ok(bookId, 'the first sync gave the book its lineage ID');

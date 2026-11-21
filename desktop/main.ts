@@ -1050,6 +1050,14 @@ async function linkSyncFolder(document: DocumentSession) {
   const folder = choice.filePaths[0];
   if (choice.canceled || !folder || document.closing) return;
   if (within(document.book.folder, folder) || folder === document.book.folder) throw new Error('Choose a folder outside the book.');
+  // A folder without this book either has never seen it, or has not finished downloading what another Mac synced; a
+  // first sync now would start a second history there, which shows later as changed on two Macs.
+  if (await document.startsHistory(folder)) {
+    const { response } = await dialog.showMessageBox(document.window, { type: 'question', buttons: ['Start Syncing', 'Cancel'], defaultId: 0, cancelId: 1,
+      message: 'Start syncing “' + bookName(document.book.folder) + '” in “' + basename(folder) + '”?',
+      detail: 'This folder has no copy of this book yet. If another Mac already syncs it to this folder, cancel and wait until the folder has finished downloading here.' });
+    if (response !== 0) return;
+  }
   await document.linkSync(folder);
   await document.syncNow();
 }
@@ -1084,10 +1092,14 @@ async function openFromSyncFolder(owner: BrowserWindow | undefined) {
   let book = books[0];
   if (books.length > 1) {
     const shown = books.slice(0, 6);
-    const { response } = await ask({ type: 'question', buttons: [...shown.map(({ title }) => title || 'Untitled'), 'Cancel'], cancelId: shown.length, defaultId: 0,
+    const { response } = await ask({ type: 'question', buttons: [...shown.map(({ title, newer }) => newer ? 'A Book Synced by a Newer ImageFlow' : title || 'Untitled'), 'Cancel'], cancelId: shown.length, defaultId: 0,
       message: 'Which book do you want to open?', detail: books.length > shown.length ? 'The ' + shown.length + ' most recently synced books are shown.' : undefined });
     if (!shown[response]) return;
     book = shown[response];
+  }
+  if (book.newer) {
+    await ask({ type: 'info', message: 'This book was synced by a newer version of ImageFlow.', detail: 'Update ImageFlow to open it.' });
+    return;
   }
   const tipId = book.tips.length === 1 ? book.tips[0].commitId : parent ? await chooseSyncTip(parent, book.tips) : book.tips.at(-1)!.commitId;
   const tip = book.tips.find(({ commitId }) => commitId === tipId);

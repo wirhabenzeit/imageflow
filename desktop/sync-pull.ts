@@ -85,7 +85,7 @@ export async function readSyncState(folder: string): Promise<SyncState> {
   return parsed.data;
 }
 
-export async function writeSyncState(folder: string, state: SyncState) {
+async function writeSyncState(folder: string, state: SyncState) {
   const path = (await syncFolder(folder, true))!;
   const bytes = JSON.stringify(syncStateSchema.parse(state)) + '\n';
   const staging = join(path, 'sync-' + randomUUID() + '.tmp');
@@ -96,8 +96,21 @@ export async function writeSyncState(folder: string, state: SyncState) {
   } finally { await rm(staging, { force: true }); }
 }
 
+// Every change to a book's sync record is a read-modify-write; one at a time per book, so a status refresh, a link or
+// a notice taken while a sync runs never writes back a record older than the engine's (and drops its pull marker).
+const syncStateWrites = new Map<string, Promise<unknown>>();
+
+/** Changes a book's sync record, serialized with every other change of it. A change that returns `state` writes nothing. */
 export async function updateSyncState(folder: string, change: (state: SyncState) => SyncState) {
-  await writeSyncState(folder, change(await readSyncState(folder)));
+  const key = await realpath(folder).catch(() => folder);
+  const previous = syncStateWrites.get(key) ?? Promise.resolve();
+  const task = previous.catch(() => {}).then(async () => {
+    const state = await readSyncState(folder);
+    const next = change(state);
+    if (next !== state) await writeSyncState(folder, next);
+  });
+  syncStateWrites.set(key, task);
+  try { await task; } finally { if (syncStateWrites.get(key) === task) syncStateWrites.delete(key); }
 }
 
 /** Reads a staged blob and checks it still has its digest. */
@@ -300,8 +313,14 @@ export async function resumeSyncPull(folder: string, { readOnly = false }: { rea
 
 /** The trace of a pull given up when the book opened, once: the editor tells the user, then it stays for the status. */
 export async function takeAbandonedAtOpen(folder: string) {
-  const { abandoned } = await readSyncState(folder);
-  if (!abandoned?.atOpen) return undefined;
-  await updateSyncState(folder, (state) => state.abandoned ? { ...state, abandoned: { ...state.abandoned, atOpen: undefined } } : state);
-  return abandoned;
+  // Nothing to take is the common case: it reads without writing, and without creating a sync record.
+  if (!(await readSyncState(folder)).abandoned?.atOpen) return undefined;
+  let taken: NonNullable<SyncState['abandoned']> | undefined;
+  await updateSyncState(folder, (state) => {
+    if (!state.abandoned?.atOpen) return state;
+    taken = state.abandoned;
+    const { atOpen: _, ...abandoned } = state.abandoned;
+    return { ...state, abandoned };
+  });
+  return taken;
 }

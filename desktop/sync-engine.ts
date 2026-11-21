@@ -18,7 +18,7 @@ import { photoDetails, photoFile } from './photos';
 import { loadProject } from './project';
 import type { OpenProject } from './project';
 import { proxyStore } from './proxy-store';
-import { captureBookState } from './revisions';
+import { captureBookState, captureBookStateRevision } from './revisions';
 import { saveDocumentCopy } from './source-actions';
 import { SourceStore } from './source-store';
 import { bookPath, finishPull, preflightPull, readSyncState, stagingFolder, updateSyncState } from './sync-pull';
@@ -667,9 +667,27 @@ export async function describeSync(folder: string, remote: SyncRemote): Promise<
     const decision = decideSync({ pullInProgress: !!state.pull, tips, commits, lastSynced: state.lastSynced, localRevision: local.revision, factsChanged: false });
     const states: Record<SyncDecision['action'], SyncStatus['state']> = { 'resume': 'behind', 'remote-behind': 'remote-syncing', 'initial-push': 'ahead',
       'push': 'ahead', 'in-sync': 'in-sync', 'adopt': 'in-sync', 'fast-forward': 'behind', 'diverged': 'diverged' };
-    return { ...base, state: states[decision.action], ...(decision.action === 'diverged' ? { tips: decision.tips.length } : {}) };
+    const synced = state.lastSynced;
+    const remoteState = !synced || state.pull || decision.action === 'remote-behind' ? undefined
+      : tips.length > 1 ? 'forked' as const : tips[0]?.commitId === synced.commitId ? 'same' as const : 'moved' as const;
+    return { ...base, state: states[decision.action], ...(decision.action === 'diverged' ? { tips: decision.tips.length } : {}),
+      ...(remoteState ? { remote: remoteState } : {}) };
   } catch (error) {
     if (error instanceof NewerSyncFormatError) return { state: 'newer', detail: error.message, pendingOriginals: 0 };
     return { state: 'unavailable', detail: error instanceof Error ? error.message : String(error), pendingOriginals: 0 };
   }
+}
+
+/**
+ * The status after an edit here, without reading the remote (#251): the remote as `previous` last saw it, against
+ * the book's revision now. Statuses that depend on the remote alone stay as they were.
+ */
+export async function describeLocalChange(folder: string, previous: SyncStatus): Promise<SyncStatus> {
+  if (!previous.remote) return previous;
+  const state = await readSyncState(folder);
+  if (!state.lastSynced || state.abandoned || state.pull) return previous;
+  const edited = await captureBookStateRevision(folder) !== state.lastSynced.bookStateRevision;
+  const next: SyncStatus['state'] = previous.remote === 'forked' ? 'diverged' : previous.remote === 'moved' ? (edited ? 'diverged' : 'behind') : edited ? 'ahead' : 'in-sync';
+  const { tips: _, ...rest } = previous;
+  return { ...rest, state: next, ...(next === 'diverged' && previous.tips ? { tips: previous.tips } : {}) };
 }

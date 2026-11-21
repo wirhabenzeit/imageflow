@@ -15,7 +15,7 @@ import { importIntoProject, loadProject, updateProject } from '../desktop/projec
 import type { OpenProject } from '../desktop/project';
 import { collectSources, relinkFolder } from '../desktop/source-actions';
 import { captureBookStateRevision } from '../desktop/revisions';
-import { cloneFromRemote, describeSync, downloadOriginals, RemoteSyncingError, stageSyncPull, syncBook } from '../desktop/sync-engine';
+import { cloneFromRemote, describeLocalChange, describeSync, downloadOriginals, RemoteSyncingError, stageSyncPull, syncBook } from '../desktop/sync-engine';
 import type { SyncOptions } from '../desktop/sync-engine';
 import { MemoryRemote, remoteBooks, remoteTips } from '../desktop/sync-remote';
 import type { SyncRemote } from '../desktop/sync-remote';
@@ -790,8 +790,12 @@ test('a sync folder: push from the desktop, Open from Sync Folder on the laptop,
   assert.ok(status.pendingOriginals > 0);
   await assert.rejects(cloneFromRemote({ remote, tip: listed.tips[0], destination: b.folder }), /already exists/);
 
-  // Round trip: the laptop edits and pushes, the desktop pulls.
+  // Round trip: the laptop edits and pushes, the desktop pulls. After an edit the status needs no remote read.
+  const seen = await describeSync(b.folder, remote);
+  assert.equal(seen.remote, 'same');
   await edit(b, caption('shore', 'From the laptop'));
+  // `describeLocalChange` is not given the remote: an edit never reads the sync folder.
+  assert.equal((await describeLocalChange(b.folder, seen)).state, 'ahead');
   assert.equal((await describeSync(b.folder, remote)).state, 'ahead');
   assert.equal((await sync(b, remote)).action, 'push');
   assert.equal((await describeSync(a.folder, remote)).state, 'behind');
@@ -953,4 +957,45 @@ test('a folder remote keeps files immutable, writes them whole, and clones blobs
   assert.equal((await remoteTips(remote, header.bookId)).length, 1);
   assert.deepEqual((await remoteFiles(remote)).filter((path) => path.split('/').at(-1)!.startsWith('.')), [], 'no temporary files stay');
   assert.deepEqual((await readdir(root)).filter((name) => name.startsWith('.')), []);
+});
+
+test('after an edit the status follows the local revision against what the remote last showed', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  await edit(a, caption('shore', 'Desktop'));
+  await sync(a, remote);
+  const behind = await describeSync(b.folder, remote);
+  assert.deepEqual([behind.state, behind.remote], ['behind', 'moved']);
+  await edit(b, caption('segla', 'Laptop'));
+  assert.equal((await describeLocalChange(b.folder, behind)).state, 'diverged');
+  const inSync = await describeSync(a.folder, remote);
+  assert.equal(inSync.remote, 'same');
+  assert.equal((await describeLocalChange(a.folder, inSync)).state, 'in-sync');
+  // Statuses that come from the remote alone stay as they were.
+  const syncing = { state: 'remote-syncing' as const, pendingOriginals: 0 };
+  assert.equal(await describeLocalChange(a.folder, syncing), syncing);
+});
+
+test('changes to a sync record are serialized, so none is lost', async (t) => {
+  const { a } = await world(t);
+  await Promise.all([
+    updateSyncState(a.folder, (state) => ({ ...state, folder: '/Sync' })),
+    updateSyncState(a.folder, (state) => ({ ...state, networkReview: true })),
+    ...Array.from({ length: 8 }, () => updateSyncState(a.folder, (state) => state)),
+  ]);
+  const state = await readSyncState(a.folder);
+  assert.equal(state.folder, '/Sync');
+  assert.equal(state.networkReview, true);
+});
+
+test('a book a newer version synced is listed as such and hides no other book', async (t) => {
+  const { a, remote } = await world(t);
+  await sync(a, remote);
+  const [tip] = await tips(remote, a);
+  const other = crypto.randomUUID();
+  remote.commits.set(other + '/' + crypto.randomUUID(), { ...tip, bookId: other, commitId: crypto.randomUUID(), version: 2 });
+  const books = await remoteBooks(remote);
+  assert.deepEqual(books.map(({ bookId, newer }) => [bookId, !!newer]), [[tip.bookId, false], [other, true]]);
 });

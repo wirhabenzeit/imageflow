@@ -59,6 +59,11 @@ export type OpenAction = 'open' | 'new' | 'reload';
 export type SyncStatus = {
   state: 'in-sync' | 'ahead' | 'behind' | 'diverged' | 'remote-syncing' | 'abandoned' | 'newer' | 'unavailable';
   detail?: string; tips?: number;
+  /**
+   * What the remote held when it was last read, against this Mac's last sync: its tip is that commit (`same`), a later
+   * one (`moved`), or several (`forked`). With it, an edit updates the status from the local revision alone.
+   */
+  remote?: 'same' | 'moved' | 'forked';
   /** Owned originals that are only proxies on this Mac. */
   pendingOriginals: number;
 };
