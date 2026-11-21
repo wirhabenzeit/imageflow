@@ -1,0 +1,104 @@
+# 0010: Sync, revision tracking, cloud assets and web readiness
+
+Status: proposed, 2026-11-21 (revised after PR #240 review). Builds on [0001](0001-rendering.md) (rendering), [0004](0004-document-packages.md) (document packages), [0005](0005-linked-sources.md) (linked sources), [0006](0006-template-capabilities.md) (template capabilities), [0009](0009-page-templates.md) (book format gating), the save ledger (#201) and the web companion exploration (#212). Captures long-term architectural direction and the short-term guardrails it places on persistence, revisions, asset metadata, compatibility and trust. Sync transports, authentication and web editing scope remain deferred.
+
+## Problem
+
+ImageFlow is currently single-machine local software: each `.imageflow` package lives on one Mac's disk, linked sources store canonical absolute paths, and runtime locks and history live inside `.imageflow/`. Two longer-term needs put pressure on those assumptions:
+
+1. **Multi-Mac sync**, primarily one person switching between a desktop (with large local storage or a Lightroom export folder) and a laptop (with smaller disk space and occasional offline edits). Multi-user collaboration is optional for now.
+2. **A lightweight web companion** (#212), starting from shareable read-only proofs and potentially extending to light editing (captions, crops, photo swaps, spread order), alongside eventual support for **cloud asset providers** (S3/R2, WebDAV, Immich, Lightroom, Apple Photos).
+
+Putting a `.imageflow` package into iCloud Drive, Dropbox or Syncthing today creates concrete failure modes:
+
+- **Machine-local runtime files sit inside `.imageflow/`.** `writer.lock` records a local PID, `/tmp` Unix socket endpoint and local `(dev, ino)` (`desktop/persistence.ts`, `desktop/lock-owner.ts`). A second Mac cannot reach that socket and sees a different `(dev, ino)`, so it treats the active lock as stale, moves it to `writer-stale-*.json` and opens the book writable anyway. `pending-save.json` relies on local hard links and inode checks; file-by-file cloud sync can deliver it out of order with `project.json` and `photos.json` and trigger interrupted-save recovery errors. `.imageflow/history/ledger.jsonl` is a single mutable append-only file that produces conflict copies under concurrent sessions.
+- **Torn multi-file sync and placeholder eviction.** Sync engines resolve conflicts per file. Even without lock or journal files, iCloud Drive or Dropbox can leave `project.json` from Mac A beside `photos.json` from Mac B, breaking referential consistency. iCloud Drive's *Optimize Mac Storage* can also evict photos to dataless placeholders, stalling `O_NONBLOCK` reads and revision hashing (`desktop/revisions.ts`).
+- **Whole-file manifest conflicts.** `project.json` holds every spread and `photos.json` holds every photo entry. Non-overlapping edits on two Macs collide at the file level because there is no retained common-ancestor snapshot.
+- **Asset asymmetry and non-portable linked paths.** Linked sources store raw absolute paths (`/Users/...`), while `SourceStore` approvals, digests, dimensions and cached previews are keyed by machine-local filesystem identity (`volumeUUID-inode-birthtimeNs`, `desktop/source-identity.ts`). `photos.json` stores neither content digests nor dimensions, and `desktop/revisions.ts` hashes local file availability (`state.kind`) and photo bytes — so a laptop without originals cannot compute a matching revision or even know photo aspect ratios or capture times.
+- **Mixed app versions.** With sync, two ImageFlow versions will inevitably open the same book. Today `projectSchema` strips unknown keys (`src/project.ts`), and `checkpointRecordSchema` is `.strict()` at `version: 1` (`desktop/persistence.ts`), so unguarded additive fields can be silently dropped or treated as unreadable by an older build.
+
+## Principle
+
+**Separate book state from asset bytes, separate sync snapshots from the local save ledger, and keep the revision model independent of sync transport and authentication.**
+
+A `.imageflow` package stays a local, human-readable, Git- and MCP-friendly working tree. Sync engines, remote storage backends, cloud asset providers and an eventual web frontend should layer over a portable causal revision model and content-addressed asset/proxy layer — much as Git separates its commit/blob model from local folders, S3 or hosted services — rather than replacing local files or locking books to one cloud vendor.
+
+## Architectural direction
+
+### 1. Split book state from originals, with synced asset facts and proxies
+
+Book state (`project.json`, `photos.json`, synced asset facts, `texts/`, `files/`, `template/`) is small (kilobytes to a few megabytes), whereas originals in `photos/` can reach tens of gigabytes.
+
+- **Synced asset facts enable offline laptops and web.** Recording per-source `digest`, `width`, `height` and capture metadata in a dedicated derived file (`assets-meta.json`) — keeping `photos.json` focused on user-editable metadata and preserving its read-only `captureFields` contract (`src/project.ts`) — lets a Mac or browser without originals lay out spreads, crop photos and sort by capture time.
+- **Derived metadata stays outside the save journal and user-edit divergence.** Because [0005](0005-linked-sources.md) computes linked-photo digests lazily in the background after opening, `assets-meta.json` is **not** part of `desktop/persistence.ts`'s two-manifest atomic save journal (`project.json` + `photos.json`) or `ledger.jsonl`, and does **not** advance the user-authored `bookStateRevision`. It is written independently via atomic temp-file rename (missing or stale entries simply regenerate from available originals), never pollutes Undo/Redo or `list_book_checkpoints`, and syncs alongside snapshots with a trivial **per-asset auto-resolve rule** starting in Milestone 1: per asset ID, a replica with an available verified original (or newer verified observation) wins automatically without ever triggering a book-level conflict copy.
+- **Staleness rule for in-place re-exports.** Consistent with [0005](0005-linked-sources.md), an available local original is always authoritative for local editing and print. When a linked photo is re-exported in place (for example from Lightroom) and its new bytes produce a different `digest`, the local Mac refreshes its entry in `assets-meta.json` and generates a new content-addressed proxy; the next sync propagates that updated asset fact via the per-asset auto-resolve rule without colliding with unrelated edits on another Mac.
+- **Content-addressed screen proxies.** A remote Mac or web light-editor only needs screen-resolution proxies keyed by original content digest and rendition spec; originals remain required for print PDF export.
+- **Two web tiers (#212).** For **read-only web proofs**, publishing **pre-rendered spreads** from the Mac avoids Safari text-flow and hyphenation differences and avoids shipping executable template code and licensed fonts to unauthenticated guests. For **authenticated light editing**, `RenderProject` (`src/project.ts`) already provides a clean web-shaped payload (`project`, `photos` with `src` URLs, `texts`, `files`, compiled `template`) that can drive the React renderer inside a sandboxed iframe using HTTPS proxy URLs, keeping print PDF export on the Mac (or a later headless Chromium worker).
+
+### 2. Sync snapshot DAG, milestones and merge policy
+
+ImageFlow separates two distinct history mechanisms:
+
+- **Local save ledger** (`.imageflow/history/ledger.jsonl`, #201): records every local save (including Undo and Redo), stores manifest hashes only, is pruned at 4 MB, and serves local inspection and MCP idempotency. It is **not** a merge base.
+- **Sync snapshots**: immutable revision nodes `(bookStateRevision, parents)` captured only at sync points, retaining the full small book state (`project.json`, `photos.json`, `texts/`, `files/`, `template/`) plus `assets-meta.json` as derived companion facts.
+
+Using an immutable snapshot DAG over plain files — rather than making a CRDT (Automerge/Yjs) the primary format — preserves Git and MCP workflows and lets ImageFlow validate cross-file invariants before committing. Rollout breaks cleanly into two milestones:
+
+- **Milestone 1 (fast-forward or keep both):** When syncing, derived `assets-meta.json` entries auto-resolve per asset ID (the replica with a locally available verified original wins, so background digesting on open never causes false divergence). For user-authored book state, if one side's sync node is an ancestor of the other, fast-forward cleanly; if the two sides diverged, preserve both copies and surface the conflict explicitly. This covers almost all solo desktop ↔ laptop switching without needing merge machinery up front.
+- **Milestone 2 (domain-aware 3-way merge):** Using the immutable snapshot at the common ancestor (`base`), 3-way merge `(base, local, remote)` by artifact class:
+  - **Manifests (`project.json`, `photos.json`):** Newly created spreads carry UUIDs (and `spreadSchema` always requires a stable identifier), while boxes, elements, parameters, crops, photos, texts and files are already ID-keyed maps (`src/project.ts`). Non-overlapping edits merge automatically and `project.spreads` order merges by spread ID. Because `projectSchema` validates only `project.json`, every merge runs an explicit **cross-file referential check** against `photos.json` (for example, if one Mac deletes a photo that the other Mac placed on a spread, retain the referenced photo entry or surface an explicit missing-source diagnostic rather than committing a dangling reference). Same-slot collisions fall back to explicit resolution or a preserved conflict copy.
+  - **Markdown and text files (`texts/*.md`, text `files/*`):** Line-based 3-way text merge, falling back to a conflict copy on overlapping edits.
+  - **Executable template code (`template/*`):** Never silently auto-merge conflicting edits; preserve a conflict copy and require an explicit choice.
+  - **Web suggestions (#212):** A web editor attaches the `bookStateRevision` it edited from, so the Mac app applies or surfaces conflicts through the same revision check. If real-time co-editing is ever added on the web, live sessions can still commit snapshots into the same DAG.
+
+### 3. Two distinct revision hashes
+
+ImageFlow needs **two** revision concepts with different jobs:
+
+1. **Local render-input revision** (what `desktop/revisions.ts` and `expectedRevision` use today): covers local file availability (`state.kind`), actual original bytes on disk, template files and local filesystem observations so checks, previews and exports detect any local input change.
+2. **Portable book-state revision**: hashes a **canonical JSON serialization** (recursively sorted keys, since JS objects preserve insertion order) of `project.json` and `photos.json`, together with the content digests of `texts/`, `files/` and `template/` — **excluding** machine-local absolute linked paths (`{ path, linked: true }` in `photos.json` and `project.json`), derived `assets-meta.json` refreshes, local availability states and raw original bytes. Until named `local-root` locators exist, machine-local absolute linked paths are kept per Mac alongside `source-access` approvals and are not overwritten across Macs during sync, so relinking on a laptop neither changes the portable revision nor ping-pongs the desktop's paths. Two Macs (one with originals, one with proxies only) therefore compute the exact same portable book-state revision for the same user-authored book state.
+
+### 4. Pluggable sync backends and cloud asset providers
+
+Keeping sync snapshots and content-addressed blobs transport-agnostic leaves storage choices open:
+
+- **Synced folders (iCloud Drive, Dropbox, Syncthing):** Plain working-tree manifests in a synced folder are safe only for **strictly sequential** single-Mac use because sync daemons resolve conflicts per file and can tear `project.json` from `photos.json`. Making a synced folder genuinely conflict-safe requires treating **immutable snapshot bundles** (carrying all manifests and text/template state atomically) plus immutable head/node records as the sync truth, and projecting the winning snapshot into the local working tree.
+- **Git:** `docs/mcp.md` explicitly advises `.gitignore`-ing `.imageflow/`, so Git does not transport ImageFlow's internal history. Instead, Git acts as its own commit DAG over the committed working-tree files (`project.json`, `photos.json`, `texts/`, `template/`).
+- **Optional hosted ImageFlow Cloud or BYO remotes (S3/R2, WebDAV):** Most flexible path for multi-Mac sync plus a web frontend, without locking web access to Apple IDs. (CloudKit / `CKSyncEngine` + CloudKit JS remains a candidate if Apple-only personal sync is prioritized, as noted in #212, though Electron provisioning and non-Apple guest access add friction.)
+- **Authentication stays outside the document format.** Read-only web proofs can use account-free, revocable capability links; user accounts only enter when adding hosted write-back or managed multi-Mac sync.
+- **Cloud asset providers and named local roots.** [0005](0005-linked-sources.md) already ensures locations are never IDs. `sourceReferenceSchema` and `photos.json` can evolve backward-compatibly from `string | { path, linked: true }` to provider-tagged locators — such as a named `local-root` (mapped per Mac in local app settings) or cloud providers (`s3`, `webdav`, `immich`, `lightroom`, `apple-photos`). Machine-specific paths and provider credentials stay in local app settings, never in book manifests.
+
+### 5. Trust boundaries
+
+Sync and web access introduce explicit shifts in ImageFlow's security model ([0005](0005-linked-sources.md), [0006](0006-template-capabilities.md)) that must remain opt-in and visible:
+
+- **Named `local-root` mappings broaden approval from file to root.** ADR 0005 approves each linked file individually per Mac. A named `local-root` grants a book read access to accepted file types anywhere inside that explicitly approved directory on this Mac, while remaining strictly confined within the root (no traversal or symlinks out). Users must configure and approve each root explicitly per Mac.
+- **Synced `template/` is executable code.** A template arriving over sync must obey ADR 0006's book-trust model: only the user's own authenticated replicas may inherit book trust, and untrusted or shared remote template edits must never execute or gain network origins silently.
+- **Web suggestions are command-allowlisted.** Remote web edits (#212) must be restricted to an explicit allowlist of safe book commands (captions, crops, photo assignments, spread parameters/order) — never arbitrary filesystem locators, `template/` files or declared `network` origins.
+
+## Short-term guardrails
+
+We do not need to build a sync transport, cloud backend or web frontend yet. However, the design above sets concrete guardrails for near-term work on persistence, revisions and schemas:
+
+1. **Move machine-local runtime state out of `.imageflow/`.** Active writer locks (`writer.lock`, `writer-lock-acquire/`) and transient save staging (`pending-save.json`) belong in local app support (keyed by local book identity/path) rather than inside a package directory users may place in iCloud Drive or Dropbox. This immediately removes stale-lock and recovery hazards while keeping local crash recovery and cross-process exclusion.
+2. **Ship unknown-field preservation on round-trip *now* (time-sensitive).** Because `projectSchema` and `photoIndexSchema` strip unknown keys today (`src/project.ts`), unknown-field preservation only protects synced books if it ships in builds released *before* the first additive field appears. Commit to preserving unknown fields on round-trip in `project.json` and `photos.json` now for harmless additive metadata (such as `bookId`), and reserve `schemaVersion` bumps ([0009](0009-page-templates.md)) strictly for structural or semantic additions that older builds must not edit or partially save. Keep sync snapshot metadata in its own versioned files rather than mutating the strict v1 local save ledger (`desktop/persistence.ts`).
+3. **Add a logical lineage `bookId` (UUID).** Once unknown-field preservation is in place (or gated via `schemaVersion` for earlier builds), store a persistent `bookId` in `project.json` to identify **book lineage** across replicas, regenerated on *Duplicate* and *Save a Copy*. Because a Finder duplicate or AirDropped copy inherits `bookId` and may diverge, `bookId` never replaces `sourceBookKey` (`volumeUUID-inode-birthtimeNs`) as the local instance and security boundary ([0004](0004-document-packages.md), [0005](0005-linked-sources.md)).
+4. **Use immutable per-commit/content-addressed sync files — never `deviceId`-named mutable logs.** macOS Migration Assistant and Time Machine restores clone local app support data, including any stored `deviceId`, so per-device mutable segment files can collide across cloned Macs. Keying sync snapshot records by commit UUID or content hash eliminates collisions by construction.
+5. **Implement the two-hash split, per-Mac linked path exclusion, and derived `assets-meta.json`.** Keep `desktop/revisions.ts` focused on the local render-input revision. Define the portable book-state revision over canonical JSON (recursively sorted keys) of `project.json` and `photos.json` plus text/file/template digests — explicitly excluding machine-local absolute linked paths (stored per Mac until named `local-root` locators ship) and excluding derived `assets-meta.json` refreshes (written outside the two-manifest save journal and auto-resolved per asset ID starting in Milestone 1).
+6. **Keep manifests merge-friendly and `src/` host-agnostic.** Continue preferring ID-keyed maps over positional arrays for independently editable entities (giving long-lived array entries stable IDs if they become independently editable), serialize manifests deterministically, route source access through `src/source-locations.ts` helpers, and keep `src/` free of Electron, Node and filesystem APIs so the renderer and `src/project-commands.ts` remain reusable on the web.
+7. **Key portable proxies by content digest.** Retain fast local stamp-based rendition invalidation for local in-place re-exports, while keying shareable proxies by original content SHA-256 and rendition spec so remote Macs and web clients can render and crop without originals.
+
+## Deferred
+
+- Choosing and implementing a sync transport (immutable snapshot bundle in a synced folder, BYO S3/WebDAV, optional hosted ImageFlow Cloud or CloudKit).
+- Defining the web companion's scope, user/account management and server-side Chromium PDF export (#212).
+- Deciding whether portable screen proxies live in a lightweight package cache or exclusively in remote object storage.
+- Implementing Milestone 2's 3-way merge engine (after Milestone 1's fast-forward / keep-both flow).
+- Implementing cloud asset provider integrations (`s3`, `immich`, `lightroom`, `apple-photos`) and named `local-root` mappings.
+- Real-time multi-user co-editing.
+
+## Consequences
+
+- Near-term persistence work eliminates the sharpest iCloud/Dropbox failure modes (stale locks and recovery journals) without pretending plain synced folders are safe for concurrent edits.
+- Separating the local save ledger from immutable sync snapshots, and separating the local render-input revision from the portable book-state revision, keeps #201 and existing checks intact while giving Milestone 1 (fast-forward / keep both) and Milestone 2 (3-way merge) an actual snapshot base.
+- Synced asset facts (`assets-meta.json`), content-addressed proxies, explicit mixed-version rules and explicit trust boundaries let multi-Mac sync, cloud asset providers and a web companion (#212) build on one coherent model while keeping local `.imageflow` packages inspectable, Git-friendly and MCP-compatible.
