@@ -158,3 +158,21 @@ test('recent books survive restart, expose missing paths, recover moves, and rem
   assert.deepEqual(await restored.list(), []);
   assert.equal(JSON.parse(await readFile(join(moved, 'project.json'), 'utf8')).title, 'Book');
 });
+
+test('every new document gets its own bookId, also from a starter or copy that already has one', async (t) => {
+  const { root, starter } = await fixture(t);
+  const first = await createDocument(join(root, 'First'), starter);
+  const second = await createDocument(join(root, 'Second'), starter);
+  const read = async (folder: string) => JSON.parse(await readFile(join(folder, 'project.json'), 'utf8'));
+  const [a, b] = [await read(first), await read(second)];
+  assert.match(a.bookId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.notEqual(a.bookId, b.bookId);
+  assert.deepEqual(a.spreads, [{ id: 'one' }]);
+  // Duplicate and Save a Copy start from an existing book: its bookId is not inherited.
+  const copy = await createDocument(join(root, 'Copy'), first);
+  assert.equal((await read(copy)).title, 'Copy');
+  assert.notEqual((await read(copy)).bookId, a.bookId);
+  // A plain file copy (Finder) keeps it.
+  await cp(first, join(root, 'Finder.imageflow'), { recursive: true });
+  assert.equal((await read(join(root, 'Finder.imageflow'))).bookId, a.bookId);
+});

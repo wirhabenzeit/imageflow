@@ -585,7 +585,7 @@ test('unknown fields survive an import and a save, and stay out of the photos te
   try {
     await mkdir(join(folder, 'photos'));
     await sharp({ create: { width: 8, height: 8, channels: 3, background: '#375b48' } }).png().toFile(join(folder, 'photos/old.png'));
-    const json = { ...project, bookId: 'b-1', template: { ...project.template, channel: 'beta' },
+    const json = { ...project, bookNote: 'b-1', template: { ...project.template, channel: 'beta' },
       spreads: [{ ...project.spreads[0], rev: 2, boxes: { hero: { photo: 'old', params: {}, pinned: true } } }] };
     await writeFile(join(folder, 'project.json'), JSON.stringify(json));
     await writeFile(join(folder, 'photos.json'), JSON.stringify({ old: { path: 'photos/old.png', title: 'Old', syncRevision: 7 } }));
@@ -600,7 +600,7 @@ test('unknown fields survive an import and a save, and stay out of the photos te
     const imported = await importIntoProject(book, { kind: 'photo', target: { spread: 'one', box: 'hero' } }, [source]);
     const saved = JSON.parse(await readFile(join(folder, 'project.json'), 'utf8'));
     const index = JSON.parse(await readFile(join(folder, 'photos.json'), 'utf8'));
-    assert.equal(saved.bookId, 'b-1');
+    assert.equal(saved.bookNote, 'b-1');
     assert.equal(saved.template.channel, 'beta');
     assert.equal(saved.spreads[0].rev, 2);
     assert.equal(saved.spreads[0].boxes.hero.pinned, true);

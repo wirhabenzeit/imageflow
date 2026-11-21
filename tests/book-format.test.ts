@@ -103,13 +103,13 @@ test('a book with pages shown opens unchanged; saving writes the lowest format',
 const unknownPage = { ...left, pageNote: 'p', boxes: { hero: { photo: 'b', params: {}, boxNote: 'bx', crops: { photoPage: { centerX: 0.4, centerY: 0.5, zoom: 1.2, cropNote: 1 } } } } };
 const withUnknown = () => structuredClone({
   ...book([{ ...spread, spreadNote: 's', boxes: { hero: { photo: 'a', params: {}, boxNote: 'bx' } }, pages: { left: unknownPage }, displaced: [{ ...displaced[0], displacedNote: 'd' }] }], 2),
-  bookId: 'abc', cover: { definition: 'cover', params: {}, boxes: {}, elements: { e: { params: {}, elementNote: 1 } }, coverNote: 'c' },
+  bookNote: 'abc', cover: { definition: 'cover', params: {}, boxes: {}, elements: { e: { params: {}, elementNote: 1 } }, coverNote: 'c' },
   template: { id: 't', version: '1', templateNote: 't' },
 });
 
 test('unknown keys survive a parse at the book, spread, page, cover, box and element levels', () => {
   const parsed = projectSchema.parse(withUnknown()) as Record<string, any>;
-  assert.equal(parsed.bookId, 'abc');
+  assert.equal(parsed.bookNote, 'abc');
   assert.equal(parsed.template.templateNote, 't');
   assert.equal(parsed.cover.coverNote, 'c');
   assert.equal(parsed.cover.elements.e.elementNote, 1);
@@ -157,4 +157,46 @@ test('a newer book format is still refused, unknown keys or not', () => {
   const result = projectSchema.safeParse({ ...withUnknown(), schemaVersion: bookFormatVersion + 1 });
   assert.equal(result.success, false);
   assert.match(result.error!.issues[0].message, /newer version/);
+});
+
+const lineage = '3f0c2d5e-8a41-4c3b-9d57-0b1e6a7f2c90';
+test('bookId is an optional UUID that parses, survives a round trip and is refused when malformed', () => {
+  const parsed = projectSchema.parse({ ...book([spread]), bookId: lineage });
+  assert.equal(parsed.bookId, lineage);
+  assert.equal(projectSchema.parse(parsed).bookId, lineage);
+  assert.equal(projectSchema.parse(book([spread])).bookId, undefined);
+  for (const bad of ['', 'not-a-uuid', 7, null, lineage + 'x']) assert.equal(projectSchema.safeParse({ ...book([spread]), bookId: bad }).success, false);
+  // Adding it never changes the book format.
+  assert.equal(parsed.schemaVersion, 1);
+});
+
+test('saves keep a bookId, assign one to a legacy book with its first write, and never write just for it', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'imageflow-book-id-')));
+  const folder = join(root, 'Book');
+  try {
+    await mkdir(join(folder, 'template'), { recursive: true });
+    await writeFile(join(folder, 'template/index.tsx'), 'export default {};\n');
+    await writeFile(join(folder, 'photos.json'), '{}');
+    const saved = async () => JSON.parse(await readFile(join(folder, 'project.json'), 'utf8'));
+    await writeFile(join(folder, 'project.json'), JSON.stringify(book([spread])));
+    const legacy = await loadProject(folder, join(root, 'cache'));
+    assert.equal(legacy.project.bookId, undefined);
+    // Nothing changed: nothing is written, so no bookId yet.
+    assert.equal(await updateProject(legacy, { project: legacy.project, photoIndex: legacy.photoIndex }), legacy);
+    assert.equal((await saved()).bookId, undefined);
+    const first = await updateProject(legacy, { project: { ...legacy.project, title: 'One' }, photoIndex: legacy.photoIndex });
+    const id = (await saved()).bookId;
+    assert.match(id, /^[0-9a-f-]{36}$/);
+    assert.equal(first.project.bookId, id);
+    // Later edits, including ones built from a snapshot that lacks the field (Undo), keep it.
+    const { bookId: _omitted, ...withoutId } = first.project;
+    const second = await updateProject(first, { project: { ...withoutId, title: 'Two' }, photoIndex: first.photoIndex });
+    assert.equal((await saved()).bookId, id);
+    assert.equal(second.project.bookId, id);
+    // An edit cannot replace it, and a reload sees the same one.
+    await updateProject(second, { project: { ...second.project, title: 'Three', bookId: '11111111-1111-4111-8111-111111111111' }, photoIndex: second.photoIndex });
+    assert.equal((await saved()).bookId, id);
+    assert.equal((await saved()).title, 'Three');
+    assert.equal((await loadProject(folder, join(root, 'cache'))).project.bookId, id);
+  } finally { await rm(root, { recursive: true }); }
 });
