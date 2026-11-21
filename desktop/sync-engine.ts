@@ -1,12 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { lstat, open, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join } from 'node:path';
+import sharp from 'sharp';
 import type { AssetFact } from '../src/asset-facts';
 import { parseDocument, photoIndexSchema, projectSchema } from '../src/project';
 import type { PhotoIndex } from '../src/project';
 import { sourceEntries } from '../src/source-locations';
-import { changedFacts, commitHeaderSchema, contentBlobKey, decideSync, encodeStateBlob, originalBlobKey, portableManifests,
+import { changedOriginals, commitHeaderSchema, contentBlobKey, decideSync, encodeStateBlob, factsAhead, originalBlobKey, portableManifests,
   projectManifests, proxyBlobKey, stateBlobSchema, stateMatchesHeader } from '../src/sync-snapshot';
 import type { CommitHeader, StateBlob, SyncedCommit } from '../src/sync-snapshot';
 import { AssetFacts, readAssetFacts } from './asset-facts';
@@ -18,9 +19,9 @@ import { proxyStore } from './proxy-store';
 import { captureBookState } from './revisions';
 import { saveDocumentCopy } from './source-actions';
 import { SourceStore } from './source-store';
-import { applyStagedPull, bookPath, originalHere, readSyncState, stagingFolder, updateSyncState } from './sync-pull';
+import { applyStagedPull, bookPath, readSyncState, stagingFolder, updateSyncState } from './sync-pull';
 import type { PullMarker } from './sync-pull';
-import { remoteTips, writeAtomically } from './sync-remote';
+import { remoteTips } from './sync-remote';
 import type { SyncRemote } from './sync-remote';
 
 /**
@@ -103,6 +104,7 @@ async function refreshFacts(context: Context) {
   return { ...facts.all() };
 }
 
+const hereDigests = (context: Context) => Object.fromEntries(Object.entries(context.here).map(([id, { digest }]) => [id, digest]));
 const photoFacts = (facts: Record<string, AssetFact>, photos: PhotoIndex) => Object.fromEntries(Object.entries(facts).filter(([id]) => photos[id]));
 const digestsOf = (facts: Record<string, AssetFact>) => Object.fromEntries(Object.entries(facts).map(([id, fact]) => [id, fact.digest]));
 
@@ -119,15 +121,19 @@ async function fetchState(remote: SyncRemote, stateDigest: string, header?: Comm
   return parsed.data;
 }
 
-/** The proxies a snapshot has for photos whose original is not readable here and that the proxy store lacks. */
-async function missingProxies(root: string, blob: StateBlob, photos: PhotoIndex) {
+/**
+ * The proxies a snapshot has that the proxy store lacks, for photos without an original here at the snapshot's digest:
+ * one not here at all, or here at an older digest because another Mac re-exported or replaced it. `skip` names photos
+ * that need none (their local fact wins).
+ */
+async function missingProxies(blob: StateBlob, photos: PhotoIndex, here: Record<string, string>, skip: ReadonlySet<string> = new Set()) {
   const store = await proxyStore();
   if (!store) return [];
   const missing = new Map<string, StateBlob['proxies'][string]>();
-  for (const [id, photo] of Object.entries(photos)) {
+  for (const id of Object.keys(photos)) {
     const digest = blob.assetsMeta.assets[id]?.digest;
     const entry = digest && blob.proxies[digest];
-    if (!digest || !entry || missing.has(digest) || await originalHere(root, id, photo)) continue;
+    if (!digest || !entry || missing.has(digest) || skip.has(id) || here[id] === digest) continue;
     if (!await store.path(digest)) missing.set(digest, entry);
   }
   return [...missing];
@@ -154,7 +160,7 @@ async function storeProxies(fetched: { digest: string; bytes: Uint8Array }[]) {
 /** Fetches the proxies that were evicted from the proxy store, or never arrived, for photos without an original here. */
 async function refetchProxies(context: Context, blob: StateBlob) {
   const photos = photoIndexSchema.parse(JSON.parse(await readFile(join(context.root, 'photos.json'), 'utf8')));
-  await storeProxies(await fetchProxies(context.remote, await missingProxies(context.root, blob, photos)));
+  await storeProxies(await fetchProxies(context.remote, await missingProxies(blob, photos, hereDigests(context))));
 }
 
 /** The open book as on disk now, for renditions of originals: reloaded after a pull or an import changed it. */
@@ -165,12 +171,24 @@ async function currentBook(context: Context) {
   return context.book;
 }
 
+/** Whether bytes are a whole still image of the proxy's type, pixels included. */
+async function decodes(bytes: Uint8Array, ext: '.jpg' | '.png') {
+  try {
+    const metadata = await sharp(bytes).metadata();
+    if (metadata.format !== (ext === '.png' ? 'png' : 'jpeg') || (metadata.pages ?? 1) > 1) return false;
+    await sharp(bytes, { failOn: 'warning' }).resize({ width: 1, height: 1 }).toBuffer();
+    return true;
+  } catch { return false; }
+}
+
 /** A proxy's bytes on the remote: ours when it has none, theirs (with their digest) when another Mac stored one first. */
 async function uploadProxy(remote: SyncRemote, digest: string, bytes: Uint8Array, ext: '.jpg' | '.png') {
   const key = proxyBlobKey(digest, ext);
   if (await remote.hasBlob(key)) {
     const existing = await remote.getBlob(key);
-    if (existing) return { sha256: sha(existing), ext };
+    // A proxy another Mac is still writing (a synced folder delivers files piecemeal) must not enter a snapshot.
+    if (!existing || !await decodes(existing, ext)) throw new RemoteSyncingError('a photo preview has not fully arrived yet.');
+    return { sha256: sha(existing), ext };
   }
   await remote.putBlob(key, bytes);
   return { sha256: sha(bytes), ext };
@@ -181,7 +199,7 @@ async function uploadProxy(remote: SyncRemote, digest: string, bytes: Uint8Array
  * the commit header. Entries for photos whose original is not on this Mac (not located, not downloaded) are carried
  * forward from `base`, the last synced snapshot, or taken from the local proxy store.
  */
-async function push(context: Context, parents: string[], base: StateBlob | undefined, facts: Record<string, AssetFact>) {
+async function push(context: Context, parents: string[], base: StateBlob | undefined, facts: Record<string, AssetFact>, synced: SyncedCommit | undefined) {
   const { root, remote } = context;
   const state = await captureBookState(root);
   const bookId = state.project.bookId;
@@ -193,7 +211,14 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
     if (sha(bytes) !== digest) throw new Error('The book changed during sync. Sync again.');
     await remote.putBlob(key, bytes);
   }
-  const assets = { ...photoFacts(base?.assetsMeta.assets ?? {}, state.photos), ...photoFacts(facts, state.photos) };
+  // A photo's fact from here goes up only when its original changed here since the last sync (or the snapshot lacks
+  // one); an original merely left at an older digest never pushes that digest back over another Mac's re-export.
+  const changed = changedOriginals(hereDigests(context), synced);
+  const remoteFacts = photoFacts(base?.assetsMeta.assets ?? {}, state.photos);
+  const assets = Object.fromEntries(Object.keys(state.photos).flatMap((id) => {
+    const fact = (changed.has(id) ? facts[id] : remoteFacts[id]) ?? facts[id] ?? remoteFacts[id];
+    return fact ? [[id, fact]] : [];
+  }));
   const originals: StateBlob['originals'] = {};
   for (const [id, photo] of Object.entries(state.photos)) {
     if (photo.linked) continue;
@@ -239,7 +264,8 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
   const header = commitHeaderSchema.parse({ version: 1, commitId: randomUUID(), bookId, parents, bookStateRevision: state.revision,
     createdAt: (context.options.now?.() ?? new Date()).toISOString(), title: state.project.title.slice(0, 400), stateDigest });
   await remote.putCommit(header);
-  await recordSynced(root, { commitId: header.commitId, bookStateRevision: header.bookStateRevision, stateDigest, photoDigests: digestsOf(assets) });
+  await recordSynced(root, { commitId: header.commitId, bookStateRevision: header.bookStateRevision, stateDigest, photoDigests: digestsOf(assets),
+    localDigests: Object.fromEntries(Object.entries(hereDigests(context)).filter(([id]) => assets[id]?.digest === context.here[id].digest)) });
   return { header, blob };
 }
 
@@ -253,17 +279,30 @@ async function recordSynced(root: string, synced: SyncedCommit) {
  */
 async function pull(context: Context, tip: CommitHeader) {
   const { blob, marker } = await stagePull(context, tip);
+  await applyPull(context, marker);
+  return blob;
+}
+
+/** Marks and projects a staged pull, then looks at the originals here again: stale ones went, downloaded ones came. */
+async function applyPull(context: Context, marker: PullMarker) {
+  await markPull(context.root, marker);
   await applyStagedPull(context.root, marker);
   context.stale = true;
-  return blob;
+  await refreshFacts(context);
 }
 
 /** The first half of a pull: everything is downloaded, verified and staged, and the pull is marked. The book is untouched. */
 export async function stageSyncPull(remote: SyncRemote, book: OpenProject, tip: CommitHeader, options: Pick<SyncOptions, 'keepOriginals'> = {}) {
   const root = await realpath(book.folder);
-  return (await stagePull({ root, remote, book, stale: false, options: { remote, book, ...options }, here: {} }, tip)).marker;
+  const { marker } = await stagePull({ root, remote, book, stale: false, options: { remote, book, ...options }, here: {} }, tip);
+  await markPull(root, marker);
+  return marker;
 }
 
+/** From here on a crash leaves a pull that the next open finishes. */
+const markPull = (root: string, marker: PullMarker) => updateSyncState(root, (state) => ({ ...state, pull: marker }));
+
+/** Downloads, verifies and stages everything a pull of `tip` needs, and says what it will do. Changes nothing in the book. */
 async function stagePull(context: Context, tip: CommitHeader) {
   const { root, remote } = context;
   const blob = await fetchState(remote, tip.stateDigest, tip);
@@ -277,25 +316,40 @@ async function stagePull(context: Context, tip: CommitHeader) {
   }
   const localPhotos = photoIndexSchema.safeParse(JSON.parse(await readFile(join(root, 'photos.json'), 'utf8'))).data;
   const projected = photoIndexSchema.parse(projectManifests(blob, { project: context.book.project, photos: localPhotos }).photos);
-  const proxies = await fetchProxies(remote, await missingProxies(root, blob, projected));
+  const synced = (await readSyncState(root)).lastSynced;
+  const here = hereDigests(context);
+  // Photos whose original changed here since the last sync keep their local fact; every other original here that
+  // differs from the snapshot is stale.
+  const keepLocal = new Set([...changedOriginals(here, synced)].filter((id) => projected[id]));
+  const proxies = await fetchProxies(remote, await missingProxies(blob, projected, here, keepLocal));
   const originals: PullMarker['originals'] = {};
-  if (context.options.keepOriginals) for (const [id, original] of Object.entries(blob.originals)) {
-    const photo = projected[id];
-    if (!photo || photo.linked || !photo.path.startsWith('photos/')) continue;
-    if (await fileDigest(join(root, photo.path)).catch(() => undefined) === original.digest) continue;
-    const path = join(staging, original.digest);
-    if (!await remote.downloadBlob(originalBlobKey(original.digest, original.ext), path) || await fileDigest(path) !== original.digest) {
-      throw new RemoteSyncingError('an original photo has not fully arrived yet.');
+  const staleOriginals: PullMarker['staleOriginals'] = {};
+  const localDigests: PullMarker['localDigests'] = {};
+  for (const [id, photo] of Object.entries(projected)) {
+    const owned = !photo.linked && photo.path.startsWith('photos/');
+    const original = owned ? blob.originals[id] : undefined;
+    const local = context.here[id];
+    if (original && context.options.keepOriginals && local?.digest !== original.digest && !keepLocal.has(id)) {
+      const path = join(staging, original.digest);
+      if (!await remote.downloadBlob(originalBlobKey(original.digest, original.ext), path) || await fileDigest(path) !== original.digest) {
+        throw new RemoteSyncingError('an original photo has not fully arrived yet.');
+      }
+      originals[photo.path] = original.digest;
+      localDigests[id] = original.digest;
+      continue;
     }
-    originals[photo.path] = original.digest;
+    // A kept local fact stays unrecorded, so it counts as ahead until a push carries it.
+    if (!local || keepLocal.has(id)) continue;
+    // An owned original the snapshot replaced goes, so the photo shows the new proxy until its new original is downloaded.
+    if (original && original.digest !== local.digest && local.path === join(root, photo.path)) { staleOriginals[photo.path] = local.digest; continue; }
+    localDigests[id] = local.digest;
   }
   await storeProxies(proxies);
-  const local = await captureBookState(root).catch(() => undefined);
+  const current = await captureBookState(root).catch(() => undefined);
   const templates = (content: Record<string, string>) => JSON.stringify(Object.entries(content).filter(([path]) => path.startsWith('template/')).sort());
-  const synced = (await readSyncState(root)).lastSynced;
   const marker: PullMarker = { targetCommit: tip.commitId, ...(synced ? { previousCommit: synced.commitId } : {}), stateDigest: tip.stateDigest,
-    bookStateRevision: tip.bookStateRevision, templateChanged: !local || templates(local.contentDigests) !== templates(blob.content), originals };
-  await updateSyncState(root, (state) => ({ ...state, pull: marker }));
+    bookStateRevision: tip.bookStateRevision, templateChanged: !current || templates(current.contentDigests) !== templates(blob.content), originals,
+    staleOriginals, keepLocal: [...keepLocal], localDigests };
   return { blob, marker };
 }
 
@@ -323,8 +377,10 @@ async function keepBoth(context: Context, tips: CommitHeader[], localRevision: s
   }
   // Only a version the remote does not hold needs keeping.
   const unsynced = localRevision !== lastSynced?.bookStateRevision && !tips.some((tip) => tip.bookStateRevision === localRevision);
+  // Everything is downloaded and verified first: a remote still syncing leaves neither a changed book nor a stray copy.
+  const { marker } = await stagePull(context, target);
   const conflictCopy = unsynced ? await saveDocumentCopy(context.book, await conflictDestination(context.root, context.options.now?.() ?? new Date()), false) : undefined;
-  await pull(context, target);
+  await applyPull(context, marker);
   const pushed: string[] = [];
   if (tips.length > 1) {
     const synced = (await readSyncState(context.root)).lastSynced!;
@@ -353,34 +409,32 @@ export async function syncBook(options: SyncOptions): Promise<SyncOutcome> {
   const registered = AssetFacts.registered(root);
   const context: Context = { root, remote: options.remote, book: options.book, stale: false, options, here: {} };
   try {
-    let resumed = await ensureBookId(root);
-    if (resumed) context.stale = true;
-    for (;;) {
+    // An interrupted pull is finished first; it was decided on before anything else changed.
+    const interrupted = (await readSyncState(root)).pull;
+    if (interrupted) await applyStagedPull(root, interrupted);
+    const assigned = await ensureBookId(root);
+    const changed = !!interrupted || assigned;
+    context.stale = changed;
+    {
       const state = await readSyncState(root);
-      if (state.pull) {
-        if (resumed) throw new Error('The interrupted sync could not be finished.');
-        await applyStagedPull(root, state.pull);
-        resumed = context.stale = true;
-        continue;
-      }
+      if (state.pull) throw new Error('The interrupted sync could not be finished.');
       const facts = await refreshFacts(context);
       const local = await captureBookState(root);
       const bookId = local.project.bookId;
       if (!bookId) throw new Error('This book has no lineage ID yet. Make an edit, then sync.');
       const tips = await remoteTips(options.remote, bookId);
       const synced = state.lastSynced;
-      const factsChanged = !!synced && changedFacts(facts, synced.photoDigests, Object.keys(local.photos)).length > 0;
+      const factsChanged = !!synced && factsAhead(hereDigests(context), synced);
       const decision = decideSync({ pullInProgress: false, tips, lastSynced: synced, localRevision: local.revision, factsChanged });
-      const changed = resumed;
       switch (decision.action) {
-        case 'resume': continue;
+        case 'resume': throw new Error('The interrupted sync could not be finished.');
         case 'initial-push': {
-          const { header } = await push(context, [], undefined, facts);
+          const { header } = await push(context, [], undefined, facts, undefined);
           return { action: 'initial-push', pushed: [header.commitId], changed };
         }
         case 'push': {
           const base = await fetchState(options.remote, synced!.stateDigest);
-          const { header } = await push(context, [decision.tip.commitId], base, facts);
+          const { header } = await push(context, [decision.tip.commitId], base, facts, synced);
           return { action: 'push', pushed: [header.commitId], changed };
         }
         case 'in-sync': {
@@ -391,11 +445,13 @@ export async function syncBook(options: SyncOptions): Promise<SyncOutcome> {
         case 'adopt': {
           const blob = await fetchState(options.remote, decision.tip.stateDigest, decision.tip);
           const photoDigests = digestsOf(photoFacts(blob.assetsMeta.assets, local.photos));
-          await recordSynced(root, { commitId: decision.tip.commitId, bookStateRevision: decision.tip.bookStateRevision, stateDigest: decision.tip.stateDigest, photoDigests });
+          // Without a record of its own, every original here that differs from the snapshot counts as newer.
+          const adopted = { commitId: decision.tip.commitId, bookStateRevision: decision.tip.bookStateRevision, stateDigest: decision.tip.stateDigest, photoDigests };
+          await recordSynced(root, { ...adopted, localDigests: Object.fromEntries(Object.entries(hereDigests(context)).filter(([id, digest]) => photoDigests[id] === digest)) });
           await refetchProxies(context, blob);
           // Facts this Mac knows better than the snapshot go back with a commit of the same book state.
-          if (changedFacts(facts, photoDigests, Object.keys(local.photos)).length) {
-            const { header } = await push(context, [decision.tip.commitId], blob, facts);
+          if (factsAhead(hereDigests(context), adopted)) {
+            const { header } = await push(context, [decision.tip.commitId], blob, facts, adopted);
             return { action: 'adopt', pushed: [header.commitId], changed };
           }
           return { action: 'adopt', pushed: [], changed };
@@ -403,11 +459,9 @@ export async function syncBook(options: SyncOptions): Promise<SyncOutcome> {
         case 'fast-forward': {
           const blob = await pull(context, decision.tip);
           const now = (await readSyncState(root)).lastSynced!;
-          // The merge kept facts this Mac verified against its own originals; those that differ from the snapshot go back.
-          const current = await readAssetFacts(root);
-          const photos = photoIndexSchema.parse(JSON.parse(await readFile(join(root, 'photos.json'), 'utf8')));
-          if (changedFacts(current, now.photoDigests, Object.keys(photos)).length) {
-            const { header } = await push(context, [decision.tip.commitId], blob, current);
+          // The merge kept the facts of originals that changed here; they go back, never stale ones.
+          if (factsAhead(hereDigests(context), now)) {
+            const { header } = await push(context, [decision.tip.commitId], blob, await readAssetFacts(root), now);
             return { action: 'fast-forward', pushed: [header.commitId], pulled: decision.tip.commitId, changed: true };
           }
           return { action: 'fast-forward', pushed: [], pulled: decision.tip.commitId, changed: true };
@@ -417,6 +471,7 @@ export async function syncBook(options: SyncOptions): Promise<SyncOutcome> {
           return { ...outcome, changed: outcome.changed || changed };
         }
       }
+      throw new Error('Unknown sync decision.');
     }
   } finally {
     // Facts this sync loaded for a book no session holds are written and dropped again.
@@ -441,12 +496,14 @@ export async function downloadOriginals({ remote, book, ids }: { remote: SyncRem
     if ((ids && !ids.includes(id)) || !photo || photo.linked || !photo.path.startsWith('photos/')) continue;
     const target = await bookPath(root, photo.path);
     if (await fileDigest(target).catch(() => undefined) === original.digest) continue;
-    const staging = join(await stagingFolder(root), 'original-' + randomUUID());
-    if (!await remote.downloadBlob(originalBlobKey(original.digest, original.ext), staging) || await fileDigest(staging) !== original.digest) {
-      throw new RemoteSyncingError('an original photo has not fully arrived yet.');
-    }
-    try { await writeAtomically(target, { file: staging }); }
-    finally { await rm(staging, { force: true }); }
+    // Staged beside its target, so a transport on the same volume can clone it, and removed whatever happens.
+    const staging = join(dirname(target), '.imageflow-write-' + randomUUID() + '.tmp');
+    try {
+      if (!await remote.downloadBlob(originalBlobKey(original.digest, original.ext), staging) || await fileDigest(staging) !== original.digest) {
+        throw new RemoteSyncingError('an original photo has not fully arrived yet.');
+      }
+      await rename(staging, target);
+    } finally { await rm(staging, { force: true }); }
     downloaded.push(id);
   }
   return downloaded;

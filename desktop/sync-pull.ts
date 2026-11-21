@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readdir, readFile, realpath, rename, rm, rmdir } from 'node:fs/promises';
-import { dirname, join, relative, sep } from 'node:path';
+import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import type { AssetFact } from '../src/asset-facts';
 import { parseDocument, photoIndexSchema, projectSchema } from '../src/project';
@@ -11,7 +11,6 @@ import type { StateBlob } from '../src/sync-snapshot';
 import { AssetFacts, readAssetFacts } from './asset-facts';
 import { bookStateFolder, persistProjectManifests } from './persistence';
 import { captureBookStateRevision, ignoredName } from './revisions';
-import { approvedSource } from './source-access';
 
 /**
  * The local half of a sync pull (ADR 0010, Milestone 1): this Mac's sync record of a book, and projecting a snapshot
@@ -23,14 +22,20 @@ import { approvedSource } from './source-access';
  * before the editor can edit a half-pulled book.
  */
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
-const syncedSchema = z.object({ commitId: z.uuid(), bookStateRevision: sha256, stateDigest: sha256, photoDigests: z.record(z.string(), sha256) }).strict();
+const syncedSchema = z.object({ commitId: z.uuid(), bookStateRevision: sha256, stateDigest: sha256, photoDigests: z.record(z.string(), sha256),
+  localDigests: z.record(z.string(), sha256).optional() }).strict();
 const syncStateSchema = z.object({
   version: z.literal(1),
   lastSynced: syncedSchema.optional(),
-  // A pull that started touching the book. `originals` are owned originals staged with it, by their photos/ path.
+  // A pull that started touching the book. `originals` are owned originals staged with it, by their photos/ path;
+  // `staleOriginals` owned originals here that the snapshot replaced and that go (by path, with their stale digest),
+  // so the photo shows its new proxy until its new original is downloaded. `keepLocal` are the photos whose original
+  // here changed since the last sync, so their local fact wins; `localDigests` the originals' digests after the pull.
   pull: z.object({
     targetCommit: z.uuid(), previousCommit: z.uuid().optional(), stateDigest: sha256, bookStateRevision: sha256,
     templateChanged: z.boolean(), originals: z.record(z.string(), sha256).default({}),
+    staleOriginals: z.record(z.string(), sha256).default({}), keepLocal: z.array(z.string()).default([]),
+    localDigests: z.record(z.string(), sha256).default({}),
   }).strict().optional(),
   // A pull changed template/: origins it declares that this book has not allowed are asked about even when the book is
   // trusted, since a sync remote is not authenticated (ADR 0006).
@@ -157,26 +162,15 @@ async function pruneTemplate(root: string, keep: Set<string>) {
   await walk('template');
 }
 
-/** Whether a photo's original is on this Mac and readable here: in photos/, or linked, approved and present. */
-export async function originalHere(root: string, id: string, photo: PhotoIndex[string]) {
-  if (!photo.linked) {
-    const path = join(root, photo.path);
-    const rel = relative(join(root, 'photos'), path);
-    if (!rel || rel.startsWith('..' + sep) || rel === '..') return false;
-    return !!(await lstat(path).catch(() => undefined))?.isFile();
-  }
-  if (!await approvedSource(root, { key: 'photo:' + id, kind: 'photo', path: photo.path, linked: true })) return false;
-  return !!(await lstat(photo.path).catch(() => undefined))?.isFile();
-}
-
 /**
- * The per-asset rule for a pull (ADR 0010): a fact this Mac verified against its own original wins; otherwise the
- * snapshot's. Facts of photos that left the book go.
+ * The per-asset rule for a pull (ADR 0010): the fact of a photo whose original changed here since the last sync wins
+ * (`keepLocal`); otherwise the snapshot's, even over an original still here at an older digest. Facts of photos that
+ * left the book go.
  */
-export async function mergePulledFacts(root: string, photos: PhotoIndex, local: Record<string, AssetFact>, remote: Record<string, AssetFact>) {
+export function mergePulledFacts(photos: PhotoIndex, local: Record<string, AssetFact>, remote: Record<string, AssetFact>, keepLocal: ReadonlySet<string>) {
   const merged: Record<string, AssetFact> = {};
-  for (const [id, photo] of Object.entries(photos)) {
-    const fact = local[id] && await originalHere(root, id, photo) ? local[id] : remote[id] ?? local[id];
+  for (const id of Object.keys(photos)) {
+    const fact = local[id] && keepLocal.has(id) ? local[id] : remote[id] ?? local[id];
     if (fact) merged[id] = fact;
   }
   return merged;
@@ -195,6 +189,10 @@ export async function applyStagedPull(folder: string, marker: PullMarker) {
   for (const [path, sha] of Object.entries(blob.content)) await place(root, path, sha, () => stagedBlob(root, sha));
   await pruneTemplate(root, new Set(Object.keys(blob.content).filter((path) => path.startsWith('template/'))));
   for (const [path, sha] of Object.entries(marker.originals)) await place(root, path, sha, () => stagedBlob(root, sha));
+  for (const [path, stale] of Object.entries(marker.staleOriginals)) {
+    const target = await bookPath(root, path);
+    if (await digestOrUndefined(target) === stale) await rm(target, { force: true });
+  }
   const before = { 'project.json': await readFile(join(root, 'project.json')), 'photos.json': await readFile(join(root, 'photos.json')) };
   const parse = <T>(bytes: Buffer, schema: z.ZodType<T>) => { try { return schema.safeParse(JSON.parse(bytes.toString('utf8'))).data; } catch { return undefined; } };
   const local = { project: parse<Project>(before['project.json'], projectSchema), photos: parse<PhotoIndex>(before['photos.json'], photoIndexSchema) };
@@ -205,7 +203,7 @@ export async function applyStagedPull(folder: string, marker: PullMarker) {
   if (!after['project.json'].equals(before['project.json']) || !after['photos.json'].equals(before['photos.json'])) {
     await persistProjectManifests(root, before, after, { origin: 'app', label: 'Sync pull' });
   }
-  const facts = await mergePulledFacts(root, photos, await readAssetFacts(root), blob.assetsMeta.assets);
+  const facts = mergePulledFacts(photos, await readAssetFacts(root), blob.assetsMeta.assets, new Set(marker.keepLocal));
   await AssetFacts.adoptSynced(root, facts);
   const revision = await captureBookStateRevision(root);
   if (revision !== marker.bookStateRevision) {
@@ -213,7 +211,8 @@ export async function applyStagedPull(folder: string, marker: PullMarker) {
   }
   const photoDigests = Object.fromEntries(Object.entries(blob.assetsMeta.assets).filter(([id]) => photos[id]).map(([id, fact]) => [id, fact.digest]));
   await updateSyncState(root, (state) => ({ ...state, pull: undefined,
-    lastSynced: { commitId: marker.targetCommit, bookStateRevision: marker.bookStateRevision, stateDigest: marker.stateDigest, photoDigests },
+    lastSynced: { commitId: marker.targetCommit, bookStateRevision: marker.bookStateRevision, stateDigest: marker.stateDigest, photoDigests,
+      localDigests: Object.fromEntries(Object.entries(marker.localDigests).filter(([id]) => photos[id])) },
     ...(marker.templateChanged || state.networkReview ? { networkReview: true as const } : {}) }));
   await rm(await stagingFolder(root), { recursive: true, force: true });
   return { blob, project, photos };

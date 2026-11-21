@@ -285,13 +285,15 @@ export class DocumentSession {
   }
   private async chooseTip(tips: CommitHeader[]) {
     if (this.window.isDestroyed()) return undefined;
+    // At most four versions fit; Cancel follows them and answers nothing.
+    const shown = tips.slice(0, 4);
     const label = (tip: CommitHeader) => tip.title + ' · ' + new Date(tip.createdAt).toLocaleString();
     const { response } = await dialog.showMessageBox(this.window, {
-      type: 'question', buttons: [...tips.slice(0, 4).map(label), 'Cancel'], cancelId: Math.min(tips.length, 4), defaultId: 0,
+      type: 'question', buttons: [...shown.map(label), 'Cancel'], cancelId: shown.length, defaultId: 0,
       message: 'This book was changed on two Macs.',
       detail: 'Choose the version to continue with. Your version on this Mac is kept as a separate copy beside the book if it is not one of them.',
     });
-    return tips[response]?.commitId;
+    return shown[response]?.commitId;
   }
   async reload() {
     const next = await loadProject(this.book.folder, this.cache);
@@ -712,6 +714,8 @@ export class DocumentSession {
       const trusted = await this.networkTrust?.(hash, origins).catch(() => []) ?? [];
       const approved = new Set([...known, ...trusted]);
       const pending = origins.filter((origin) => !approved.has(origin));
+      // Every newly declared site is allowed already, for example by the library's trust in this exact template.
+      if (review && !pending.length) await updateSyncState(book.folder, ({ networkReview: _, ...state }) => state).catch(() => {});
       // A book from elsewhere, or made from a template whose sites were not allowed: the one question, for the book.
       if (pending.length && !this.window.isDestroyed()) {
         const { response } = await dialog.showMessageBox(this.window, {

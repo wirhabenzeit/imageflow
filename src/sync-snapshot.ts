@@ -125,8 +125,13 @@ export function deriveTips(headers: readonly CommitHeader[]) {
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.commitId.localeCompare(b.commitId));
 }
 
-/** What this Mac last synced of a book: the commit, its revision and the photo digests of its assets-meta.json. */
-export type SyncedCommit = { commitId: string; bookStateRevision: string; stateDigest: string; photoDigests: Record<string, string> };
+/**
+ * What this Mac last synced of a book: the commit, its revision and the photo digests of its assets-meta.json, and
+ * `localDigests`, the digests of the originals this Mac held then. An original whose bytes have not changed since is
+ * no evidence against the snapshot, however old it is.
+ */
+export type SyncedCommit = { commitId: string; bookStateRevision: string; stateDigest: string; photoDigests: Record<string, string>;
+  localDigests?: Record<string, string> };
 
 export type SyncDecision =
   | { action: 'resume' }
@@ -137,14 +142,27 @@ export type SyncDecision =
   | { action: 'fast-forward'; tip: CommitHeader; thenPush: boolean }
   | { action: 'diverged'; tips: CommitHeader[] };
 
-/** The photo digests of a book's facts that differ from the ones last synced: an in-place re-export, say. */
-export function changedFacts(local: Record<string, { digest: string }>, synced: Record<string, string>, photoIds: Iterable<string>) {
-  return [...photoIds].filter((id) => local[id] && local[id].digest !== synced[id]);
+/**
+ * The photos whose original here changed since the last sync (ADR 0010, per-asset rule): their local fact is a newer
+ * verified observation and wins over the snapshot's. An original still at the digest it had when this Mac last synced
+ * is merely stale (another Mac re-exported or replaced the photo) and loses. `here` holds the digests of the originals
+ * readable on this Mac; without a sync record every one of them counts as changed.
+ */
+export function changedOriginals(here: Record<string, string>, synced?: Pick<SyncedCommit, 'photoDigests' | 'localDigests'>) {
+  return new Set(Object.entries(here).filter(([id, digest]) => {
+    const baseline = synced?.localDigests?.[id] ?? synced?.photoDigests[id];
+    return baseline === undefined || digest !== baseline;
+  }).map(([id]) => id));
+}
+
+/** Whether this Mac knows a photo fact the last synced snapshot lacks, which a push has to carry: an in-place re-export. */
+export function factsAhead(here: Record<string, string>, synced: Pick<SyncedCommit, 'photoDigests' | 'localDigests'>) {
+  return [...changedOriginals(here, synced)].some((id) => here[id] !== synced.photoDigests[id]);
 }
 
 /**
- * The Milestone 1 decision table (ADR 0010): fast-forward or keep both. `factsChanged` says whether a photo digest in
- * this Mac's assets-meta.json differs from the last synced snapshot; facts never make a book diverge.
+ * The Milestone 1 decision table (ADR 0010): fast-forward or keep both. `factsChanged` says whether this Mac verified a photo fact
+ * the last synced snapshot lacks (`factsAhead`); facts never make a book diverge.
  */
 export function decideSync({ pullInProgress, tips, lastSynced, localRevision, factsChanged }: {
   pullInProgress: boolean; tips: readonly CommitHeader[]; lastSynced?: Pick<SyncedCommit, 'commitId' | 'bookStateRevision'>;
