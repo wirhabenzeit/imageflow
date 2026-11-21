@@ -22,7 +22,7 @@ const guardedEntrySchema = z.union([entrySchema, z.object({ sha256: z.string().r
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
 // One committed save in .imageflow/history/ledger.jsonl. It holds metadata only, never manifest contents (#201).
 const checkpointMcpSchema = z.object({
-  tool: z.enum(['apply_project_changes', 'import_sources']),
+  tool: z.enum(['apply_project_changes', 'import_sources', 'rename_source']),
   idempotencyKey: z.string().max(128),
   requestFingerprint: sha256,
   session: z.string().max(64),

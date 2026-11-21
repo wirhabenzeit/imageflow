@@ -127,7 +127,8 @@
                 "required": [
                   "path",
                   "linked"
-                ]
+                ],
+                "additionalProperties": {}
               }
             ]
           }
@@ -158,7 +159,8 @@
                 "required": [
                   "path",
                   "linked"
-                ]
+                ],
+                "additionalProperties": {}
               }
             ]
           }
@@ -6647,6 +6649,129 @@
               }
             },
             "additionalProperties": {}
+          },
+          "notice": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "revision",
+          "committed"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "rename_source": {
+      "readOnly": false,
+      "input": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "expectedRevision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]{1,128}$"
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "project",
+          "expectedRevision",
+          "idempotencyKey",
+          "source",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "error"
+            ]
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "committed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string",
+                "const": "pending"
+              }
+            ]
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "markdown",
+                  "file"
+                ]
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "path"
+            ],
+            "additionalProperties": {}
+          },
+          "replayed": {
+            "type": "boolean",
+            "const": true
+          },
+          "checkpointId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requestFingerprint": {
+            "type": "string"
           },
           "notice": {
             "type": "string"

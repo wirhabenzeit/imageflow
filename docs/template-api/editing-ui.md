@@ -12,7 +12,7 @@ Saved data and its editing UI are separate. Parameters declare what is saved: ID
    ```
 
    An entry is a parameter ID, `{ parameter, label?, description?, when? }`, or `{ group, description?, controls, when? }`. `when` names other parameters of the same scope and the values they must have (all must match; an array matches any of its values). For boxes, pass `controls` as `box.photo(label, parameters, { controls })` or in `box.markdown`'s options.
-   - A parameter left out of `controls` gets no generated control. It keeps its value, its validation and its project commands, so use this for values only a custom editor or an agent sets.
+   - A parameter left out of `controls` gets no generated control. It keeps its value, its validation and its project commands, so use this for values only a custom editor or an agent sets. A document parameter left out of a non-empty template-level `controls` list loads with a `declaration-control-missing` warning in the Book check, since a new setting is easily forgotten there. A document editor's own parameters, and parameters a spread marks on the page as `document.<id>` with `ctx.edit` or `ctx.Text`, are exempt.
    - `controls: []` shows no generated controls for the scope while keeping every declaration. A group needs at least one entry.
    - A condition only hides a control. The value stays saved and validated, and comes back when the condition holds again. Conditions are presentation: they never remove a declaration or change a saved ID.
    - Click-to-edit follows the box's or element's `controls` for its own parameters. A parameter a node explicitly shows with `ctx.edit` or `ctx.Text` is always editable on that node.

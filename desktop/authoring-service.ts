@@ -1,6 +1,6 @@
 import { authoringSnapshotState } from './authoring-sdk';
 import { layoutFootprint } from '../src/layouts';
-import { sourcePath, sourceLinked } from '../src/source-locations';
+import { sourceEntries, sourcePath, sourceLinked } from '../src/source-locations';
 import { DependencyInstallError } from './dependency-install';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
@@ -57,6 +57,8 @@ type Hooks = {
   changed: (book: OpenProject) => void;
   recovery: (message: string) => void;
   import: (request: ImportRequest, paths: string[], base: OpenProject, checkpoint?: SaveCheckpoint) => Promise<{ imported: string[] }>;
+  // Renames a stored text or file (desktop/source-actions.ts renameSource) and returns the book with its new path.
+  rename?: (key: string, name: string, base: OpenProject, checkpoint: SaveCheckpoint) => Promise<OpenProject>;
   // Installs the template's packages outside the book and rebuilds template/vendor/ (ADR 0006).
   dependencies?: (signal: AbortSignal) => Promise<Record<string, unknown>>;
   // The installed app's authoring SDK, to tell whether the template's .imageflow-sdk snapshot is current.
@@ -498,6 +500,11 @@ export function createAuthoringService(hooks: Hooks) {
     }
     return ledger.records.findLast((record) => record.mcp?.idempotencyKey === key);
   };
+  // A renamed source as the book now names it.
+  const renamed = (book: OpenProject, id: string) => {
+    const entry = sourceEntries(book).find((source) => source.id === id && source.kind !== 'photo');
+    return entry ? { source: { id, kind: entry.kind, path: entry.path } } : {};
+  };
   const ledgerReplay = async (session: ProjectSession, name: string, args: Record<string, any>, record: CheckpointRecord, signal: AbortSignal) => {
     let revision: string | null = null;
     try { revision = (await session.inputs.capture({ signal })).revision; } catch { signal.throwIfAborted(); }
@@ -507,6 +514,7 @@ export function createAuthoringService(hooks: Hooks) {
       ...(name === 'apply_project_changes'
         ? { dryRun: false, changes: mcp.changes ?? [], affectedSpreads: mcp.affectedSpreads ?? [],
           ...(mcp.affectedCover ? { affectedCover: true } : {}), references: mcp.references ?? {} }
+        : name === 'rename_source' ? renamed(session.book, args.source)
         : { sources: (mcp.sources ?? []).map((id, i) => ({ id, path: args.paths[i], kind: args.kind })) }),
       notice: 'This request was already committed at ' + record.time + ' and was not applied again. The book may have changed since; inspect it before the next edit.' +
         (mcp.truncated ? ' The recorded change list was shortened.' : ''),
@@ -735,7 +743,7 @@ export function createAuthoringService(hooks: Hooks) {
         throw error;
       }
     }
-    if (name !== 'apply_project_changes' && name !== 'import_sources') throw new AuthoringError('UNKNOWN_TOOL', 'Unknown authoring tool.');
+    if (name !== 'apply_project_changes' && name !== 'import_sources' && name !== 'rename_source') throw new AuthoringError('UNKNOWN_TOOL', 'Unknown authoring tool.');
     if (session.book.readOnly) throw new AuthoringError('READ_ONLY', 'Create an editable project in ImageFlow first.');
     const request = JSON.stringify({ name, ...args });
     const receipt = session.receipts.get(args.idempotencyKey);
@@ -757,7 +765,7 @@ export function createAuthoringService(hooks: Hooks) {
       }
     }
     if (session.receipts.size >= 1000) throw new AuthoringError('SESSION_LIMIT', 'This project session has reached 1000 requests. Reopen the book for a new handle.');
-    const checkpoint: SaveCheckpoint = { origin: 'mcp', label: name === 'apply_project_changes' ? args.label : 'Import sources',
+    const checkpoint: SaveCheckpoint = { origin: 'mcp', label: name === 'apply_project_changes' ? args.label : name === 'rename_source' ? 'Rename source' : 'Import sources',
       mcp: { tool: name, idempotencyKey: args.idempotencyKey, requestFingerprint: fingerprint, session: client.session, client: client.name } };
     const commit = async (save: () => Promise<unknown>) => {
       try { return { value: await save() }; }
@@ -791,6 +799,26 @@ export function createAuthoringService(hooks: Hooks) {
         ...(planned.affectedCover ? { affectedCover: true } : {}) });
       const saved = await commit(() => session.save(planned.files, args.label, fresh, checkpoint));
       if (saved.recovery) return saved.recovery;
+    } else if (name === 'rename_source') {
+      const entry = sourceEntries(fresh).find((source) => source.id === args.source);
+      if (!entry) throw new AuthoringError('SOURCE_NOT_FOUND', 'The book has no source ' + args.source + '. List them with inspect_book view sources.');
+      if (entry.kind === 'photo') throw new AuthoringError('INVALID_RENAME', 'A photo is named by its title. Change it with set_photo_metadata.');
+      const rename = hooks.rename;
+      if (!rename) throw new AuthoringError('UNKNOWN_TOOL', 'Renaming sources is not available here.');
+      checkpoint.mcp!.sources = [entry.id];
+      let next: OpenProject | undefined;
+      const saved = await commit(async () => {
+        try { next = await rename(entry.key, args.name, fresh, checkpoint); }
+        catch (error) {
+          if (error instanceof CommittedProjectSaveError || error instanceof AuthoringError) throw error;
+          throw new AuthoringError('INVALID_RENAME', error instanceof Error ? error.message : String(error));
+        }
+      });
+      if (saved.recovery) return saved.recovery;
+      // The same name: nothing was saved, so there is no checkpoint and the key stays free.
+      if (next === fresh) return { state: 'ready', project: session.handle, committed: false, revision: inputs.revision, ...renamed(fresh, entry.id),
+        notice: 'The source already has this name. Nothing was changed.' };
+      result = { state: 'ready', project: session.handle, committed: true, revision: null, ...renamed(next!, entry.id) };
     } else {
       const extensions = args.kind === 'photo' ? photoExtensions : new Set(args.kind === 'markdown' ? ['.md'] : args.accept);
       const paths: string[] = [];

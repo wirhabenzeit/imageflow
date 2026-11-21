@@ -205,6 +205,11 @@ export const mcpOutputSchemas = {
     diagnostics: z.array(diagnosticSchema).optional(), checks: checksSchema.optional(),
     history: history.optional(), notice: z.string().optional(),
   }),
+  rename_source: z.looseObject({
+    state, revision, committed: z.union([z.boolean(), z.literal('pending')]),
+    source: z.looseObject({ id: z.string(), kind: z.enum(['markdown', 'file']), path: z.string() }).optional(),
+    replayed: z.literal(true).optional(), ...checkpointFields, notice: z.string().optional(),
+  }),
 };
 
 // The declared shapes accept every value of the app's own types, so output validation cannot reject a typed result.

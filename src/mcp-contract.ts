@@ -120,6 +120,11 @@ export const mcpToolSchemas = {
     z.strictObject({ ...importFields, kind: z.literal('markdown').describe('Import Markdown texts (.md).') }),
     z.strictObject({ ...importFields, kind: z.literal('file').describe('Import files for file parameters, such as GPX tracks.'), accept: extensions }),
   ]),
+  rename_source: z.strictObject({
+    project, expectedRevision: revision, idempotencyKey,
+    source: z.string().min(1).max(256).describe('ID of a text or file stored in the book, not linked.'),
+    name: z.string().trim().min(1).max(200).describe('New file name. The extension is kept.'),
+  }),
 };
 
 export type McpToolName = keyof typeof mcpToolSchemas;
@@ -147,6 +152,8 @@ export const mcpTools: { name: McpToolName; title: string; description: string; 
     description: 'Validate a book\'s template/ folder and save it into the template library, so New Book offers it. Raise version for a changed template. A conflict result names the entry it would replace; pass its hash as replaceHash only when the user wants it replaced.' },
   { name: 'import_sources', title: 'Import sources', readOnly: false,
     description: 'Register files you copied into the book\'s inbox/ folder as photos, Markdown texts or files, and return their source IDs for assign_source or file parameters.' },
+  { name: 'rename_source', title: 'Rename source', readOnly: false,
+    description: 'Rename a stored text or file, as Rename… in Assets does. Its ID and assignments stay. Photos are named by title (set_photo_metadata). Not undoable.' },
 ];
 
 /** The JSON Schemas a tool advertises. Schemas used more than once, such as the command union that check_book drafts and
