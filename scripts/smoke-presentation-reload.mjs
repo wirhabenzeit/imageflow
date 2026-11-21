@@ -100,6 +100,9 @@ try {
   await cover.getByLabel('Cover layout', { exact: true }).selectOption('wrapPhoto');
   await cover.waitForFunction(async () => !!(await window.imageflow.currentProject()).value.project.cover);
   await cover.locator('.cover-preview-sheet[data-ready]').waitFor({ timeout: 60_000 });
+  // The sheet is also ready while the cover is empty. The editor presents the cover only once it has the chosen layout
+  // itself (the saved project reaches it after the main process has it), so wait for the prompt to go.
+  await cover.getByRole('button', { name: 'Choose a cover layout' }).waitFor({ state: 'detached', timeout: 60_000 });
   const showing = await present(cover);
   await showing.locator('.presentation-cover:not(.presentation-cover-hidden) .book-frame-cover[data-ready]').waitFor({ timeout: 20_000 })
     .catch(async (error) => { console.log(await showing.evaluate(() => document.body.innerHTML.replace(/<p>[^]*?<\/p>/g, '').slice(0, 3000))); throw error; });
