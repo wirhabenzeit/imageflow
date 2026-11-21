@@ -192,16 +192,25 @@ export const flow = (() => {
     return { block, start, blockStart: indexOf(index, start) };
   }
 
-  // Keep-with-next for a break before `anchor`, a child of the box that starts at `start`: the break moves before the
-  // kept blocks that end there. A kept block is kept by the one before it in turn: a date above a title, or a
-  // heading above a subheading.
-  function keepWithNext(index, anchor, start) {
+  // Keep-with-next for a break before `anchor`, starting at `start`: the break moves before any kept siblings that end
+  // there, and climbs out of wrapper elements when the run reaches a wrapper's start. A kept block is kept by the one
+  // before it in turn: a date above a title, or a heading above a subheading.
+  function keepWithNext(box, index, anchor, start) {
     let p = start;
-    for (let previous = previousMeaningfulSibling(anchor); previous?.matches?.(KEEP_NEXT); previous = previousMeaningfulSibling(previous)) {
-      const kept = indexOf(index, firstText(previous));
-      // Kept blocks that begin the box cannot move on, so they stay, and stay together.
-      if (!(kept > 0)) return start;
-      p = kept;
+    for (let current = anchor; current && current !== box; current = current.parentElement) {
+      let first = current;
+      for (let previous = previousMeaningfulSibling(current); previous?.matches?.(KEEP_NEXT); previous = previousMeaningfulSibling(previous)) {
+        first = previous;
+        const text = firstText(previous);
+        // Empty or decorative kept elements have no text index of their own; keep walking past them so they neither
+        // strand a following heading nor break the run.
+        if (!text) continue;
+        const kept = indexOf(index, text);
+        // Kept blocks that begin the box cannot move on, so they stay, and stay together.
+        if (!(kept > 0)) return start;
+        p = kept;
+      }
+      if (!current.parentNode || firstMeaningfulChild(current.parentNode) !== first) break;
     }
     return p;
   }
@@ -210,14 +219,23 @@ export const flow = (() => {
   function applyRules(box, index, p) {
     if (p >= index.total) return p;
     // An element a template marked stays whole, like the heading it stands for, unless it begins the box.
-    let top = locate(index, p).node;
-    while (top.parentNode && top.parentNode !== box) top = top.parentNode;
-    if (top.parentNode === box && top.matches?.('[data-keep-next]')) {
-      const start = indexOf(index, firstText(top));
-      return start > 0 ? keepWithNext(index, top, start) : p;
+    let kept = null;
+    for (let node = locate(index, p).node.parentElement; node && node !== box; node = node.parentElement) {
+      if (node.matches('[data-keep-next]')) kept = node;
+    }
+    if (kept) {
+      const text = firstText(kept);
+      const start = text ? indexOf(index, text) : 0;
+      return start > 0 ? keepWithNext(box, index, kept, start) : p;
     }
     const info = blockOf(box, index, p);
-    if (!info) return p;
+    if (!info) {
+      const { node, offset } = locate(index, p);
+      if (offset > 0) return p;
+      let anchor = node;
+      while (anchor.parentNode && anchor.parentNode !== box && firstMeaningfulChild(anchor.parentNode) === anchor) anchor = anchor.parentNode;
+      return anchor.parentNode ? keepWithNext(box, index, anchor, p) : p;
+    }
     let atStart = p <= info.blockStart;
     if (!atStart) {
       const { node, offset } = locate(index, p);
@@ -226,11 +244,7 @@ export const flow = (() => {
         atStart = true;
       }
     }
-    if (atStart) {
-      let anchor = info.block;
-      while (anchor.parentNode !== box && firstMeaningfulChild(anchor.parentNode) === anchor) anchor = anchor.parentNode;
-      if (anchor.parentNode === box) p = keepWithNext(index, anchor, p);
-    }
+    if (atStart) p = keepWithNext(box, index, info.block, p);
     return p;
   }
 
@@ -394,8 +408,13 @@ export const flow = (() => {
     const first = blocks[0];
     if (last?.classList.contains('split') && last.matches('p') && lineCount(last) < 2) violations.push('orphan');
     if (first?.classList.contains('cont') && first.matches('p') && lineCount(first) < 2) violations.push('widow');
-    const lastTop = [...box.children].filter((child) => /\S/.test(child.textContent)).pop();
-    if (lastTop?.matches(KEEP_NEXT)) violations.push('heading at end');
+    let lastEnd = [...box.children].filter((child) => /\S/.test(child.textContent)).pop();
+    while (lastEnd && !lastEnd.matches(KEEP_NEXT) && !lastEnd.matches('p,li')) {
+      const child = [...lastEnd.children].filter((node) => /\S/.test(node.textContent)).pop();
+      if (!child) break;
+      lastEnd = child;
+    }
+    if (lastEnd?.matches(KEEP_NEXT)) violations.push('heading at end');
     return violations;
   }
 

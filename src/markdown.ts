@@ -6,8 +6,8 @@ function escape(text: string) {
   return text.replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[char]!));
 }
 
-// A top-level block of a Markdown source, as a template composes it (`MarkdownBox` children): what it is, its plain
-// text, and its HTML as a whole (`html`) and without its own element (`content`).
+// A top-level block of a Markdown source, as a template composition receives it: what it is, its plain text, and its
+// HTML as a whole (`html`) and without its own element (`content`).
 export type MarkdownBlock = {
   type: 'paragraph' | 'heading' | 'blockquote' | 'list' | 'rule';
   depth?: 1 | 2 | 3 | 4 | 5 | 6;

@@ -1021,8 +1021,8 @@ export type TextComposition = { blocks: readonly TextBlock[]; meta: TextMeta; do
 export type TextCompose = (text: TextComposition) => ReactNode;
 
 // Calls a composition as its own component, under the purity guard of the spread its text starts on.
-function ComposeCall({ compose, text, spread }: { compose: TextCompose; text: TextComposition; spread: string }) {
-  renderingSpread(spread);
+function ComposeCall({ compose, text, spread, page }: { compose: TextCompose; text: TextComposition; spread: string; page?: PageSide }) {
+  renderingSpread(spread, page);
   try {
     return <>{compose(text)}</>;
   } finally {
@@ -1035,7 +1035,7 @@ function ComposeCall({ compose, text, spread }: { compose: TextCompose; text: Te
  * (`composeHtml` puts them back). It reads the text and the document only, never a spread, so the result is the same
  * wherever the text is placed.
  */
-export function textComposition(template: Template, book: RenderProject, name: string, source: string, spread: string) {
+export function textComposition(template: Template, book: RenderProject, name: string, source: string, spread: string, page?: PageSide) {
   const compose = template.compositions?.[name];
   if (!compose) throw new Error('The template declares no composition ' + name + '.');
   const blocks = markdownBlocks(source);
@@ -1049,7 +1049,7 @@ export function textComposition(template: Template, book: RenderProject, name: s
       content: createElement('if-block', { key: start + ':content', 'data-i': i, 'data-part': 'content' }),
     }))),
   });
-  return { element: <ComposeCall compose={compose} text={text} spread={spread} />, blocks };
+  return { element: <ComposeCall compose={compose} text={text} spread={spread} page={page} />, blocks };
 }
 
 // In the editor an element is also an edit target for its own parameters and any it is marked with.

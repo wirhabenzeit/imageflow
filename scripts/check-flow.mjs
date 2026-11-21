@@ -37,7 +37,7 @@ export async function checkFlow(app, root) {
     .box h1 { font: 600 20pt/1.15 "Field Serif"; margin: 0 0 4mm; break-after: avoid; }
     .box h2 { font: 500 9pt "Field Sans"; letter-spacing: .12em; text-transform: uppercase; margin: 5mm 0 2mm; break-after: avoid; }
     .box h3 { font: italic 400 11pt "Field Serif"; margin: 4mm 0 1mm; break-after: avoid; }
-    .box [data-keep-next] { break-after: avoid; }
+    .box [data-keep-next] { break-after: avoid; break-inside: avoid; }
     .box .date { font: 500 8pt "Field Sans"; }
     .box > :first-child { margin-top: 0; }
     .box ul, .box ol { margin: 1.5mm 0; padding-left: 1.3em; }
@@ -99,8 +99,8 @@ export async function checkFlow(app, root) {
   assert.deepEqual(results, [], 'Randomized text-flow chains');
   console.log('120 randomized Markdown flow checks passed.');
 
-  // A text a template composed (MarkdownBox children): a date and a title before the blocks, every second-level
-  // heading replaced by the template's own element, and an end mark after them.
+  // A text a template composed: a date and a title before the blocks, every second-level heading replaced by the
+  // template's own element, and an end mark after them.
   const composed = await page.evaluate(async (source) => {
     const { flow, composeHtml, markdownBlocks } = ImageFlowTest;
     const blocks = markdownBlocks(source);
@@ -180,12 +180,34 @@ export async function checkFlow(app, root) {
     flow.run('<p class="lead">' + 'A long lead that the template wrote itself. '.repeat(30) + '</p>' + compose(' data-keep-next'), boxes, 'columns');
     const marks = [boxes[0].firstElementChild.className, boxes[1].firstElementChild.className,
       boxes[0].firstElementChild.dataset.s === boxes[1].firstElementChild.dataset.s];
-    return { failures, kept, unkept, marks };
+
+    // Edge cases for keep-with-next in composed texts:
+    // 1. An empty [data-keep-next] element before a heading must not strand the heading.
+    // 2. A heading or [data-keep-next] followed by a plain <div> (not p/li/h1-h6) still stays with it.
+    // 3. A heading inside a wrapper <section> still stays with the paragraph after it.
+    const edgeViolations = (markup) => {
+      let count = 0;
+      for (let height = 24; height <= 100; height += 2) {
+        const pair = chain([{ width: 85, height }, { width: 85, height: 4000 }]);
+        flow.run(markup, pair, 'columns');
+        if (flow.ruleViolations(pair[0]).includes('heading at end')) count++;
+      }
+      return count;
+    };
+    const intro = '<p>' + 'An opening paragraph long enough to push the next section near the bottom of the box. '.repeat(4) + '</p>';
+    const body = '<p>' + 'The following paragraph has several lines so the heading can move with it cleanly. '.repeat(4) + '</p>';
+    const emptyKeptViolations = edgeViolations(intro + '<p class="date" data-keep-next></p><h3>Day Two</h3>' + body);
+    const divFollowerViolations = edgeViolations(intro + '<h3 data-keep-next>Day Two</h3><div class="callout">' + 'Text directly inside a div element without a paragraph wrapper. '.repeat(4) + '</div>');
+    const wrappedViolations = edgeViolations(intro + '<section class="day"><h2>Day Two</h2>' + body + '</section>');
+    return { failures, kept, unkept, marks, emptyKeptViolations, divFollowerViolations, wrappedViolations };
   }, source);
   await page.close();
   assert.deepEqual(composed.failures, [], 'Randomized chains of a composed text');
   assert.equal(composed.kept, 0, 'A marked element ends a box');
   assert.ok(composed.unkept > 0, 'The keep-with-next sweep never reaches an unmarked element at the end of a box');
   assert.deepEqual(composed.marks, ['lead split', 'lead cont', true], 'Split marks of a composed element');
+  assert.equal(composed.emptyKeptViolations, 0, 'Empty [data-keep-next] element stranded the following heading');
+  assert.equal(composed.divFollowerViolations, 0, 'Kept heading stranded before a non-paragraph <div>');
+  assert.equal(composed.wrappedViolations, 0, 'Heading inside a wrapper <section> stranded at end of box');
   console.log('60 randomized composed-text flow checks passed.');
 }

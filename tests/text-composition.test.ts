@@ -9,6 +9,7 @@ import { projectSchema } from '../src/project';
 import type { RenderProject } from '../src/project';
 import { box, chooseFormat, normalizeTemplate, Spread, templateInfo, templateSchema, textComposition } from '../src/template';
 import type { TextComposition } from '../src/template';
+import { installPurityGuards } from '../src/purity';
 import { textAssignments } from '../src/text-assignments';
 
 const source = '---\ntitle: Song-Kul\n---\n\nWe left *early*.\n\n## 12 June · Lake **Song-Kul**\n\n- one\n- two\n\n> Quoted.\n\n---\n\n```\ncode\n```\n';
@@ -105,4 +106,19 @@ test('a composition reads the text and the document, and its result is the flow\
   const html = composeHtml(renderToStaticMarkup(element), blocks);
   assert.equal(html, '<h3>Song-Kul in en</h3>' + markdownToHtml(source));
   assert.throws(() => textComposition(template, book, 'missing', source, 'opener'), /declares no composition missing/);
+});
+
+test('impure calls inside a composition are attributed to its starting spread and page', () => {
+  const script = '/render/view/template/template.js';
+  const target: Record<string, unknown> = { fetch: () => 'ok' };
+  const guards = installPurityGuards(target, script, () => script);
+  const impure = chooseFormat(templateSchema.parse(declaration({ body: box.markdown('Story', { composition: 'impure' }) }, {
+    impure: ({ blocks }: TextComposition) => {
+      (target.fetch as (url: string) => unknown)('https://example.test');
+      return blocks.map((block) => block.node);
+    },
+  })));
+  const { element } = textComposition(impure, book, 'impure', source, 'opener', 'right');
+  renderToStaticMarkup(element);
+  assert.deepEqual(guards.calls, [{ api: 'fetch', spread: 'opener', page: 'right' }]);
 });

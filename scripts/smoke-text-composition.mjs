@@ -30,26 +30,29 @@ template = replace(template, "  spreads: {\n", `  compositions: {
       <p className="end-mark">The end</p>
     </>,
     broken: () => { throw new Error('no such field'); },
+    impure: ({ blocks }) => { setTimeout(() => {}, 0); return blocks.map((block) => block.node); },
   },
   spreads: {
 `);
 const storyBox = "story: { type: 'markdown', label: 'Story', flowOrder: 1 },";
 template = replace(template, storyBox, "story: { type: 'markdown', label: 'Story', flowOrder: 1, composition: 'story' },");
-// The same layout twice more: one whose box names no composition, one whose composition throws.
+// The same layout thrice more: no composition, a throwing composition, and an impure composition.
 const layout = template.slice(template.indexOf('    story: {\n      label'), template.lastIndexOf('  },\n});'));
 const variant = (id, composition) => layout.replace('    story: {', '    ' + id + ': {').replace(", composition: 'story'", composition ? ", composition: '" + composition + "'" : '');
-template = replace(template, layout, layout + variant('plain', '') + variant('broken', 'broken'));
+template = replace(template, layout, layout + variant('plain', '') + variant('broken', 'broken') + variant('impure', 'impure'));
 await writeFile(templateFile, template);
 
 const paragraph = (n) => 'Paragraph ' + n + ' follows the shore and counts the horses grazing above the water, one after another.';
 await writeFile(join(project, 'texts/arrival.md'), '---\ntitle: Song-Kul\ndate: 12 June\n---\n\n' +
   [1, 2, 3, 4].map(paragraph).concat('## 13 June · The *pass*', paragraph(5)).join('\n\n') + '\n');
 await writeFile(join(project, 'texts/note.md'), 'A short note that its composition cannot shape.\n');
+await writeFile(join(project, 'texts/impure.md'), 'A note composed with a timer.\n');
 const file = join(project, 'project.json');
 const book = JSON.parse(await readFile(file, 'utf8'));
 book.texts.note = 'texts/note.md';
+book.texts.impure = 'texts/impure.md';
 const spread = (id, definition, text) => ({ id, definition, params: { eyebrow: '', heading: '' }, boxes: { story: { text } } });
-book.spreads = [spread('opens', 'story', 'arrival'), spread('continues', 'plain', 'arrival'), spread('fails', 'broken', 'note')];
+book.spreads = [spread('opens', 'story', 'arrival'), spread('continues', 'plain', 'arrival'), spread('trailing', 'plain', 'arrival'), spread('fails', 'broken', 'note'), spread('impure', 'impure', 'impure')];
 await writeFile(file, JSON.stringify(book, null, 2) + '\n');
 
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
@@ -83,16 +86,25 @@ try {
   // A replaced heading is the template's element, built from the heading's words.
   assert.equal(shown.head, '<span class="day">13 June</span><h3>The pass</h3>');
   assert.equal(shown.placeholders, 0, 'No placeholder reaches the page');
-  // The continuing box names no composition: the text keeps the first box's, and the check says so.
+  // Every continuing box that names another composition (or none) is warned on; the text keeps the first box's.
   const mixed = shown.findings.filter(({ code }) => code === 'text-composition-mixed');
-  assert.equal(mixed.length, 1);
-  assert.deepEqual([mixed[0].spread, mixed[0].box, mixed[0].details.composition, mixed[0].details.boxComposition], ['continues', 'story', 'story', '']);
+  assert.deepEqual(mixed.map(({ spread, box, details }) => [spread, box, details.composition, details.boxComposition]), [
+    ['continues', 'story', 'story', ''],
+    ['trailing', 'story', 'story', ''],
+  ]);
   // A composition that throws is reported, and its text flows as plain Markdown.
   const failed = shown.findings.filter(({ code }) => code === 'text-composition-failed');
   assert.equal(failed.length, 1);
   assert.deepEqual([failed[0].spread, failed[0].details.composition], ['fails', 'broken']);
   assert.match(shown.fails, /^<p data-s="0" data-e="\d+">A short note that its composition cannot shape\.<\/p>$/);
   assert.deepEqual(shown.findings.filter(({ code }) => code === 'text-overflow'), [], 'The composed text fits its two boxes');
+
+  // Book check runs with purity guards installed: an impure call inside a composition is reported on its spread.
+  const checked = await w.evaluate(async () => window.imageflow.checkBook((await window.imageflow.currentProject()).value.id, {}));
+  assert.ok(checked.value, JSON.stringify(checked.error));
+  const impureErrors = checked.value.diagnostics.filter(({ code }) => code === 'render-impure');
+  assert.deepEqual(impureErrors.map(({ location, details }) => [location?.spread, details?.api]), [['impure', 'setTimeout']],
+    'Impure calls inside a composition are reported by Book check');
 
   // Layout previews start each layout's text themselves: each shows the composition its own box names, and a
   // composition that throws leaves the preview its plain text.
@@ -128,8 +140,8 @@ try {
       throw error;
     }
   };
-  // One PDF page per trimmed page: each spread's story box is on its right page.
-  const [opens, continues, fails] = [2, 4, 6].map(pageText);
+  // One PDF page per trimmed page: each spread's story box is on its right page (`trailing` is spread 3, `fails` is 4).
+  const [opens, continues, fails] = [2, 4, 8].map(pageText);
   assert.match(opens, /12 June\s+Song-Kul\s+Paragraph 1 /, 'The PDF opens the text with the date and the title');
   assert.ok(!/Song-Kul|12 June/.test(continues), 'The PDF does not repeat the lead');
   assert.match(continues, /13 June\s+The pass\s+Paragraph 5 [\s\S]*The end\s*$/, 'The PDF has the replaced heading and the end mark');

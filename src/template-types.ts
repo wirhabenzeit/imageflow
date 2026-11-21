@@ -8,7 +8,7 @@ import type { BoundGeometry } from './geometry';
 import type { Parameter } from './parameters';
 import type { Photo } from './project';
 import type { Anchor, AnchorContext, AnchorDeclaration, BookContext, BookText, BookTextPlacement, DocumentEditorProps, EditorContext, Element, ElementEditorProps, IssueMarker, LayoutPickerProps, LayoutVariant, MarkdownBox, Page, PhotoBox, RenderContext, runtime, Spread, TemplateIssue,
-  TemplateDeclaration, Text, TextTag } from './template';
+  TemplateDeclaration, Text, TextBlock, TextComposition, TextTag } from './template';
 import type { Capability, runtimeExports } from './runtime-exports';
 
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
@@ -57,4 +57,6 @@ export const declaredTypesMatchRuntime: [
   Same<keyof Declared.EditorContext, keyof EditorContext>,
   Same<keyof Declared.DocumentEditorProps, keyof DocumentEditorProps>,
   Assignable<Declared.OpeningSpread, NonNullable<TemplateDeclaration['openingSpreads']>[number]>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+  Same<keyof Declared.TextBlock, keyof TextBlock>,
+  Same<keyof Declared.TextComposition, keyof TextComposition>,
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

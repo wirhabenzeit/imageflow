@@ -516,7 +516,7 @@ export default defineTemplate({
   // …
   compositions: {
     story: ({ blocks, meta }) => <>
-      <p className="story-date" data-keep-next>{String(meta.date ?? '')}</p>
+      {meta.date && <p className="story-date" data-keep-next>{String(meta.date)}</p>}
       <h3>{String(meta.title ?? '')}</h3>
       {blocks.map((block) => block.type === 'heading' && block.depth === 2
         ? <div key={block.key} className="day-head" data-keep-next>
@@ -541,7 +541,7 @@ export default defineTemplate({
 - **What it reads.** A composition receives the text (`blocks`, `meta`) and the document settings (`document`), never a spread: a text has one structure wherever it is placed, and no spread parameter can change pages further on. A text that needs another structure names it in its header, and the composition reads `meta`; a layout that needs another names another composition.
 - **Which composition.** The box a text starts in decides for the whole text, and the result flows through the chain, so an element before the blocks appears where the text starts and one after them where it ends. Give the boxes a text continues in the same `composition`, so their CSS meets the structure it expects. When a later box of the chain names another, or none, the Book check warns with `text-composition-mixed`; the text keeps the first. Moving a text's start to a layout with another composition therefore restructures the whole text.
 - **Flow.** What a composition returns is measured, broken across columns and boxes and counted towards overflow like Markdown. Return block elements (`p`, headings, `div`, `blockquote`, lists) next to each other. An element marked `data-keep-next` stays whole and with the one after it, as a heading does, and a run of them stays together: a date, its title and the paragraph below. A run that begins a box too small for it stays where it is, and may then split. An element split across two boxes gets `.split` and `.cont` like a Markdown block; set `break-inside: avoid` on one that must not split.
-- **Static.** A composition renders once per text, off the page, before the flow. Use plain elements and your own helper components. Content that arrives later, such as a `<RenderedImage>`, and platform components (`PhotoBox`, `MarkdownBox`, `Element`, `ctx.Text`) are not supported inside it.
+- **Static.** A composition renders once per text, off the page, before the flow. Use plain elements and your own helper components. Content that arrives later — such as a `<RenderedImage>` or an `<img>` without fixed dimensions (images are decoded before the flow runs) — and platform components (`PhotoBox`, `MarkdownBox`, `Element`, `ctx.Text`) are not supported inside it.
 - **Errors.** A composition that throws is a `text-composition-failed` error on the text's first box, and the text flows as plain Markdown until it is fixed. A box that names a composition the template does not declare fails the template's validation.
 
 ## Print format
