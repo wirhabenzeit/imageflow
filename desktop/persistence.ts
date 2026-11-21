@@ -1,6 +1,6 @@
 import { constants } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import fs, { link, lstat, mkdir, mkdtemp, open, realpath, rm, stat, unlink } from 'node:fs/promises';
+import fs, { link, lstat, mkdir, mkdtemp, open, readdir, realpath, rm, stat, unlink } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { z } from 'zod';
@@ -604,6 +604,15 @@ export async function acquireProjectLock(folder: string): Promise<ProjectLock> {
     await proof?.close();
     throw error;
   }
+  // Only the writer may sweep: a crash between staging and rename leaves a `.imageflow-write-<uuid>.tmp`, and any live
+  // save of this book would hold the lock. Exact names and regular files only; failures never block opening.
+  try {
+    for (const name of await readdir(location)) {
+      if (!/^\.imageflow-write-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/.test(name)) continue;
+      const file = join(location, name);
+      if ((await lstat(file)).isFile()) await unlink(file);
+    }
+  } catch { /* best effort */ }
   let released = false;
   const matchesOwner = (current: Awaited<ReturnType<typeof readOwner>>) => current.owner.version === 2 && current.owner.token === token &&
     current.owner.endpoint === proof!.endpoint && current.info.ino === owned!.info.ino && current.info.dev === owned!.info.dev;

@@ -11,6 +11,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { selectUpdate, nativeUpdateURL } from '../src/update-feed.ts';
 import { run, verifyMacSigning } from './verify-mac-signing.mjs';
 import { readPlan, work } from './upgrade-fixtures.mjs';
+import { readWriterLock } from './book-state.mjs';
 
 if (process.platform !== 'darwin') throw new Error('Real signed upgrades require macOS.');
 const plan = await readPlan(), platform = 'darwin-' + process.arch;
@@ -89,7 +90,8 @@ async function upgrade(page, target, channel) {
   }, channel);
   await waitStatus(page, 'ready');
   assert.ok(requests.includes(`/packages/${target}.zip`), 'The actual update ZIP must be downloaded');
-  const beforeLock = JSON.parse(await readFile(join(plan.book, '.imageflow/writer.lock'), 'utf8'));
+  // The running build may be a release from before ADR 0010, which recorded its lock inside the book.
+  const beforeLock = (await readWriterLock(plan.profile, plan.book)).owner;
   const info = await fetch(`http://127.0.0.1:${plan.debugPort}/json/version`).then((r) => r.json());
   const from = (await state(page)).installedVersion;
   // Calls the real app quit path and real Squirrel quitAndInstall; neither is replaced or intercepted.
@@ -97,7 +99,9 @@ async function upgrade(page, target, channel) {
   await until(() => !browser.isConnected(), 'Old application connection did not close');
   const next = await editor(target, info.webSocketDebuggerUrl);
   assert.equal((await next.evaluate(() => window.imageflow.currentProject())).value.project.spreads[0].params.heading, 'Kept through signed upgrades');
-  const afterLock = JSON.parse(await readFile(join(plan.book, '.imageflow/writer.lock'), 'utf8'));
+  const reacquired = await readWriterLock(plan.profile, plan.book);
+  const afterLock = reacquired.owner;
+  assert.equal(reacquired.location, 'app-support', 'The upgraded build records its lock in App Support, not the book');
   assert.notDeepEqual(afterLock, beforeLock, 'The new process must reacquire its own book lock');
   await verifyMacSigning(plan.installed);
   await reconnect(next);

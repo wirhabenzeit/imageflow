@@ -8,6 +8,7 @@ import { _electron } from 'playwright-core';
 import semver from 'semver';
 import { menuAction, testBook } from './ui-actions.mjs';
 import { copySample } from '../desktop/sample-book.mjs';
+import { bookStateFile } from './book-state.mjs';
 
 // UI/quit integration with simulated native events. No release or feed is published by this test.
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -82,16 +83,18 @@ try {
   assert.equal(await instance.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('restart-update').enabled), true);
   await settings.getByRole('button', { name: 'Restart to Update', exact: true }).last().waitFor();
   // No installation should be attempted by a cancelled quit. The eventual install sees no book lock or MCP descriptor.
-  await instance.evaluate(({ autoUpdater, app }, { folder, profile, work }) => {
+  const lockPath = await bookStateFile(profile, folder, 'writer.lock');
+  await stat(lockPath); // the path is right, so its later absence is meaningful
+  await instance.evaluate(({ autoUpdater, app }, { lockPath, profile, work }) => {
     const fs = process.getBuiltinModule('node:fs');
     autoUpdater.quitAndInstall = () => {
       fs.writeFileSync(work + '/install.json', JSON.stringify({
-        lock: fs.existsSync(folder + '/.imageflow/writer.lock'),
+        lock: fs.existsSync(lockPath),
         descriptor: fs.existsSync(profile + '/mcp-connection.json'),
       }));
       app.quit();
     };
-  }, { folder, profile, work });
+  }, { lockPath, profile, work });
   await page.evaluate(() => { globalThis.quitMessages = []; window.imageflow.onAppError((message) => globalThis.quitMessages.push(message)); });
   // Put unsaved text in the real inline editor, then try both restart and ordinary Quit.
   const heading = page.frameLocator('iframe.book-frame-book[data-current][data-ready]').locator('[data-edit="heading"]').first();

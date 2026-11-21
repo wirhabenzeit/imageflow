@@ -699,3 +699,24 @@ test('an in-package ledger of an older release is read, then imported by the nex
     assert.deepEqual(await readFile(legacy), bytes);
   } finally { await rm(root, { recursive: true }); }
 });
+
+test('acquiring the writer lock sweeps stale staging files from the book root and nothing else', async () => {
+  const { root, folder } = await fixture();
+  const stale = '.imageflow-write-' + randomUUID() + '.tmp';
+  const keep = ['.imageflow-write-notes.tmp', '.imageflow-write-' + randomUUID() + '.tmp.bak', 'photos.tmp', '.imageflow-write-' + randomUUID() + '.tmp-dir'];
+  try {
+    await writeFile(join(folder, stale), 'interrupted save');
+    for (const name of keep.slice(0, 3)) await writeFile(join(folder, name), 'user file');
+    await mkdir(join(folder, keep[3]));
+    // Without the lock nothing is touched: a live writer in another process may be mid-save.
+    const other = await acquireProjectLock(folder);
+    await writeFile(join(folder, stale), 'a save in progress under the other writer');
+    await assert.rejects(acquireProjectLock(folder), /already open for editing/);
+    assert.equal(await readFile(join(folder, stale), 'utf8'), 'a save in progress under the other writer');
+    await other();
+    const lock = await acquireProjectLock(folder);
+    await assert.rejects(lstat(join(folder, stale)), { code: 'ENOENT' });
+    for (const name of keep) await lstat(join(folder, name));
+    await lock();
+  } finally { await rm(root, { recursive: true }); }
+});

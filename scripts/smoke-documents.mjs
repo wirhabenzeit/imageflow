@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { cp, mkdtemp, readdir, readFile, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
@@ -7,6 +7,7 @@ import { _electron } from 'playwright-core';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { clickClosingWindow, reloadBook, waitForPage } from './ui-actions.mjs';
+import { bookStateFile } from './book-state.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await realpath(await mkdtemp(join(root, '.build/documents-smoke-')));
@@ -15,17 +16,6 @@ const second = join(work, 'Second.imageflow');
 const duplicate = join(work, 'Duplicate.imageflow');
 const profile = join(work, 'profile');
 const errors = [];
-// Writer locks live in App Support (<profile>/persistence/<book key>/writer.lock), never in the book. The lock records
-// the book folder's inode, which finds the right entry without recomputing the book key.
-async function writerLock(folder) {
-  const { ino } = await stat(folder, { bigint: true });
-  const base = join(profile, 'persistence');
-  for (const entry of await readdir(base).catch(() => [])) {
-    const path = join(base, entry, 'writer.lock');
-    const owner = await readFile(path, 'utf8').then(JSON.parse, () => undefined);
-    if (owner?.directory?.inode === String(ino)) return path;
-  }
-}
 let client;
 let failed = false;
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + profile], env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
@@ -197,8 +187,8 @@ try {
   const inspections = await Promise.all([firstHandle, secondHandle].map((project) => call('inspect_book', { project, view: 'summary' })));
   assert.equal(inspections[0].data.title, 'First');
   assert.equal(inspections[1].data.title, 'Second edited');
-  const firstLock = await writerLock(first);
-  assert.ok(firstLock, 'An open book records its writer in App Support');
+  const firstLock = await bookStateFile(profile, first, 'writer.lock');
+  await stat(firstLock); // An open book records its writer in App Support
   await assert.rejects(stat(join(first, '.imageflow/writer.lock')), { code: 'ENOENT' }, 'No writer lock is written inside the book');
   await one.close();
   for (let attempt = 0; await stat(firstLock).catch(() => false); attempt++) {
