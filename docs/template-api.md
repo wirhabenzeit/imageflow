@@ -13,7 +13,7 @@ This page is generated from the topic files in [`template-api/`](template-api), 
 - [Page layouts](#page-layouts): Page roots, geometry and facing pages.
 - [Parameters](#parameters): p.* types, options and defaults.
 - [List parameters](#list-parameters): List items, IDs and edit commands.
-- [Boxes and elements](#boxes-and-elements): Photo boxes, Markdown flow and text.meta.
+- [Boxes and elements](#boxes-and-elements): Photo boxes, Markdown flow, text.meta and composing a text.
 - [Print format](#print-format): Trim, bleed, safe areas and pagination.
 - [Template library](#template-library): Import, previews and openingSpreads.
 - [Switching layouts](#switching-layouts): Content, crops and saved layout state.
@@ -230,6 +230,7 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, … })
 | `formatted-text` | `markdown: 'inline'` on string parameters: bold, italic and strikethrough, shown by `ctx.Text` and `<FormattedText>` ([Formatted text](#formatted-text-formatted-text)). |
 | `app-controls` | `<Choice>`: ImageFlow's own segmented choice for element editors and layout-family pickers ([App controls](#app-controls)). |
 | `text-metadata` | `text.meta` on Markdown boxes: the fields of the source's YAML header, the same on every box of the chain ([Text metadata](#text-metadata)); every placed text in `ctx.book.texts` ([Texts](#texts)); and `boxes` in `anchors`. |
+| `text-composition` | `compositions`: named functions that compose a text from its blocks, adding, replacing or wrapping them; a Markdown box names one with `composition` ([Composing a text](#composing-a-text)). |
 
 
 Use `requires` for extensions beyond the contract-1 baseline. Unsupported extensions are rejected when the template loads, with an update hint. Listing baseline features in `requires` is also valid.
@@ -506,6 +507,43 @@ render: (ctx) => {
 - **Unreadable headers.** A header whose YAML cannot be read is a `text-frontmatter-invalid` warning on the text's first box. The header is still left out of the text, and `meta` is `{}`.
 - **Editing.** ImageFlow does not change the header. Edit it in the Markdown editor or the linked file.
 
+### Composing a text
+
+A `MarkdownBox` flows its Markdown as it is. A composition shapes the text first: a function in the template's `compositions` that receives the text's top-level blocks and returns what flows. It can add an element before or after the blocks, replace a block with its own element, or put several blocks in one. A Markdown box names the composition for the text that starts in it:
+
+```tsx
+export default defineTemplate({
+  // …
+  compositions: {
+    story: ({ blocks, meta }) => <>
+      {meta.date && <p className="story-date" data-keep-next>{String(meta.date)}</p>}
+      <h3>{String(meta.title ?? '')}</h3>
+      {blocks.map((block) => block.type === 'heading' && block.depth === 2
+        ? <div key={block.key} className="day-head" data-keep-next>
+            <span className="day">{block.text.split(' · ')[0]}</span>
+            <h3>{block.text.split(' · ')[1] ?? block.content}</h3>
+          </div>
+        : block.node)}
+      <p className="end-mark">❦</p>
+    </>,
+  },
+  spreads: ({ spread }) => ({
+    story: spread({
+      label: 'Story',
+      boxes: { body: box.markdown('Story', { composition: 'story' }) },
+      render: (ctx) => <Spread><ctx.MarkdownBox id="body" /></Spread>,
+    }),
+  }),
+});
+```
+
+- **Blocks.** Each block has a `type` (`paragraph`, `heading`, `blockquote`, `list` or `rule`), a heading's `depth`, a list's `ordered`, its `text` without Markdown syntax, and a `key`. `block.node` is the block as ImageFlow renders it; `block.content` is what is inside it, such as a heading's formatted words, for your own element. Place a block once. The Markdown stays plain: read what you need from a heading's `text`, or from the header through `meta`.
+- **What it reads.** A composition receives the text (`blocks`, `meta`) and the document settings (`document`), never a spread: a text has one structure wherever it is placed, and no spread parameter can change pages further on. A text that needs another structure names it in its header, and the composition reads `meta`; a layout that needs another names another composition.
+- **Which composition.** The box a text starts in decides for the whole text, and the result flows through the chain, so an element before the blocks appears where the text starts and one after them where it ends. Give the boxes a text continues in the same `composition`, so their CSS meets the structure it expects. When a later box of the chain names another, or none, the Book check warns with `text-composition-mixed`; the text keeps the first. Moving a text's start to a layout with another composition therefore restructures the whole text.
+- **Flow.** What a composition returns is measured, broken across columns and boxes and counted towards overflow like Markdown. Return block elements (`p`, headings, `div`, `blockquote`, lists) next to each other. An element marked `data-keep-next` stays whole and with the one after it, as a heading does, and a run of them stays together: a date, its title and the paragraph below. A run that begins a box too small for it stays where it is, and may then split. An element split across two boxes gets `.split` and `.cont` like a Markdown block; set `break-inside: avoid` on one that must not split.
+- **Static.** A composition renders once per text, off the page, before the flow. Use plain elements and your own helper components. Content that arrives later — such as a `<RenderedImage>` or an `<img>` without fixed dimensions (images are decoded before the flow runs) — and platform components (`PhotoBox`, `MarkdownBox`, `Element`, `ctx.Text`) are not supported inside it.
+- **Errors.** A composition that throws is a `text-composition-failed` error on the text's first box, and the text flows as plain Markdown until it is fixed. A box that names a composition the template does not declare fails the template's validation.
+
 ## Print format
 
 `format` is a single `PrintFormat` as sketched in `spikes/pdf-format/print-format-sketch.md` (PR #2): trim, bleed per edge, safe insets, structure (`delivery: 'pages' | 'spreads'`, `ends: 'single-pages' | 'inside-covers'`, page-count rule), and output constraints (container, colour space, transparency policy, resolution range, raster size, font rules, minimum text size). The platform resolves it into concrete geometry once.
@@ -535,6 +573,59 @@ Declare `requires: ['physical-covers']`, `coverFormats` keyed by interior format
 Each cover layout renders one full exterior sheet. It can declare photo boxes, parameters, and elements with generated controls. The render context provides `cover.sheet`, `cover.trim`, and `cover.regions` for the back, spine, front and optional flaps, in millimetres. Use `cover.safe` for text placement. A region can have a `null` safe area if its insets consume the available space. `cover.sheet` starts at negative trim-relative coordinates so artwork can extend into the wrap or bleed.
 
 Print specifications can use fixed widths or inclusive page-count bands for the spine and both flaps. Bands cover every valid interior page count, with printer rounding applied in the source unit. Interior page counts include blank pages. Guides and provisional sizing appear in the editor and preview metadata.
+
+#### Printer presets
+
+The Photobook starter has measured presets in `print-presets.ts`: `whiteWallGallerySquare({ paper })` for WhiteWall Gallery Square (Fuji Crystal Archive, Fedrigoni gloss and Sappi silk-matt papers) and `blurbLargeSquare({ paper, cover })` for Blurb Large Square (six papers, `'imageWrap'` or `'dustJacket'`). Each returns `{ format, coverFormat, researched, sources }`. The interior format and the cover come together because the cover's panels, height and spine bands depend on the interior trim and page-count rule. To use a preset, copy `print-presets.ts` into your template folder. It is part of the template, so a book keeps the values it was made with when the app updates.
+
+```tsx
+import { blurbLargeSquare, whiteWallGallerySquare } from './print-presets';
+
+const whiteWall = whiteWallGallerySquare({ paper: 'fujiCrystalArchive' });
+const blurb = blurbLargeSquare({ paper: 'premiumMatte', cover: 'dustJacket' });
+
+export default defineTemplate({
+  // …
+  requires: ['physical-covers'],
+  formats: {
+    whiteWall: { ...whiteWall.format, label: 'WhiteWall · 29 × 29 cm' },
+    blurb: blurb.format,
+  },
+  coverFormats: { whiteWall: whiteWall.coverFormat, blurb: blurb.coverFormat },
+  coverLayouts: { /* … */ },
+});
+```
+
+A preset is plain data. Spread it to change a field, for example `{ ...blurb.coverFormat, foldAvoidance: { back: pt(18), front: pt(18) } }`. The values were measured from the printers' calculators, templates and help pages on the `researched` date. They were not tested with the printers' uploaders, so check them against `sources` before ordering. If a printer changes its specification, add the new values beside the old ones instead of editing them, so existing books keep their size.
+
+#### A custom cover
+
+For any other printer, write the `CoverFormat` yourself, from the printer's cover template or calculator. This one is for a 21 × 21 cm hardcover with a 5 mm spine up to 40 pages and 7 mm up to 80, with 15 mm wrapped around the board on each edge:
+
+```tsx
+const edges = (length: Length) => ({ top: length, right: length, bottom: length, left: length });
+
+formats: {
+  square: printFormat({ label: 'Square · 21 × 21 cm', trim: { width: mm(210), height: mm(210) },
+    bleed: { all: mm(3), binding: mm(0) }, safe: mm(5), pageCount: { min: 24, max: 80, step: 2 } }),
+},
+coverFormats: {
+  square: {
+    kind: 'wrap',
+    height: mm(216), panels: { back: mm(213), front: mm(213) },   // the cover board, front and back
+    widths: { kind: 'page-bands', bands: [
+      { from: 24, to: 40, value: { spine: mm(5) } },
+      { from: 42, to: 80, value: { spine: mm(7) } },
+    ] },
+    outer: { kind: 'wrap', insets: edges(mm(15)) },                // 'bleed' for a jacket or a softcover
+    safe: { back: edges(mm(8)), front: edges(mm(8)), spine: edges(mm(1)) },
+    foldAvoidance: { back: mm(8), front: mm(8) },                  // a warning band next to the spine
+    output: { container: 'pdf', colorSpace: 'sRGB', transparency: 'allow' },
+  },
+},
+```
+
+The bands must cover every page count the interior allows, here 24 to 80 in steps of two. A dust jacket adds `flaps: { back, front }` to each band's `value` and declares `flaps: { safe: { back, front } }` on the cover. Use `widths: { kind: 'fixed', value: { spine } }` when the spine does not depend on the page count.
 
 ### Formats without facing pages
 
@@ -957,7 +1048,7 @@ Prefer `presentation="inline"` for a single user-written string printed on the p
 
 `parameter` takes the same paths as `ctx.edit`, limited to string parameters. `as` is one of `h1`–`h6`, `p` (default), `span`, `div`, `blockquote` or `figcaption`; `className`, `style`, `rect` and `issue()` markers work as on the platform components. When the value is empty, the editing canvas shows a dimmed placeholder in the template's own type (`placeholder`, else the parameter's `placeholder`, else its label) and marks the node `data-empty`; the exported book shows the empty node. The value is rendered as text, never as HTML, and newlines follow the node's CSS `white-space`. `fallback` displays inherited text when the saved value is empty or whitespace-only, without saving it. Set `fallbackLabel` to name its source: inherited text has a dotted underline on the canvas and the popover explains what clearing the override does. `hidden` suppresses the node explicitly; whitespace never means hidden. A template can bind it to a separate visibility parameter, as the calendar does with `showPlace`. Use `ctx.edit` for nodes that combine several parameters or show more than the value.
 
-Templates read photo metadata (for captions) and page numbers through the context; they never receive file paths, image data, or Markdown source, and they cannot change project data.
+Templates read photo metadata (for captions) and page numbers through the context; they never receive file paths or image data, and they cannot change project data. Of a Markdown source they receive its header fields and, in a composition, its blocks ([Composing a text](#composing-a-text)).
 
 ## Anchors
 

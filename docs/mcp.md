@@ -221,6 +221,8 @@ Layout findings use one envelope: `code`, `severity`, `stage`, `message`, an opt
 | --- | --- |
 | `text-overflow` | Last box of the text chain and its Markdown source; `overflowCharacters`, `boxes`, `path`. |
 | `text-source-missing` | First box of the chain and its source. |
+| `text-composition-mixed` | A box of the text chain whose layout names another composition than the box the text starts in (or none); `composition`, `boxComposition`, `path`. The text keeps the first box's. |
+| `text-composition-failed` | First box of a text whose composition threw; `composition`, `path`. The text flows as plain Markdown. |
 | `text-box-unused` | A box of the text chain that the text ends before, so it prints nothing; `part`, `parts`, `path`. One warning per empty box. |
 | `text-frontmatter-invalid` | First box of the chain and its source; `line` of the YAML problem in the file, `path`. A warning: the layout renders without the header's fields. |
 | `photo-resolution-low` | Photo box and source; `ppi`, `minimumPpi`, `boxWidthMm`, `boxHeightMm`. |

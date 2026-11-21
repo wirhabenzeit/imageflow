@@ -204,7 +204,7 @@ export type DesktopApi = {
 export type ElementDefinition = {
   label: string; parameters: Parameters; controls?: ControlItem[]; editor?: { label?: string; parameters: string[]; spread?: string[]; presentation: 'dialog' | 'inline' };
 };
-export type BoxDefinition = { type: 'photo' | 'markdown'; label: string; parameters: Parameters; flowOrder?: number; controls?: ControlItem[] };
+export type BoxDefinition = { type: 'photo' | 'markdown'; label: string; parameters: Parameters; flowOrder?: number; composition?: string; controls?: ControlItem[] };
 // `family` names the layout family this layout is a variant of; `variant` holds the template's tags for it.
 export type SpreadDefinition = {
   sides?: PageSide[];

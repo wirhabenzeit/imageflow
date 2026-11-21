@@ -11,6 +11,8 @@
 export const flow = (() => {
   const EPS = 0.5;
   const BLOCKS = 'p,li,h1,h2,h3,h4,h5,h6';
+  // Blocks that stay with the one after them: headings, and whatever a template marks in a composed text.
+  const KEEP_NEXT = 'h1,h2,h3,h4,h5,h6,[data-keep-next]';
   const range = document.createRange();
   const isBlank = (node) => node.nodeType === Node.TEXT_NODE && !/\S/.test(node.data);
 
@@ -190,10 +192,50 @@ export const flow = (() => {
     return { block, start, blockStart: indexOf(index, start) };
   }
 
+  // Keep-with-next for a break before `anchor`, starting at `start`: the break moves before any kept siblings that end
+  // there, and climbs out of wrapper elements when the run reaches a wrapper's start. A kept block is kept by the one
+  // before it in turn: a date above a title, or a heading above a subheading.
+  function keepWithNext(box, index, anchor, start) {
+    let p = start;
+    for (let current = anchor; current && current !== box; current = current.parentElement) {
+      let first = current;
+      for (let previous = previousMeaningfulSibling(current); previous?.matches?.(KEEP_NEXT); previous = previousMeaningfulSibling(previous)) {
+        first = previous;
+        const text = firstText(previous);
+        // Empty or decorative kept elements have no text index of their own; keep walking past them so they neither
+        // strand a following heading nor break the run.
+        if (!text) continue;
+        const kept = indexOf(index, text);
+        // Kept blocks that begin the box cannot move on, so they stay, and stay together.
+        if (!(kept > 0)) return start;
+        p = kept;
+      }
+      if (!current.parentNode || firstMeaningfulChild(current.parentNode) !== first) break;
+    }
+    return p;
+  }
+
   // Orphans and keep-with-next, applied to a candidate break p.
   function applyRules(box, index, p) {
+    if (p >= index.total) return p;
+    // An element a template marked stays whole, like the heading it stands for, unless it begins the box.
+    let kept = null;
+    for (let node = locate(index, p).node.parentElement; node && node !== box; node = node.parentElement) {
+      if (node.matches('[data-keep-next]')) kept = node;
+    }
+    if (kept) {
+      const text = firstText(kept);
+      const start = text ? indexOf(index, text) : 0;
+      return start > 0 ? keepWithNext(box, index, kept, start) : p;
+    }
     const info = blockOf(box, index, p);
-    if (!info) return p;
+    if (!info) {
+      const { node, offset } = locate(index, p);
+      if (offset > 0) return p;
+      let anchor = node;
+      while (anchor.parentNode && anchor.parentNode !== box && firstMeaningfulChild(anchor.parentNode) === anchor) anchor = anchor.parentNode;
+      return anchor.parentNode ? keepWithNext(box, index, anchor, p) : p;
+    }
     let atStart = p <= info.blockStart;
     if (!atStart) {
       const { node, offset } = locate(index, p);
@@ -202,15 +244,7 @@ export const flow = (() => {
         atStart = true;
       }
     }
-    if (atStart) {
-      let anchor = info.block;
-      while (anchor.parentNode !== box && firstMeaningfulChild(anchor.parentNode) === anchor) anchor = anchor.parentNode;
-      const previous = anchor.parentNode === box ? previousMeaningfulSibling(anchor) : null;
-      if (previous?.matches?.('h1,h2,h3,h4,h5,h6')) {
-        const headingStart = indexOf(index, firstText(previous));
-        if (headingStart > 0) p = headingStart;
-      }
-    }
+    if (atStart) p = keepWithNext(box, index, info.block, p);
     return p;
   }
 
@@ -320,6 +354,10 @@ export const flow = (() => {
     const template = document.createElement('template');
     template.innerHTML = html;
     const queue = template.content;
+    // Elements a template composed into the text have no source offsets; number them, so one split across boxes is
+    // marked like a Markdown block.
+    let composed = 0;
+    for (const element of queue.querySelectorAll(':not([data-s]):not(br)')) element.dataset.s = 'c' + composed++;
     const started = performance.now();
     const results = boxes.map((box, i) => flowBox(box, queue, strategy, boxes[i + 1]));
     const elapsed = performance.now() - started;
@@ -370,8 +408,13 @@ export const flow = (() => {
     const first = blocks[0];
     if (last?.classList.contains('split') && last.matches('p') && lineCount(last) < 2) violations.push('orphan');
     if (first?.classList.contains('cont') && first.matches('p') && lineCount(first) < 2) violations.push('widow');
-    const lastTop = [...box.children].filter((child) => /\S/.test(child.textContent)).pop();
-    if (lastTop?.matches('h1,h2,h3,h4,h5,h6')) violations.push('heading at end');
+    let lastEnd = [...box.children].filter((child) => /\S/.test(child.textContent)).pop();
+    while (lastEnd && !lastEnd.matches(KEEP_NEXT) && !lastEnd.matches('p,li')) {
+      const child = [...lastEnd.children].filter((node) => /\S/.test(node.textContent)).pop();
+      if (!child) break;
+      lastEnd = child;
+    }
+    if (lastEnd?.matches(KEEP_NEXT)) violations.push('heading at end');
     return violations;
   }
 

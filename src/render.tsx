@@ -26,7 +26,7 @@ import type { ReorderOffset } from './reorder-motion';
 import type { PrintSide, ResolvedFormat } from './format';
 import { frameView, scopeSpread, scopeState } from './project';
 import type { FixtureMarking, PageSide, RenderProject, SpreadState, Values } from './project';
-import { markdownToHtml } from './markdown';
+import { composeHtml, markdownToHtml } from './markdown';
 import { splitFrontmatter } from './frontmatter';
 import { isParameterValue, parameterWarnings, resolveParams, resolveValue } from './parameters';
 import type { ListItem } from './parameters';
@@ -35,7 +35,7 @@ import type { Parameters } from './parameters';
 import { flow } from './text-flow';
 import { declarationWarnings, placeControlWarnings } from './declaration-check';
 import type { Schema } from './declaration-check';
-import { bookIndex, chooseFormat, CoverArtwork, currentPhotoRenderFailures, watchPhotoRenderFailures, editorContext, normalizeTemplate, photoNearEvent, refreshedEditorContext, setLivePlacement, withEditorDraft, withEditorGeometry, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
+import { bookIndex, chooseFormat, CoverArtwork, currentPhotoRenderFailures, watchPhotoRenderFailures, editorContext, normalizeTemplate, photoNearEvent, refreshedEditorContext, setLivePlacement, withEditorDraft, withEditorGeometry, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema, textComposition } from './template';
 import type { AnchorLookup, PhotoRenderFailure, EditorContext, EditorPresentation } from './template';
 import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
@@ -1138,6 +1138,26 @@ function decodable(root: ParentNode): HTMLImageElement[] {
   return [...html, ...svg];
 }
 
+// The HTML a text flows as: its Markdown, or what the composition named by the box it starts in makes of its blocks.
+// The composition renders off the page, once per text, before the flow.
+function textHtml(template: Template, book: RenderProject, source: string, composition: string | undefined, spread: string, page?: PageSide) {
+  if (!composition) return markdownToHtml(book.texts[source]);
+  const { element, blocks } = textComposition(template, book, composition, book.texts[source], spread, page);
+  const host = document.createElement('div');
+  let failure: { error: unknown } | undefined;
+  const fail = (error: unknown) => { failure ??= { error }; };
+  const react = createRoot(host, { onUncaughtError: fail, onCaughtError: fail });
+  let staged = '';
+  try {
+    flushSync(() => react.render(element));
+    staged = host.innerHTML;
+  } finally {
+    react.unmount();
+  }
+  if (failure) throw failure.error;
+  return composeHtml(staged, blocks);
+}
+
 // Waits for fonts and photos so measurements and text flow see final metrics.
 async function settle(images: HTMLImageElement[]) {
   // A font that fails to load is reported by `fontFailures` rather than aborting the render.
@@ -1207,13 +1227,21 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
   const containers = root.querySelectorAll<HTMLElement>('.if-spread-container');
   const sheets = previews.map(({ definition, spread, crop }, n) => {
     const { sheet, boxes } = validateSpread(containers[n], spread, template, format, definition, [], []);
-    const sources = new Map<string, HTMLElement[]>();
+    const sources = new Map<string, { targets: HTMLElement[]; composition?: string }>();
     const order = Object.entries(template.spreads[definition].boxes).sort(([, a], [, b]) => (a.flowOrder ?? 1) - (b.flowOrder ?? 1));
-    for (const [box] of order) {
+    for (const [box, { composition }] of order) {
       const source = spread.boxes[box]?.text;
-      if (source && book.texts[source] !== undefined && boxes.has(box)) sources.set(source, [...sources.get(source) ?? [], boxes.get(box)!]);
+      if (!source || book.texts[source] === undefined || !boxes.has(box)) continue;
+      const entry = sources.get(source);
+      if (entry) entry.targets.push(boxes.get(box)!);
+      else sources.set(source, { targets: [boxes.get(box)!], composition });
     }
-    for (const [source, targets] of sources) flow.run(markdownToHtml(book.texts[source]), targets, 'columns');
+    for (const [source, { targets, composition }] of sources) {
+      let html: string;
+      // A preview has nowhere to report a failing composition; the book's own render does.
+      try { html = textHtml(template, book, source, composition, spreads[index].id); } catch { html = markdownToHtml(book.texts[source]); }
+      flow.run(html, targets, 'columns');
+    }
     if (crop) {
       const page = sheetPages(format).find(({ side }) => side === crop)!;
       const artwork = sheet.querySelector<HTMLElement>('.if-spread')!;
@@ -2096,10 +2124,6 @@ export async function startRender(root: HTMLElement) {
     const photoRenderIssues = (failures: PhotoRenderFailure[]): Issue[] => failures.map(({ spread, page, box, message: text }) => ({
       ...located(spread, 'Photo box ' + box + ': its render callback failed: ' + text), code: 'photo-render-failed', ...onPage(page), box,
       suggestion: 'Fix the PhotoBox render callback so it returns markup for every crop and parameter value.' }));
-    for (const { api, spread, page } of guards?.calls ?? []) {
-      errors.push({ ...(spread ? located(spread, impureMessage(api)) : message(impureMessage(api, false))), code: 'render-impure', ...onPage(page),
-        details: { api }, suggestion: spread ? impureSuggestion : unlocatedImpureSuggestion });
-    }
     for (const sheet of spreads) for (const { page, state: spread } of shownLayoutStates(sheet)) {
       const definition = template.spreads[spread.definition];
       if (!definition) continue;
@@ -2199,7 +2223,25 @@ export async function startRender(root: HTMLElement) {
           suggestion: 'Fix the YAML between the opening and closing --- lines of ' + path + '. Until then the layout shows it without its header fields.' });
       }
       const boxes = chain.map(({ spread, page, box }) => validated.get(spread)!.boxes.get((page ? page + ':' : '') + box)!);
-      const result = flow.run(markdownToHtml(book.texts[source]), boxes, 'columns');
+      const path = book.project.texts[source] ? sourcePath(book.project.texts[source]) : source;
+      // The box a text starts in decides its composition. A later box that names another is styled for a structure
+      // the text does not have there.
+      const named = (name?: string) => name ? 'composition ' + name : 'no composition';
+      for (const other of chain) {
+        if (other.composition === first.composition) continue;
+        warnings.push({ ...located(other.spread, 'Text from ' + path + ' starts in a box with ' + named(first.composition) + ', but box ' + other.box + ' names ' + named(other.composition) + '. The text keeps the first.'),
+          code: 'text-composition-mixed', ...onPage(other.page), box: other.box, source,
+          details: { composition: first.composition ?? '', boxComposition: other.composition ?? '', path },
+          suggestion: 'Use layouts whose boxes name the same composition for every part of the text, or start the text in the layout whose composition it should have.' });
+      }
+      let html: string;
+      try { html = textHtml(template, book, source, first.composition, first.spread, first.page); } catch (error) {
+        errors.push({ ...located(first.spread, 'Composition ' + first.composition + ' could not compose ' + path + ': ' + (error instanceof Error ? error.message : String(error))),
+          code: 'text-composition-failed', ...onPage(first.page), box: first.box, source, details: { composition: first.composition ?? '', path },
+          suggestion: 'Fix the composition ' + first.composition + ' in the template. Until then the text flows as plain Markdown.' });
+        html = markdownToHtml(book.texts[source]);
+      }
+      const result = flow.run(html, boxes, 'columns');
       const overflow = result.overflowText.trim();
       if (overflow || result.results.some(({ failed, unresolved }) => failed || unresolved)) {
         const last = chain.at(-1)!;
@@ -2222,6 +2264,11 @@ export async function startRender(root: HTMLElement) {
               ' and use the space for something else, such as another layout for that page, or lengthen the text.' });
         });
       }
+    }
+    // Reported after text flow so impure calls made inside a composition are included alongside layout renders.
+    for (const { api, spread, page } of guards?.calls ?? []) {
+      errors.push({ ...(spread ? located(spread, impureMessage(api)) : message(impureMessage(api, false))), code: 'render-impure', ...onPage(page),
+        details: { api }, suggestion: spread ? impureSuggestion : unlocatedImpureSuggestion });
     }
     step('flow');
     const minimum = template.format.output.minimumTextSize;

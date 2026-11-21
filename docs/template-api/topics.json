@@ -6,7 +6,7 @@
   {"id":"page-layouts","title":"Page layouts","summary":"Page roots, geometry and facing pages."},
   {"id":"parameters","title":"Parameters","summary":"p.* types, options and defaults."},
   {"id":"list-parameters","title":"List parameters","summary":"List items, IDs and edit commands."},
-  {"id":"boxes-and-elements","title":"Boxes and elements","summary":"Photo boxes, Markdown flow and text.meta."},
+  {"id":"boxes-and-elements","title":"Boxes and elements","summary":"Photo boxes, Markdown flow, text.meta and composing a text."},
   {"id":"print-formats","title":"Print format","summary":"Trim, bleed, safe areas and pagination."},
   {"id":"template-library","title":"Template library","summary":"Import, previews and openingSpreads."},
   {"id":"switching-layouts","title":"Switching layouts","summary":"Content, crops and saved layout state."},

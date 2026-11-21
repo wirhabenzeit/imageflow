@@ -1,11 +1,11 @@
 import { layoutFootprint, shownLayoutStates } from './layouts';
-import { Component, createContext, Fragment, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Component, createContext, createElement, Fragment, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
 import { RenderedImage } from './rendered-image';
 import { Choice } from './choice';
 import { parseFormatted, plainFormatted } from './formatted-text';
 import { renderingSpread } from './purity';
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties, ReactElement, ReactNode } from 'react';
 import { z } from 'zod';
 import { cssMM, formatSchema, hasFacingPages, hasSingleEnds, inch, mm, pageSequence, printFormat, pt, resolveFormat, spanAllowedAt, spanFits, spanRequiredAt } from './format';
 import type { PrintFormat, ResolvedFormat, Span, UnitPages } from './format';
@@ -14,7 +14,10 @@ import type { CoverState, PageSide, Photo, ProjectFile, RenderProject, RenderVie
 import { coverFormatSchema, coverLayoutsFor, printSpecificationSchema } from './cover';
 import type { CoverFormat, ResolvedCover } from './cover';
 import { textAssignments } from './text-assignments';
+import { splitFrontmatter } from './frontmatter';
 import type { TextMeta } from './frontmatter';
+import { markdownBlocks } from './markdown';
+import type { MarkdownBlock } from './markdown';
 import { getCrop, placementIn } from './spread';
 import type { Crop, Placement as CropPlacement } from './spread';
 import { declarationConflicts, familyProblems } from './layouts';
@@ -409,8 +412,13 @@ const elements = z.record(identifier, z.object({
   .superRefine(({ parameters, controls, editor }, context) => checkControls(context, parameters, controls, editor?.parameters))).default({});
 const boxSchema = z.object({
   type: z.enum(['photo', 'markdown']), label: z.string().min(1), parameters: parametersSchema, flowOrder: z.int().positive().optional(),
+  // The template composition that shapes the text starting in this Markdown box.
+  composition: identifier.optional(),
   controls: controlsSchema,
-}).superRefine(({ parameters, controls }, context) => checkControls(context, parameters, controls));
+}).superRefine(({ type, composition, parameters, controls }, context) => {
+  if (composition && type !== 'markdown') context.addIssue({ code: 'custom', path: ['composition'], message: 'Only Markdown boxes name a composition.' });
+  checkControls(context, parameters, controls);
+});
 
 const coverLayout = z.strictObject({
   label: z.string().min(1),
@@ -520,6 +528,15 @@ export const templateSchema = z.preprocess(withSpans, z.object({
   coverLayouts: z.record(identifier, coverLayout).optional(),
   // Editors of document parameters, by ID.
   editors: z.record(identifier, documentEditor).optional(),
+  // How texts are composed from their blocks, by name; a Markdown box names one with `composition`.
+  compositions: z.record(identifier, z.custom<TextCompose>((value) => typeof value === 'function', 'Expected a composition function.')).optional(),
+}).superRefine(({ spreads, compositions }, context) => {
+  for (const [layout, { boxes }] of Object.entries(spreads)) for (const [id, { composition }] of Object.entries(boxes)) {
+    if (composition && !Object.hasOwn(compositions ?? {}, composition)) {
+      context.addIssue({ code: 'custom', path: ['spreads', layout, 'boxes', id, 'composition'],
+        message: 'Box ' + id + ' names composition ' + composition + ', which the template\'s compositions do not declare.' });
+    }
+  }
 }).superRefine(({ parameters, editors, controls }, context) => {
   const owners = new Map<string, string>();
   for (const [id, editor] of Object.entries(editors ?? {})) {
@@ -679,6 +696,7 @@ export type TemplateDeclaration = {
   coverFormats?: Record<string, CoverFormat>;
   coverLayouts?: Record<string, DeclaredCover>;
   editors?: Record<string, { label?: string; parameters: string[]; component: (props: DocumentEditorProps) => ReactNode; presentation?: EditorPresentation }>;
+  compositions?: Record<string, TextCompose>;
 };
 // `spreads` may be a function of the builder; the declaration ImageFlow validates always has the built record.
 // Applied by defineTemplate and again when the template loads, for templates exported without defineTemplate.
@@ -996,6 +1014,44 @@ export function MarkdownBox({ id, className, style, rect, columns = 1, decorativ
   );
 }
 
+// A top-level block of a Markdown text, as a composition receives it. `node` is the block as ImageFlow renders it and
+// `content` what is inside it (a heading's words without the heading), for the template's own element.
+export type TextBlock = Pick<MarkdownBlock, 'type' | 'depth' | 'ordered' | 'text'> & { key: string; node: ReactElement; content: ReactElement };
+export type TextComposition = { blocks: readonly TextBlock[]; meta: TextMeta; document: Values };
+export type TextCompose = (text: TextComposition) => ReactNode;
+
+// Calls a composition as its own component, under the purity guard of the spread its text starts on.
+function ComposeCall({ compose, text, spread, page }: { compose: TextCompose; text: TextComposition; spread: string; page?: PageSide }) {
+  renderingSpread(spread, page);
+  try {
+    return <>{compose(text)}</>;
+  } finally {
+    renderingSpread(undefined);
+  }
+}
+
+/**
+ * A text as its composition renders it: the element to render and the blocks its placeholders stand for
+ * (`composeHtml` puts them back). It reads the text and the document only, never a spread, so the result is the same
+ * wherever the text is placed.
+ */
+export function textComposition(template: Template, book: RenderProject, name: string, source: string, spread: string, page?: PageSide) {
+  const compose = template.compositions?.[name];
+  if (!compose) throw new Error('The template declares no composition ' + name + '.');
+  const blocks = markdownBlocks(source);
+  // Frozen by hand: the blocks hold React elements, which are not ours to freeze through.
+  const text: TextComposition = Object.freeze({
+    meta: deepFreeze(structuredClone(splitFrontmatter(source).meta ?? {})),
+    document: deepFreeze(resolveParams(template.parameters, book.project.params)),
+    blocks: Object.freeze(blocks.map(({ type, depth, ordered, text, start }, i): TextBlock => Object.freeze({
+      type, text, key: String(start), ...(depth ? { depth } : {}), ...(ordered !== undefined ? { ordered } : {}),
+      node: createElement('if-block', { key: start, 'data-i': i }),
+      content: createElement('if-block', { key: start + ':content', 'data-i': i, 'data-part': 'content' }),
+    }))),
+  });
+  return { element: <ComposeCall compose={compose} text={text} spread={spread} page={page} />, blocks };
+}
+
 // In the editor an element is also an edit target for its own parameters and any it is marked with.
 export function Element({ id, className, style, rect, children, decorative, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker & IssueMarker & DecorativeMarker &
   { id: string; children?: ReactNode }) {
@@ -1101,8 +1157,9 @@ export const box = {
   photo: (label: string, parameters: Parameters = {}, options: { controls?: ControlItem[] } = {}) => ({
     type: 'photo' as const, label, parameters, ...(options.controls ? { controls: options.controls } : {}),
   }),
-  markdown: (label: string, options: { flowOrder?: number; parameters?: Parameters; controls?: ControlItem[] } = {}) => ({
+  markdown: (label: string, options: { flowOrder?: number; composition?: string; parameters?: Parameters; controls?: ControlItem[] } = {}) => ({
     type: 'markdown' as const, label, parameters: options.parameters ?? {}, ...(options.flowOrder !== undefined ? { flowOrder: options.flowOrder } : {}),
+    ...(options.composition !== undefined ? { composition: options.composition } : {}),
     ...(options.controls ? { controls: options.controls } : {}),
   }),
   // Several photo boxes with explicit IDs: `box.photos(['one', 'two'], (id, i) => 'Photo ' + (i + 1))`.

@@ -495,3 +495,33 @@ defineTemplate({ id: 'page-opening', version: '1', contract: 1, format,
 defineTemplate({ id: 'page-opening', version: '1', contract: 1, format,
   spreads: ({ page }) => ({ photo: page({ label: 'Photo', render: () => null }) }),
   openingSpreads: [{ pages: { left: { layout: 'missing' } } }] });
+
+// Compositions read typed document settings, and boxes must name declared compositions (Markdown boxes only).
+defineTemplate({ id: 'composed', version: '1', contract: 1, format,
+  parameters: { language: p.enum({ label: 'Language', default: 'en', options: ['en', 'de'] }) },
+  compositions: {
+    story: ({ blocks, meta, document }) => {
+      const language: 'en' | 'de' = document.language;
+      return <>{language}{String(meta.title ?? '')}{blocks.map((block) => block.node)}</>;
+    },
+  },
+  spreads: ({ spread }) => ({
+    a: spread({ label: 'A', boxes: { body: box.markdown('Story', { composition: 'story' }) }, render: () => <Spread /> }),
+    b: spread({ label: 'B', boxes: { body: { type: 'markdown', label: 'Story', composition: 'story' } }, render: () => <Spread /> }),
+    c: spread({ label: 'C', boxes: { body: box.markdown('Story') }, render: () => <Spread /> }),
+  }),
+});
+// @ts-expect-error A box cannot name a composition the template does not declare.
+defineTemplate({ id: 'composed-missing', version: '1', contract: 1, format,
+  compositions: { story: ({ blocks }) => blocks.map((block) => block.node) },
+  spreads: ({ spread }) => ({
+    a: spread({ label: 'A', boxes: { body: box.markdown('Story', { composition: 'missing' }) }, render: () => <Spread /> }),
+  }),
+});
+defineTemplate({ id: 'composed-photo', version: '1', contract: 1, format,
+  compositions: { story: ({ blocks }) => blocks.map((block) => block.node) },
+  spreads: ({ spread }) => ({
+    // @ts-expect-error Only Markdown boxes name a composition.
+    a: spread({ label: 'A', boxes: { hero: { type: 'photo', label: 'Hero', composition: 'story' } }, render: () => <Spread /> }),
+  }),
+});
