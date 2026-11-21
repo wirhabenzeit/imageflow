@@ -592,7 +592,7 @@ test('unknown fields survive an import and a save, and stay out of the photos te
   try {
     await mkdir(join(folder, 'photos'));
     await sharp({ create: { width: 8, height: 8, channels: 3, background: '#375b48' } }).png().toFile(join(folder, 'photos/old.png'));
-    const json = { ...project, bookId: 'b-1', template: { ...project.template, channel: 'beta' },
+    const json = { ...project, bookNote: 'b-1', template: { ...project.template, channel: 'beta' },
       spreads: [{ ...project.spreads[0], rev: 2, boxes: { hero: { photo: 'old', params: {}, pinned: true } } }] };
     await writeFile(join(folder, 'project.json'), JSON.stringify(json));
     await writeFile(join(folder, 'photos.json'), JSON.stringify({ old: { path: 'photos/old.png', title: 'Old', syncRevision: 7 } }));
@@ -607,7 +607,7 @@ test('unknown fields survive an import and a save, and stay out of the photos te
     const imported = await importIntoProject(book, { kind: 'photo', target: { spread: 'one', box: 'hero' } }, [source]);
     const saved = JSON.parse(await readFile(join(folder, 'project.json'), 'utf8'));
     const index = JSON.parse(await readFile(join(folder, 'photos.json'), 'utf8'));
-    assert.equal(saved.bookId, 'b-1');
+    assert.equal(saved.bookNote, 'b-1');
     assert.equal(saved.template.channel, 'beta');
     assert.equal(saved.spreads[0].rev, 2);
     assert.equal(saved.spreads[0].boxes.hero.pinned, true);
@@ -625,6 +625,9 @@ test('a book whose files hold a reserved key is refused when it opens', async ()
     await writeFile(join(folder, 'photos.json'), '{"p":{"path":"photos/a.jpg","constructor":1}}');
     await assert.rejects(loadProject(folder, cache), /reserved/);
     assert.equal(({} as Record<string, unknown>).polluted, undefined);
+  } finally { await rm(root, { recursive: true }); }
+});
+
 const intendedJournal = (original = before, intended = after) => JSON.stringify({
   version: 1, transaction: randomUUID(), manifests: Object.fromEntries((['project.json', 'photos.json'] as const).map((name) =>
     [name, { before: original[name].toString('base64'), after: intended[name].toString('base64') }])),

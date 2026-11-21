@@ -122,6 +122,9 @@ const coverState = object(layoutState);
 export const projectSchema = guarded(object({
   schemaVersion,
   title: label,
+  // The book's logical lineage across copies of one book (ADR 0010). Never an instance or security key (that is
+  // `sourceBookKey`): a Finder copy shares it. New Book, Duplicate and Save a Copy start a new one.
+  bookId: z.uuid().optional(),
   importMode: importModeSchema.optional(),
   // `hash` is the template source's hash when the book was created from the template library; it tells a later
   // template update whether the book's copy was edited since.

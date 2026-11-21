@@ -397,7 +397,7 @@ test('page layout transitions, blank pages and sheet operations share editor rul
 test('commands keep unknown fields they do not touch, and a content change keeps the box\'s other keys (ADR 0010)', () => {
   const original = files();
   const raw = { project: structuredClone(original.project) as Record<string, any>, photoIndex: structuredClone(original.photoIndex) as Record<string, any> };
-  raw.project.bookId = 'abc';
+  raw.project.bookNote = 'abc';
   raw.project.spreads[0].spreadNote = 's';
   raw.project.spreads[0].boxes.hero.boxNote = 'bx';
   raw.photoIndex.p1.syncRevision = 4;
@@ -408,7 +408,7 @@ test('commands keep unknown fields they do not touch, and a content change keeps
     { op: 'duplicate_spread', spread: 'one', ref: 'copy' },
   ]);
   const project = result.files.project as Record<string, any>;
-  assert.equal(project.bookId, 'abc');
+  assert.equal(project.bookNote, 'abc');
   assert.equal(project.spreads[0].spreadNote, 's');
   assert.equal(project.spreads[0].boxes.hero.photo, 'p2');
   assert.equal(project.spreads[0].boxes.hero.crops, undefined);

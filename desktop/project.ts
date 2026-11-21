@@ -285,11 +285,18 @@ function projectJson(value: unknown) {
 export async function updateProject(book: OpenProject, files: ProjectFiles, reloadContent = false,
   checkpoint: SaveCheckpoint = { origin: 'app', label: 'Project edit' }) {
   if (book.readOnly) throw new Error('Use New Project to make an editable copy of the sample.');
-  const project = parseDocument(projectSchema, files.project, 'project.json');
+  // `bookId` is the book's lineage (ADR 0010): an ordinary save, an undo or a redo never changes it, even when the files
+  // handed in come from an older snapshot or a caller that does not know the field.
+  let project = parseDocument(projectSchema, { ...files.project, ...(book.project.bookId ? { bookId: book.project.bookId } : {}) }, 'project.json');
   const photoIndex = parseDocument(photoIndexSchema, files.photoIndex, 'photos.json');
+  const unchanged = projectJson(book.project) === projectJson(project);
+  // A legacy book gets its `bookId` with the first save that writes something, so it adds no undo step of its own and
+  // no write when nothing changed.
+  // Parsed again, so the field takes its place in the schema's key order like one read from disk.
+  if (!project.bookId && !unchanged) project = parseDocument(projectSchema, { ...project, bookId: randomUUID() }, 'project.json');
   const projectSource = projectJson(project);
   const indexSource = projectJson(photoIndex);
-  const projectChanged = projectJson(book.project) !== projectSource;
+  const projectChanged = !unchanged || project.bookId !== book.project.bookId;
   const indexChanged = projectJson(book.photoIndex) !== indexSource;
   if (!projectChanged && !indexChanged) return book;
   const [projectFile, photoFile] = await Promise.all([readProjectManifest(book.folder, 'project.json'), readProjectManifest(book.folder, 'photos.json')]);

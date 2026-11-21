@@ -25,8 +25,11 @@ export async function createDocument(destination: string, starter: string | ((st
     else { await mkdir(staging); await starter(staging); }
     const file = join(staging, 'project.json');
     const project = JSON.parse(await readFile(file, 'utf8'));
-    project.title = basename(folder).slice(0, -documentExtension.length);
-    await writeFile(file, JSON.stringify(project, null, 2) + '\n');
+    // Every document made here (New Book, Duplicate, Save a Copy) starts a new lineage, so a copy never shares the
+    // `bookId` of the book it was made from (ADR 0010). A Finder copy, which does not pass here, keeps it by design.
+    const { schemaVersion, title: _title, bookId: _inherited, ...rest } = project;
+    await writeFile(file, JSON.stringify({ ...(schemaVersion === undefined ? {} : { schemaVersion }),
+      title: basename(folder).slice(0, -documentExtension.length), bookId: randomUUID(), ...rest }, null, 2) + '\n');
     // Reserve the destination exclusively. Never replace a user's existing book, even an empty package.
     try { await mkdir(folder); }
     catch (error) {
