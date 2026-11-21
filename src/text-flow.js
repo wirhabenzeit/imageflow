@@ -208,13 +208,13 @@ export const flow = (() => {
       let anchor = info.block;
       while (anchor.parentNode !== box && firstMeaningfulChild(anchor.parentNode) === anchor) anchor = anchor.parentNode;
       let previous = anchor.parentNode === box ? previousMeaningfulSibling(anchor) : null;
+      const blockStart = p;
       while (previous?.matches?.(KEEP_NEXT)) {
         const start = indexOf(index, firstText(previous));
-        if (!(start > 0)) break;
+        // Kept blocks that begin the box cannot move on, so they stay, and stay together.
+        if (!(start > 0)) return blockStart;
         p = start;
-        // A marked block is kept by the one before it in turn, such as a date above a title. A heading is not: two
-        // Markdown headings in a row break as they always have.
-        if (!previous.matches('[data-keep-next]')) break;
+        // A kept block is kept by the one before it in turn: a date above a title, or a heading above a subheading.
         previous = previousMeaningfulSibling(previous);
       }
     }
