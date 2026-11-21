@@ -300,20 +300,30 @@ export const flow = (() => {
     if (queue.firstChild) box.append(queue.firstChild);
   }
 
-  function flowBox(box, queue, strategy, nextBox) {
+  function flowBox(box, queue, strategy, nextBox, band) {
     box.replaceChildren();
+    // The band a head opening the box's first rectangle takes, reserved here by an empty spanner so the text of
+    // this rectangle starts level with the text there. It holds no text, so it is never split or flowed.
+    if (band?.spacer) {
+      const spacer = document.createElement('div');
+      spacer.dataset.levelSpacer = '';
+      spacer.setAttribute('aria-hidden', 'true');
+      spacer.style.cssText = `column-span:all;height:${band.spacer}px;margin:0;padding:0;border:0`;
+      box.append(spacer);
+    }
     if (strategy === 'columns') {
       const columns = Number(box.dataset.columns ?? 1);
       Object.assign(box.style, { columnCount: String(columns), columnFill: 'auto', overflow: 'hidden' });
     }
     fill(box, queue, strategy);
+    if (band?.grow) growHead(box, band.grow);
     if (!overflows(box, strategy)) return { retries: 0 };
 
     const snapshot = [...box.childNodes].map((node) => node.cloneNode(true));
     let index = textIndex(box);
     let p = strategy === 'columns' ? columnsBreak(box, index) : measureBreak(box, index);
     if (p === null) {
-      queue.prepend(...snapshot);
+      queue.prepend(...snapshot.filter((node) => node.dataset?.levelSpacer === undefined).map(release));
       box.replaceChildren();
       return { retries: 0, unresolved: true };
     }
@@ -342,15 +352,92 @@ export const flow = (() => {
         if (widow.linesBefore >= 3) { p = lineBack; continue; }
         if (block && block.blockStart > 0 && p > block.blockStart) { p = block.blockStart; continue; }
       }
-      if (after) queue.prepend(after);
+      if (after) queue.prepend(release(after));
       return { retries: attempt };
     }
-    queue.prepend(...snapshot);
+    queue.prepend(...snapshot.filter((node) => node.dataset?.levelSpacer === undefined).map(release));
     box.replaceChildren();
     return { retries: 30, failed: true, log, height: box.clientHeight };
   }
 
-  function run(html, boxes, strategy) {
+  // ---- rectangles of one box ----
+
+  const spans = (element) => element.nodeType === Node.ELEMENT_NODE && getComputedStyle(element).columnSpan === 'all';
+  const marginBottom = (element) => parseFloat(getComputedStyle(element).marginBottom) || 0;
+  // A head: an element that spans all columns and says something. One without text, such as a spanning rule, is not
+  // one, so a band is never measured from it or stretched to.
+  const isHead = (element) => spans(element) && /\S/.test(element.textContent);
+
+  function contentTop(box) {
+    const style = getComputedStyle(box);
+    return box.getBoundingClientRect().top + (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.paddingTop) || 0);
+  }
+
+  // The heads that open a node's content, in order.
+  function leadingHeads(parent) {
+    const heads = [];
+    for (const node of parent.childNodes) {
+      if (isBlank(node)) continue;
+      if (node.nodeType !== Node.ELEMENT_NODE || !isHead(node)) break;
+      heads.push(node);
+    }
+    return heads;
+  }
+
+  // How far below the top of the box its columns start: the bottom of the heads that open it, with their bottom
+  // margin. Zero when the box opens with text.
+  function openingBand(box) {
+    const last = leadingHeads(box).at(-1);
+    return last ? last.getBoundingClientRect().bottom + marginBottom(last) - contentTop(box) : 0;
+  }
+
+  // What a later rectangle of the box reserves so that its columns start at `band`: an empty spanner, or, when the
+  // text that starts it opens with a head of its own, `grow`: that head is made as tall as the band instead, so the
+  // two never add up.
+  function reserveBand(box, queue, band) {
+    box.replaceChildren();
+    const first = [...queue.childNodes].find((node) => !isBlank(node));
+    if (first?.nodeType === Node.ELEMENT_NODE) {
+      const probe = first.cloneNode(true);
+      box.append(probe);
+      const head = isHead(probe);
+      probe.remove();
+      if (head) return { grow: band };
+    }
+    return { spacer: band };
+  }
+
+  // Makes the last head of the heads that open the box tall enough for its columns to start at `band`. It works from
+  // the laid-out geometry, so collapsed margins and a head that is already tall enough need no special care. The
+  // head remembers what it replaced, so `release` can undo this if the flow moves it to another box.
+  function growHead(box, band) {
+    const last = leadingHeads(box).at(-1);
+    if (!last) return;
+    const missing = band - (last.getBoundingClientRect().bottom + marginBottom(last) - contentTop(box));
+    if (missing < 0.01) return;
+    last.dataset.bandGrown = '';
+    last.dataset.bandBoxSizing = last.style.boxSizing;
+    last.dataset.bandMinHeight = last.style.minHeight;
+    last.style.boxSizing = 'border-box';
+    last.style.minHeight = `${last.getBoundingClientRect().height + missing}px`;
+  }
+
+  // Undoes growHead on a node, or on the heads inside it, that goes back to the queue.
+  function release(node) {
+    const grown = node.matches?.('[data-band-grown]') ? [node] : [];
+    for (const element of [...grown, ...(node.querySelectorAll?.('[data-band-grown]') ?? [])]) {
+      element.style.boxSizing = element.dataset.bandBoxSizing;
+      element.style.minHeight = element.dataset.bandMinHeight;
+      delete element.dataset.bandGrown;
+      delete element.dataset.bandBoxSizing;
+      delete element.dataset.bandMinHeight;
+    }
+    return node;
+  }
+
+  // `groups[i]` says which box rectangle i belongs to. The first rectangle of a box decides the band; the rectangles
+  // after it reserve it.
+  function run(html, boxes, strategy, groups) {
     const template = document.createElement('template');
     template.innerHTML = html;
     const queue = template.content;
@@ -359,7 +446,17 @@ export const flow = (() => {
     let composed = 0;
     for (const element of queue.querySelectorAll(':not([data-s]):not(br)')) element.dataset.s = 'c' + composed++;
     const started = performance.now();
-    const results = boxes.map((box, i) => flowBox(box, queue, strategy, boxes[i + 1]));
+    let band = 0;
+    const results = boxes.map((box, i) => {
+      const continued = groups && i > 0 && groups[i] === groups[i - 1];
+      // Nothing to reserve in a rectangle the text never reaches.
+      const reserve = continued && band > 0 && hasContent(queue) ? reserveBand(box, queue, band) : undefined;
+      const result = flowBox(box, queue, strategy, boxes[i + 1], reserve);
+      if (groups && !continued) band = openingBand(box);
+      // The room alone left this rectangle no space for text: it stays empty and the text goes on to the next.
+      if (reserve && !/\S/.test(box.textContent) && hasContent(queue)) result.bandBlocked = true;
+      return result;
+    });
     const elapsed = performance.now() - started;
     const overflowText = queue.textContent;
     return { elapsed, results, overflowText };

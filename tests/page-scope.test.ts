@@ -79,3 +79,13 @@ test('ordinary page artwork retains page attribution without a box or element', 
   el({ 'data-if-page': 'right' }, text);
   assert.deepEqual(ownerOf(asDom<Element>(text)), { page: 'right' });
 });
+
+test('a further rectangle of a box belongs to that box without being a declared node', () => {
+  const caption = el({ class: 'text' });
+  const second = el({ 'data-box-rect': 'body', 'data-rect': '1', 'data-box-type': 'markdown' }, caption);
+  const sheet = el({ class: 'if-sheet' }, el({ 'data-if-page': 'right' }, el({ 'data-box': 'body', 'data-box-type': 'markdown' }), second));
+  assert.deepEqual(ownerOf(asDom<Element>(caption)), { box: 'body', page: 'right' });
+  assert.deepEqual(declaredNodes(asDom<HTMLElement>(sheet)).map(declaredKey), ['right:box:body'], 'The rectangle is not a second box');
+  const spreadSecond = el({ 'data-box-rect': 'body', 'data-rect': '1' });
+  assert.deepEqual(ownerOf(asDom<Element>(spreadSecond)), { box: 'body' });
+});

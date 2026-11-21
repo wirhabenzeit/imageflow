@@ -110,6 +110,17 @@ function photoResolutionIssue(node: HTMLElement, minimum: number | undefined, mm
   };
 }
 
+// Whether the rectangles of a box start level below a head that opens it (`alignHeads`); otherwise each flows on its own,
+// like chained boxes.
+const aligned = (first: HTMLElement) => first.dataset.alignHeads !== undefined;
+
+// A box and the further rectangles it is drawn over, in flow order.
+function rectsOf(boxes: Map<string, HTMLElement>, key: string) {
+  const rects = [boxes.get(key)!];
+  for (let i = 1; boxes.has(key + '#' + i); i++) rects.push(boxes.get(key + '#' + i)!);
+  return rects;
+}
+
 function validateSpread(container: HTMLElement, spread: SpreadState, template: Template, format: ResolvedFormat, where: string,
   warnings: Issue[], errors: Issue[]) {
   const sheet = container.firstElementChild;
@@ -253,6 +264,15 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
   }
   for (const [page, scope] of scopes) {
     if (scope.boxes.size) throw new SpreadError(where + (page ? ' · ' + page + ' page' : '') + ' is missing boxes: ' + [...scope.boxes].join(', ') + '.', spread.id, { page });
+  }
+  // A Markdown box drawn over several rectangles (`rects`): the first is the box itself, the others are registered as
+  // `id#1`, `id#2`, … and flow after it.
+  for (const node of sheet.querySelectorAll<HTMLElement>('[data-box-rect]')) {
+    const id = node.dataset.boxRect!, page = pageOf(node);
+    const key = (page ? page + ':' : '') + id;
+    if (!boxes.has(key)) throw new SpreadError(where + ' draws a rectangle of box ' + id + ' without the box itself.', spread.id, { page });
+    if (!node.clientWidth || !node.clientHeight) throw new SpreadError(where + ' · rectangle ' + node.dataset.rect + ' of box ' + id + ' has no area.', spread.id, { page });
+    boxes.set(key + '#' + node.dataset.rect, node);
   }
   return { sheet, boxes };
 }
@@ -1227,20 +1247,21 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
   const containers = root.querySelectorAll<HTMLElement>('.if-spread-container');
   const sheets = previews.map(({ definition, spread, crop }, n) => {
     const { sheet, boxes } = validateSpread(containers[n], spread, template, format, definition, [], []);
-    const sources = new Map<string, { targets: HTMLElement[]; composition?: string }>();
+    const sources = new Map<string, { targets: HTMLElement[]; groups: number[]; next: number; composition?: string }>();
     const order = Object.entries(template.spreads[definition].boxes).sort(([, a], [, b]) => (a.flowOrder ?? 1) - (b.flowOrder ?? 1));
     for (const [box, { composition }] of order) {
       const source = spread.boxes[box]?.text;
       if (!source || book.texts[source] === undefined || !boxes.has(box)) continue;
-      const entry = sources.get(source);
-      if (entry) entry.targets.push(boxes.get(box)!);
-      else sources.set(source, { targets: [boxes.get(box)!], composition });
+      const entry = sources.get(source) ?? sources.set(source, { targets: [], groups: [], next: 0, composition }).get(source)!;
+      const together = aligned(boxes.get(box)!);
+      let group = entry.next++;
+      for (const rect of rectsOf(boxes, box)) { entry.targets.push(rect); entry.groups.push(group); if (!together) group = entry.next++; }
     }
-    for (const [source, { targets, composition }] of sources) {
+    for (const [source, { targets, groups, composition }] of sources) {
       let html: string;
       // A preview has nowhere to report a failing composition; the book's own render does.
       try { html = textHtml(template, book, source, composition, spreads[index].id); } catch { html = markdownToHtml(book.texts[source]); }
-      flow.run(html, targets, 'columns');
+      flow.run(html, targets, 'columns', groups);
     }
     if (crop) {
       const page = sheetPages(format).find(({ side }) => side === crop)!;
@@ -2222,7 +2243,14 @@ export async function startRender(root: HTMLElement) {
           code: 'text-frontmatter-invalid', ...onPage(first.page), box: first.box, source, details: { line: header.line, path },
           suggestion: 'Fix the YAML between the opening and closing --- lines of ' + path + '. Until then the layout shows it without its header fields.' });
       }
-      const boxes = chain.map(({ spread, page, box }) => validated.get(spread)!.boxes.get((page ? page + ':' : '') + box)!);
+      // A box drawn over several rectangles flows through each in turn; `groups` tells the flow which belong together.
+      let next = 0;
+      const stages = chain.flatMap(({ spread, page, box }, index) => {
+        const all = validated.get(spread)!.boxes, key = (page ? page + ':' : '') + box, together = aligned(all.get(key)!);
+        let group = next++;
+        return rectsOf(all, key).map((node) => { const stage = { node, group, index }; if (!together) group = next++; return stage; });
+      });
+      const boxes = stages.map(({ node }) => node);
       const path = book.project.texts[source] ? sourcePath(book.project.texts[source]) : source;
       // The box a text starts in decides its composition. A later box that names another is styled for a structure
       // the text does not have there.
@@ -2241,9 +2269,20 @@ export async function startRender(root: HTMLElement) {
           suggestion: 'Fix the composition ' + first.composition + ' in the template. Until then the text flows as plain Markdown.' });
         html = markdownToHtml(book.texts[source]);
       }
-      const result = flow.run(html, boxes, 'columns');
+      const result = flow.run(html, boxes, 'columns', stages.map(({ group }) => group));
+      // With alignHeads a rectangle can be too short for the room the opening head takes: it holds no text, and the flow
+      // goes on in the next rectangle or box.
+      result.results.forEach(({ bandBlocked }, i) => {
+        if (!bandBlocked) return;
+        const target = chain[stages[i].index];
+        const rect = stages.slice(0, i).filter(({ index }) => index === stages[i].index).length + 1;
+        warnings.push({ ...located(target.spread, 'Rectangle ' + rect + ' of box ' + target.box + ' is too short for the room the head that opens it takes, so it holds no text from ' + path + '.'),
+          code: 'text-band-too-tall', ...onPage(target.page), box: target.box, source, details: { rect, path },
+          suggestion: 'Make rectangle ' + rect + ' of box ' + target.box + ' taller than the opening head, shorten the head, or remove alignHeads.' });
+      });
       const overflow = result.overflowText.trim();
-      if (overflow || result.results.some(({ failed, unresolved }) => failed || unresolved)) {
+      // A rectangle left empty by the room it reserves gives its text back to the queue: nothing is lost there.
+      if (overflow || result.results.some(({ failed, unresolved, bandBlocked }) => failed || (unresolved && !bandBlocked))) {
         const last = chain.at(-1)!;
         errors.push({ ...located(last.spread, 'Text from ' + (book.project.texts[source] ? sourcePath(book.project.texts[source]) : source) + ' does not fit; add a spread that continues it.'),
           code: 'text-overflow', ...onPage(last.page), box: last.box, source,
@@ -2252,7 +2291,7 @@ export async function startRender(root: HTMLElement) {
             ' to it so the flow continues, or enlarge the boxes, reduce the text size or shorten the text.' });
       } else {
         // The text ends before its last boxes: they are assigned but print nothing, space the book could use.
-        const used = boxes.map((box) => !!box.textContent?.trim());
+        const used = chain.map((_, index) => stages.some((stage) => stage.index === index && !!stage.node.textContent?.trim()));
         const ends = used.lastIndexOf(true);
         chain.forEach((target, i) => {
           if (ends < 0 || i <= ends) return;

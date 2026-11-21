@@ -754,7 +754,7 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
     children?: (photo: PhotoRender, box: PhotoBoxState<I, ValuesOf<S['boxes'][I]>>) => ImageFlowNode;
   }): ImageFlowElement;
   /** `MarkdownBox` limited to this layout's Markdown box IDs. */
-  MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: BoxIds<S, 'markdown'>; columns?: Columns }): ImageFlowElement;
+  MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: BoxIds<S, 'markdown'>; columns?: Columns; rects?: readonly Rect[]; alignHeads?: boolean }): ImageFlowElement;
   /** `Element` limited to this layout's element IDs. */
   Element(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: keyof S['elements'] & string; children?: ImageFlowNode }): ImageFlowElement;
   /**
@@ -1132,7 +1132,7 @@ export type TextComposition<D extends Parameters = Parameters> = {
  * columns; set the gap with the `columnGap` style. Text fills each column before continuing in the next box.
  * In the editor, clicking it edits the box's parameters and any others it is marked with: `{...ctx.edit('textSize')}`.
  */
-export function MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: string; columns?: Columns }): ImageFlowElement;
+export function MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: string; columns?: Columns; rects?: readonly Rect[]; alignHeads?: boolean }): ImageFlowElement;
 /**
  * Generated content with parameters, such as a calendar grid. In the editor, clicking it edits the element's
  * parameters and any others it is marked with: `<Element id="grid" {...ctx.edit('month')}>`.

@@ -42,7 +42,9 @@ export function findDeclared(root: ParentNode, target: DeclaredTarget): Declared
 
 /** The declared box or element that contains a node, with its page, for locating findings inside a spread. */
 export function ownerOf(node: Element): { box?: string; element?: string; page?: PageSide } {
-  const owner = node.closest<HTMLElement>(declaredSelector);
+  // A further rectangle of a box (`rects`) belongs to that box, though it is not a declared node of its own.
+  const owner = node.closest<HTMLElement>(declaredSelector + ', [data-box-rect]');
+  if (owner?.dataset.boxRect !== undefined) return { box: owner.dataset.boxRect, ...onPage(pageOf(owner)) };
   const found = owner && declaredNode(owner);
   if (!found) return onPage(pageOf(node));
   return { [found.kind]: found.id, ...onPage(found.page) };

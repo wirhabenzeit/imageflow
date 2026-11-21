@@ -75,3 +75,24 @@ export default defineTemplate({
 - **Flow.** What a composition returns is measured, broken across columns and boxes and counted towards overflow like Markdown. Return block elements (`p`, headings, `div`, `blockquote`, lists) next to each other. An element marked `data-keep-next` stays whole and with the one after it, as a heading does, and a run of them stays together: a date, its title and the paragraph below. A run that begins a box too small for it stays where it is, and may then split. An element split across two boxes gets `.split` and `.cont` like a Markdown block; set `break-inside: avoid` on one that must not split.
 - **Static.** A composition renders once per text, off the page, before the flow. Use plain elements and your own helper components. Content that arrives later — such as a `<RenderedImage>` or an `<img>` without fixed dimensions (images are decoded before the flow runs) — and platform components (`PhotoBox`, `MarkdownBox`, `Element`, `ctx.Text`) are not supported inside it.
 - **Errors.** A composition that throws is a `text-composition-failed` error on the text's first box, and the text flows as plain Markdown until it is fixed. A box that names a composition the template does not declare fails the template's validation.
+
+## One box over several rectangles
+
+`rects` draws one Markdown box over several rectangles, such as the two pages of a spread, so a text can run across the fold without two boxes and a `flowOrder` pairing:
+
+```tsx
+const left = ctx.geometry.page('left', 'safe');
+const right = ctx.geometry.page('right', 'safe');
+// A text spread: both pages in full.
+<ctx.MarkdownBox id="body" columns={2} rects={[left, right]} />
+// An opener band: the text sits in the bottom quarter of both pages, level below the head that opens it.
+<ctx.MarkdownBox id="body" columns={2} rects={[bandLeft, bandRight]} alignHeads />
+```
+
+- **One box.** There is one ID, one label, one text assignment and one drop target. The text cannot differ between the rectangles, and `text.part` counts the box once. `rect` and `rects` are mutually exclusive; `className` and `style` apply to every rectangle.
+- **Flow.** Text runs down the columns of the first rectangle, then those of the next, then continues in the next box that holds the same text, as with chained boxes. Every rectangle has `columns` columns. Rectangles may differ in size and position; the space between pages is whatever lies between the rectangles, so it can differ from the column gap.
+- **Without `alignHeads`** each rectangle behaves like a box of its own in a chain. A head (an element with `column-span: all`, such as a composition's day head) spans the columns of the rectangle it lands in and moves nothing else, so facing pages keep the same top line and only the page a head opens is lowered. This is the usual setting for running text, where heads fall wherever the text breaks.
+- **With `alignHeads`,** a head that opens the box, as the first thing in its first rectangle, leaves the same room at the top of every other rectangle, so the columns on all pages start on one line below it. The room is the head's full height: its padding and its bottom margin count. A later rectangle that itself opens with a head grows that head to the same height instead of adding a gap. Use it for opener bands, where the head belongs to the whole band. Give heads and text whole baseline-grid lines (a head of three lines, text in the same line height) and the columns stay on the grid across the fold.
+- **Only a head that opens the box counts.** A head in the middle of a rectangle, or at the top of a later rectangle, spans that rectangle's columns and does not change the others. The room costs capacity: a text that just fitted may now need another box. A later rectangle that is too short for the room holds no text, the text goes on in the next rectangle or box, and the Book check warns with `text-band-too-tall`. A rectangle the text never reaches gets no room.
+- **Column fill.** Columns fill top to bottom and the text continues in the next rectangle, as in chained boxes; the platform sets this, so a template's `column-fill` has no effect. A short text therefore fills the first rectangle's columns before the next. Balancing across rectangles is not supported.
+- **Existing books.** A book made with two boxes (`body` and `bodyMore`) keeps the second assignment when a spread switches to a layout with one box over two rectangles: what a layout does not show stays with the spread, `switch_layout` reports it as kept, and only the box the layout draws flows. `clear_box` discards the leftover assignment; switching back shows both boxes again. IDs are identity, so renaming `body` or dropping `bodyMore` from a template is a breaking change for books that use them.
