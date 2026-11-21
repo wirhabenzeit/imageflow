@@ -108,20 +108,23 @@ async function fileDigest(path: string) {
 const digestOrUndefined = (path: string) => fileDigest(path).catch(() => undefined);
 
 /**
- * A path inside one of the book's folders, refusing anything that leaves it through `..` or a link. Missing folders
- * on the way are created as real directories.
+ * A path inside one of the book's folders, refusing anything that leaves it through `..` or a link, and template
+ * folders a book never carries (`node_modules`, `.git` and other ignored names, which a push never sends). Missing
+ * folders on the way are created as real directories, unless only `checking`.
  */
-export async function bookPath(root: string, path: string) {
+export async function bookPath(root: string, path: string, { checking = false } = {}) {
   const parts = path.split('/');
-  if (!['texts', 'files', 'template', 'photos'].includes(parts[0]) || parts.length < 2 || parts.some((part) => !part || part === '.' || part === '..' || part.includes('\\'))) {
+  if (!['texts', 'files', 'template', 'photos'].includes(parts[0]) || parts.length < 2 || parts.some((part) => !part || part === '.' || part === '..' || part.includes('\\')) ||
+      (parts[0] === 'template' && parts.slice(1).some(ignoredName))) {
     throw new Error('A synced path must stay inside the book: ' + path);
   }
   let current = root;
+  let missing = false;
   for (const part of parts.slice(0, -1)) {
     current = join(current, part);
-    const info = await lstat(current).catch(() => undefined);
-    if (!info) await mkdir(current);
-    else if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('A synced path must stay inside the book: ' + path);
+    const info = missing ? undefined : await lstat(current).catch(() => undefined);
+    if (!info) { missing = true; if (!checking) await mkdir(current); }
+    else if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('A synced file would go through a file or link here: ' + path);
   }
   const target = join(current, parts.at(-1)!);
   const info = await lstat(target).catch(() => undefined);
@@ -178,6 +181,56 @@ export function mergePulledFacts(photos: PhotoIndex, local: Record<string, Asset
 
 const manifestJson = (value: unknown) => JSON.stringify(value, null, 2) + '\n';
 
+const manifests = async (root: string) => ({ 'project.json': await readFile(join(root, 'project.json')), 'photos.json': await readFile(join(root, 'photos.json')) });
+
+/** The manifests a pull writes: the snapshot's, with this Mac's linked paths. Throws for ones that would not load. */
+function projectedManifests(blob: StateBlob, before: Awaited<ReturnType<typeof manifests>>) {
+  const parse = <T>(bytes: Buffer, schema: z.ZodType<T>) => { try { return schema.safeParse(JSON.parse(bytes.toString('utf8'))).data; } catch { return undefined; } };
+  const local = { project: parse<Project>(before['project.json'], projectSchema), photos: parse<PhotoIndex>(before['photos.json'], photoIndexSchema) };
+  const projected = projectManifests(blob, local);
+  const project = parseDocument(projectSchema, projected.project, 'project.json');
+  const photos = parseDocument(photoIndexSchema, projected.photos, 'photos.json');
+  return { project, photos, after: { 'project.json': Buffer.from(manifestJson(project)), 'photos.json': Buffer.from(manifestJson(photos)) } };
+}
+
+const readStaged = async (root: string, marker: PullMarker): Promise<StateBlob> =>
+  stateBlobSchema.parse(JSON.parse(Buffer.from(await stagedBlob(root, marker.stateDigest)).toString('utf8')));
+
+/**
+ * Checks, before a pull is marked, everything that could make projecting it fail: the staged blobs are there and
+ * whole, every file it writes or removes can be written there, and the manifests it writes are valid, like the ones
+ * on disk the save journal starts from. A pull that passes changes the book only through ordinary writes.
+ */
+export async function preflightPull(folder: string, marker: PullMarker) {
+  const root = await realpath(folder);
+  const blob = await readStaged(root, marker);
+  for (const [path, sha] of [...Object.entries(blob.content), ...Object.entries(marker.originals)]) {
+    await bookPath(root, path, { checking: true });
+    await stagedBlob(root, sha);
+  }
+  for (const path of Object.keys(marker.staleOriginals)) await bookPath(root, path, { checking: true });
+  const before = await manifests(root);
+  parseDocument(projectSchema, JSON.parse(before['project.json'].toString('utf8')), 'project.json');
+  parseDocument(photoIndexSchema, JSON.parse(before['photos.json'].toString('utf8')), 'photos.json');
+  projectedManifests(blob, before);
+}
+
+/**
+ * Gives up a pull that could not be projected, so the book stays openable: it keeps what was written so far, and
+ * this Mac forgets what it last synced. The next sync then treats the book as this Mac's own version and keeps both
+ * (a conflict copy beside the book, then a fresh pull), so nothing half-pulled is ever pushed and nothing is lost.
+ */
+export async function abandonPull(folder: string) {
+  await updateSyncState(folder, ({ pull, lastSynced: _, ...state }) => ({ ...state, ...(pull?.templateChanged || state.networkReview ? { networkReview: true as const } : {}) }));
+  await rm(await stagingFolder(folder), { recursive: true, force: true }).catch(() => {});
+}
+
+/** Projects a marked pull, giving it up when that fails. */
+export async function finishPull(folder: string, marker: PullMarker) {
+  try { return await applyStagedPull(folder, marker); }
+  catch (error) { await abandonPull(folder).catch(() => {}); throw error; }
+}
+
 /**
  * Projects a staged snapshot into the book, under its writer lock: content, the template (removing what the snapshot
  * no longer has), owned originals staged with it, the manifests through the save journal, and the merged facts.
@@ -185,7 +238,7 @@ const manifestJson = (value: unknown) => JSON.stringify(value, null, 2) + '\n';
  */
 export async function applyStagedPull(folder: string, marker: PullMarker) {
   const root = await realpath(folder);
-  const blob: StateBlob = stateBlobSchema.parse(JSON.parse(Buffer.from(await stagedBlob(root, marker.stateDigest)).toString('utf8')));
+  const blob = await readStaged(root, marker);
   for (const [path, sha] of Object.entries(blob.content)) await place(root, path, sha, () => stagedBlob(root, sha));
   await pruneTemplate(root, new Set(Object.keys(blob.content).filter((path) => path.startsWith('template/'))));
   for (const [path, sha] of Object.entries(marker.originals)) await place(root, path, sha, () => stagedBlob(root, sha));
@@ -193,13 +246,8 @@ export async function applyStagedPull(folder: string, marker: PullMarker) {
     const target = await bookPath(root, path);
     if (await digestOrUndefined(target) === stale) await rm(target, { force: true });
   }
-  const before = { 'project.json': await readFile(join(root, 'project.json')), 'photos.json': await readFile(join(root, 'photos.json')) };
-  const parse = <T>(bytes: Buffer, schema: z.ZodType<T>) => { try { return schema.safeParse(JSON.parse(bytes.toString('utf8'))).data; } catch { return undefined; } };
-  const local = { project: parse<Project>(before['project.json'], projectSchema), photos: parse<PhotoIndex>(before['photos.json'], photoIndexSchema) };
-  const projected = projectManifests(blob, local);
-  const project = parseDocument(projectSchema, projected.project, 'project.json');
-  const photos = parseDocument(photoIndexSchema, projected.photos, 'photos.json');
-  const after = { 'project.json': Buffer.from(manifestJson(project)), 'photos.json': Buffer.from(manifestJson(photos)) };
+  const before = await manifests(root);
+  const { project, photos, after } = projectedManifests(blob, before);
   if (!after['project.json'].equals(before['project.json']) || !after['photos.json'].equals(before['photos.json'])) {
     await persistProjectManifests(root, before, after, { origin: 'app', label: 'Sync pull' });
   }
@@ -207,7 +255,7 @@ export async function applyStagedPull(folder: string, marker: PullMarker) {
   await AssetFacts.adoptSynced(root, facts);
   const revision = await captureBookStateRevision(root);
   if (revision !== marker.bookStateRevision) {
-    throw new Error('The pulled book does not match its snapshot. It is left as pulled so far; sync again to finish.');
+    throw new Error('The pulled book does not match its snapshot. It is kept as pulled so far; the next sync keeps it as a separate copy and pulls again.');
   }
   const photoDigests = Object.fromEntries(Object.entries(blob.assetsMeta.assets).filter(([id]) => photos[id]).map(([id, fact]) => [id, fact.digest]));
   await updateSyncState(root, (state) => ({ ...state, pull: undefined,
@@ -226,6 +274,8 @@ export async function resumeSyncPull(folder: string, { readOnly = false }: { rea
   const state = await readSyncState(folder);
   if (!state.pull) return false;
   if (readOnly) throw new Error('This book has an interrupted sync. Open it as a writable book to finish it before checking or previewing it.');
-  await applyStagedPull(folder, state.pull);
+  // A pull that cannot be finished is given up rather than retried at every open (`abandonPull`).
+  try { await finishPull(folder, state.pull); }
+  catch (error) { console.warn('ImageFlow could not finish an interrupted sync; the next sync keeps both versions', error); return false; }
   return true;
 }

@@ -22,7 +22,7 @@ import type { ImportProgress } from './project';
 import type { OpenProject } from './project';
 import { photoExtensions } from './photos';
 import { bundledFontNames } from './fonts';
-import { isProjectInputPath } from './revisions';
+import { captureBookStateRevision, isProjectInputPath } from './revisions';
 import type { ProjectInputIndex } from './revisions';
 import { checkProject } from './check';
 import { checkTemplateTypes } from './typecheck';
@@ -276,10 +276,22 @@ export class DocumentSession {
   async sync(remote: SyncRemote, options: Pick<SyncOptions, 'keepOriginals'> = {}) {
     return this.run(async () => {
       this.stopWatch();
+      // What a pull changes: the book state, or (photos only) the commit this Mac last synced.
+      const mark = async () => [await captureBookStateRevision(this.book.folder).catch(() => ''),
+        (await readSyncState(this.book.folder).catch(() => undefined))?.lastSynced?.commitId ?? ''].join(':');
+      const before = await mark();
       try {
         const outcome = await syncBook({ remote, book: this.book, ...options, chooseTip: (tips) => this.chooseTip(tips) });
         if (outcome.changed) this.notify({ value: this.activate(await loadProject(this.book.folder, this.cache), true) });
         return outcome;
+      } catch (error) {
+        // A sync can fail after it changed the book (a pull, then a failed push or fork commit): the editor takes what
+        // is on disk now, so its next edit does not fail as a change made outside ImageFlow.
+        if (await mark() !== before) {
+          const next = await loadProject(this.book.folder, this.cache).catch(() => undefined);
+          if (next) this.notify({ value: this.activate(next, true) });
+        }
+        throw error;
       } finally { this.watchProject(this.book); }
     });
   }

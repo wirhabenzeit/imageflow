@@ -33,6 +33,32 @@ export const commitHeaderSchema = z.object({
 }).strict();
 export type CommitHeader = z.infer<typeof commitHeaderSchema>;
 
+/**
+ * Sync records a newer ImageFlow wrote: a higher `version`, or fields this version does not know. They are never
+ * skipped, which would hide commits and make an older app push a fork; sync stops and asks for an update instead.
+ */
+export class NewerSyncFormatError extends Error {
+  readonly code = 'SYNC_FORMAT_NEWER';
+  constructor() {
+    super('This book was synced by a newer version of ImageFlow. Update ImageFlow to sync it. The book was not changed.');
+    this.name = 'NewerSyncFormatError';
+  }
+}
+const newer = (value: unknown, schema: z.ZodObject) => {
+  if (!value || typeof value !== 'object') return false;
+  const version = (value as { version?: unknown }).version;
+  if (typeof version === 'number' && version > 1) return true;
+  // Every field this version needs, and more: written by a newer version.
+  return version === 1 && schema.loose().safeParse(value).success;
+};
+/** A commit header as a remote stored it: the header, or undefined for one that is incomplete or not a header. */
+export function readCommitHeader(value: unknown): CommitHeader | undefined {
+  const parsed = commitHeaderSchema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  if (newer(value, commitHeaderSchema)) throw new NewerSyncFormatError();
+  return undefined;
+}
+
 // Paths of the content map: the book's own texts and files that project.json references, and every template file.
 const contentPath = z.string().max(1024).refine((path) => /^(?:texts|files|template)\/./.test(path) &&
   path.split('/').every((part) => part && part !== '.' && part !== '..' && !part.includes('\\')), 'A content path must stay inside texts/, files/ or template/.');
@@ -51,6 +77,8 @@ export const stateBlobSchema = z.object({
   proxies: z.record(sha256, z.object({ sha256, ext: z.enum(['.jpg', '.png']) }).strict()),
 }).strict();
 export type StateBlob = z.infer<typeof stateBlobSchema>;
+/** Whether a complete state blob that this version cannot read was written by a newer version. */
+export const newerStateBlob = (value: unknown) => newer(value, stateBlobSchema);
 
 /** Keys of the immutable blobs a remote stores. */
 export const contentBlobKey = (digest: string) => 'blobs/content/' + sha256.parse(digest);
@@ -135,6 +163,7 @@ export type SyncedCommit = { commitId: string; bookStateRevision: string; stateD
 
 export type SyncDecision =
   | { action: 'resume' }
+  | { action: 'remote-behind' }
   | { action: 'initial-push' }
   | { action: 'adopt'; tip: CommitHeader }
   | { action: 'push'; tip: CommitHeader }
@@ -164,11 +193,16 @@ export function factsAhead(here: Record<string, string>, synced: Pick<SyncedComm
  * The Milestone 1 decision table (ADR 0010): fast-forward or keep both. `factsChanged` says whether this Mac verified a photo fact
  * the last synced snapshot lacks (`factsAhead`); facts never make a book diverge.
  */
-export function decideSync({ pullInProgress, tips, lastSynced, localRevision, factsChanged }: {
+export function decideSync({ pullInProgress, tips, commits = tips, lastSynced, localRevision, factsChanged }: {
   pullInProgress: boolean; tips: readonly CommitHeader[]; lastSynced?: Pick<SyncedCommit, 'commitId' | 'bookStateRevision'>;
+  /** Every commit the remote lists; the tips by default. */
+  commits?: readonly Pick<CommitHeader, 'commitId'>[];
   localRevision: string; factsChanged: boolean;
 }): SyncDecision {
   if (pullInProgress) return { action: 'resume' };
+  // The commit this Mac last synced is not there (yet): a folder still downloading, or the wrong one. Pushing now would
+  // start a second history that shows as diverged once the real commits arrive.
+  if (lastSynced && !commits.some(({ commitId }) => commitId === lastSynced.commitId)) return { action: 'remote-behind' };
   if (!tips.length) return { action: 'initial-push' };
   if (tips.length > 1) return { action: 'diverged', tips: [...tips] };
   const [tip] = tips;

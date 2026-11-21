@@ -2,7 +2,7 @@ import { constants } from 'node:fs';
 import { copyFile, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
-import { blobKeyPattern, commitHeaderSchema, deriveTips } from '../src/sync-snapshot';
+import { blobKeyPattern, commitHeaderSchema, deriveTips, readCommitHeader } from '../src/sync-snapshot';
 import type { CommitHeader } from '../src/sync-snapshot';
 
 /**
@@ -14,9 +14,11 @@ import type { CommitHeader } from '../src/sync-snapshot';
 export interface SyncRemote {
   /** Stores a commit header. Headers are immutable: storing one whose ID exists is an error unless it is identical. */
   putCommit(header: CommitHeader): Promise<void>;
-  getCommit(bookId: string, commitId: string): Promise<CommitHeader | undefined>;
-  /** Every commit header of a book that is fully written and valid. */
-  listCommits(bookId: string): Promise<CommitHeader[]>;
+  /** A commit header as stored (parsed JSON), or undefined. The engine validates it (`readCommitHeader`). */
+  getCommit(bookId: string, commitId: string): Promise<unknown>;
+  /** Every commit header of a book as stored (parsed JSON). Files that are not whole JSON yet are left out; anything
+   * else is returned, so the engine can tell a header a newer version wrote from one still arriving. */
+  listCommits(bookId: string): Promise<unknown[]>;
   hasBlob(key: string): Promise<boolean>;
   /** Stores a blob under a key of `blobKeyPattern`, from bytes or a local file. An existing blob is kept. */
   putBlob(key: string, source: Uint8Array | { file: string }): Promise<void>;
@@ -26,9 +28,14 @@ export interface SyncRemote {
   downloadBlob(key: string, destination: string): Promise<boolean>;
 }
 
+/** A book's commits on a remote. Throws `NewerSyncFormatError` for one a newer version wrote. */
+export async function remoteCommits(remote: SyncRemote, bookId: string) {
+  return (await remote.listCommits(bookId)).map(readCommitHeader).filter((header) => header !== undefined && header.bookId === bookId) as CommitHeader[];
+}
+
 /** The tips of a book on a remote: commits that no other commit names as a parent. */
 export async function remoteTips(remote: SyncRemote, bookId: string) {
-  return deriveTips(await remote.listCommits(bookId));
+  return deriveTips(await remoteCommits(remote, bookId));
 }
 
 export function requireBlobKey(key: string) {
@@ -37,7 +44,8 @@ export function requireBlobKey(key: string) {
 
 /** A remote held in memory: tests, and the reference for what a transport has to do. */
 export class MemoryRemote implements SyncRemote {
-  readonly commits = new Map<string, CommitHeader>();
+  // Values as stored; tests put other ones here to stand for what another version wrote.
+  readonly commits = new Map<string, unknown>();
   readonly blobs = new Map<string, Uint8Array>();
   async putCommit(header: CommitHeader) {
     const parsed = commitHeaderSchema.parse(header);
@@ -51,7 +59,7 @@ export class MemoryRemote implements SyncRemote {
     return header && structuredClone(header);
   }
   async listCommits(bookId: string) {
-    return [...this.commits.values()].filter((header) => header.bookId === bookId).map((header) => structuredClone(header));
+    return [...this.commits.entries()].filter(([key]) => key.startsWith(bookId + '/')).map(([, header]) => structuredClone(header));
   }
   async hasBlob(key: string) { requireBlobKey(key); return this.blobs.has(key); }
   async putBlob(key: string, source: Uint8Array | { file: string }) {

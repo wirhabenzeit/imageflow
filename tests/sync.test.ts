@@ -13,17 +13,20 @@ import { AssetFacts, readAssetFacts } from '../desktop/asset-facts';
 import { acquireProjectLock, readSaveLedger } from '../desktop/persistence';
 import { importIntoProject, loadProject, updateProject } from '../desktop/project';
 import type { OpenProject } from '../desktop/project';
-import { relinkFolder } from '../desktop/source-actions';
+import { collectSources, relinkFolder } from '../desktop/source-actions';
 import { captureBookStateRevision } from '../desktop/revisions';
 import { downloadOriginals, RemoteSyncingError, stageSyncPull, syncBook } from '../desktop/sync-engine';
 import type { SyncOptions } from '../desktop/sync-engine';
 import { MemoryRemote, remoteTips } from '../desktop/sync-remote';
 import { readSyncState, updateSyncState } from '../desktop/sync-pull';
-import { contentBlobKey, decideSync, deriveTips, isUnlocatedPath, originalBlobKey, portableManifests, projectManifests, proxyBlobKey, stateBlobSchema } from '../src/sync-snapshot';
+import { contentBlobKey, decideSync, readCommitHeader, NewerSyncFormatError, deriveTips, isUnlocatedPath, originalBlobKey, portableManifests, projectManifests, proxyBlobKey, stateBlobSchema } from '../src/sync-snapshot';
 import type { CommitHeader, StateBlob } from '../src/sync-snapshot';
 import type { ProjectFiles } from '../src/project';
 import { copySample } from '../desktop/sample-book.mjs';
-import './persistence-root';
+import { canonicalJson } from '../src/canonical-json';
+import { computeBookStateRevision } from '../src/book-revision';
+import { photoIndexSchema, projectSchema } from '../src/project';
+import { persistenceRoot } from './persistence-root';
 
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const image = (path: string, color: string, width = 120, height = 80) =>
@@ -72,7 +75,7 @@ const bookId = async (mac: Mac) => (await manifests(mac)).project.bookId as stri
 const tips = async (remote: MemoryRemote, mac: Mac) => remoteTips(remote, await bookId(mac));
 const stateOf = (remote: MemoryRemote, header: CommitHeader): StateBlob =>
   stateBlobSchema.parse(JSON.parse(Buffer.from(remote.blobs.get(contentBlobKey(header.stateDigest))!).toString('utf8')));
-const commit = async (remote: MemoryRemote, mac: Mac, id: string) => (await remote.getCommit(await bookId(mac), id))!;
+const commit = async (remote: MemoryRemote, mac: Mac, id: string) => readCommitHeader(await remote.getCommit(await bookId(mac), id))!;
 const proxyFile = async (mac: Mac, digest: string) => {
   for (const ext of ['.jpg', '.png']) {
     const path = join(mac.base, 'proxies', digest + '-preview-v1' + ext);
@@ -93,9 +96,12 @@ test('the decision table: fast-forward or keep both, and facts never diverge', (
   assert.deepEqual(deriveTips([c1, c2]).map(({ commitId }) => commitId), [c2.commitId]);
   assert.equal(deriveTips([c1, c2, c3]).length, 2);
   const synced = { commitId: c1.commitId, bookStateRevision: r1 };
-  const decide = (input: Partial<Parameters<typeof decideSync>[0]>) => decideSync({ pullInProgress: false, tips: [c1], lastSynced: synced, localRevision: r1, factsChanged: false, ...input }).action;
+  const decide = (input: Partial<Parameters<typeof decideSync>[0]>) => decideSync({ pullInProgress: false, tips: [c1], commits: [c1, c2, c3], lastSynced: synced, localRevision: r1, factsChanged: false, ...input }).action;
   assert.equal(decide({ pullInProgress: true }), 'resume');
-  assert.equal(decide({ tips: [] }), 'initial-push');
+  assert.equal(decide({ tips: [], lastSynced: undefined }), 'initial-push');
+  assert.equal(decide({ tips: [], commits: [] }), 'remote-behind', 'an empty listing never starts a second history');
+  assert.equal(decide({ tips: [c2], commits: [c2] }), 'remote-behind');
+  assert.equal(decide({ tips: [c2], commits: [c1, c2] }), 'fast-forward');
   assert.equal(decide({ tips: [c2, c3] }), 'diverged');
   assert.equal(decide({ lastSynced: undefined }), 'adopt');
   assert.equal(decide({ lastSynced: undefined, localRevision: r2 }), 'diverged');
@@ -103,7 +109,7 @@ test('the decision table: fast-forward or keep both, and facts never diverge', (
   assert.equal(decide({ localRevision: r2 }), 'push');
   assert.equal(decide({ factsChanged: true }), 'push');
   assert.equal(decide({ tips: [c2] }), 'fast-forward');
-  assert.deepEqual(decideSync({ pullInProgress: false, tips: [c2], lastSynced: synced, localRevision: r1, factsChanged: true }), { action: 'fast-forward', tip: c2, thenPush: true });
+  assert.deepEqual(decideSync({ pullInProgress: false, tips: [c2], commits: [c1, c2], lastSynced: synced, localRevision: r1, factsChanged: true }), { action: 'fast-forward', tip: c2, thenPush: true });
   assert.equal(decide({ tips: [c2], localRevision: r3 }), 'diverged');
 });
 
@@ -528,7 +534,10 @@ test('a push refuses a proxy another Mac has not finished writing, and a failed 
   const digest = sha(await readFile(photo));
   const key = proxyBlobKey(digest, state.proxies[digest].ext);
   const proxy = remote.blobs.get(key)!;
-  // The remote's proxy for this photo is cut short, and the laptop's next push would rest on it.
+  // A snapshot from a Mac that had no proxy for this photo, then the remote's proxy is cut short: the laptop's next
+  // push finds that proxy on the remote and would record it.
+  await forge(remote, tip, (next) => { delete next.proxies[digest]; });
+  assert.equal((await sync(b, remote)).action, 'fast-forward');
   remote.blobs.set(key, proxy.slice(0, 200));
   await edit(b, caption(id, 'Laptop'));
   await on(b, async () => {});
@@ -547,4 +556,129 @@ test('a push refuses a proxy another Mac has not finished writing, and a failed 
   assert.deepEqual((await readdir(join(a.folder, 'photos'))).filter((name) => name.startsWith('.imageflow-write-')), []);
   remote.blobs.set(original, good);
   await on(a, async (book) => assert.deepEqual(await downloadOriginals({ remote, book }), [id]));
+});
+
+/** A commit on top of `tip` whose state blob is `change`d by hand, as another version or a hostile remote might write. */
+async function forge(remote: MemoryRemote, tip: CommitHeader, change: (state: Record<string, any>) => void) {
+  const state = JSON.parse(Buffer.from(remote.blobs.get(contentBlobKey(tip.stateDigest))!).toString('utf8'));
+  change(state);
+  const bytes = new TextEncoder().encode(canonicalJson(state));
+  const stateDigest = sha(bytes);
+  remote.blobs.set(contentBlobKey(stateDigest), bytes);
+  const bookStateRevision = await computeBookStateRevision({ project: projectSchema.parse(state.project), photos: photoIndexSchema.parse(state.photos), contentDigests: state.content });
+  const header: CommitHeader = { ...tip, commitId: crypto.randomUUID(), parents: [tip.commitId], stateDigest, bookStateRevision, createdAt: new Date().toISOString() };
+  await remote.putCommit(header);
+  return header;
+}
+
+test('a remote that lists nothing, or not this Mac’s last commit yet, is still syncing', async (t) => {
+  const { a, remote } = await world(t);
+  await sync(a, remote);
+  const empty = new MemoryRemote();
+  await assert.rejects(sync(a, empty), RemoteSyncingError);
+  assert.equal(empty.commits.size, 0, 'no second root commit');
+});
+
+test('a pull stages the snapshot as stored, so facts a newer version added never break it', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  const [tip] = await tips(remote, a);
+  const next = await forge(remote, tip, (state) => { state.assetsMeta.assets.shore.lens = 'from a newer version'; state.photos.shore.caption = 'Newer'; });
+  const outcome = await sync(b, remote);
+  assert.equal(outcome.action, 'fast-forward');
+  assert.equal(outcome.pulled, next.commitId);
+  assert.equal((await manifests(b)).photos.shore.caption, 'Newer');
+  assert.equal((await readSyncState(b.folder)).pull, undefined);
+});
+
+test('a pull that cannot be written is refused before it is marked, and one that fails later is given up, not retried at every open', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  await writeFile(join(a.folder, 'template', 'notes.txt'), 'new');
+  await edit(a, caption('shore', 'Remote'));
+  await sync(a, remote);
+  const [tip] = await tips(remote, a);
+  // A folder where the snapshot has a file: refused before anything changes.
+  await mkdir(join(b.folder, 'template', 'notes.txt'));
+  const before = await manifests(b);
+  await assert.rejects(sync(b, remote), /through a file or link|replace a folder/);
+  assert.deepEqual(await manifests(b), before);
+  assert.equal((await readSyncState(b.folder)).pull, undefined);
+  await on(b, async () => {});
+  await rm(join(b.folder, 'template', 'notes.txt'), { recursive: true });
+  // A pull that fails after it was marked (here: a staged blob lost) is given up when the book opens: it opens.
+  await on(b, (book) => stageSyncPull(remote, book, tip));
+  const staged = sha(new TextEncoder().encode('new'));
+  for (const name of await readdir(persistenceRoot)) await rm(join(persistenceRoot, name, 'sync', 'staged', staged), { force: true });
+  await on(b, async (book) => assert.ok(book.photoIndex.shore));
+  const state = await readSyncState(b.folder);
+  assert.equal(state.pull, undefined);
+  assert.equal(state.lastSynced, undefined, 'this Mac forgets what it last synced');
+  await on(b, async () => {});
+  // The next sync keeps whatever was written as a copy and pulls again.
+  const outcome = await sync(b, remote);
+  assert.equal(outcome.action, 'diverged');
+  assert.equal(await captureBookStateRevision(b.folder), tip.bookStateRevision);
+  assert.equal((await sync(b, remote)).action, 'in-sync');
+});
+
+test('commits and snapshots from a newer version stop sync with a request to update', async (t) => {
+  const { a, remote } = await world(t);
+  await sync(a, remote);
+  const [tip] = await tips(remote, a);
+  const id = await bookId(a);
+  remote.commits.set(id + '/future', { ...tip, version: 2, commitId: crypto.randomUUID(), parents: [tip.commitId] });
+  await assert.rejects(sync(a, remote), NewerSyncFormatError);
+  remote.commits.delete(id + '/future');
+  remote.commits.set(id + '/extra', { ...tip, commitId: crypto.randomUUID(), parents: [tip.commitId], signature: 'x' });
+  await assert.rejects(sync(a, remote), NewerSyncFormatError);
+  remote.commits.delete(id + '/extra');
+  await forge(remote, tip, (state) => { state.future = true; });
+  await assert.rejects(sync(a, remote), NewerSyncFormatError);
+});
+
+test('a pull refuses template folders a book never carries', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  const [tip] = await tips(remote, a);
+  const bytes = new TextEncoder().encode('module.exports = 1');
+  remote.blobs.set(contentBlobKey(sha(bytes)), bytes);
+  await forge(remote, tip, (state) => { state.content['template/node_modules/evil/index.js'] = sha(bytes); });
+  await assert.rejects(sync(b, remote), /stay inside the book/);
+  assert.equal(await lstat(join(b.folder, 'template', 'node_modules')).catch(() => undefined), undefined);
+});
+
+test('pushes reuse recorded proxies, and a pull reuses local bytes for a photo copied into the book elsewhere', async (t) => {
+  const { a, b, remote } = await world(t);
+  const photo = join(a.external, 'moved.jpg');
+  await image(photo, '#665544');
+  const id = await on(a, async (book) => (await importIntoProject(book, { kind: 'photo', mode: 'link' }, [photo])).imported[0]);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await cp(photo, join(b.external, 'moved.jpg'));
+  await on(b, async (book) => { assert.equal((await relinkFolder(book, b.external)).repaired, 1); });
+  await sync(b, remote);
+  // An edit pushes without reading any proxy from the remote again.
+  const getBlob = remote.getBlob.bind(remote);
+  const read: string[] = [];
+  remote.getBlob = async (key) => { read.push(key); return getBlob(key); };
+  await edit(a, caption('shore', 'Edited'));
+  assert.equal((await sync(a, remote)).action, 'push');
+  assert.deepEqual(read.filter((key) => key.startsWith('blobs/proxies/')), []);
+  remote.getBlob = getBlob;
+  // The desktop copies the linked photo into the book; the laptop has the same bytes in its own folder.
+  await on(a, async (book) => { await collectSources(book, ['photo:' + id]); });
+  assert.equal((await sync(a, remote)).action, 'push');
+  assert.equal((await sync(b, remote)).action, 'fast-forward');
+  const owned = (await manifests(b)).photos[id];
+  assert.equal(owned.linked, undefined);
+  assert.equal(sha(await readFile(join(b.folder, owned.path))), sha(await readFile(photo)));
+  await on(b, async (book) => assert.equal(book.sources!['photo:' + id].state, 'available'));
+  assert.equal((await sync(b, remote)).action, 'in-sync');
 });
