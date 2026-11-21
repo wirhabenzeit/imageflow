@@ -23,6 +23,7 @@ import type { SourceStatus } from '../src/source-locations';
 import { digestBytes, SourceStore } from './source-store';
 import { AssetFacts } from './asset-facts';
 import { proxyStore } from './proxy-store';
+import { resumeSyncPull } from './sync-pull';
 import type { AssetFact } from '../src/asset-facts';
 import { captureFields } from '../src/photo-metadata';
 import { approveSources, sourceBookKey } from './source-access';
@@ -237,6 +238,8 @@ const fileName = (path: string) => basename(path).replace(/^fl-[0-9a-f-]{12}-/, 
 export async function loadProject(path: string, fallback: string, readOnly = false, pinSources = false): Promise<OpenProject> {
   const folder = await realpath(path);
   await recoverProjectSave(folder, { readOnly });
+  // A sync pull interrupted after it began changing the book is finished from what it staged (ADR 0010).
+  await resumeSyncPull(folder, { readOnly });
   const [{ document: project, source: projectFile }, { document: photoIndex, source: photoFile }] = await Promise.all([
     readProjectDocument(folder, 'project.json'), readProjectDocument(folder, 'photos.json'),
   ]);

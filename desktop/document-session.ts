@@ -38,6 +38,11 @@ import { saveDocumentCopy } from './source-actions';
 import { rebuildTemplateDependencies } from './dependency-install';
 import type { DependencyRebuild } from './dependency-install';
 import { AssetFacts } from './asset-facts';
+import { syncBook } from './sync-engine';
+import type { SyncOptions } from './sync-engine';
+import type { SyncRemote } from './sync-remote';
+import { readSyncState, updateSyncState } from './sync-pull';
+import type { CommitHeader } from '../src/sync-snapshot';
 import { acquireProjectLock, CommittedProjectSaveError } from './persistence';
 import type { ProjectLock, SaveCheckpoint } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
@@ -262,6 +267,31 @@ export class DocumentSession {
       return;
     }
     await this.relocate(destination);
+  }
+  /**
+   * Syncs the book with a remote (ADR 0010, Milestone 1), serialized with every other edit of the book: the folder
+   * watcher is paused while the engine pushes or pulls, and a pull is adopted as an external change, which resets
+   * Undo and Redo. With several remote tips the user picks the one to continue from.
+   */
+  async sync(remote: SyncRemote, options: Pick<SyncOptions, 'keepOriginals'> = {}) {
+    return this.run(async () => {
+      this.stopWatch();
+      try {
+        const outcome = await syncBook({ remote, book: this.book, ...options, chooseTip: (tips) => this.chooseTip(tips) });
+        if (outcome.changed) this.notify({ value: this.activate(await loadProject(this.book.folder, this.cache), true) });
+        return outcome;
+      } finally { this.watchProject(this.book); }
+    });
+  }
+  private async chooseTip(tips: CommitHeader[]) {
+    if (this.window.isDestroyed()) return undefined;
+    const label = (tip: CommitHeader) => tip.title + ' · ' + new Date(tip.createdAt).toLocaleString();
+    const { response } = await dialog.showMessageBox(this.window, {
+      type: 'question', buttons: [...tips.slice(0, 4).map(label), 'Cancel'], cancelId: Math.min(tips.length, 4), defaultId: 0,
+      message: 'This book was changed on two Macs.',
+      detail: 'Choose the version to continue with. Your version on this Mac is kept as a separate copy beside the book if it is not one of them.',
+    });
+    return tips[response]?.commitId;
   }
   async reload() {
     const next = await loadProject(this.book.folder, this.cache);
@@ -663,9 +693,14 @@ export class DocumentSession {
     while (this.askingNetwork) await this.askingNetwork.catch(() => {});
     const ask = (async () => {
       const known = await approvedNetwork(book.folder);
+      // A template that arrived through sync comes from an unauthenticated remote (ADR 0006, ADR 0010): sites it newly
+      // declares are asked about even in a trusted book, once.
+      const review = (await readSyncState(book.folder).catch(() => undefined))?.networkReview === true;
+      const unreviewed = review && origins.some((origin) => !known.includes(origin));
+      if (review && !unreviewed) await updateSyncState(book.folder, ({ networkReview: _, ...state }) => state).catch(() => {});
       // The user's own book (made here, or trusted once): every declared site, without asking. A site its template
       // newly declares is recorded and named in a quiet notice instead of a question.
-      if (await bookTrusted(book.folder)) {
+      if (!unreviewed && await bookTrusted(book.folder)) {
         const added = origins.filter((origin) => !known.includes(origin));
         if (added.length) {
           await approveNetwork(book.folder, added, hash);
@@ -688,6 +723,7 @@ export class DocumentSession {
         if (response === 0) {
           await approveNetwork(book.folder, origins, hash);
           await trustBook(book.folder);
+          if (review) await updateSyncState(book.folder, ({ networkReview: _, ...state }) => state).catch(() => {});
           return origins;
         }
       }

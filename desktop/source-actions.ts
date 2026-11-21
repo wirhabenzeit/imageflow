@@ -8,6 +8,7 @@ import { clearFileAssignments, fileAssigned } from '../src/asset-usage';
 import { sourceEntries, sourceFolder, storedFileName } from '../src/source-locations';
 import type { ImportMode, SourceEntry } from '../src/source-locations';
 import { createDocument } from './documents';
+import { readAssetFacts } from './asset-facts';
 import { loadProject, updateProject } from './project';
 import type { OpenProject } from './project';
 import { CommittedProjectSaveError } from './persistence';
@@ -138,6 +139,7 @@ export async function relinkFolder(book: OpenProject, directory: string, keys?: 
   const entries = await readdir(root, { recursive: true, withFileTypes: true });
   const candidates = entries.filter((entry) => entry.isFile()).map((entry) => join(entry.parentPath, entry.name));
   const store = await SourceStore.forBook(book.folder, book.cache);
+  const facts = readAssetFacts(book.folder);
   let next = book;
   const ambiguous: string[] = [];
   let repaired = 0;
@@ -151,7 +153,8 @@ export async function relinkFolder(book: OpenProject, directory: string, keys?: 
       next = await relocateSource(next, source.key, source.path); repaired++;
       continue;
     }
-    const digest = state.status.digest ?? state.stored?.digest;
+    // A linked photo that arrived from another Mac has no record here yet; its synced fact names its content (ADR 0010).
+    const digest = state.status.digest ?? state.stored?.digest ?? (source.kind === 'photo' ? (await facts)[source.id]?.digest : undefined);
     if (!digest) continue;
     const matches: string[] = [];
     for (const path of candidates) {
