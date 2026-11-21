@@ -20,6 +20,8 @@ The six signing secrets in [Mac signing and notarization](signing.md) must be co
 
    Commit `package.json`, `package-lock.json` and `sample/released-templates.json`, open a PR, and merge after checks pass. The release workflow stops before approval when a built-in template's hash is missing from that list. To withdraw trust from a released built-in, for example because a site it uses changed owner, remove its hash in a later release. **ImageFlow → About ImageFlow** shows this version; packaged checks verify it against the Mac bundle and running app.
 
+   The **Packaged app** workflow runs on every push to `main`. It builds the app and runs the packaged smoke tests the release repeats after signing, so a break shows up when it merges, not when you tag. Before tagging, check that the run for the commit you will tag is green.
+
 2. From the merged commit on `main`, create and push the matching tag:
 
    ```sh
@@ -29,7 +31,7 @@ The six signing secrets in [Mac signing and notarization](signing.md) must be co
    git push origin v1.0.0
    ```
 
-   `v1.0.0` must match `package.json` version `1.0.0` exactly. A mismatch or a commit outside `origin/main` fails before release approval or credential access. Semver build metadata (`+...`) is rejected because the updater does not treat it as a distinct version; use a new version or a prerelease suffix instead.
+   `v1.0.0` must match `package.json` version `1.0.0` exactly. A mismatch, a commit outside `origin/main`, or a commit without a passing **Packaged app** run fails before release approval or credential access. If that run failed or is still going, rerun it from **Actions → Packaged app** (no credentials involved), then rerun the failed Release jobs. Semver build metadata (`+...`) is rejected because the updater does not treat it as a distinct version; use a new version or a prerelease suffix instead.
 
 3. In **Actions → Release**, review the tagged commit and approve the pending **release** environment deployment. The Mac job validates the secrets before building, builds without Apple credentials, signs with a temporary keychain, removes it before packaged tests, then obtains temporary credentials again for notarization. Once both the signed-app checks and signed-upgrade tests succeed, it publishes the release and starts the Pages feed refresh. Wait for both workflows to succeed. The published release contains:
 

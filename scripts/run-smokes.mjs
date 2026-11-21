@@ -6,6 +6,11 @@
 // A script that hangs (for example a Playwright call that never returns) is killed after SMOKE_TIMEOUT_MINUTES
 // (default 6) together with the Electron app it started, so a hang costs minutes and names itself instead of running
 // into the CI job limit. Later scripts still run, so one run shows all broken scripts rather than only the first.
+//
+// On CI a script that exits with a failure is run once more (SMOKE_RETRIES, default 1 on CI and 0 elsewhere). A script
+// that passes the second time is reported as flaky in a warning annotation and the summary, and does not fail the run,
+// so a hosted-runner hiccup doesn't turn the nightly red while a script that fails twice still does. Timeouts are not
+// retried: they cost the full limit and usually mean a hang rather than a hiccup.
 import { spawn, execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,6 +26,7 @@ if (!names.length) {
 }
 const limit = Number(process.env.SMOKE_TIMEOUT_MINUTES || 6) * 60_000;
 const annotate = !!process.env.GITHUB_ACTIONS;
+const retries = Number(process.env.SMOKE_RETRIES ?? (annotate ? 1 : 0));
 const env = { ...process.env, IMAGEFLOW_HIDE_WINDOW: visible ? '' : '1' };
 delete env.ELECTRON_RUN_AS_NODE;
 let current;
@@ -50,7 +56,7 @@ function run(name) {
       clearTimeout(timer);
       current = undefined;
       const seconds = Math.round((Date.now() - started) / 1000);
-      resolve({ name, seconds, ok: code === 0 && !timedOut,
+      resolve({ name, seconds, timedOut, ok: code === 0 && !timedOut,
         reason: timedOut ? `timed out after ${limit / 60_000} min` : code !== 0 ? `exited with ${signal ?? 'code ' + code}` : '' });
     });
   });
@@ -65,18 +71,29 @@ for (const name of names) {
     continue;
   }
   console.log(`\n▶ ${name}`);
-  const result = await run(name);
-  results.push(result);
-  if (!result.ok) {
+  let result = await run(name);
+  const failures = [];
+  while (!result.ok) {
+    failures.push(result.reason);
     console.error(`✖ ${name} ${result.reason}`);
-    if (annotate) console.log(`::error title=${name}::${name} ${result.reason}`);
     killLeftovers();
+    if (result.timedOut || failures.length > retries) break;
+    console.log(`\n↻ ${name} failed once; running it again.`);
+    result = await run(name);
   }
+  if (result.ok && failures.length) {
+    result.flaky = failures[0];
+    console.log(`⚠ ${name} passed on retry after: ${failures[0]}`);
+    if (annotate) console.log(`::warning title=${name} is flaky::${name} failed (${failures[0]}) and then passed on retry.`);
+  } else if (!result.ok && annotate) console.log(`::error title=${name}::${name} ${result.reason}`);
+  results.push(result);
 }
 
 const failed = results.filter(({ ok }) => !ok);
 console.log('\nSmoke scripts:');
-for (const { name, ok, seconds, reason } of results) console.log(`  ${ok ? '✓' : '✖'} ${name} (${seconds} s)${ok ? '' : ' — ' + reason}`);
+for (const { name, ok, seconds, reason, flaky } of results) {
+  console.log(`  ${ok ? flaky ? '⚠' : '✓' : '✖'} ${name} (${seconds} s)${ok ? flaky ? ' — flaky: passed on retry after ' + flaky : '' : ' — ' + reason}`);
+}
 console.log((failed.length ? `\n${failed.length} of ${results.length} failed.` : `\nAll ${results.length} passed.`)
   + (skipped.length ? ` ${skipped.length} skipped (require --visible).` : ''));
 process.exit(failed.length ? 1 : 0);

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
 import sharp from 'sharp';
-import { clickClosingWindow, clickPage, closeApp } from './ui-actions.mjs';
+import { clickClosingWindow, clickPage, closeApp, reloadBook } from './ui-actions.mjs';
 
 // The template library: import from its own window, live updates in an open New Book picker, removal, a failed import,
 // creating books from a library template and from the built-in starter's example or opening spreads, and Save Template to Library.
@@ -255,7 +255,7 @@ try {
   await answer(0);
   await settings.getByRole('button', { name: 'Move to Trash' }).click();
   await travelEntry.waitFor({ state: 'detached' });
-  await editor.evaluate(() => window.imageflow.openProject('reload'));
+  await reloadBook(editor);
   await editor.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
   assert.equal(await editor.locator('.spread-thumb').count(), tour.length + 1, 'the starting spreads and the map spread');
 

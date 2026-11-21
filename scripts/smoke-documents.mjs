@@ -6,7 +6,7 @@ import electron from 'electron';
 import { _electron } from 'playwright-core';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
-import { clickClosingWindow, waitForPage } from './ui-actions.mjs';
+import { clickClosingWindow, reloadBook, waitForPage } from './ui-actions.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await realpath(await mkdtemp(join(root, '.build/documents-smoke-')));
@@ -51,7 +51,7 @@ async function save(page, title) {
   const result = await page.evaluate(({ id, files }) => window.imageflow.saveProject(id, files, 'Rename book'), { id: before.id, files });
   assert.ok(result.value, JSON.stringify(result));
   // Native saves normally return directly to the editor; publish through Reload for this IPC-driven fixture.
-  await page.evaluate(() => window.imageflow.openProject('reload'));
+  await reloadBook(page);
   await page.reload({ waitUntil: 'domcontentloaded' });
   await ready(page);
   return result.value;

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
 import sharp from 'sharp';
-import { closeApp, testBook, menuAction, retryBookRefresh, waitForPage } from './ui-actions.mjs';
+import { closeApp, testBook, menuAction, reloadBook, retryBookRefresh, waitForPage } from './ui-actions.mjs';
 import { createRouteFixture } from './route-fixture.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -225,7 +225,7 @@ try {
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   manifest.files.notchosen = { path: unselected, linked: true };
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
-  await page.evaluate(() => window.imageflow.openProject('reload'));
+  await reloadBook(page);
   await reload(page);
   assert.equal((await current(page)).sources['file:notchosen'].state, 'unapproved');
   const loadedFile = () => page.frameLocator('iframe.book-frame-book[data-current][data-ready]').locator('body').evaluate(async () =>
@@ -283,7 +283,7 @@ try {
   assert.deepEqual(portableState.project.spreads.find(({ id }) => id === 'arriving').pages.left.boxes.hero.crops, crop);
   assert.equal(portableState.project.spreads.find(({ id }) => id === 'arriving').pages.left.boxes.hero.photo, imported.photo);
   await rm(external, { recursive: true });
-  await copy.evaluate(() => window.imageflow.openProject('reload'));
+  await reloadBook(copy);
   await reload(copy);
   assert.ok(Object.values((await current(copy)).sources).every((source) => source.state === 'available'));
   console.log('Linked photos, Markdown and parameter files, atomic refresh, cached missing states, export consistency, and portable Save a Copy passed.');

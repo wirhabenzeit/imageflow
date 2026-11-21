@@ -15,6 +15,9 @@ jobs:
   version:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
@@ -29,6 +32,11 @@ jobs:
           node-version: '22.x'
       - name: Require the tagged commit on main
         run: node scripts/release-main.mjs
+      - name: Require passing packaged-app tests on the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: node scripts/release-packaged.mjs
       - name: Check tag against package version
         id: version
         run: node scripts/release-metadata.mjs
