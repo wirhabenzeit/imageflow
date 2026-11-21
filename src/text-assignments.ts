@@ -5,7 +5,8 @@ import { sourceFileName } from './source-locations';
 import { onPage } from './page-scope';
 import { splitFrontmatter } from './frontmatter';
 
-type Target = { spread: string; page?: import('./project').PageSide; box: string; source: string };
+// `composition` is the one the box's layout names for it; the chain's first box decides for the text.
+type Target = { spread: string; page?: import('./project').PageSide; box: string; source: string; composition?: string };
 export function textAssignments(book: RenderProject, template: Template) {
   const chains = new Map<string, Target[]>();
   const positions: Record<string, FlowPosition> = {};
@@ -14,11 +15,11 @@ export function textAssignments(book: RenderProject, template: Template) {
     if (!definition) continue;
     const boxes = Object.entries(definition.boxes).filter(([, box]) => box.type === 'markdown')
       .sort(([, a], [, b]) => (a.flowOrder ?? 1) - (b.flowOrder ?? 1));
-    for (const [box] of boxes) {
+    for (const [box, { composition }] of boxes) {
       const source = spread.boxes[box]?.text;
       if (!source) continue;
       if (!chains.has(source)) chains.set(source, []);
-      chains.get(source)!.push({ spread: spread.id, ...onPage(page), box, source });
+      chains.get(source)!.push({ spread: spread.id, ...onPage(page), box, source, ...(composition ? { composition } : {}) });
     }
   }
   for (const [source, chain] of chains) {

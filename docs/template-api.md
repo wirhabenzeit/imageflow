@@ -13,7 +13,7 @@ This page is generated from the topic files in [`template-api/`](template-api), 
 - [Page layouts](#page-layouts): Page roots, geometry and facing pages.
 - [Parameters](#parameters): p.* types, options and defaults.
 - [List parameters](#list-parameters): List items, IDs and edit commands.
-- [Boxes and elements](#boxes-and-elements): Photo boxes, Markdown flow and text.meta.
+- [Boxes and elements](#boxes-and-elements): Photo boxes, Markdown flow, text.meta and composing a text.
 - [Print format](#print-format): Trim, bleed, safe areas and pagination.
 - [Template library](#template-library): Import, previews and openingSpreads.
 - [Switching layouts](#switching-layouts): Content, crops and saved layout state.
@@ -230,6 +230,7 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, … })
 | `formatted-text` | `markdown: 'inline'` on string parameters: bold, italic and strikethrough, shown by `ctx.Text` and `<FormattedText>` ([Formatted text](#formatted-text-formatted-text)). |
 | `app-controls` | `<Choice>`: ImageFlow's own segmented choice for element editors and layout-family pickers ([App controls](#app-controls)). |
 | `text-metadata` | `text.meta` on Markdown boxes: the fields of the source's YAML header, the same on every box of the chain ([Text metadata](#text-metadata)); every placed text in `ctx.book.texts` ([Texts](#texts)); and `boxes` in `anchors`. |
+| `text-composition` | `compositions`: named functions that compose a text from its blocks, adding, replacing or wrapping them; a Markdown box names one with `composition` ([Composing a text](#composing-a-text)). |
 
 
 Use `requires` for extensions beyond the contract-1 baseline. Unsupported extensions are rejected when the template loads, with an update hint. Listing baseline features in `requires` is also valid.
@@ -505,6 +506,43 @@ render: (ctx) => {
 - **One source, every box.** `meta` is read from the saved file before any spread renders and is the same object for every box of the chain, whatever the flow puts in it, so a layout may size or style its boxes from it. Two sources on a spread each keep their own `meta`; the layout decides which one, if any, styles the page around them. Other pages read it through [`ctx.book.texts`](#texts), and `anchors` through `boxes`. In layout previews a Markdown box has no flow position, so its `text` is `null` there.
 - **Unreadable headers.** A header whose YAML cannot be read is a `text-frontmatter-invalid` warning on the text's first box. The header is still left out of the text, and `meta` is `{}`.
 - **Editing.** ImageFlow does not change the header. Edit it in the Markdown editor or the linked file.
+
+### Composing a text
+
+A `MarkdownBox` flows its Markdown as it is. A composition shapes the text first: a function in the template's `compositions` that receives the text's top-level blocks and returns what flows. It can add an element before or after the blocks, replace a block with its own element, or put several blocks in one. A Markdown box names the composition for the text that starts in it:
+
+```tsx
+export default defineTemplate({
+  // …
+  compositions: {
+    story: ({ blocks, meta }) => <>
+      {meta.date && <p className="story-date" data-keep-next>{String(meta.date)}</p>}
+      <h3>{String(meta.title ?? '')}</h3>
+      {blocks.map((block) => block.type === 'heading' && block.depth === 2
+        ? <div key={block.key} className="day-head" data-keep-next>
+            <span className="day">{block.text.split(' · ')[0]}</span>
+            <h3>{block.text.split(' · ')[1] ?? block.content}</h3>
+          </div>
+        : block.node)}
+      <p className="end-mark">❦</p>
+    </>,
+  },
+  spreads: ({ spread }) => ({
+    story: spread({
+      label: 'Story',
+      boxes: { body: box.markdown('Story', { composition: 'story' }) },
+      render: (ctx) => <Spread><ctx.MarkdownBox id="body" /></Spread>,
+    }),
+  }),
+});
+```
+
+- **Blocks.** Each block has a `type` (`paragraph`, `heading`, `blockquote`, `list` or `rule`), a heading's `depth`, a list's `ordered`, its `text` without Markdown syntax, and a `key`. `block.node` is the block as ImageFlow renders it; `block.content` is what is inside it, such as a heading's formatted words, for your own element. Place a block once. The Markdown stays plain: read what you need from a heading's `text`, or from the header through `meta`.
+- **What it reads.** A composition receives the text (`blocks`, `meta`) and the document settings (`document`), never a spread: a text has one structure wherever it is placed, and no spread parameter can change pages further on. A text that needs another structure names it in its header, and the composition reads `meta`; a layout that needs another names another composition.
+- **Which composition.** The box a text starts in decides for the whole text, and the result flows through the chain, so an element before the blocks appears where the text starts and one after them where it ends. Give the boxes a text continues in the same `composition`, so their CSS meets the structure it expects. When a later box of the chain names another, or none, the Book check warns with `text-composition-mixed`; the text keeps the first. Moving a text's start to a layout with another composition therefore restructures the whole text.
+- **Flow.** What a composition returns is measured, broken across columns and boxes and counted towards overflow like Markdown. Return block elements (`p`, headings, `div`, `blockquote`, lists) next to each other. An element marked `data-keep-next` stays whole and with the one after it, as a heading does, and a run of them stays together: a date, its title and the paragraph below. A run that begins a box too small for it stays where it is, and may then split. An element split across two boxes gets `.split` and `.cont` like a Markdown block; set `break-inside: avoid` on one that must not split.
+- **Static.** A composition renders once per text, off the page, before the flow. Use plain elements and your own helper components. Content that arrives later — such as a `<RenderedImage>` or an `<img>` without fixed dimensions (images are decoded before the flow runs) — and platform components (`PhotoBox`, `MarkdownBox`, `Element`, `ctx.Text`) are not supported inside it.
+- **Errors.** A composition that throws is a `text-composition-failed` error on the text's first box, and the text flows as plain Markdown until it is fixed. A box that names a composition the template does not declare fails the template's validation.
 
 ## Print format
 
@@ -1010,7 +1048,7 @@ Prefer `presentation="inline"` for a single user-written string printed on the p
 
 `parameter` takes the same paths as `ctx.edit`, limited to string parameters. `as` is one of `h1`–`h6`, `p` (default), `span`, `div`, `blockquote` or `figcaption`; `className`, `style`, `rect` and `issue()` markers work as on the platform components. When the value is empty, the editing canvas shows a dimmed placeholder in the template's own type (`placeholder`, else the parameter's `placeholder`, else its label) and marks the node `data-empty`; the exported book shows the empty node. The value is rendered as text, never as HTML, and newlines follow the node's CSS `white-space`. `fallback` displays inherited text when the saved value is empty or whitespace-only, without saving it. Set `fallbackLabel` to name its source: inherited text has a dotted underline on the canvas and the popover explains what clearing the override does. `hidden` suppresses the node explicitly; whitespace never means hidden. A template can bind it to a separate visibility parameter, as the calendar does with `showPlace`. Use `ctx.edit` for nodes that combine several parameters or show more than the value.
 
-Templates read photo metadata (for captions) and page numbers through the context; they never receive file paths, image data, or Markdown source, and they cannot change project data.
+Templates read photo metadata (for captions) and page numbers through the context; they never receive file paths or image data, and they cannot change project data. Of a Markdown source they receive its header fields and, in a composition, its blocks ([Composing a text](#composing-a-text)).
 
 ## Anchors
 

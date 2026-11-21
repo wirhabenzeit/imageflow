@@ -57,6 +57,9 @@ export const contract1Capabilities = [
   // `text.meta` on Markdown boxes: the source's YAML header, the same on every box its text flows through; every
   // placed text in `ctx.book.texts`; and `boxes` in `anchors`.
   'text-metadata',
+  // `compositions`: named functions that compose a text from its blocks, adding, replacing or wrapping them; a
+  // Markdown box names one with `composition`. `data-keep-next` marks elements that stay with the next one (#230).
+  'text-composition',
 ] as const;
 // All supported features, including the baseline names accepted in older templates' `requires` lists. Until the
 // first public release the baseline stays open and new features join it (ADR 0008); after it, additive extensions

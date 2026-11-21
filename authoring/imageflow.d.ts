@@ -276,7 +276,7 @@ export type Controls<K extends string = string> = readonly ControlItem<K>[];
 
 // Declarations
 
-export type BoxDeclaration = { type: 'photo' | 'markdown'; label: string; parameters?: Parameters; flowOrder?: number; controls?: Controls };
+export type BoxDeclaration = { type: 'photo' | 'markdown'; label: string; parameters?: Parameters; flowOrder?: number; composition?: string; controls?: Controls };
 /**
  * Props of a template-supplied element editor. `values` holds all of the element's parameters with the draft
  * applied, including changes in the dialog's generated controls as the user makes them, so the editor can preview
@@ -494,7 +494,8 @@ type OwnParametersChecked<T> = T extends { parameters: infer P } ? { parameters:
 type ElementsChecked<E, D extends Parameters = Parameters, S extends Parameters = Parameters> = { [K in keyof E]: { controls?: Controls<ParameterKeys<E[K]>>;
   editor?: ElementEditor<ParameterKeys<E[K]>, ParametersOf<E[K]>, EditorKeys<E[K]> & keyof ParametersOf<E[K]> & string, D, S, EditorSpreadKeys<E[K]> & keyof S & string> }
   & Exact<E[K], ElementDeclaration> & OwnParametersChecked<E[K]> };
-type BoxesChecked<B> = { [K in keyof B]: { controls?: Controls<ParameterKeys<B[K]>> } & Exact<B[K], BoxDeclaration> & OwnParametersChecked<B[K]> };
+type BoxesChecked<B> = { [K in keyof B]: { controls?: Controls<ParameterKeys<B[K]>> } & (B[K] extends { type: 'photo' } ? { composition?: never } : unknown)
+  & Exact<B[K], BoxDeclaration> & OwnParametersChecked<B[K]> };
 
 // Anchors
 
@@ -803,12 +804,16 @@ export type AnchorContext<P = Values, D = Values, B = Record<string, { params: V
 declare const typedDocument: unique symbol;
 /** Type-only marker: the layout family the builder saw, checked against the template's `layoutFamilies`. */
 declare const typedFamily: unique symbol;
-export type SpreadDefinition<D extends Parameters = Parameters, F extends string = string> = SpreadDeclaration & {
+/** Type-only marker: the compositions the builder's Markdown boxes named, checked against the template's `compositions`. */
+declare const typedCompositions: unique symbol;
+type BoxCompositions<B> = { [K in keyof B]: B[K] extends { composition: infer C extends string } ? C : never }[keyof B];
+export type SpreadDefinition<D extends Parameters = Parameters, F extends string = string, C extends string = never> = SpreadDeclaration & {
   render(context: UntypedRenderContext): ImageFlowNode;
   anchors?(context: AnchorContext): readonly AnchorDeclaration[];
   credits?(context: CreditContext): readonly CreditDeclaration[];
   readonly [typedDocument]?: D;
   readonly [typedFamily]?: F;
+  readonly [typedCompositions]?: C;
 };
 /**
  * Known feature names. Include `physical-covers` in `requires` for a template with exterior cover layouts.
@@ -817,7 +822,7 @@ export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issu
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
   'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'page-layouts' | 'editor-context' | 'document-editors' |
   'editor-network' | 'rendered-images' | 'rendered-vectors' | 'font-coverage' | 'book-credits' | 'inline-editors' | 'inline-text' | 'list-parameters' | 'template-preview' | 'photo-render' |
-  'formatted-text' | 'app-controls' | 'text-metadata' | 'physical-covers';
+  'formatted-text' | 'app-controls' | 'text-metadata' | 'text-composition' | 'physical-covers';
 /** All features this app provides, including the contract-1 baseline and any later extensions. */
 export const capabilities: readonly Capability[];
 
@@ -856,6 +861,7 @@ export type TemplateDeclaration = {
   coverFormats?: Record<string, CoverFormat>;
   coverLayouts?: Record<string, CoverLayout>;
   editors?: Record<string, DocumentEditor>;
+  compositions?: Record<string, (text: TextComposition) => ImageFlowNode>;
 };
 
 /**
@@ -894,11 +900,11 @@ export type SpreadBuilder<D extends Parameters, IsPage extends boolean = false> 
   family?: F;
   /** Tags that tell this variant apart from the others in its family, such as `{ size: '3x3' }`. Pickers read them. */
   variant?: VariantTags;
-}) => SpreadDefinition<D, F>;
+}) => SpreadDefinition<D, F, BoxCompositions<B>>;
 /** What `spreads` receives when it is a function. */
 export type TemplateTools<D extends Parameters> = { spread: SpreadBuilder<D>; page: SpreadBuilder<D, true> };
 
-type TemplateBase<D extends Parameters, L extends string = string> = {
+type TemplateBase<D extends Parameters, L extends string = string, C extends string = string> = {
   /** Stable template ID; `project.json` refers to it, and the template library keeps one entry per ID. */
   id: string;
   /** Compared as dot-separated numbers, such as `1.2.0`, when a template is imported into the library. */
@@ -938,6 +944,11 @@ type TemplateBase<D extends Parameters, L extends string = string> = {
   layoutFamilies?: { [K in L]: LayoutFamily };
   /** Editors of document parameters, by ID, opened from nodes marked with their parameters. Included in the contract-1 baseline. */
   editors?: Record<string, DocumentEditor<D, any>>;
+  /**
+   * How texts are composed from their blocks, by name: each function receives a text's blocks, header fields and the
+   * document settings and returns what flows. A Markdown box names one with `composition`. See `TextComposition`.
+   */
+  compositions?: { [K in C]: (text: TextComposition<D>) => ImageFlowNode };
   /** Physical cover specifications keyed by interior format ID. Use 'default' for a single format. */
   coverFormats?: Record<string, CoverFormat>;
   /** One layout per exterior sheet, separate from the document's page and spread layouts. */
@@ -972,9 +983,15 @@ type FamilyOf<T> = typeof typedFamily extends keyof T ? NonNullable<T[typeof typ
 type FamilyCheck<T, L extends string> = 0 extends 1 & T ? unknown : [FamilyOf<T>] extends [never] ? unknown : string extends FamilyOf<T> ? unknown
   : [Exclude<FamilyOf<T>, L>] extends [never] ? unknown
   : { family: `Declare layout family ${Exclude<FamilyOf<T>, L> & string} in the template's layoutFamilies` };
-type DocumentCheck<S, D, L extends string = string> = {
+/** The compositions a spread's boxes name: from the builder's marker, or from boxes written in a plain object. */
+type CompositionsOf<T> = typeof typedCompositions extends keyof T ? NonNullable<T[typeof typedCompositions & keyof T]>
+  : T extends { boxes: infer B } ? BoxCompositions<B> : never;
+type CompositionCheck<T, C extends string> = 0 extends 1 & T ? unknown : [CompositionsOf<T>] extends [never] ? unknown : string extends CompositionsOf<T> ? unknown
+  : [Exclude<CompositionsOf<T>, C>] extends [never] ? unknown
+  : { boxes: `Declare composition ${Exclude<CompositionsOf<T>, C> & string} in the template's compositions` };
+type DocumentCheck<S, D, L extends string = string, C extends string = string> = {
   // Untyped spreads (`any`) are not checked.
-  [K in keyof S]: FamilyCheck<S[K], L> & (0 extends 1 & TypedWith<S[K]> ? unknown : [Missing<D, TypedWith<S[K]>>] extends [never]
+  [K in keyof S]: FamilyCheck<S[K], L> & CompositionCheck<S[K], C> & (0 extends 1 & TypedWith<S[K]> ? unknown : [Missing<D, TypedWith<S[K]>>] extends [never]
     ? [Mismatched<D, TypedWith<S[K]>>] extends [never] ? unknown
       : { [typedDocument]: `Document parameter ${Mismatched<D, TypedWith<S[K]>>} is declared differently in the template's parameters and in spreadFor()` }
     : { [typedDocument]: `Declare document parameter ${Missing<D, TypedWith<S[K]>>} in the template's parameters, or remove it from spreadFor()` })
@@ -1005,17 +1022,19 @@ type SpreadChecked<T, D extends Parameters = Parameters> = 0 extends 1 & T ? unk
 export function defineTemplate<
   const D extends Parameters = {},
   const F extends string = never,
-  const S extends Record<string, SpreadDefinition<any, any>> = {},
+  const S extends Record<string, SpreadDefinition<any, any, any>> = {},
   const L extends string = never,
   const O extends string = never,
->(template: TemplateBase<D, L> & FormatChoice<F> & Opening<O> & { spreads: (tools: TemplateTools<D>) => S & DocumentCheck<S, D, L> & OpeningLayouts<S, O> }): TemplateDeclaration;
+  const C extends string = never,
+>(template: TemplateBase<D, L, C> & FormatChoice<F> & Opening<O> & { spreads: (tools: TemplateTools<D>) => S & DocumentCheck<S, D, L, C> & OpeningLayouts<S, O> }): TemplateDeclaration;
 export function defineTemplate<
   const D extends Parameters = {},
   const F extends string = never,
-  const S extends Record<string, SpreadDefinition<any, any>> = {},
+  const S extends Record<string, SpreadDefinition<any, any, any>> = {},
   const L extends string = never,
   const O extends string = never,
->(template: TemplateBase<D, L> & FormatChoice<F> & Opening<O> & { spreads: S & DocumentCheck<S, D, L> & OpeningLayouts<S, O> }): TemplateDeclaration;
+  const C extends string = never,
+>(template: TemplateBase<D, L, C> & FormatChoice<F> & Opening<O> & { spreads: S & DocumentCheck<S, D, L, C> & OpeningLayouts<S, O> }): TemplateDeclaration;
 
 /**
  * Returns a `spread` builder typed with these document parameters, for spreads declared outside `defineTemplate`,
@@ -1077,6 +1096,37 @@ export type PhotoBoxState<I extends string = string, P = Values> = { id: I; uid:
  * draw the photo at `photo.image` for the printed crop to match. It is not called for an empty box.
  */
 export function PhotoBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: string; children?: (photo: PhotoRender, box: PhotoBoxState) => ImageFlowNode }): ImageFlowElement;
+/** A top-level block of a Markdown text, as a composition receives it. */
+export type TextBlock = {
+  /** A thematic break is a `rule`; code blocks and raw HTML are not part of the text. */
+  readonly type: 'paragraph' | 'heading' | 'blockquote' | 'list' | 'rule';
+  /** A heading's level, 1–6. */
+  readonly depth?: 1 | 2 | 3 | 4 | 5 | 6;
+  /** Whether a list is numbered. */
+  readonly ordered?: boolean;
+  /** The block's words without Markdown syntax, for reading a date or a title from a heading. */
+  readonly text: string;
+  /** Stable for this block of this text: the `key` of an element rendered in its place. */
+  readonly key: string;
+  /** The block as ImageFlow renders it. Place it once. */
+  readonly node: ImageFlowElement;
+  /** What the block contains without its own element, such as a heading's formatted words, for your own element. */
+  readonly content: ImageFlowElement;
+};
+/**
+ * A Markdown text as a composition receives it: its blocks in order, its header fields and the document settings.
+ * A composition is a function in the template's `compositions` that returns what flows, such as
+ * `({ blocks, meta }) => <><h3>{String(meta.title)}</h3>{blocks.map((block) => block.node)}</>`. A Markdown box
+ * names one with `composition`; the box a text starts in decides for the whole text. Mark an element that must stay
+ * with the next one with `data-keep-next`.
+ */
+export type TextComposition<D extends Parameters = Parameters> = {
+  readonly blocks: readonly TextBlock[];
+  /** The fields of the source's YAML header, `{}` without one. */
+  readonly meta: Readonly<TextMeta>;
+  /** The document settings, as `ctx.document`. */
+  readonly document: Readonly<ParameterValues<D>>;
+};
 /**
  * A box that shows its part of the Markdown text assigned to box `id`. `columns` (1–6, default 1) splits it into
  * columns; set the gap with the `columnGap` style. Text fills each column before continuing in the next box.
@@ -1097,8 +1147,9 @@ export function Element(props: Styling & Placement & EditMarker & IssueMarker & 
 export const box: {
   photo<const P extends Parameters = {}>(label: string, parameters?: P & ParametersChecked<P>, options?: { controls?: Controls<keyof P & string> }):
     { type: 'photo'; label: string; parameters: P; controls?: Controls<keyof P & string> };
-  markdown<const P extends Parameters = {}>(label: string, options?: { flowOrder?: number; parameters?: P & ParametersChecked<P>; controls?: Controls<keyof P & string> }):
-    { type: 'markdown'; label: string; parameters: P; flowOrder?: number; controls?: Controls<keyof P & string> };
+  /** `composition` names one of the template's `compositions` for the text that starts in this box. */
+  markdown<const P extends Parameters = {}, const C extends string = never>(label: string, options?: { flowOrder?: number; composition?: C; parameters?: P & ParametersChecked<P>; controls?: Controls<keyof P & string> }):
+    { type: 'markdown'; label: string; parameters: P; flowOrder?: number; controls?: Controls<keyof P & string> } & ([C] extends [never] ? { composition?: undefined } : { composition: C });
   /**
    * Several photo boxes with explicit IDs, typed without casts: `boxes: box.photos(['one', 'two'], (id, i) => 'Photo ' + (i + 1))`.
    * The IDs are saved identities, so list them literally and never derive them from content.
