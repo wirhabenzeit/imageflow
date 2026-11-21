@@ -20,6 +20,13 @@ export default defineTemplate({
   format,
   parameters: {},
   compositions: {
+    // Date and title as two spanning elements, whose margins collapse where they meet.
+    stacked: ({ blocks }) => <>
+      {blocks.flatMap((block) => block.type === 'heading' && block.depth === 2
+        ? [<p key={block.key + 'd'} className="day-line" data-keep-next>{block.text.split(' · ')[0]}</p>,
+           <h3 key={block.key + 't'} className="day-title" data-keep-next>{block.text.split(' · ')[1] ?? block.content}</h3>]
+        : [block.node])}
+    </>,
     story: ({ blocks }) => <>
       {blocks.map((block) => block.type === 'heading' && block.depth === 2
         ? <div key={block.key} className="day-head" data-keep-next>
@@ -42,6 +49,14 @@ export default defineTemplate({
     band: spread({
       label: 'Opener band',
       boxes: { body: box.markdown('Story', { flowOrder: 1, composition: 'story' }) },
+      render: (ctx) => <Spread>
+        <ctx.MarkdownBox id="body" className="body" columns={2} alignHeads rects={[band(ctx, 'left'), band(ctx, 'right')]} />
+      </Spread>,
+    }),
+    // The band with a head made of two spanning elements.
+    bandStacked: spread({
+      label: 'Opener band, stacked head',
+      boxes: { body: box.markdown('Story', { flowOrder: 1, composition: 'stacked' }) },
       render: (ctx) => <Spread>
         <ctx.MarkdownBox id="body" className="body" columns={2} alignHeads rects={[band(ctx, 'left'), band(ctx, 'right')]} />
       </Spread>,

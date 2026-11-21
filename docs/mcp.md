@@ -224,6 +224,7 @@ Layout findings use one envelope: `code`, `severity`, `stage`, `message`, an opt
 | `text-composition-mixed` | A box of the text chain whose layout names another composition than the box the text starts in (or none); `composition`, `boxComposition`, `path`. The text keeps the first box's. |
 | `text-composition-failed` | First box of a text whose composition threw; `composition`, `path`. The text flows as plain Markdown. |
 | `text-box-unused` | A box of the text chain that the text ends before, so it prints nothing; `part`, `parts`, `path`. One warning per empty box. |
+| `text-band-too-tall` | A box drawn over several rectangles with `alignHeads`, on a rectangle after the first that is too short for the room the opening head takes; `rect` (1-based), `path`. A warning: that rectangle holds no text and the text goes on in the next box. |
 | `text-frontmatter-invalid` | First box of the chain and its source; `line` of the YAML problem in the file, `path`. A warning: the layout renders without the header's fields. |
 | `photo-resolution-low` | Photo box and source; `ppi`, `minimumPpi`, `boxWidthMm`, `boxHeightMm`. |
 | `photo-missing`, `photo-decode-failed` | Photo box and source. |

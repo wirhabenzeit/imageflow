@@ -62,6 +62,7 @@ test('alignHeads marks the box only when it has rects', () => {
   assert.equal(count(markup({ rects: [left, right], alignHeads: true }), /data-align-heads/g), 1);
   assert.equal(count(markup({ rects: [left, right] }), /data-align-heads/g), 0);
   assert.equal(count(markup({ rect: left, alignHeads: true }), /data-align-heads/g), 0);
+  assert.equal(count(markup({ rects: [left], alignHeads: true }), /data-align-heads/g), 0, 'One rectangle has nothing to align');
 });
 
 test('rect and rects are exclusive, and rects needs a rectangle', () => {

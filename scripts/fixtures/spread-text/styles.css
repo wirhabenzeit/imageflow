@@ -8,3 +8,6 @@
 .body .day-head { column-span: all; margin: 0 0 var(--line); }
 .body .day-head .day { display: block; font: 500 8pt/var(--line) "Fixture Sans"; letter-spacing: .16em; text-transform: uppercase; }
 .body .day-head h3 { margin: 0; font: 600 21pt/calc(var(--line) * 2) "Fixture Serif"; }
+/* The stacked head: two spanners; the title's top margin collapses with the date's bottom margin. */
+.body .day-line { column-span: all; margin: 0 0 6px; font: 500 8pt/var(--line) "Fixture Sans"; letter-spacing: .16em; text-transform: uppercase; }
+.body .day-title { column-span: all; margin: 14px 0 var(--line); font: 600 21pt/calc(var(--line) * 2) "Fixture Serif"; }

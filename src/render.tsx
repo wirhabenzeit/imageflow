@@ -2270,6 +2270,16 @@ export async function startRender(root: HTMLElement) {
         html = markdownToHtml(book.texts[source]);
       }
       const result = flow.run(html, boxes, 'columns', stages.map(({ group }) => group));
+      // With alignHeads a rectangle can be too short for the room the opening head takes: it holds no text, and the flow
+      // goes on in the next rectangle or box.
+      result.results.forEach(({ bandBlocked }, i) => {
+        if (!bandBlocked) return;
+        const target = chain[stages[i].index];
+        const rect = stages.slice(0, i).filter(({ index }) => index === stages[i].index).length + 1;
+        warnings.push({ ...located(target.spread, 'Rectangle ' + rect + ' of box ' + target.box + ' is too short for the room the head that opens it takes, so it holds no text from ' + path + '.'),
+          code: 'text-band-too-tall', ...onPage(target.page), box: target.box, source, details: { rect, path },
+          suggestion: 'Make rectangle ' + rect + ' of box ' + target.box + ' taller than the opening head, shorten the head, or remove alignHeads.' });
+      });
       const overflow = result.overflowText.trim();
       if (overflow || result.results.some(({ failed, unresolved }) => failed || unresolved)) {
         const last = chain.at(-1)!;

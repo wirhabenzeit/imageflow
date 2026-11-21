@@ -1013,11 +1013,11 @@ export function MarkdownBox({ id, className, style, rect, rects, alignHeads, col
   return (<>
     <div data-box={id} data-box-type="markdown" data-columns={count > 1 ? count : undefined}
       data-edit={editTarget(book, 'boxes.' + id + '.', definition.boxes[id]?.parameters, marked)}
-      data-empty={empty ? '' : undefined} data-align-heads={rects && alignHeads ? '' : undefined}
+      data-empty={empty ? '' : undefined} data-align-heads={rects && rects.length > 1 && alignHeads ? '' : undefined}
       className={classes} style={place(shapes[0], style)} {...decorativeOn(decorative)} {...issueOn(marker)}>
-      {renderView(book) === 'canvas' && (!text || book.texts[text] === undefined) &&
+      {renderView(book) === 'canvas' && empty &&
         <span className="if-placeholder">{text ? 'Missing Markdown' : 'Drop a Markdown file'}</span>}
-      {renderView(book) === 'layout-preview' && (!text || book.texts[text] === undefined) && <LayoutGlyph kind="text" />}
+      {renderView(book) === 'layout-preview' && empty && <LayoutGlyph kind="text" />}
     </div>
     {shapes.slice(1).map((shape, i) => (
       <div key={i} data-box-rect={id} data-rect={i + 1} data-box-type="markdown" data-columns={count > 1 ? count : undefined}
