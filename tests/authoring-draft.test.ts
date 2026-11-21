@@ -18,6 +18,7 @@ import { p } from '../src/parameters';
 import { PreviewError } from '../src/preview';
 import { parseMcpArguments } from '../src/mcp-contract';
 import type { PreviewRequest } from '../src/preview';
+import './persistence-root';
 
 const layout = (label: string, parameters = {}) => ({ label, span: 'spread' as const, parameters, boxes: {}, elements: {} });
 const status: Extract<RenderStatus, { state: 'ready' }> = {

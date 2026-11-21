@@ -15,6 +15,7 @@ import { keptOutside } from '../src/layouts';
 import type { Layouts } from '../src/layouts';
 import { coverInstance, projectSchema, storedBoxes, storedStates } from '../src/project';
 import type { Project, SpreadState } from '../src/project';
+import './persistence-root';
 
 // Phase 2 of ADR 0009: every code path that reads or rewrites references reads every state a spread stores. These
 // books reference their photos, texts and files only from page states, page parameters and replaced content.

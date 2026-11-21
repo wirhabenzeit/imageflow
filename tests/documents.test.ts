@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { createDocument, documentIdentity, RecentDocuments } from '../desktop/documents';
 import { templateFolder, textSourcePath } from '../desktop/document-actions';
 import { approveSource } from '../desktop/source-access';
+import './persistence-root';
 
 async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'imageflow-documents-')));

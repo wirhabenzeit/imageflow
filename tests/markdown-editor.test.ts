@@ -12,6 +12,7 @@ import { configureSourceStore } from '../desktop/source-store';
 import { configureSourceAccess } from '../desktop/source-access';
 import { textSourcePath } from '../desktop/document-actions';
 import { copySample } from '../desktop/sample-book.mjs';
+import './persistence-root';
 
 function buffer(initial = 'Original') {
   let disk = initial;

@@ -2,10 +2,11 @@ import { constants } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import fs, { link, lstat, mkdir, mkdtemp, open, realpath, rm, stat, unlink } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
-import { isAbsolute, join, relative, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { z } from 'zod';
 import { photoIndexSchema, projectSchema } from '../src/project';
 import { createLockOwner, isLockOwnerAlive } from './lock-owner';
+import { sourceBookKey } from './source-identity';
 
 const names = ['project.json', 'photos.json'] as const;
 type ManifestName = typeof names[number];
@@ -102,20 +103,40 @@ async function directory(path: string, parent: string, create: boolean) {
   }
   if (!info) return undefined;
   if (!info.isDirectory() || info.isSymbolicLink() || await realpath(path) !== path) {
-    throw new Error(path + ' must be a real directory inside the project.');
+    throw new Error(path + ' must be a real directory.');
   }
   return path;
 }
 
-async function internalFolder(folder: string, create: boolean) {
-  const root = await realpath(folder);
-  return directory(join(root, '.imageflow'), root, create);
+// Machine-local runtime state (writer lock, pending-save journal, save ledger) lives in App Support, one folder per
+// book keyed by its filesystem identity (ADR 0010), so a package in a synced folder never carries it to another Mac.
+// A same-volume move keeps the inode and birth time and so the state; a Finder duplicate starts with its own.
+let stateRoot: string | undefined;
+export function configurePersistence(directory: string) { stateRoot = directory; }
+
+async function stateFolder(folder: string, create: boolean) {
+  // Reading before configuration finds no state. Writing without it must fail rather than put state somewhere unscoped.
+  if (!stateRoot) { if (create) throw new Error('Project persistence is not configured.'); return undefined; }
+  const key = await sourceBookKey(await realpath(folder));
+  if (create) await mkdir(stateRoot, { recursive: true, mode: 0o700 });
+  else if (!await lstat(stateRoot).catch(() => undefined)) return undefined;
+  return directory(join(await realpath(stateRoot), key), await realpath(stateRoot), create);
 }
 
-async function persistenceFolder(folder: string, create: boolean) {
-  const internal = await internalFolder(folder, create);
-  return internal && directory(join(internal, 'persistence'), internal, create);
+// Releases before ADR 0010 kept this state inside the package. It is only read for migration, never created.
+async function legacyFolder(folder: string, ...names: string[]) {
+  let path = await realpath(folder);
+  for (const name of ['.imageflow', ...names]) {
+    const next = await directory(join(path, name), path, false);
+    if (!next) return undefined;
+    path = next;
+  }
+  return path;
 }
+
+// A short-lived file in the book root, renamed into place. Staging beside the target avoids EXDEV when the book is
+// on another volume than App Support. `.imageflow-write-*` is ignored by revision tracking.
+const stagingName = () => '.imageflow-write-' + randomUUID() + '.tmp';
 
 async function boundedFile(path: string, maximum: number) {
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
@@ -223,8 +244,8 @@ function checkpointLine(transaction: string, checkpoint: SaveCheckpoint, before:
 }
 
 async function historyFolder(root: string, create: boolean) {
-  const internal = await internalFolder(root, create);
-  return internal && directory(join(internal, 'history'), internal, create);
+  const state = await stateFolder(root, create);
+  return state && directory(join(state, 'history'), state, create);
 }
 
 async function readAt(handle: FileHandle, position: number, length: number) {
@@ -275,6 +296,15 @@ async function appendCheckpoint(root: string, line: string, transaction: string)
     const info = await handle.stat();
     if (!info.isFile()) throw new Error(path + ' is not a regular file.');
     let size = info.size;
+    if (!size) {
+      // A first save in App Support imports the in-package ledger of an older release so history and idempotency continue.
+      const legacy = await ledgerLines(await legacyFolder(root, 'history'), Math.max(0, ledgerLimits.retainedBytes - record.length));
+      if (legacy?.length) {
+        const seed = Buffer.from(legacy.map((entry) => entry + '\n').join(''));
+        await writeAt(handle, seed, 0);
+        size = seed.length;
+      }
+    }
     const window = 2 * record.length + 2;
     const tail = await readAt(handle, Math.max(0, size - window), Math.min(size, window));
     if (tail.length && tail.at(-1) !== 0x0a) {
@@ -317,28 +347,31 @@ export type SaveLedger = {
   current: Record<ManifestName, string | null>;
 };
 
+/** The newest complete lines of a history folder's ledger, or undefined when there is none. */
+async function ledgerLines(history: string | undefined, maximum = ledgerLimits.bytes + 2 * maximumCheckpointBytes) {
+  if (!history) return undefined;
+  const path = join(history, 'ledger.jsonl');
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK).catch((error: unknown) => {
+    if (code(error) !== 'ENOENT') throw error;
+    return undefined;
+  });
+  if (!handle) return undefined;
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) throw new Error(path + ' is not a regular file.');
+    // A ledger grown past its limit outside ImageFlow is read from its newest records; the next save prunes it.
+    return await tailLines(handle, info.size, maximum);
+  } finally { await handle.close(); }
+}
+
 /** The retained checkpoints of a book, oldest first. Reading never creates the history folder. */
 export async function readSaveLedger(folder: string): Promise<SaveLedger> {
   const root = await realpath(folder);
   const current = Object.fromEntries(await Promise.all(names.map(async (name) =>
     [name, await manifest(root, name).then(digest, () => null)]))) as SaveLedger['current'];
   // A missing folder or ledger is an empty history. Any other failure is reported, because an empty answer would let
-  // a retried request commit again.
-  const history = await historyFolder(root, false);
-  if (!history) return { records: [], unreadable: 0, current };
-  const path = join(history, 'ledger.jsonl');
-  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK).catch((error: unknown) => {
-    if (code(error) !== 'ENOENT') throw error;
-    return undefined;
-  });
-  if (!handle) return { records: [], unreadable: 0, current };
-  let lines: string[];
-  try {
-    const info = await handle.stat();
-    if (!info.isFile()) throw new Error(path + ' is not a regular file.');
-    // A ledger grown past its limit outside ImageFlow is read from its newest records; the next save prunes it.
-    lines = await tailLines(handle, info.size, ledgerLimits.bytes + 2 * maximumCheckpointBytes);
-  } finally { await handle.close(); }
+  // a retried request commit again. The in-package ledger of an older release is read until the first save imports it.
+  const lines = await ledgerLines(await historyFolder(root, false)) ?? await ledgerLines(await legacyFolder(root, 'history')) ?? [];
   const records: CheckpointRecord[] = [];
   let unreadable = 0;
   for (const line of lines) {
@@ -355,55 +388,70 @@ export function changedBetween(previous: CheckpointRecord['manifests'] | undefin
   return names.filter((name) => previous[name].after !== next[name]);
 }
 
-function conflict(name: string) {
-  return new Error(name + ' changed outside ImageFlow during an interrupted save. Preserve .imageflow/persistence/pending-save.json and restore this manifest to its recorded original or saved bytes before reopening.');
+function conflict(name: string, journal: string) {
+  return new Error(name + ' changed outside ImageFlow during an interrupted save. Preserve ' + journal + ' and restore this manifest to its recorded original or saved bytes before reopening.');
 }
 
-async function recoveryManifest(folder: string, name: typeof names[number]) {
+async function recoveryManifest(folder: string, name: typeof names[number], journal: string) {
   try { return await manifest(folder, name); }
   catch (error) {
-    if (code(error) === 'ENOENT') throw conflict(name);
+    if (code(error) === 'ENOENT') throw conflict(name, journal);
     throw error;
   }
 }
 
+// The journal in App Support, else one an older release left inside the package (recovered, then removed).
 async function pendingJournal(folder: string) {
-  const internal = await persistenceFolder(folder, false);
-  if (!internal) return undefined;
-  const path = join(internal, 'pending-save.json');
-  const pending = await boundedFile(path, maximumJournalBytes).catch((error: unknown) => {
-    if (code(error) !== 'ENOENT') throw error;
-    return undefined;
-  });
-  return pending && { internal, path, ...pending };
+  for (const internal of [await stateFolder(folder, false), await legacyFolder(folder, 'persistence')]) {
+    if (!internal) continue;
+    const path = join(internal, 'pending-save.json');
+    const pending = await boundedFile(path, maximumJournalBytes).catch((error: unknown) => {
+      if (code(error) !== 'ENOENT') throw error;
+      return undefined;
+    });
+    if (pending) return { internal, path, ...pending };
+  }
+  return undefined;
 }
 
-async function finishSave(folder: string, pending: NonNullable<Awaited<ReturnType<typeof pendingJournal>>>, journal: Journal, staging: string) {
-  // Validate every manifest before publishing any of them. Recheck each immediately before its rename as well.
-  for (const name of names) {
-    const bytes = await recoveryManifest(folder, name);
-    const entry = journal.manifests[name];
-    if ('sha256' in entry) {
-      if (digest(bytes) !== entry.sha256) throw conflict(name);
-      validateManifest(name, bytes);
-    } else {
-      if (!bytes.equals(entry.before) && !bytes.equals(entry.after)) throw conflict(name);
-      if (!bytes.equals(entry.after)) await writeDurably(join(staging, name), entry.after);
+async function finishSave(folder: string, pending: NonNullable<Awaited<ReturnType<typeof pendingJournal>>>, journal: Journal) {
+  // Intended bytes are staged beside their target in the book root (cross-volume rename fails with EXDEV) and are
+  // removed again whatever happens: the journal holds them for any later recovery.
+  const staged = new Map<string, string>();
+  try {
+    // Validate every manifest before publishing any of them. Recheck each immediately before its rename as well.
+    for (const name of names) {
+      const bytes = await recoveryManifest(folder, name, pending.path);
+      const entry = journal.manifests[name];
+      if ('sha256' in entry) {
+        if (digest(bytes) !== entry.sha256) throw conflict(name, pending.path);
+        validateManifest(name, bytes);
+      } else {
+        if (!bytes.equals(entry.before) && !bytes.equals(entry.after)) throw conflict(name, pending.path);
+        if (!bytes.equals(entry.after)) {
+          const path = join(folder, stagingName());
+          staged.set(name, path);
+          await writeDurably(path, entry.after);
+        }
+      }
     }
-  }
-  await syncDirectory(staging);
-  for (const name of names) {
-    const bytes = await recoveryManifest(folder, name);
-    const entry = journal.manifests[name];
-    if ('sha256' in entry) {
-      if (digest(bytes) !== entry.sha256) throw conflict(name);
-      continue;
+    if (staged.size) await syncDirectory(folder);
+    for (const name of names) {
+      const bytes = await recoveryManifest(folder, name, pending.path);
+      const entry = journal.manifests[name];
+      if ('sha256' in entry) {
+        if (digest(bytes) !== entry.sha256) throw conflict(name, pending.path);
+        continue;
+      }
+      if (bytes.equals(entry.after)) continue;
+      if (!bytes.equals(entry.before)) throw conflict(name, pending.path);
+      // Both destinations are fixed names in the project root. rename() replaces a link rather than following it.
+      await fs.rename(staged.get(name)!, join(folder, name));
+      staged.delete(name);
+      await syncDirectory(folder);
     }
-    if (bytes.equals(entry.after)) continue;
-    if (!bytes.equals(entry.before)) throw conflict(name);
-    // Both destinations are fixed names in the project root. rename() replaces a link rather than following it.
-    await fs.rename(join(staging, name), join(folder, name));
-    await syncDirectory(folder);
+  } finally {
+    await Promise.all([...staged.values()].map((path) => rm(path, { force: true })));
   }
   const current = await boundedFile(pending.path, maximumJournalBytes);
   if (current.info.ino !== pending.info.ino || current.info.dev !== pending.info.dev || !current.bytes.equals(pending.bytes)) {
@@ -416,18 +464,10 @@ async function finishSave(folder: string, pending: NonNullable<Awaited<ReturnTyp
 }
 
 export async function recoverProjectSave(folder: string, { readOnly = false }: { readOnly?: boolean } = {}) {
-  const pending = await pendingJournal(folder);
-  if (!pending) return;
-  if (readOnly) throw new Error('This project has an interrupted save. Open it as a writable project to recover .imageflow/persistence/pending-save.json before checking or previewing it.');
-  const journal = decodeJournal(pending.bytes);
-  const staging = await mkdtemp(join(pending.internal, 'recover-'));
-  let complete = false;
-  try {
-    await finishSave(await realpath(folder), pending, journal, staging);
-    complete = true;
-  } finally {
-    // Keep failed recovery evidence and unrelated abandoned staging directories intact.
-    if (complete) await rm(staging, { recursive: true });
+  // At most one journal per location. Loop in case a legacy journal sits beside one in App Support.
+  for (let pending = await pendingJournal(folder); pending; pending = await pendingJournal(folder)) {
+    if (readOnly) throw new Error('This project has an interrupted save. Open it as a writable project to recover ' + pending.path + ' before checking or previewing it.');
+    await finishSave(await realpath(folder), pending, decodeJournal(pending.bytes));
   }
 }
 
@@ -438,7 +478,7 @@ export async function persistProjectManifests(folder: string, before: ProjectMan
     validateManifest(name, before[name]);
     if (!before[name].equals(after[name])) validateManifest(name, after[name]);
   }
-  const internal = await persistenceFolder(root, true);
+  const internal = await stateFolder(root, true);
   if (!internal) throw new Error('Could not create the project save directory.');
   if (await pendingJournal(root)) throw new Error('A previous project save needs recovery. Reload this project before making another edit.');
   for (const name of names) if (!(await manifest(root, name)).equals(before[name])) throw new Error('The project changed on disk. Reload before making more edits.');
@@ -450,6 +490,7 @@ export async function persistProjectManifests(folder: string, before: ProjectMan
     const entry = edits[name];
     return [name, 'sha256' in entry ? entry : { before: entry.before.toString('base64'), after: entry.after.toString('base64') }];
   })), checkpoint: line }) + '\n');
+  // The journal is staged in its own folder next to its final name, so the hard link publishing it stays on one volume.
   const staging = await mkdtemp(join(internal, 'save-'));
   let published = false;
   let complete = false;
@@ -463,7 +504,7 @@ export async function persistProjectManifests(folder: string, before: ProjectMan
     checkpoint.id = transaction;
     await syncDirectory(internal);
     const pending = { internal, path, ...await boundedFile(path, maximumJournalBytes) };
-    await finishSave(root, pending, { transaction, manifests: edits, checkpoint: line }, staging);
+    await finishSave(root, pending, { transaction, manifests: edits, checkpoint: line });
     complete = true;
   } catch (error) {
     if (published) throw new CommittedProjectSaveError('The save was interrupted after its recovery journal was committed. Reload this project to finish saving before making more edits.', { cause: error });
@@ -498,14 +539,32 @@ async function readOwner(path: string) {
   return { ...file, owner: result.data };
 }
 
+type Owner = Awaited<ReturnType<typeof readOwner>>['owner'];
+const liveMessage = (owner: Owner) => owner.version === 1
+  ? 'This project has a legacy writer lock for a live or reused process ID. Close other ImageFlow sessions and resolve the recorded ownership before reopening.'
+  : 'This project is already open for editing in another ImageFlow session.';
+// Whether a recorded owner is a live writer. `directory` is the identity of the folder the lock is being claimed for.
+async function ownerLive(owner: Owner, directory: { device: string; inode: string }) {
+  if (owner.version === 1) return processAlive(owner.pid);
+  return (!owner.directory || owner.directory.device === directory.device && owner.directory.inode === directory.inode) &&
+    await isLockOwnerAlive(owner.endpoint, owner.token);
+}
+
 // Call before opening a writable project and keep the returned release function for that editor's lifetime.
 export async function acquireProjectLock(folder: string): Promise<ProjectLock> {
-  let location = await realpath(folder);
+  const location = await realpath(folder);
   const rootInfo = await stat(location, { bigint: true });
   const directoryIdentity = { device: String(rootInfo.dev), inode: String(rootInfo.ino) };
-  const originalInternal = await internalFolder(location, true);
-  if (!originalInternal) throw new Error('Could not create the project lock directory.');
-  let internal = originalInternal;
+  const identity = await sourceBookKey(location);
+  // A writer from a release before ADR 0010 recorded its lock in the package. Honor a live one, but never write there.
+  const legacy = await legacyFolder(location);
+  const legacyOwner = legacy && await readOwner(join(legacy, 'writer.lock')).catch((error: unknown) => {
+    if (code(error) !== 'ENOENT') throw error;
+    return undefined;
+  });
+  if (legacyOwner && await ownerLive(legacyOwner.owner, directoryIdentity)) throw new Error(liveMessage(legacyOwner.owner));
+  const internal = await stateFolder(location, true);
+  if (!internal) throw new Error('Could not create the project lock directory.');
   const gate = join(internal, 'writer-lock-acquire');
   try { await mkdir(gate, { mode: 0o700 }); }
   catch (error) {
@@ -513,7 +572,7 @@ export async function acquireProjectLock(folder: string): Promise<ProjectLock> {
     throw new Error('Project lock acquisition is in progress or was interrupted. Close other ImageFlow instances and inspect ' + gate + ' before retrying.');
   }
   const token = randomUUID();
-  let path = join(internal, 'writer.lock');
+  const path = join(internal, 'writer.lock');
   let owned: Awaited<ReturnType<typeof readOwner>> | undefined;
   let proof: Awaited<ReturnType<typeof createLockOwner>> | undefined;
   try {
@@ -522,16 +581,7 @@ export async function acquireProjectLock(folder: string): Promise<ProjectLock> {
         if (code(error) !== 'ENOENT') throw error;
         return undefined;
       });
-      if (previous) {
-        if (previous.owner.version === 1 && processAlive(previous.owner.pid)) {
-          throw new Error('This project has a legacy writer lock for a live or reused process ID. Close other ImageFlow sessions and resolve the recorded ownership before reopening.');
-        }
-        if (previous.owner.version === 2 &&
-            (!previous.owner.directory || previous.owner.directory.device === directoryIdentity.device && previous.owner.directory.inode === directoryIdentity.inode) &&
-            await isLockOwnerAlive(previous.owner.endpoint, previous.owner.token)) {
-          throw new Error('This project is already open for editing in another ImageFlow session.');
-        }
-      }
+      if (previous && await ownerLive(previous.owner, directoryIdentity)) throw new Error(liveMessage(previous.owner));
       proof = await createLockOwner(token);
       const owner = { version: 2 as const, pid: process.pid, token, endpoint: proof.endpoint, directory: directoryIdentity };
       await writeDurably(join(gate, 'owner.json'), JSON.stringify(owner));
@@ -560,7 +610,8 @@ export async function acquireProjectLock(folder: string): Promise<ProjectLock> {
   const release = async () => {
     if (released) return;
     try {
-      if (await internalFolder(location, false) === internal) {
+      // A state folder replaced by a link is not ours to write through; this reports it instead.
+      if (await directory(internal, dirname(internal), false) === internal) {
         const current = await readOwner(path).catch((error: unknown) => {
           if (code(error) !== 'ENOENT') throw error;
           return undefined;
@@ -572,7 +623,7 @@ export async function acquireProjectLock(folder: string): Promise<ProjectLock> {
       }
     } catch (error) {
       if (code(error) !== 'ENOENT') {
-        throw new Error('Project ownership was retired, but its writer record could not be checked or removed. Preserve the remaining .imageflow lock evidence before repairing this project.', { cause: error });
+        throw new Error('Project ownership was retired, but its writer record could not be checked or removed. Preserve the remaining lock evidence in ' + internal + ' before repairing this project.', { cause: error });
       }
     } finally {
       // Releasing this capability always retires its proof, even when disk metadata needs manual repair.
@@ -580,27 +631,25 @@ export async function acquireProjectLock(folder: string): Promise<ProjectLock> {
       await proof!.close();
     }
   };
+  let current = location;
   return Object.assign(release, {
+    // The lock is keyed by the book's identity, not its path, so a same-volume move leaves it where it is. Only confirm
+    // that the new location is this same folder and that our lock record is still the one on disk.
     async tryRelocate(newFolder: string) {
       if (released) return false;
       try {
         const candidate = await realpath(newFolder);
         const candidateInfo = await stat(candidate, { bigint: true });
         if (String(candidateInfo.dev) !== directoryIdentity.device || String(candidateInfo.ino) !== directoryIdentity.inode) return false;
-        const candidateInternal = await internalFolder(candidate, false);
-        if (!candidateInternal) return false;
-        const candidatePath = join(candidateInternal, 'writer.lock');
-        const current = await readOwner(candidatePath);
-        if (!matchesOwner(current)) return false;
-        const previousExists = await lstat(location).catch((error: unknown) => {
+        if (await sourceBookKey(candidate) !== identity) return false;
+        if (!matchesOwner(await readOwner(path))) return false;
+        const previousExists = await lstat(current).catch((error: unknown) => {
           if (code(error) !== 'ENOENT') throw error;
           return undefined;
         });
-        if (previousExists && await realpath(location) !== candidate) return false;
+        if (previousExists && await realpath(current) !== candidate) return false;
         if (released) return false;
-        location = candidate;
-        internal = candidateInternal;
-        path = candidatePath;
+        current = candidate;
         return true;
       } catch {
         // An unrelated candidate is validated by its own writable-open attempt. Keep our current proof intact.

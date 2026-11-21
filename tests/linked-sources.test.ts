@@ -16,6 +16,7 @@ import { captureProjectInputs } from '../desktop/revisions';
 import { ProjectSession } from '../desktop/project-session';
 import { sourceEntries } from '../src/source-locations';
 import { copySample } from '../desktop/sample-book.mjs';
+import './persistence-root';
 
 async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'if-linked-')));

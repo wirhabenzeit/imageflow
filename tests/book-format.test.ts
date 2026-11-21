@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { loadProject, updateProject } from '../desktop/project';
 import { bookFormatOf, bookFormatVersion, pagesUnsupportedMessage, projectSchema, scopeState, spreadSchema, unsupportedBookMessage } from '../src/project';
+import './persistence-root';
 
 // Book format 2 adds page states (ADR 0009). A book is written in the lowest format that holds it. Every reference
 // consumer reads page states and replaced content (phase 2), so books that store them open; until pages are drawn
