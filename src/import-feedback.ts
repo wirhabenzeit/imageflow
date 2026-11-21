@@ -10,5 +10,8 @@ export function importFeedback(imported: number, counts?: ImportCounts) {
   const kinds = [[counts.photos, 'photo'], [counts.texts, 'text'], [counts.files, 'file']] as const;
   const parts = kinds.filter(([count]) => count > 0).map(([count, kind]) => amount(count, kind));
   const description = parts.length < 2 ? parts[0] : parts.slice(0, -1).join(', ') + ' and ' + parts.at(-1);
-  return ['Imported ' + description + '.', ...skipped].join(' ');
+  // Files the book already holds are not added again (F-044).
+  const existing = counts.existing ? (counts.existing === 1 ? '1 file is' : counts.existing + ' files are') + ' already in this book' : '';
+  if (!parts.length && existing) return [existing + '; nothing new to import.', ...skipped].join(' ');
+  return ['Imported ' + description + (existing ? '; ' + existing : '') + '.', ...skipped].join(' ');
 }

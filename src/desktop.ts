@@ -83,7 +83,8 @@ export type ProjectSummary = ProjectFiles & {
   texts: Record<string, string>;
   sources?: Record<string, SourceStatus>;
 };
-export type ImportCounts = { photos: number; texts: number; files: number; skipped: number; failed: number };
+// `existing`: files the book already holds, linked or copied, found by path or by content; they are not added again.
+export type ImportCounts = { photos: number; texts: number; files: number; skipped: number; failed: number; existing?: number };
 export type Result<T> = { value: T } | { error: string; code?: 'BOOK_BUSY' };
 export type HistoryState = { undo?: string; redo?: string };
 // How an MCP client starts ImageFlow's stdio bridge. It does not change when the connection is enabled again.
@@ -106,7 +107,7 @@ export type SourceAction = { action: 'retry' | 'locate' | 'replace' | 'reveal' |
 export type ContextMenuItem = import('./commands').RegisteredCommand | { command: import('./commands').RegisteredCommand; value?: string; label?: string; enabled?: boolean; checked?: boolean; items?: ContextMenuItem[] } | { type: 'separator' };
 export type ContextMenuResult = { command: import('./commands').RegisteredCommand; value?: string };
 export type SourceCommand = { action: 'place'; keys: string[] } | { action: 'jump'; spread: string };
-export type PopupItem = { id?: string; label?: string; type?: 'separator'; enabled?: boolean; checked?: boolean; toolTip?: string };
+export type PopupItem = { id?: string; label?: string; type?: 'separator'; enabled?: boolean; checked?: boolean; toolTip?: string; submenu?: PopupItem[] };
 export type MarkdownState = {
   id: string; name: string; path: string; external: boolean; text: string; version: number; basis: number;
   dirty: boolean; saving: boolean; closing?: boolean; error?: string; conflict?: string;

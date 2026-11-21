@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Icon } from './Icon';
-import { ActionMenu } from './ActionMenu';
+import { ActionMenu, Submenu } from './ActionMenu';
 import { Field } from './Fields';
 import type { ProjectSummary } from './desktop';
 import type { SpreadState } from './project';
-import { textChoices } from './source-items';
+import { textChoices, textMenuChoices } from './source-items';
+import { sourceEntries } from './source-locations';
+import { openMarkdown } from './markdown-open';
 import type { SourceRef } from './source-items';
 import { centered, placementIn, setPlacement } from './spread';
 
@@ -146,27 +148,47 @@ function CropPhotoActions({ summary, assigned, label, choose, remove, fields }: 
 }
 
 // Assign a Markdown source to a box, import one, or show it; and where the box sits in its text's flow.
-export function TextContent({ summary, spread, box, label, change, importText, inspect, flow, compact = false, quickLook }: {
+export function TextContent({ summary, spread, box, label, change, importText, inspect, flow, compact = false, quickLook, failure }: {
   summary: ProjectSummary; spread: SpreadState; box: string; label: string; change: Change;
   compact?: boolean; quickLook?: (source: SourceRef) => void; importText: () => void; inspect?: (source: SourceRef) => void; flow?: { part: number; parts: number };
+  failure?: (message: string) => void;
 }) {
   const assigned = spread.boxes[box]?.text;
   const choices = textChoices(summary);
   const name = assigned ? choices.find(([id]) => id === assigned)?.[1] ?? 'Missing text' : 'No text';
+  async function editText(id: string) {
+    const api = window.imageflow;
+    if (!api) return;
+    try { const result = await openMarkdown(api, { id }); if ('error' in result) failure?.(result.error); }
+    catch { failure?.('Could not open the Markdown editor.'); }
+  }
   function assign(value?: string) {
     change((item) => {
       item.boxes[box] = { params: item.boxes[box]?.params ?? {}, ...(value ? { text: value } : {}) };
     }, value ? (choices.find(([id]) => id === value)?.[1] ?? value) + ' placed in ' + label : 'Text removed from ' + label);
   }
-  if (compact) return <ActionMenu className="text-source-menu" label={<>Aa <span>{name}</span>{flow && flow.parts > 1 && <small>{flow.part}/{flow.parts}</small>}<Icon name="chevron" /></>}>
-    {choices.filter(([id]) => id !== assigned).map(([id, name]) => <button key={id} onClick={() => assign(id)}>{name}</button>)}
-    <hr />
-    <button onClick={importText}>Choose Markdown File…</button>
-    <button disabled={!assigned || !quickLook} onClick={() => assigned && quickLook?.({ kind: 'text', id: assigned })}>Show in Quick Look</button>
-    <button disabled={!assigned} onClick={() => assigned && void window.imageflow?.sourceAction({ action: 'open', key: 'markdown:' + assigned })}>Edit in Default App</button>
-    <button disabled={!assigned} onClick={() => assigned && void window.imageflow?.sourceAction({ action: 'reveal', key: 'markdown:' + assigned })}>Show in Finder</button>
-    <hr /><button disabled={!assigned} onClick={() => assign()}>Remove Text</button>
-  </ActionMenu>;
+  // The text's own editor first, and the book's other texts in a submenu: dragging a text onto the box is the usual way
+  // to place one (F-043). Quick Look and the default app are offered only for a text linked from outside the book.
+  if (compact) {
+    const readable = !!assigned && summary.texts[assigned] !== undefined;
+    const linked = !!assigned && sourceEntries(summary).some(({ key, linked }) => key === 'markdown:' + assigned && linked);
+    const others = textMenuChoices(summary).filter(({ id }) => id !== assigned);
+    return <ActionMenu className="text-source-menu" label={<>Aa <span>{name}</span>{flow && flow.parts > 1 && <small>{flow.part}/{flow.parts}</small>}<Icon name="chevron" /></>}>
+      {assigned && <button disabled={!readable} onClick={() => void editText(assigned)}>Edit Text…</button>}
+      <Submenu label={assigned ? 'Replace Text' : 'Choose Text'}>
+        {others.map(({ id, title, file }) => <button key={id} title={file} onClick={() => assign(id)}>{title}</button>)}
+        {others.length > 0 && <hr />}
+        <button onClick={importText}>Choose Markdown File…</button>
+      </Submenu>
+      {linked && <>
+        <hr />
+        <button disabled={!readable || !quickLook} onClick={() => assigned && quickLook?.({ kind: 'text', id: assigned })}>Show in Quick Look</button>
+        <button disabled={!readable} onClick={() => assigned && void window.imageflow?.sourceAction({ action: 'open', key: 'markdown:' + assigned })}>Edit in Default App</button>
+      </>}
+      <button disabled={!assigned} onClick={() => assigned && void window.imageflow?.sourceAction({ action: 'reveal', key: 'markdown:' + assigned })}>Show in Finder</button>
+      <hr /><button disabled={!assigned} onClick={() => assign()}>Remove Text</button>
+    </ActionMenu>;
+  }
   return <div className="box-content">
     <div className="box-photo box-text">
       <button type="button" className="box-photo-thumb content-file-icon" title="Show text" aria-label={'Show text in ' + label}

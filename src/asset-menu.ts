@@ -22,7 +22,9 @@ export function assetMenu(summary: ProjectSummary, keys: string[], place = false
       label: chosen[0].linked ? 'Rename… (Copy into Book First)' : undefined }] : []),
     { type: 'separator' }, { command: 'asset-reveal', enabled: !missing },
     ...(chosen.length === 1 && chosen[0].kind === 'markdown' ? [{ command: 'asset-open' as const, enabled: !missing }] : []),
-    ...(missing ? [{ command: chosen.length === 1 ? 'asset-locate' as const : 'asset-locate-folder' as const }] : []),
+    // Locate Folder… finds every missing asset in the folder chosen, whatever is selected (F-045).
+    ...(missing && chosen.length === 1 ? [{ command: 'asset-locate' as const }] : []),
+    ...(missing ? [{ command: 'asset-locate-folder' as const }] : []),
     ...(linked ? [{ command: 'asset-copy' as const, label: linked > 1 ? 'Copy ' + linked + ' into Book' : undefined, enabled: !missing }] : []),
     { type: 'separator' }, { command: 'asset-remove', label: chosen.length > 1 ? 'Remove ' + chosen.length + ' Assets from Book' : undefined },
   ];

@@ -66,6 +66,32 @@ export function textChoices(summary: Pick<ProjectSummary, 'project'>): (readonly
   });
 }
 
+// "2026-08-22" as "22 Aug", for telling apart texts that are days of a journey.
+function dayLabel(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (!match) return undefined;
+  const day = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return Number.isNaN(day.getTime()) ? undefined : day.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+}
+
+/**
+ * The book's texts for a menu (F-043): by their heading or header title, and the header's date, as the Texts tiles
+ * name them, since files such as "Bishkek.md" and "Bishkek.md (2)" are hard to tell apart. A text without either, or
+ * one not readable now, keeps its file name; `file` names the file in either case.
+ */
+export function textMenuChoices(summary: Pick<ProjectSummary, 'project' | 'texts'>) {
+  const files = new Map(textChoices(summary));
+  const entries = Object.keys(summary.project.texts).map((id) => {
+    const source = summary.texts[id];
+    const { heading, meta } = source === undefined ? { heading: undefined, meta: null } : excerpt(source);
+    const date = typeof meta?.date === 'string' ? dayLabel(meta.date) : undefined;
+    const file = files.get(id) ?? id;
+    return { id, file, title: heading ? heading + (date ? ' · ' + date : '') : file };
+  });
+  return entries.map((entry) => entry.title !== entry.file && entries.filter(({ title }) => title === entry.title).length > 1
+    ? { ...entry, title: entry.title + ' — ' + entry.file } : entry);
+}
+
 // The name shown for a photo or Markdown source.
 export function sourceTitle(summary: ProjectSummary, kind: SourceKind, id: string) {
   if (kind === 'photo') return summary.photoIndex[id]?.title || (summary.photoIndex[id] ? fileName(summary.photoIndex[id].path) : id);

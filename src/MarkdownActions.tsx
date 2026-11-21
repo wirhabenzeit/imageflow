@@ -1,14 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DesktopApi } from './desktop';
 import { Icon } from './Icon';
+import { openMarkdown } from './markdown-open';
 
-async function openMarkdown(api: DesktopApi, request: { id: string } | { name: string }) {
-  for (let attempt = 0; ; attempt++) {
-    const result = await api.showMarkdown(request);
-    if (!('error' in result) || result.code !== 'BOOK_BUSY' || attempt >= 30) return result;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-}
+
 
 export function EditMarkdown({ id, name, api = window.imageflow, disabled = false, failure }: {
   id: string; name: string; api?: DesktopApi; disabled?: boolean; failure: (message: string) => void;

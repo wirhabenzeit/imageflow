@@ -110,7 +110,10 @@ try {
 
   await window.getByRole('button', { name: 'Pages 6–7 · Photo and story' }).click();
   await window.locator('[data-spread="arriving"][aria-current="page"]').waitFor();
-  const photo = join(root, 'sample/shared/photos/shore.jpg');
+  // Not the starter's own shore.jpg, which an import would recognise as already in the book (F-044): bytes after the
+  // JPEG's end marker make it another file that shows the same picture.
+  const photo = join(work, 'shore.jpg');
+  await writeFile(photo, Buffer.concat([await readFile(join(root, 'sample/shared/photos/shore.jpg')), Buffer.from('imported')]));
   const markdown = join(work, 'drop.md');
   await writeFile(markdown, 'A small story imported through the canvas.\n');
   await changed(() => dropFile(photo, '[data-box="hero"]'));

@@ -371,7 +371,13 @@ export function App() {
   const anchorSize = useRef<string>(undefined);
   const queue = useRef(Promise.resolve());
   const agentLocked = useRef(false);
-  const [agentWorking, setAgentWorking] = useState(false);
+  // An agent's save is running: 'beside' an open editor whose layout it leaves alone, which stays usable, or with the
+  // book to itself ('exclusive'), when the workspace is inert until it finishes.
+  const [agentWorking, setAgentWorking] = useState<false | 'beside' | 'exclusive'>(false);
+  // Edits, imports and history steps made while an agent saves wait for it, then apply to the revision it saved.
+  const agentWaiters = useRef<(() => void)[]>([]);
+  const agentSettled = () => agentLocked.current && !quitLock.current
+    ? new Promise<void>((resolve) => agentWaiters.current.push(resolve)) : Promise.resolve();
   const pendingTasks = useRef(0);
   const quitLock = useRef(false);
   const quitAttempt = useRef(0);
@@ -431,6 +437,7 @@ export function App() {
   const thumbnailsLate = useDelayed(!!lastReady && !thumbs, 1000);
   const opening = !!summary && render?.state !== 'error' && (!lastReady || (!thumbs && !thumbnailsLate));
   const updatingText = reloadingFiles ? 'Updating the book after its files changed…' : 'Updating the book…';
+  const agentText = 'Agent is updating the book…';
   const canvasReady = render?.state === 'ready' && !reload;
   const holdPreview = reload === 'loading' || typeof reload === 'object';
   const generation = inputGeneration.current;
@@ -579,6 +586,7 @@ export function App() {
   function edit(change: (files: ProjectFiles) => void | false, notice?: string | (() => string), selected?: string, canvasId?: string) {
     let applied = false;
     return enqueue(async () => {
+      await agentSettled();
       const before = current.current;
       if (!api || !before || agentLocked.current || reloading.current || generation !== inputGeneration.current ||
           (canvasId && (before.id !== canvasId || readyId.current !== canvasId))) return;
@@ -610,6 +618,7 @@ export function App() {
   function undo(direction: 'undo' | 'redo') {
     const generation = inputGeneration.current;
     enqueue(async () => {
+      await agentSettled();
       const before = current.current;
       if (!api || !before || agentLocked.current || reloading.current || generation !== inputGeneration.current) return;
       const result = await persist(() => api.history(before.id, direction));
@@ -625,6 +634,7 @@ export function App() {
     if (!request.kind && !request.accept) request = { ...request, accept: fileExtensions(template) };
     const generation = inputGeneration.current;
     enqueue(async () => {
+      await agentSettled();
       const before = current.current;
       if (!api || !before || agentLocked.current || reloading.current || generation !== inputGeneration.current ||
           (canvasId && (before.id !== canvasId || readyId.current !== canvasId))) return;
@@ -654,6 +664,7 @@ export function App() {
     const generation = inputGeneration.current;
     return new Promise<{ id: string; project: string } | undefined>((resolve) => enqueue(async () => {
       try {
+        await agentSettled();
         const before = current.current;
         if (!api || !before || agentLocked.current || reloading.current || generation !== inputGeneration.current) return resolve(undefined);
         setBusy('Importing file…');
@@ -793,6 +804,11 @@ export function App() {
     else if ('error' in change) {
       if (!reloading.current) beginReload();
       failReload(change.error);
+    } else if (!reloading.current && agentLocked.current && !quitLock.current) {
+      // An agent's save is a new revision like the editor's own saves, not a reload after the book's files changed:
+      // an editor it leaves alone stays open and usable, with its caret, selection and typing (F-042).
+      adopt(change.value);
+      setError('');
     } else {
       if (!reloading.current) beginReload();
       adoptReload(change.value);
@@ -801,9 +817,11 @@ export function App() {
   });
   const acquireAgentLease = useEffectEvent((footprint?: AgentFootprint) => {
     // Operations the user cannot finish by closing an editor refuse plainly; only an open editor is named to the agent.
-    const reloadRunning = reloading.current && !reloadFailed.current;
-    if (pendingTasks.current || busy || reloadRunning || reorder.dragging || agentLocked.current) return { busy:
-      busy ? busy.replace(/…$/, '').toLowerCase() : reloadRunning ? 'reloading the book after its files changed' : reorder.dragging ? 'a drag in the editor'
+    // A reload after the book's files changed does not refuse (F-041): the main process lets a save start only once the
+    // reloaded book is published, and the editor then renders the agent's revision instead. The reload's render may
+    // take minutes while macOS reports the window as covered (another app in front), when Chromium throttles it.
+    if (pendingTasks.current || busy || reorder.dragging || agentLocked.current) return { busy:
+      busy ? busy.replace(/…$/, '').toLowerCase() : reorder.dragging ? 'a drag in the editor'
         : agentLocked.current ? 'another agent change' : 'saving an edit' };
     const typing = focusedEditorLabel(document.activeElement);
     if (editing || elementEditor || cropping || typing) {
@@ -814,15 +832,16 @@ export function App() {
       // revision, so they still keep the book to themselves.
       // Focus inside the open editor (its text field, its dialog) belongs to it; only a field focused without one blocks.
       if (!open || cropping || (typing && !editing && !elementEditor) || !leavesEditorAlone(footprint, open)) return open ?? false;
-      // Inert at once, as below: the prop only follows after the next render, and the agent's save starts now.
+      // The editor stays usable while the agent saves (F-042): the workspace is not made inert, which would take the
+      // focus, caret and selection from it. What the user saves meanwhile waits for the agent's save (agentSettled).
       agentLocked.current = true;
-      if (workspace.current) workspace.current.inert = true;
-      setAgentWorking(true);
+      setAgentWorking('beside');
       return true;
     }
+    // Inert at once: the prop only follows after the next render, and the agent's save starts now.
     agentLocked.current = true;
     if (workspace.current) workspace.current.inert = true;
-    setAgentWorking(true);
+    setAgentWorking('exclusive');
     return true;
   });
   const finishQuit = useEffectEvent(() => {
@@ -893,6 +912,7 @@ export function App() {
       agentLocked.current = quitLock.current;
       if (workspace.current) workspace.current.inert = quitLock.current;
       setAgentWorking(false);
+      for (const resolve of agentWaiters.current.splice(0)) resolve();
     });
     const command = api.onCommand((command) => onCommand(command));
     const changed = api.onProjectChanged((change) => onProjectChanged(change));
@@ -1886,7 +1906,8 @@ export function App() {
     ? pageSelectionRect(selectedSheetRect, selectionSide === 'left' ? 'right' : 'left') : undefined;
   const previewError = typeof reload === 'object' ? reload.error : render?.state === 'error' ? render.message : '';
   const issue = previewError || error;
-  const previewNotice = agentWorking ? 'Agent is updating the book…' : previewError ? (geometry ? 'Showing the last successful preview' : 'Book preview unavailable') : '';
+  // Agent activity shows in the status bar, not over the page (F-042).
+  const previewNotice = previewError ? (geometry ? 'Showing the last successful preview' : 'Book preview unavailable') : '';
   const blockedInline = editing?.held && !resumeInline && (canvasReady
     ? 'This field changed while you were editing. Close it and open the field again to continue.'
     : 'Editing is paused while the preview is out of date.');
@@ -1906,7 +1927,7 @@ export function App() {
   const menuState: BookMenuState = { importMode: summary?.project.importMode, document: !!summary, enabled: { 'add-spread': !coverActive && canAdd, 'duplicate-spread': !coverActive && canDuplicate,
     'move-spread-up': !coverActive && canMoveUp, 'move-spread-down': !coverActive && canMoveDown, 'delete-spread': !coverActive && canDelete && spreadFocused },
     editing: controlFocused || !!editing || !!cropping || !!elementEditor || !!quick, textEditing,
-    writable, busy: !!busy || exporting || !!reload || agentWorking, history: summary?.history,
+    writable, busy: !!busy || exporting || !!reload || !!agentWorking, history: summary?.history,
     canExport, canSwapPages: !coverActive && !!spread && !!template && hasFacingPages(template.format) && sequence?.spreads[index]?.span === 'spread' && canSwapPages(spread, template.spreads),
     sidebar: !panels.leftHidden, inspector: !panels.rightHidden, sources: !panels.bottomHidden, guides: showGuides, layout, zoom, selectedSpread: spreadId, photoView: photoView.value, selectionCount: selectedSpreads.length,
     saving, activeEditor, view: coverGeometry ? (coverActive ? 'cover' : 'content') : undefined, coverBoxIds,
@@ -2012,7 +2033,7 @@ export function App() {
         </div>}
         {coverGeometry && <div className="book-view-switch">
           <Choice label="Book view" hideLabel value={coverActive ? 'cover' : 'content'}
-            disabled={!!busy || !!editing || !!cropping || !!elementEditor || agentWorking || !!reload}
+            disabled={!!busy || !!editing || !!cropping || !!elementEditor || !!agentWorking || !!reload}
             options={[{ value: 'content', label: 'Content' }, { value: 'cover', label: 'Cover' }]}
             onChange={(view) => { clearCanvasEditors(); setBookView(view); }} />
         </div>}
@@ -2031,7 +2052,7 @@ export function App() {
         <button className="toolbar-icon" aria-label="Toggle Inspector" aria-pressed={!panels.rightHidden} title="Toggle Inspector (⌥⌘I)" disabled={!summary} onClick={() => togglePanel('right')}><Icon name="sidebarRight" /></button>
       </div>
     </header>
-    <div ref={workspace} inert={agentWorking} key={projectInstance} className="workspace"
+    <div ref={workspace} inert={agentWorking === 'exclusive'} key={projectInstance} className="workspace"
       data-cover-active={coverActive || undefined}
       data-resizing={resizing || undefined}
       style={{ '--left-content': panels.left + 'px', '--right-content': panels.right + 'px', '--left-panel': panels.leftHidden ? '0px' : panels.left + 'px', '--right-panel': panels.rightHidden ? '0px' : panels.right + 'px',
@@ -2276,7 +2297,7 @@ export function App() {
                 {editing.owner?.type === 'photo' && <PhotoContent summary={summary} spread={scopeSpread(inline.spread, inline.target.page)!} box={editing.owner.id}
                   label={ownerLabel(inline.spread, editing.owner)} change={changeSpreadInline} inspect={choose} values={!!boxSource(editing.spread, editing.owner.id, inline.target.page)}
                   adjustCrop={cropBlocked(editing.spread, editing.owner.id, inline.target.page) ? undefined : () => startCrop(editing.spread, editing.owner!.id, inline.target.page)} />}
-                {editing.owner?.type === 'markdown' && <TextContent compact quickLook={setQuick} summary={summary} spread={scopeSpread(inline.spread, inline.target.page)!} box={editing.owner.id}
+                {editing.owner?.type === 'markdown' && <TextContent compact quickLook={setQuick} failure={setError} summary={summary} spread={scopeSpread(inline.spread, inline.target.page)!} box={editing.owner.id}
                   label={ownerLabel(inline.spread, editing.owner)} change={changeSpreadInline} inspect={choose}
                   flow={readyFlow?.[editing.spread + ':' + (inline.target.page ? inline.target.page + ':' : '') + editing.owner.id]}
                   importText={() => importFiles({ kind: 'markdown', target: { spread: editing.spread, box: editing.owner!.id, page: inline.target.page } })} />}
@@ -2318,7 +2339,7 @@ export function App() {
       <ElementEditorDialog host={canvasWrap.current} key={JSON.stringify(elementEditor)} project={summary.id} template={template}
         presentation={elementEditor.presentation} placement={placement} click={elementEditor.click} stage={stage.current} shown={setInlineShown}
         spread={spreads.find(({ id }) => id === elementEditor.spread)!} params={summary.project.params} target={elementEditor}
-        blocked={agentWorking ? 'Agent is updating the book…' : reloading.current ? 'Editing is paused while the book reloads…' : previewError || undefined}
+        blocked={agentWorking === 'exclusive' ? 'Agent is updating the book…' : reloading.current ? 'Editing is paused while the book reloads…' : previewError || undefined}
         canvasReady={canvasReady} geometry={geometry} edit={edit} close={() => {
           if (elementEditor.presentation === 'inline' && inlineShown) setLeavingEditor(elementEditor);
           else setElementEditor((current) => current === elementEditor ? undefined : current);
@@ -2328,8 +2349,8 @@ export function App() {
       close={() => setQuick(undefined)} jump={(id) => select(id)} />}
     {photoView.dialog}
     <footer className="status-bar">
-      <span title={issue || busy || notice || undefined} className={issue ? 'status status-error' : busy || updating ? 'status status-busy' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
-        {!issue && (busy || updating) && <span className="status-spinner" aria-hidden="true" />}{issue || busy || notice || (updating ? updatingText : '')}
+      <span title={issue || busy || notice || undefined} className={issue ? 'status status-error' : busy || updating || agentWorking ? 'status status-busy' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
+        {!issue && (busy || updating || agentWorking) && <span className="status-spinner" aria-hidden="true" />}{issue || busy || (agentWorking ? agentText : notice || (updating ? updatingText : ''))}
       </span>
       {exporting && <button type="button" className="status-cancel" onClick={() => void api?.cancelExport()}>Cancel</button>}
       <AgentStatus api={api} />

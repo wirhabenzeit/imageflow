@@ -185,7 +185,8 @@ try {
   // File controls follow the book’s import policy through the editor-frame bridge.
   for (const mode of ['link', 'copy']) {
     const original = join(work, mode + '-through-editor.gpx');
-    await writeFile(original, await readFile(sample));
+    // A file of its own: the same bytes as the book's track would be recognised as already in the book (F-044).
+    await writeFile(original, (await readFile(sample, 'utf8')) + '\n<!-- ' + mode + ' -->\n');
     await openDialog([original]);
     if (((await read()).importMode ?? 'copy') !== mode) await rerendered(() => menuAction(app, 'Copy Assets into Book'));
     await openRoute();
@@ -258,7 +259,8 @@ try {
   // Import… takes a file the template's file parameter accepts, and skips one it does not.
   const extra = join(work, 'Extra ride.gpx');
   const sheet = join(work, 'Sheet.csv');
-  await writeFile(extra, await readFile(join(project, 'files', 'senja-road.gpx')));
+  // Not byte for byte the book's track, which an import would recognise as already in the book (F-044).
+  await writeFile(extra, (await readFile(join(project, 'files', 'senja-road.gpx'), 'utf8')) + '\n<!-- extra -->\n');
   await writeFile(sheet, 'a,b\n1,2\n');
   await openDialog([extra, sheet]);
   await w.getByRole('button', { name: 'Import…' }).click();
@@ -271,7 +273,7 @@ try {
   await w.locator('.sources-bar [role="tab"]').filter({ hasText: 'Photos' }).click();
   // The Assets window imports the same way and tells the book window.
   const second = join(work, 'Second ride.gpx');
-  await writeFile(second, await readFile(extra));
+  await writeFile(second, (await readFile(extra, 'utf8')) + '<!-- second -->\n');
   await openDialog([second]);
   await menuAction(app, 'Assets…');
   const manager = await (async () => {

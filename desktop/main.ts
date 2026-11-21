@@ -1454,13 +1454,21 @@ void app.whenReady().then(async () => {
     const owner = appOwner(event) ?? pickerOwner(event) ?? assetsWindows.get(assetsOwner(event)!)?.window;
     if (!owner || !Array.isArray(items) || items.length > 80) return null;
     let selected: string | null = null;
-    const entries = items.flatMap<MenuItemConstructorOptions>((item) => {
+    // A submenu, such as the texts a box can show, holds up to 500 items, one level deep.
+    type Item = { type?: unknown; label?: unknown; id?: unknown; enabled?: unknown; checked?: unknown; toolTip?: unknown; submenu?: unknown } | null;
+    const build = (items: Item[], depth = 0): MenuItemConstructorOptions[] => items.slice(0, 500).flatMap<MenuItemConstructorOptions>((item) => {
       if (item?.type === 'separator') return [{ type: 'separator' as const }];
-      if (typeof item?.label !== 'string' || typeof item.id !== 'string') return [];
+      if (typeof item?.label !== 'string') return [];
+      if (Array.isArray(item.submenu) && depth === 0) {
+        return [{ label: item.label.slice(0, 160), enabled: item.enabled !== false, submenu: build(item.submenu as Item[], depth + 1) }];
+      }
+      const id = item.id;
+      if (typeof id !== 'string') return [];
       return [{ label: item.label.slice(0, 160), enabled: item.enabled !== false,
         ...(typeof item.toolTip === 'string' ? { toolTip: item.toolTip.slice(0, 300) } : {}),
-        ...(typeof item.checked === 'boolean' ? { type: 'checkbox' as const, checked: item.checked } : {}), click: () => { selected = item.id; } }];
+        ...(typeof item.checked === 'boolean' ? { type: 'checkbox' as const, checked: item.checked } : {}), click: () => { selected = id; } }];
     });
+    const entries = build(items as Item[]);
     const at = point as { x?: unknown; y?: unknown };
     const position = Number.isInteger(at?.x) && Number.isInteger(at?.y) ? { x: Number(at.x), y: Number(at.y) } : {};
     await new Promise<void>((resolve) => Menu.buildFromTemplate(entries).popup({ window: owner, ...position, callback: resolve }));
@@ -1690,7 +1698,9 @@ void app.whenReady().then(async () => {
       const choice = await dialog.showOpenDialog(owner, { title: 'Locate Missing Sources in Folder', buttonLabel: 'Locate',
         properties: ['openDirectory', 'treatPackageAsDirectory'] });
       if (!choice.canceled && choice.filePaths[0]) {
-        const result = await relinkFolder(document.book, choice.filePaths[0], keys);
+        // Every missing source the folder holds is located and approved, not only the selected ones (F-045): choosing
+        // the folder is the approval, and the rest of a moved or re-approved folder would otherwise stay missing.
+        const result = await relinkFolder(document.book, choice.filePaths[0]);
         next = result.book;
         const names = new Map(sourceEntries(document.book).map((entry) => [entry.key as string, basename(entry.path)]));
         message = result.repaired + ' sources located.' + (result.ambiguous.length ? ' Multiple matches need Locate… for: ' + result.ambiguous.map((key) => names.get(key) ?? 'a source').join(', ') : '');

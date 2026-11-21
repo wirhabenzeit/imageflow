@@ -240,13 +240,21 @@ try {
   const sameSpread=await call('apply_project_changes',{project,expectedRevision:revision,idempotencyKey:'heading-editor-same',label:'Agent heading',
     operations:[{op:'set_parameter',scope:'spread',spread:'first',key:'heading',value:'Agent heading'}]});
   assert.equal(sameSpread.data.error.code,'EDIT_IN_PROGRESS');
+  // The user is typing in the editor when the agent saves elsewhere: the editor keeps its focus and draft, and is
+  // never paused or covered by a notice on the page (F-042).
+  const headingField=popover.getByLabel('Heading',{exact:true});
+  await headingField.waitFor();
+  await headingField.fill('Typed while the agent saved');
   const elsewhere=await good('apply_project_changes',{project,expectedRevision:revision,idempotencyKey:'heading-editor-elsewhere',label:'Agent chapter',
     operations:[{op:'set_parameter',scope:'spread',spread:applied.references.chapter,key:'heading',value:'Saved beside an editor'}]});
   assert.equal(elsewhere.committed,true);
   await ready();
   assert.equal(await popover.isVisible(),true,'The open editor stays open');
-  const headingField=popover.getByLabel('Heading',{exact:true});
-  await headingField.waitFor();
+  assert.equal(await headingField.evaluate((field)=>document.activeElement===field),true,'The field keeps its focus');
+  assert.equal(await headingField.inputValue(),'Typed while the agent saved');
+  assert.equal(await headingField.isEditable(),true);
+  assert.equal(await window.getByText(/Editing is paused/).count(),0);
+  await headingField.pressSequentially(' and after');
   await headingField.fill('Typed after the agent saved');
   // This popover saves when it closes.
   await popover.getByRole('button', { name: 'Close', exact: true }).click();
@@ -258,6 +266,35 @@ try {
   // The render-failure check below needs the chapter's original heading.
   revision=(await good('list_projects')).projects[0].revision;
   await good('apply_project_changes',{project,expectedRevision:revision,idempotencyKey:'heading-editor-restore',label:'Restore chapter',
+    operations:[{op:'set_parameter',scope:'spread',spread:applied.references.chapter,key:'heading',value:'A new chapter'}]});
+  await ready();
+
+  // A save is not refused while the editor renders the book again after a template edit (F-041). While macOS reports
+  // the window as covered, that render can take minutes; here the book view's status is held back to keep it rendering.
+  await window.evaluate(() => {
+    window.holdRenderStatus = true;
+    const data = Object.getOwnPropertyDescriptor(MessageEvent.prototype, 'data');
+    Object.defineProperty(MessageEvent.prototype, 'data', { configurable: true, get() {
+      const value = data.get.call(this);
+      return window.holdRenderStatus && value && typeof value === 'object' && 'state' in value ? { held: true } : value;
+    } });
+  });
+  const current=await readFile(entry,'utf8');
+  const shownBefore=await window.evaluate(()=>document.querySelector('iframe.book-frame-book[data-current]')?.dataset.revision);
+  await writeFile(entry,current+'\n// reloading\n');
+  await window.waitForFunction((shown)=>document.querySelector('.canvas[aria-busy="true"]') &&
+    [...document.querySelectorAll('iframe.book-frame-book')].some((frame)=>frame.dataset.revision!==shown),shownBefore);
+  revision=(await good('list_projects')).projects[0].revision;
+  const duringReload=await good('apply_project_changes',{project,expectedRevision:revision,idempotencyKey:'during-reload',label:'Saved during a reload',
+    operations:[{op:'set_parameter',scope:'spread',spread:applied.references.chapter,key:'heading',value:'Saved during a reload'}]});
+  assert.equal(duringReload.committed,true);
+  await window.evaluate(() => { window.holdRenderStatus = false; });
+  await ready();
+  assert.equal((await window.evaluate(() => window.imageflow.currentProject())).value.project.spreads.find((s)=>s.id===applied.references.chapter).params.heading,'Saved during a reload');
+  await writeFile(entry,current);
+  await ready();
+  revision=(await good('list_projects')).projects[0].revision;
+  await good('apply_project_changes',{project,expectedRevision:revision,idempotencyKey:'after-reload-restore',label:'Restore chapter',
     operations:[{op:'set_parameter',scope:'spread',spread:applied.references.chapter,key:'heading',value:'A new chapter'}]});
   await ready();
 

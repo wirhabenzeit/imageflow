@@ -277,7 +277,10 @@ test('an interrupted import preserves journal-referenced assets while a rejected
     assert.deepEqual(await readdir(join(folder, 'photos')), copied);
 
     await writeFile(join(folder, 'project.json'), JSON.stringify({ ...recovered.project, title: 'An external edit' }));
-    await assert.rejects(importIntoProject(recovered, { kind: 'photo' }, [source]), /changed on disk/);
+    // Another picture: the one imported above is already in the book, so importing it again would change nothing.
+    const another = join(root, 'another.png');
+    await sharp({ create: { width: 8, height: 8, channels: 3, background: '#48375b' } }).png().toFile(another);
+    await assert.rejects(importIntoProject(recovered, { kind: 'photo' }, [another]), /changed on disk/);
     assert.deepEqual(await readdir(join(folder, 'photos')), copied);
   } finally { await rm(root, { recursive: true }); }
 });

@@ -72,7 +72,8 @@ test('removing sources referenced from pages, replaced content and the cover lea
   configureSourceStore(join(root, 'source-cache'));
   configureSourceAccess(join(root, 'source-access'));
   await copySample(resolve('sample/starter'), folder);
-  for (const name of ['one', 'two', 'cover']) await sharp({ create: { width: 60, height: 40, channels: 3, background: '#336699' } }).png().toFile(join(external, name + '.png'));
+  // Different pictures: an import adds a file the book already holds, by path or by content, only once.
+  for (const [name, background] of [['one', '#336699'], ['two', '#993366'], ['cover', '#669933']]) await sharp({ create: { width: 60, height: 40, channels: 3, background } }).png().toFile(join(external, name + '.png'));
   await writeFile(join(external, 'story.md'), '# Story');
   await writeFile(join(external, 'route.gpx'), '<gpx/>');
   let book = await loadProject(folder, cache);
