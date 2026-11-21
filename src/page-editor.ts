@@ -1,6 +1,6 @@
 import { keptOutside, shownLayoutStates } from './layouts';
 import type { KeptContent, Layouts } from './layouts';
-import { scopeSpread, scopeState, storedBoxes } from './project';
+import { boxBase, scopeSpread, scopeState, storedBoxes } from './project';
 import type { BoxState, PageSide, SpreadState, StateLocation } from './project';
 
 export const layoutMime = 'application/x-imageflow-layout';
@@ -43,16 +43,16 @@ export function placeKeptContent(sheet: SpreadState, from: KeptItem, to: Content
   if (!source || !destination || (from.displaced === undefined && from.location === (to.page ?? 'spread') && from.id === to.box)) return;
   const occupant = destination.boxes[to.box] ?? { params: {} };
   const outgoing = occupant.photo ?? occupant.text;
-  destination.boxes[to.box] = { params: occupant.params, ...assignment(source) };
+  destination.boxes[to.box] = { ...boxBase(occupant), ...assignment(source) };
   if (from.displaced !== undefined) {
-    if (outgoing) sheet.displaced![from.displaced] = { from: to.page ?? 'spread', box: to.box, state: { params: occupant.params, ...assignment(occupant) } };
+    if (outgoing) sheet.displaced![from.displaced] = { from: to.page ?? 'spread', box: to.box, state: { ...boxBase(occupant), ...assignment(occupant) } };
     else {
       sheet.displaced!.splice(from.displaced, 1);
       if (!sheet.displaced!.length) delete sheet.displaced;
     }
   } else {
     const origin = scopeState(sheet, from.location === 'spread' ? undefined : from.location)!;
-    origin.boxes[from.id] = { params: source.params, ...assignment(occupant) };
+    origin.boxes[from.id] = { ...boxBase(source), ...assignment(occupant) };
   }
   return outgoing;
 }
@@ -63,7 +63,7 @@ export function discardKeptContent(sheet: SpreadState, item: KeptItem): boolean 
   if (item.displaced !== undefined) {
     sheet.displaced!.splice(item.displaced, 1);
     if (!sheet.displaced!.length) delete sheet.displaced;
-  } else scopeState(sheet, item.location === 'spread' ? undefined : item.location)!.boxes[item.id] = { params: source.params };
+  } else scopeState(sheet, item.location === 'spread' ? undefined : item.location)!.boxes[item.id] = boxBase(source);
   return true;
 }
 

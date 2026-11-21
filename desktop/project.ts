@@ -8,7 +8,7 @@ import { bundledFontCoverage } from './fonts';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { BuildFailure, Loader } from 'esbuild';
 import type { AuthoringDiagnostic } from '../src/authoring';
-import { parseDocument, photoIndexSchema, projectSchema, unsupportedBookMessage } from '../src/project';
+import { boxBase, parseDocument, photoIndexSchema, projectSchema, unsupportedBookMessage } from '../src/project';
 import type { FixtureMarking, PhotoIndex, Project, ProjectFile, ProjectFiles, RenderProject } from '../src/project';
 import { renderOrigin } from '../src/desktop';
 import type { ImportRequest, ProjectSummary } from '../src/desktop';
@@ -256,11 +256,12 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
       if (status.problem && source.kind !== 'file') problems.push(source.kind + ' ' + source.id + ' · ' + status.problem);
       if (source.kind === 'photo') {
         if (stored) {
-          const { path: _path, linked: _linked, ...metadata } = book.photoIndex[source.id];
+          // Only the editable metadata reaches templates; unknown keys of the entry stay in photos.json (ADR 0010).
+          const { title, caption, credit, altText } = book.photoIndex[source.id];
           const details = await photoDetails(stored.snapshot, null);
           // Without an EXIF capture time, photo views use the original's modification time, not the snapshot's.
           const estimate = details.captured ? undefined : stored.modified ?? details.estimatedCapture;
-          photos.set(source.id, { ...metadata, ...details, estimatedCapture: estimate, observation: stored.direct && status.state === 'available' ? stored.observation : details.observation,
+          photos.set(source.id, { title, caption, credit, altText, ...details, estimatedCapture: estimate, observation: stored.direct && status.state === 'available' ? stored.observation : details.observation,
             width: stored.width!, height: stored.height!, original: stored.snapshot,
             key: stored.direct ? status.problem ? digestBytes(Buffer.from(stored.key + ':stale')) : stored.key! : digestBytes(Buffer.from(stored.digest + ':rendition-3')),
             cache: renditionCacheFor(book.cache), ...(status.problem ? { problem: status.problem } : {}) });
@@ -414,7 +415,7 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
       if (!spread) throw new Error('The selected spread no longer exists.');
       const id = request.target.box;
       spread.boxes[id] = {
-        params: spread.boxes[id]?.params ?? {},
+        ...boxBase(spread.boxes[id]),
         ...(request.kind === 'photo' ? { photo: imported[0] } : { text: imported[0] }),
       };
     }

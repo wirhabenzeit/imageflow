@@ -8,7 +8,7 @@ import { describeLayoutChange, discardContent, editorLayoutChoices, editorLayout
 import { hasFacingPages, spanAllowedAt, spanFits, spanRequiredAt } from './format';
 import { isParameterValue, listProblems, newItemId, resolveValue, sameValue } from './parameters';
 import type { ListItem, Parameter, Parameters } from './parameters';
-import { coverInstance, identifier, scopeState, storedBoxes } from './project';
+import { boxBase, coverInstance, identifier, scopeState, storedBoxes } from './project';
 import { coverLayoutsFor } from './cover';
 import type { LayoutState, PageSide, ProjectFiles, SpreadState, Values } from './project';
 import { maxZoom, setPlacement } from './spread';
@@ -567,7 +567,7 @@ export function applyProjectCommands(
         const before = own(state.boxes, operation.box);
         const source = operation.kind === 'photo' ? before?.photo : before?.text;
         if (source === operation.source && !before?.crops && !before?.focus) break;
-        const replacement = { params: before?.params ?? {}, ...(operation.kind === 'photo' ? { photo: operation.source } : { text: operation.source }) };
+        const replacement = { ...boxBase(before), ...(operation.kind === 'photo' ? { photo: operation.source } : { text: operation.source }) };
         state.boxes[operation.box] = replacement;
         changed('Assigned ' + operation.kind + ' ' + operation.source + ' to ' + operation.box, [spread.id], operation.kind === 'text');
         break;
