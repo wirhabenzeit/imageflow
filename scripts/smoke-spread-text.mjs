@@ -37,21 +37,24 @@ const story = day(12, 'Over the pass', 4) + '\n\n' + day(13, 'Song-Kul', 1).spli
 const wide = [day(12, 'Over the pass', 9), day(13, 'Song-Kul', 8, 2), day(14, 'The long descent', 7, 4)].join('\n\n');
 // The first paragraph grows from variant to variant, which slides the second day's head across the break between the
 // rectangles until one of them opens with it.
-const sweep = (sentenceCount) => '## 12 June · Over the pass\n\n' +
+// Day 12 opens with a title long enough to wrap onto a second line, so its head is taller than day 13's and a head at the
+// top of the second rectangle has to grow to the room.
+const longTitle = 'Over the pass and down into the long green valley where the horses graze beside the cold river';
+const sweep = (sentenceCount) => '## 12 June · ' + longTitle + '\n\n' +
   Array.from({ length: sentenceCount }, (_, i) => sentences[i % sentences.length]).join(' ') + '\n\n' + paragraph(1) + '\n\n' +
-  day(13, 'Song-Kul', 2, 3);
-const counts = { grow: [12, 13, 14, 15, 16, 17], stack: [8, 9, 10, 11, 12, 13] };
-const texts = { aligned: story, plain: story, wide, single: day(12, 'Over the pass', 2), shortfit: day(12, 'Over the pass', 2), short: story, tail: story,
+  day(13, 'Song-Kul', 1, 3).split('. ').slice(0, 3).join('. ') + '.';
+const counts = { grow: [13, 14, 15, 16, 17], stack: [8, 9, 10] };
+const texts = { shortHead: sweep(13), aligned: story, plain: story, wide, single: day(12, 'Over the pass', 2), shortfit: day(12, 'Over the pass', 2), short: story, tail: story,
   ...Object.fromEntries(Object.entries(counts).flatMap(([kind, list]) => list.map((n) => [kind + n, sweep(n)]))) };
 for (const [id, text] of Object.entries(texts)) await writeFile(join(project, 'texts', id + '.md'), text + '\n');
 await writeFile(join(project, 'photos.json'), '{}\n');
-const spreads = [['aligned', 'band'], ['plain', 'bandPlain'], ['wide', 'run'], ['single', 'single'], ['shortfit', 'short'], ['short', 'short'], ['tail', 'single'],
+const spreads = [['aligned', 'band'], ['plain', 'bandPlain'], ['wide', 'run'], ['single', 'single'], ['shortfit', 'short'], ['short', 'short'], ['tail', 'single'], ['shortHead', 'short'], ['shortHeadTail', 'single'],
   ...Object.entries(counts).flatMap(([kind, list]) => list.map((n) => [kind + n, kind === 'grow' ? 'band' : 'bandStacked']))];
 await writeFile(join(project, 'project.json'), JSON.stringify({
   schemaVersion: 1, title: 'Spread text', template: { id: 'spread-text', version: '0.1.0' }, params: {},
   texts: Object.fromEntries(Object.keys(texts).map((id) => [id, 'texts/' + id + '.md'])),
-  // `tail` continues the text of `short`, whose second rectangle has no room for text.
-  spreads: spreads.map(([id, definition]) => ({ id, definition, params: {}, boxes: { body: { text: id === 'tail' ? 'short' : id } } })),
+  // `tail` and `shortHeadTail` continue the texts of `short` and `shortHead`, whose second rectangle has no room for text.
+  spreads: spreads.map(([id, definition]) => ({ id, definition, params: {}, boxes: { body: { text: id === 'tail' ? 'short' : id === 'shortHeadTail' ? 'shortHead' : id } } })),
 }, null, 2));
 
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
@@ -82,6 +85,7 @@ try {
       return {
         id: box.dataset.box ?? box.dataset.boxRect, rect: Number(box.dataset.rect ?? 0), band: band(box), line,
         spacer: box.querySelector(':scope > [data-level-spacer]') !== null,
+        grown: box.querySelector(':scope > [data-band-grown]') !== null,
         opensWithHead: !!box.firstElementChild && spans(box.firstElementChild) && /\S/.test(box.firstElementChild.textContent),
         heads: box.querySelectorAll('.day-head').length, midHeads: [...box.querySelectorAll('.day-head')].filter((head) => head !== box.firstElementChild).length,
         text: box.textContent.trim().length,
@@ -93,6 +97,7 @@ try {
     return {
       spreads: Object.fromEntries(ids.map((spread) => [spread, rects(spread)])),
       extra: Object.fromEntries(ids.map((spread) => [spread, sheet(spread).querySelectorAll('[data-box-rect]').length])),
+      grownHeads: document.querySelectorAll('[data-band-grown]').length,
       // A head grown to the room stays in the leading run of a later rectangle; one that was moved on must not carry the
       // growth along, and nothing else gets an inline min-height.
       leaks: [...document.querySelectorAll('.if-markdown [style*="min-height"], .if-markdown [data-band-grown]')].filter((head) => {
@@ -138,7 +143,11 @@ try {
     const [one, two] = shown.spreads[kind + n];
     assert.ok(one.opensWithHead, kind + n + ': the text opens with a head');
     if (two.text > 0) assert.ok(Math.abs(one.band - two.band) < 0.05, kind + n + ': ' + one.band + ' vs ' + two.band);
-    if (two.opensWithHead) { landed[kind]++; assert.ok(!two.spacer, kind + n + ': the second rectangle opens with its own head and needs no spacer'); }
+    if (two.opensWithHead) {
+      landed[kind]++;
+      assert.ok(!two.spacer, kind + n + ': the second rectangle opens with its own head and needs no spacer');
+      assert.ok(two.grown, kind + n + ': its head is shorter than the first rectangle\'s, so it grows to the room');
+    }
     else if (two.text > 0) assert.ok(two.spacer, kind + n + ': the second rectangle holds the room as a spacer');
   }
   assert.ok(landed.grow > 0 && landed.stack > 0, 'The sweep lands a head at the top of the second rectangle: ' + JSON.stringify(landed));
@@ -153,8 +162,14 @@ try {
   assert.ok(shortFirst.text > 0 && shortSecond.text === 0, 'The short rectangle holds no text');
   assert.ok(shown.spreads.tail[0].text > 0, 'The text continues in the next box');
   assert.deepEqual(shown.errors, []);
-  assert.deepEqual(shown.warnings.map(({ code, spread, box }) => [code, spread, box]), [['text-band-too-tall', 'short', 'body']]);
+  // The same when the text that reaches the short rectangle opens with a head: that head grew to the room, did not fit,
+  // and went on to the next box without the growth.
+  assert.ok(shown.spreads.shortHead[0].opensWithHead && shown.spreads.shortHead[1].text === 0, 'The short rectangle holds no head');
+  assert.ok(shown.spreads.shortHeadTail[0].opensWithHead && !shown.spreads.shortHeadTail[0].grown, 'The head that moved on is as the composition made it');
+  assert.deepEqual(shown.warnings.map(({ code, spread, box }) => [code, spread, box]),
+    [['text-band-too-tall', 'short', 'body'], ['text-band-too-tall', 'shortHead', 'body']]);
   assert.equal(shown.leaks, 0);
+  assert.ok(shown.grownHeads > 0, 'Some head was grown to the room');
   console.log('smoke-spread-text ok');
 } finally {
   await closeApp(app);

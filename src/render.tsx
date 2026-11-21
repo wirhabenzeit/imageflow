@@ -2281,7 +2281,8 @@ export async function startRender(root: HTMLElement) {
           suggestion: 'Make rectangle ' + rect + ' of box ' + target.box + ' taller than the opening head, shorten the head, or remove alignHeads.' });
       });
       const overflow = result.overflowText.trim();
-      if (overflow || result.results.some(({ failed, unresolved }) => failed || unresolved)) {
+      // A rectangle left empty by the room it reserves gives its text back to the queue: nothing is lost there.
+      if (overflow || result.results.some(({ failed, unresolved, bandBlocked }) => failed || (unresolved && !bandBlocked))) {
         const last = chain.at(-1)!;
         errors.push({ ...located(last.spread, 'Text from ' + (book.project.texts[source] ? sourcePath(book.project.texts[source]) : source) + ' does not fit; add a spread that continues it.'),
           code: 'text-overflow', ...onPage(last.page), box: last.box, source,
