@@ -276,7 +276,7 @@ export type Controls<K extends string = string> = readonly ControlItem<K>[];
 
 // Declarations
 
-export type BoxDeclaration = { type: 'photo' | 'markdown'; label: string; parameters?: Parameters; flowOrder?: number; controls?: Controls };
+export type BoxDeclaration = { type: 'photo' | 'markdown'; label: string; parameters?: Parameters; flowOrder?: number; composition?: string; controls?: Controls };
 /**
  * Props of a template-supplied element editor. `values` holds all of the element's parameters with the draft
  * applied, including changes in the dialog's generated controls as the user makes them, so the editor can preview
@@ -753,11 +753,7 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
     children?: (photo: PhotoRender, box: PhotoBoxState<I, ValuesOf<S['boxes'][I]>>) => ImageFlowNode;
   }): ImageFlowElement;
   /** `MarkdownBox` limited to this layout's Markdown box IDs. */
-  MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & {
-    id: BoxIds<S, 'markdown'>; columns?: Columns;
-    /** Composes the text yourself from its blocks. See `TextComposition`. */
-    children?: (text: TextComposition) => ImageFlowNode;
-  }): ImageFlowElement;
+  MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: BoxIds<S, 'markdown'>; columns?: Columns }): ImageFlowElement;
   /** `Element` limited to this layout's element IDs. */
   Element(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: keyof S['elements'] & string; children?: ImageFlowNode }): ImageFlowElement;
   /**
@@ -860,6 +856,7 @@ export type TemplateDeclaration = {
   coverFormats?: Record<string, CoverFormat>;
   coverLayouts?: Record<string, CoverLayout>;
   editors?: Record<string, DocumentEditor>;
+  compositions?: Record<string, (text: TextComposition) => ImageFlowNode>;
 };
 
 /**
@@ -942,6 +939,11 @@ type TemplateBase<D extends Parameters, L extends string = string> = {
   layoutFamilies?: { [K in L]: LayoutFamily };
   /** Editors of document parameters, by ID, opened from nodes marked with their parameters. Included in the contract-1 baseline. */
   editors?: Record<string, DocumentEditor<D, any>>;
+  /**
+   * How texts are composed from their blocks, by name: each function receives a text's blocks, header fields and the
+   * document settings and returns what flows. A Markdown box names one with `composition`. See `TextComposition`.
+   */
+  compositions?: Record<string, (text: TextComposition<D>) => ImageFlowNode>;
   /** Physical cover specifications keyed by interior format ID. Use 'default' for a single format. */
   coverFormats?: Record<string, CoverFormat>;
   /** One layout per exterior sheet, separate from the document's page and spread layouts. */
@@ -1081,7 +1083,7 @@ export type PhotoBoxState<I extends string = string, P = Values> = { id: I; uid:
  * draw the photo at `photo.image` for the printed crop to match. It is not called for an empty box.
  */
 export function PhotoBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: string; children?: (photo: PhotoRender, box: PhotoBoxState) => ImageFlowNode }): ImageFlowElement;
-/** A top-level block of a Markdown text, as a `MarkdownBox` render callback receives it. */
+/** A top-level block of a Markdown text, as a composition receives it. */
 export type TextBlock = {
   /** A thematic break is a `rule`; code blocks and raw HTML are not part of the text. */
   readonly type: 'paragraph' | 'heading' | 'blockquote' | 'list' | 'rule';
@@ -1098,23 +1100,26 @@ export type TextBlock = {
   /** What the block contains without its own element, such as a heading's formatted words, for your own element. */
   readonly content: ImageFlowElement;
 };
-/** A Markdown text as a `MarkdownBox` render callback receives it: its blocks in order and its header fields. */
-export type TextComposition = {
+/**
+ * A Markdown text as a composition receives it: its blocks in order, its header fields and the document settings.
+ * A composition is a function in the template's `compositions` that returns what flows, such as
+ * `({ blocks, meta }) => <><h3>{String(meta.title)}</h3>{blocks.map((block) => block.node)}</>`. A Markdown box
+ * names one with `composition`; the box a text starts in decides for the whole text. Mark an element that must stay
+ * with the next one with `data-keep-next`.
+ */
+export type TextComposition<D extends Parameters = Parameters> = {
   readonly blocks: readonly TextBlock[];
-  /** The fields of the source's YAML header, `{}` without one; also set in layout previews. */
+  /** The fields of the source's YAML header, `{}` without one. */
   readonly meta: Readonly<TextMeta>;
+  /** The document settings, as `ctx.document`. */
+  readonly document: Readonly<ParameterValues<D>>;
 };
 /**
  * A box that shows its part of the Markdown text assigned to box `id`. `columns` (1–6, default 1) splits it into
  * columns; set the gap with the `columnGap` style. Text fills each column before continuing in the next box.
  * In the editor, clicking it edits the box's parameters and any others it is marked with: `{...ctx.edit('textSize')}`.
- *
- * A render callback as children composes the text: it receives the text's blocks and returns what flows, such as
- * `{({ blocks, meta }) => <><h3>{String(meta.title)}</h3>{blocks.map((block) => block.node)}</>}`. It is called for
- * the box the text starts in and decides the whole text; what it returns flows through the chain like Markdown.
- * Mark an element that must stay with the next one with `data-keep-next`.
  */
-export function MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: string; columns?: Columns; children?: (text: TextComposition) => ImageFlowNode }): ImageFlowElement;
+export function MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: string; columns?: Columns }): ImageFlowElement;
 /**
  * Generated content with parameters, such as a calendar grid. In the editor, clicking it edits the element's
  * parameters and any others it is marked with: `<Element id="grid" {...ctx.edit('month')}>`.
@@ -1129,8 +1134,9 @@ export function Element(props: Styling & Placement & EditMarker & IssueMarker & 
 export const box: {
   photo<const P extends Parameters = {}>(label: string, parameters?: P & ParametersChecked<P>, options?: { controls?: Controls<keyof P & string> }):
     { type: 'photo'; label: string; parameters: P; controls?: Controls<keyof P & string> };
-  markdown<const P extends Parameters = {}>(label: string, options?: { flowOrder?: number; parameters?: P & ParametersChecked<P>; controls?: Controls<keyof P & string> }):
-    { type: 'markdown'; label: string; parameters: P; flowOrder?: number; controls?: Controls<keyof P & string> };
+  /** `composition` names one of the template's `compositions` for the text that starts in this box. */
+  markdown<const P extends Parameters = {}>(label: string, options?: { flowOrder?: number; composition?: string; parameters?: P & ParametersChecked<P>; controls?: Controls<keyof P & string> }):
+    { type: 'markdown'; label: string; parameters: P; flowOrder?: number; composition?: string; controls?: Controls<keyof P & string> };
   /**
    * Several photo boxes with explicit IDs, typed without casts: `boxes: box.photos(['one', 'two'], (id, i) => 'Photo ' + (i + 1))`.
    * The IDs are saved identities, so list them literally and never derive them from content.

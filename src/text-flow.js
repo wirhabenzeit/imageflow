@@ -192,8 +192,30 @@ export const flow = (() => {
     return { block, start, blockStart: indexOf(index, start) };
   }
 
+  // Keep-with-next for a break before `anchor`, a child of the box that starts at `start`: the break moves before the
+  // kept blocks that end there. A kept block is kept by the one before it in turn: a date above a title, or a
+  // heading above a subheading.
+  function keepWithNext(index, anchor, start) {
+    let p = start;
+    for (let previous = previousMeaningfulSibling(anchor); previous?.matches?.(KEEP_NEXT); previous = previousMeaningfulSibling(previous)) {
+      const kept = indexOf(index, firstText(previous));
+      // Kept blocks that begin the box cannot move on, so they stay, and stay together.
+      if (!(kept > 0)) return start;
+      p = kept;
+    }
+    return p;
+  }
+
   // Orphans and keep-with-next, applied to a candidate break p.
   function applyRules(box, index, p) {
+    if (p >= index.total) return p;
+    // An element a template marked stays whole, like the heading it stands for, unless it begins the box.
+    let top = locate(index, p).node;
+    while (top.parentNode && top.parentNode !== box) top = top.parentNode;
+    if (top.parentNode === box && top.matches?.('[data-keep-next]')) {
+      const start = indexOf(index, firstText(top));
+      return start > 0 ? keepWithNext(index, top, start) : p;
+    }
     const info = blockOf(box, index, p);
     if (!info) return p;
     let atStart = p <= info.blockStart;
@@ -207,16 +229,7 @@ export const flow = (() => {
     if (atStart) {
       let anchor = info.block;
       while (anchor.parentNode !== box && firstMeaningfulChild(anchor.parentNode) === anchor) anchor = anchor.parentNode;
-      let previous = anchor.parentNode === box ? previousMeaningfulSibling(anchor) : null;
-      const blockStart = p;
-      while (previous?.matches?.(KEEP_NEXT)) {
-        const start = indexOf(index, firstText(previous));
-        // Kept blocks that begin the box cannot move on, so they stay, and stay together.
-        if (!(start > 0)) return blockStart;
-        p = start;
-        // A kept block is kept by the one before it in turn: a date above a title, or a heading above a subheading.
-        previous = previousMeaningfulSibling(previous);
-      }
+      if (anchor.parentNode === box) p = keepWithNext(index, anchor, p);
     }
     return p;
   }

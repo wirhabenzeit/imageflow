@@ -108,7 +108,7 @@ export async function checkFlow(app, root) {
     const compose = (keep) => composeHtml(
       '<p class="date"' + keep + '>12 June</p><h3 class="title">Lake Song-Kul</h3>' +
       blocks.map((block, i) => block.type === 'heading' && block.depth === 2
-        ? '<p class="date"' + keep + '>Day</p><div class="day-head"' + keep + '><h3><if-block data-i="' + i + '" data-part="content"></if-block></h3></div>'
+        ? '<p class="date"' + keep + '>Day</p><div class="day-head"' + keep + '><span>Day ' + i + '</span><h3><if-block data-i="' + i + '" data-part="content"></if-block></h3></div>'
         : place(i)).join('') +
       '<p class="end">The end</p>', blocks);
     const html = compose(' data-keep-next');
@@ -151,10 +151,10 @@ export async function checkFlow(app, root) {
         const last = used.at(-1).lastElementChild;
         if (!last.matches('.end') || document.querySelectorAll('.box .end:not(.cont)').length !== 1) fail('trail is not last');
       }
-      // A replaced heading stays whole behind its date, and keeps the heading's own words.
-      for (const head of document.querySelectorAll('.box .day-head:not(.cont)')) {
-        const date = head.previousElementSibling;
-        if (!date?.matches('.date') && !head.classList.contains('split')) fail('day heading without its date');
+      // A replaced heading stays whole, behind its date.
+      if (document.querySelector('.box :is(.day-head, .date):is(.split, .cont)')) fail('kept element split');
+      for (const head of document.querySelectorAll('.box .day-head')) {
+        if (!head.previousElementSibling?.matches('.date')) fail('day heading without its date');
       }
       // Every split element continues in a later box under the same number, composed or Markdown.
       for (const element of document.querySelectorAll('.box .split')) {
