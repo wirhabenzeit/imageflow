@@ -1,0 +1,684 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { createHash } from 'node:crypto';
+import { cp, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import sharp from 'sharp';
+import { configureSourceStore, SourceStore } from '../desktop/source-store';
+import { configureSourceAccess } from '../desktop/source-access';
+import { configureRenditionCache } from '../desktop/rendition-cache';
+import { configureProxyStore } from '../desktop/proxy-store';
+import { AssetFacts, readAssetFacts } from '../desktop/asset-facts';
+import { acquireProjectLock, readSaveLedger } from '../desktop/persistence';
+import { importIntoProject, loadProject, updateProject } from '../desktop/project';
+import type { OpenProject } from '../desktop/project';
+import { collectSources, relinkFolder } from '../desktop/source-actions';
+import { captureBookStateRevision } from '../desktop/revisions';
+import { downloadOriginals, RemoteSyncingError, stageSyncPull, syncBook } from '../desktop/sync-engine';
+import type { SyncOptions } from '../desktop/sync-engine';
+import { MemoryRemote, remoteTips } from '../desktop/sync-remote';
+import { readSyncState, updateSyncState } from '../desktop/sync-pull';
+import { contentBlobKey, decideSync, readCommitHeader, NewerSyncFormatError, deriveTips, isUnlocatedPath, originalBlobKey, portableManifests, projectManifests, proxyBlobKey, stateBlobSchema } from '../src/sync-snapshot';
+import type { CommitHeader, StateBlob } from '../src/sync-snapshot';
+import type { ProjectFiles } from '../src/project';
+import { copySample } from '../desktop/sample-book.mjs';
+import { canonicalJson } from '../src/canonical-json';
+import { computeBookStateRevision } from '../src/book-revision';
+import { photoIndexSchema, projectSchema } from '../src/project';
+import { persistenceRoot } from './persistence-root';
+
+const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+const image = (path: string, color: string, width = 120, height = 80) =>
+  sharp({ create: { width, height, channels: 3, background: color } }).jpeg().toFile(path);
+
+// Each Mac has its own book folder, source store, approvals, rendition cache and proxy store. The stores are
+// configured globally, so a Mac is switched to before each step.
+type Mac = { base: string; folder: string; cache: string; external: string };
+async function world(t: { after: (fn: () => Promise<void>) => void }) {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'if-sync-')));
+  t.after(async () => { await SourceStore.drain(); configureProxyStore(undefined); await rm(root, { recursive: true, force: true }); });
+  const mac = async (name: string): Promise<Mac> => {
+    const base = join(root, name);
+    await mkdir(join(base, 'cache'), { recursive: true });
+    await mkdir(join(base, 'external'), { recursive: true });
+    return { base, folder: join(base, 'Book.imageflow'), cache: join(base, 'cache'), external: join(base, 'external') };
+  };
+  const a = await mac('desktop');
+  const b = await mac('laptop');
+  await copySample(resolve('sample/starter'), a.folder);
+  return { root, a, b, remote: new MemoryRemote() };
+}
+async function use(mac: Mac) {
+  await SourceStore.drain();
+  configureSourceStore(join(mac.base, 'source-cache'));
+  configureSourceAccess(join(mac.base, 'source-access'));
+  await configureRenditionCache(mac.cache, join(mac.base, 'renditions'));
+  await configureProxyStore(join(mac.base, 'proxies'));
+}
+/** Opens the book for editing on a Mac, runs `step` and closes it again. */
+async function on<T>(mac: Mac, step: (book: OpenProject) => Promise<T>) {
+  await use(mac);
+  const release = await acquireProjectLock(mac.folder);
+  try { return await step(await loadProject(mac.folder, mac.cache)); }
+  finally { await AssetFacts.release(mac.folder); await SourceStore.drain(); await release(); }
+}
+const sync = (mac: Mac, remote: MemoryRemote, options: Omit<SyncOptions, 'remote' | 'book'> = {}) => on(mac, (book) => syncBook({ remote, book, ...options }));
+const edit = (mac: Mac, change: (files: ProjectFiles) => void) => on(mac, async (book) => {
+  const files = structuredClone({ project: book.project, photoIndex: book.photoIndex });
+  change(files);
+  return updateProject(book, files);
+});
+const caption = (id: string, text: string) => (files: ProjectFiles) => { files.photoIndex[id].caption = text; };
+const manifests = async (mac: Mac) => ({ project: JSON.parse(await readFile(join(mac.folder, 'project.json'), 'utf8')), photos: JSON.parse(await readFile(join(mac.folder, 'photos.json'), 'utf8')) });
+const bookId = async (mac: Mac) => (await manifests(mac)).project.bookId as string;
+const tips = async (remote: MemoryRemote, mac: Mac) => remoteTips(remote, await bookId(mac));
+const stateOf = (remote: MemoryRemote, header: CommitHeader): StateBlob =>
+  stateBlobSchema.parse(JSON.parse(Buffer.from(remote.blobs.get(contentBlobKey(header.stateDigest))!).toString('utf8')));
+const commit = async (remote: MemoryRemote, mac: Mac, id: string) => readCommitHeader(await remote.getCommit(await bookId(mac), id))!;
+const proxyFile = async (mac: Mac, digest: string) => {
+  for (const ext of ['.jpg', '.png']) {
+    const path = join(mac.base, 'proxies', digest + '-preview-v1' + ext);
+    if (await lstat(path).catch(() => undefined)) return path;
+  }
+  return undefined;
+};
+/** The laptop starts as a Finder or AirDrop copy of the desktop's book, with no sync record of its own. */
+const copyBook = (from: Mac, to: Mac) => cp(from.folder, to.folder, { recursive: true });
+
+test('the decision table: fast-forward or keep both, and facts never diverge', () => {
+  const header = (commitId: string, bookStateRevision: string, parents: string[] = []): CommitHeader => ({ version: 1, commitId, bookId: '00000000-0000-4000-8000-000000000000',
+    parents, bookStateRevision, createdAt: '2026-11-21T10:00:00.000Z', title: 'Book', stateDigest: 'f'.repeat(64) });
+  const [r1, r2, r3] = ['1', '2', '3'].map((digit) => digit.repeat(64));
+  const c1 = header('00000000-0000-4000-8000-000000000001', r1);
+  const c2 = header('00000000-0000-4000-8000-000000000002', r2, [c1.commitId]);
+  const c3 = header('00000000-0000-4000-8000-000000000003', r3, [c1.commitId]);
+  assert.deepEqual(deriveTips([c1, c2]).map(({ commitId }) => commitId), [c2.commitId]);
+  assert.equal(deriveTips([c1, c2, c3]).length, 2);
+  const synced = { commitId: c1.commitId, bookStateRevision: r1 };
+  const decide = (input: Partial<Parameters<typeof decideSync>[0]>) => decideSync({ pullInProgress: false, tips: [c1], commits: [c1, c2, c3], lastSynced: synced, localRevision: r1, factsChanged: false, ...input }).action;
+  assert.equal(decide({ pullInProgress: true }), 'resume');
+  assert.equal(decide({ tips: [], lastSynced: undefined }), 'initial-push');
+  assert.equal(decide({ tips: [], commits: [] }), 'remote-behind', 'an empty listing never starts a second history');
+  assert.equal(decide({ tips: [c2], commits: [c2] }), 'remote-behind');
+  assert.equal(decide({ tips: [c2], commits: [c1, c2] }), 'fast-forward');
+  assert.equal(decide({ tips: [c2, c3] }), 'diverged');
+  assert.equal(decide({ lastSynced: undefined }), 'adopt');
+  assert.equal(decide({ lastSynced: undefined, localRevision: r2 }), 'diverged');
+  assert.equal(decide({}), 'in-sync');
+  assert.equal(decide({ localRevision: r2 }), 'push');
+  assert.equal(decide({ factsChanged: true }), 'push');
+  assert.equal(decide({ tips: [c2] }), 'fast-forward');
+  assert.deepEqual(decideSync({ pullInProgress: false, tips: [c2], commits: [c1, c2], lastSynced: synced, localRevision: r1, factsChanged: true }), { action: 'fast-forward', tip: c2, thenPush: true });
+  assert.equal(decide({ tips: [c2], localRevision: r3 }), 'diverged');
+});
+
+test('a snapshot carries linked paths as file names, and a pull keeps this Mac’s own paths', () => {
+  const project = { schemaVersion: 1, title: 'B', template: { id: 't', version: '1' }, params: {}, spreads: [],
+    texts: { a: { path: '/Users/alice/story.md', linked: true }, b: 'texts/b.md' }, files: {} } as never;
+  const photos = { x: { path: '/Users/alice/Pictures/x.jpg', linked: true, caption: 'c' }, y: { path: 'photos/y.jpg' } };
+  const portable = portableManifests(project, photos);
+  assert.deepEqual(portable.photos.x, { path: 'x.jpg', linked: true, caption: 'c' });
+  assert.deepEqual((portable.project.texts as Record<string, unknown>).a, { path: 'story.md', linked: true });
+  const pulled = projectManifests({ ...portable, photos: { ...portable.photos, z: { path: 'z.jpg', linked: true } } },
+    { photos: { x: { path: '/Volumes/Photos/x-renamed.jpg', linked: true } } });
+  assert.equal((pulled.photos.x as { path: string }).path, '/Volumes/Photos/x-renamed.jpg');
+  assert.equal((pulled.photos.z as { path: string }).path, '/imageflow-unlocated/z.jpg');
+  assert.equal((pulled.photos.y as { path: string }).path, 'photos/y.jpg');
+  assert.ok(isUnlocatedPath(((pulled.project.texts as Record<string, { path: string }>).a).path));
+});
+
+test('desktop and laptop: adopt, push after import, proxies first, originals on demand, linked paths stay per Mac', async (t) => {
+  const { a, b, remote } = await world(t);
+  // Desktop: the first push gives the book its lineage ID and uploads everything.
+  const first = await sync(a, remote);
+  assert.equal(first.action, 'initial-push');
+  assert.equal(first.changed, true, 'the lineage ID was saved');
+  const [c1] = await tips(remote, a);
+  assert.deepEqual(c1.parents, []);
+  assert.equal(c1.bookStateRevision, await captureBookStateRevision(a.folder));
+  const s1 = stateOf(remote, c1);
+  assert.ok(s1.originals.shore && remote.blobs.has(originalBlobKey(s1.originals.shore.digest, s1.originals.shore.ext)));
+  assert.equal(s1.originals.shore.digest, sha(await readFile(join(a.folder, 'photos/shore.jpg'))));
+
+  // Laptop: an AirDropped copy with the same book state adopts the tip.
+  await copyBook(a, b);
+  const adopted = await sync(b, remote);
+  assert.equal(adopted.action, 'adopt');
+  assert.equal((await readSyncState(b.folder)).lastSynced?.commitId, c1.commitId);
+  assert.equal((await sync(b, remote)).action, 'in-sync');
+
+  // Desktop links a photo from its own folder and pushes.
+  const linkedPhoto = join(a.external, 'harbour.jpg');
+  await image(linkedPhoto, '#336699');
+  const linked = await on(a, async (book) => (await importIntoProject(book, { kind: 'photo', mode: 'link' }, [linkedPhoto])).imported[0]);
+  const pushed = await sync(a, remote);
+  assert.equal(pushed.action, 'push');
+  const c2 = await commit(remote, a, pushed.pushed[0]);
+  assert.deepEqual(c2.parents, [c1.commitId]);
+  const s2 = stateOf(remote, c2);
+  assert.deepEqual(s2.photos[linked], { path: 'harbour.jpg', linked: true, title: 'harbour' }, 'the desktop’s folder layout never leaves it');
+  const linkedDigest = sha(await readFile(linkedPhoto));
+  assert.equal(s2.assetsMeta.assets[linked].digest, linkedDigest, 'a push right after an import waits for the digest');
+  assert.equal(s2.originals[linked], undefined, 'linked originals stay where they are');
+  const proxyEntry = s2.proxies[linkedDigest];
+  assert.ok(proxyEntry, 'the proxy goes along');
+  assert.equal(sha(remote.blobs.get(proxyBlobKey(linkedDigest, proxyEntry.ext))!), proxyEntry.sha256, 'with its own SHA-256');
+
+  // Laptop: the linked photo arrives unlocated and is drawn from its proxy.
+  const pulled = await sync(b, remote);
+  assert.equal(pulled.action, 'fast-forward');
+  const onLaptop = (await manifests(b)).photos[linked];
+  assert.equal(onLaptop.path, '/imageflow-unlocated/harbour.jpg');
+  await on(b, async (book) => {
+    assert.equal(book.sources!['photo:' + linked].state, 'unapproved');
+    assert.equal(book.sources!['photo:' + linked].cached, true);
+    assert.equal(book.photos.get(linked)!.original, await proxyFile(b, linkedDigest));
+    assert.deepEqual([book.photos.get(linked)!.width, book.photos.get(linked)!.height], [120, 80]);
+  });
+
+  // Laptop: Locate Folder… finds its own copy by the synced digest.
+  const laptopCopy = join(b.external, 'Exports');
+  await mkdir(laptopCopy);
+  await cp(linkedPhoto, join(laptopCopy, 'harbour.jpg'));
+  await on(b, async (book) => {
+    const result = await relinkFolder(book, laptopCopy);
+    assert.equal(result.repaired, 1);
+    assert.equal(result.book.photoIndex[linked].path, join(laptopCopy, 'harbour.jpg'));
+  });
+  assert.equal((await sync(b, remote)).action, 'in-sync', 'locating a photo changes no portable state');
+
+  // Laptop imports a copied photo and edits a caption; the desktop pulls both without overwriting its linked path.
+  const laptopPhoto = join(b.external, 'laptop.jpg');
+  await image(laptopPhoto, '#aa5500', 90, 60);
+  const owned = await on(b, async (book) => (await importIntoProject(book, { kind: 'photo', mode: 'copy' }, [laptopPhoto])).imported[0]);
+  await edit(b, caption('shore', 'From the laptop'));
+  const fromLaptop = await sync(b, remote);
+  assert.equal(fromLaptop.action, 'push');
+  const s3 = stateOf(remote, await commit(remote, b, fromLaptop.pushed[0]));
+  const ownedDigest = sha(await readFile(laptopPhoto));
+  assert.deepEqual(s3.originals[owned], { digest: ownedDigest, ext: '.jpg' });
+  assert.equal(s3.photos[linked] && (s3.photos[linked] as { path: string }).path, 'harbour.jpg');
+  assert.equal((await sync(a, remote)).action, 'fast-forward');
+  const desktop = await manifests(a);
+  assert.equal(desktop.photos.shore.caption, 'From the laptop');
+  assert.equal(desktop.photos[linked].path, linkedPhoto, 'the desktop keeps its own path');
+
+  // Desktop: the laptop's copied photo arrives as a proxy first, then its original on demand.
+  const ownedPath = join(a.folder, desktop.photos[owned].path);
+  assert.equal(await lstat(ownedPath).catch(() => undefined), undefined);
+  await on(a, async (book) => {
+    assert.equal(book.sources!['photo:' + owned].state, 'missing');
+    assert.equal(book.photos.get(owned)!.original, await proxyFile(a, ownedDigest));
+  });
+
+  // Desktop, proxy-only for that photo, edits and pushes: the photo's original and proxy entries are carried forward.
+  await edit(a, caption('segla', 'From the desktop'));
+  const carried = await sync(a, remote);
+  assert.equal(carried.action, 'push');
+  const s4 = stateOf(remote, await commit(remote, a, carried.pushed[0]));
+  assert.deepEqual(s4.originals[owned], s3.originals[owned]);
+  assert.deepEqual(s4.proxies[ownedDigest], s3.proxies[ownedDigest]);
+  assert.equal(s4.assetsMeta.assets[owned].digest, ownedDigest);
+
+  // Laptop pulls the desktop's caption and keeps its own located path.
+  assert.equal((await sync(b, remote)).action, 'fast-forward');
+  assert.equal((await manifests(b)).photos[linked].path, join(laptopCopy, 'harbour.jpg'));
+  assert.equal((await manifests(b)).photos.segla.caption, 'From the desktop');
+
+  // Desktop downloads the original for print.
+  await on(a, async (book) => assert.deepEqual(await downloadOriginals({ remote, book }), [owned]));
+  assert.equal(sha(await readFile(ownedPath)), ownedDigest);
+  await on(a, async (book) => assert.equal(book.sources!['photo:' + owned].state, 'available'));
+
+  // Laptop: the located copy goes away again and the proxy store evicted the proxy; a sync with nothing else to do
+  // fetches it again.
+  await rm(join(laptopCopy, 'harbour.jpg'));
+  await rm((await proxyFile(b, linkedDigest))!);
+  assert.equal((await sync(b, remote)).action, 'in-sync');
+  assert.ok(await proxyFile(b, linkedDigest), 'the proxy is back');
+});
+
+test('an in-place re-export and a caption edit elsewhere fast-forward, merge facts and push, with no conflict copy', async (t) => {
+  const { root, a, b, remote } = await world(t);
+  const linkedPhoto = join(a.external, 'export.jpg');
+  await image(linkedPhoto, '#225522');
+  const linked = await on(a, async (book) => (await importIntoProject(book, { kind: 'photo', mode: 'link' }, [linkedPhoto])).imported[0]);
+  await sync(a, remote);
+  await copyBook(a, b);
+  assert.equal((await sync(b, remote)).action, 'adopt');
+  await edit(b, caption('shore', 'Laptop caption'));
+  assert.equal((await sync(b, remote)).action, 'push');
+  // Lightroom writes the photo again, in place, with other bytes.
+  await image(linkedPhoto, '#dd2222', 160, 90);
+  const digest = sha(await readFile(linkedPhoto));
+  const outcome = await sync(a, remote);
+  assert.equal(outcome.action, 'fast-forward');
+  assert.equal(outcome.pushed.length, 1, 'the newer fact goes back');
+  assert.equal(outcome.conflictCopy, undefined);
+  assert.equal((await manifests(a)).photos.shore.caption, 'Laptop caption');
+  const [tip] = await tips(remote, a);
+  assert.equal(tip.commitId, outcome.pushed[0]);
+  const state = stateOf(remote, tip);
+  assert.equal(state.assetsMeta.assets[linked].digest, digest);
+  assert.deepEqual([state.assetsMeta.assets[linked].width, state.assetsMeta.assets[linked].height], [160, 90]);
+  assert.ok(state.proxies[digest]);
+  assert.equal((await readAssetFacts(a.folder))[linked].digest, digest);
+  assert.deepEqual((await readdir(join(root, 'desktop'))).filter((name) => name.includes('Conflict')), []);
+  // The laptop takes the new facts without a conflict either.
+  assert.equal((await sync(b, remote)).action, 'fast-forward');
+  assert.equal((await readAssetFacts(b.folder))[linked].digest, digest);
+});
+
+test('a pull deletes template files the snapshot no longer has, and asks again about network sites', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  await writeFile(join(a.folder, 'template', 'notes.txt'), 'draft');
+  assert.equal((await sync(a, remote)).action, 'push');
+  assert.equal((await sync(b, remote)).action, 'fast-forward');
+  assert.equal(await readFile(join(b.folder, 'template', 'notes.txt'), 'utf8'), 'draft');
+  assert.equal((await readSyncState(b.folder)).networkReview, true, 'a template from the remote does not inherit trust silently');
+  await updateSyncState(b.folder, ({ networkReview: _, ...state }) => state);
+  await rm(join(a.folder, 'template', 'notes.txt'));
+  await sync(a, remote);
+  assert.equal((await sync(b, remote)).action, 'fast-forward');
+  assert.equal(await lstat(join(b.folder, 'template', 'notes.txt')).catch(() => undefined), undefined);
+  assert.equal(await captureBookStateRevision(b.folder), (await tips(remote, a))[0].bookStateRevision);
+  await updateSyncState(b.folder, ({ networkReview: _, ...state }) => state);
+  // A caption is not code.
+  await edit(a, caption('shore', 'Only a caption'));
+  await sync(a, remote);
+  await sync(b, remote);
+  assert.equal((await readSyncState(b.folder)).networkReview, undefined);
+});
+
+test('an incomplete or corrupted remote fails as still syncing and leaves the book untouched', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  const photo = join(a.external, 'new.jpg');
+  await image(photo, '#123456');
+  await on(a, async (book) => importIntoProject(book, { kind: 'photo', mode: 'copy' }, [photo]));
+  await writeFile(join(a.folder, 'template', 'notes.txt'), 'new');
+  await edit(a, caption('shore', 'Remote edit'));
+  await sync(a, remote);
+  const state = stateOf(remote, (await tips(remote, a))[0]);
+  const digest = sha(await readFile(photo));
+  const proxyKey = proxyBlobKey(digest, state.proxies[digest].ext);
+  const goodProxy = remote.blobs.get(proxyKey)!;
+  const before = { files: await manifests(b), ledger: (await readSaveLedger(b.folder)).records.length, synced: (await readSyncState(b.folder)).lastSynced };
+  const untouched = async () => {
+    assert.deepEqual(await manifests(b), before.files);
+    assert.equal((await readSaveLedger(b.folder)).records.length, before.ledger);
+    assert.equal(await lstat(join(b.folder, 'template', 'notes.txt')).catch(() => undefined), undefined);
+    const now = await readSyncState(b.folder);
+    assert.equal(now.pull, undefined);
+    assert.deepEqual(now.lastSynced, before.synced);
+  };
+  // A proxy whose bytes fail its own SHA-256.
+  remote.blobs.set(proxyKey, goodProxy.slice(0, goodProxy.length - 10));
+  await assert.rejects(sync(b, remote), RemoteSyncingError);
+  await untouched();
+  remote.blobs.set(proxyKey, goodProxy);
+  // A content blob that has not arrived.
+  const notes = contentBlobKey(state.content['template/notes.txt']);
+  const notesBytes = remote.blobs.get(notes)!;
+  remote.blobs.delete(notes);
+  await assert.rejects(sync(b, remote), /Remote still syncing/);
+  await untouched();
+  remote.blobs.set(notes, notesBytes);
+  // A state blob that does not match its commit.
+  const [tip] = await tips(remote, a);
+  const stateBytes = remote.blobs.get(contentBlobKey(tip.stateDigest))!;
+  remote.blobs.set(contentBlobKey(tip.stateDigest), new TextEncoder().encode('{}'));
+  await assert.rejects(sync(b, remote), RemoteSyncingError);
+  await untouched();
+  remote.blobs.set(contentBlobKey(tip.stateDigest), stateBytes);
+  assert.equal((await sync(b, remote)).action, 'fast-forward');
+  assert.equal((await manifests(b)).photos.shore.caption, 'Remote edit');
+});
+
+test('a pull interrupted after it was staged is finished when the book opens', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  await writeFile(join(a.folder, 'template', 'notes.txt'), 'new');
+  await edit(a, caption('shore', 'Before the crash'));
+  await sync(a, remote);
+  const [tip] = await tips(remote, a);
+  // The laptop staged the pull and had written one file of it when it crashed.
+  await on(b, async (book) => { await stageSyncPull(remote, book, tip); });
+  await writeFile(join(b.folder, 'template', 'notes.txt'), 'new');
+  assert.equal((await readSyncState(b.folder)).pull?.targetCommit, tip.commitId);
+  // Opening the book finishes the pull before anything reads the manifests, without the remote.
+  await on(b, async (book) => {
+    assert.equal(book.photoIndex.shore.caption, 'Before the crash');
+  });
+  const state = await readSyncState(b.folder);
+  assert.equal(state.pull, undefined);
+  assert.equal(state.lastSynced?.commitId, tip.commitId);
+  assert.equal(await captureBookStateRevision(b.folder), tip.bookStateRevision);
+  assert.equal((await sync(b, remote)).action, 'in-sync', 'no false divergence');
+  // A read-only load refuses a book with an unfinished pull.
+  await on(b, async (book) => { await stageSyncPull(remote, book, tip); });
+  await assert.rejects(loadProject(b.folder, b.cache, true), /interrupted sync/);
+});
+
+test('an AirDropped book edited before its first sync keeps both versions', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await edit(b, caption('shore', 'Laptop, never synced'));
+  const outcome = await sync(b, remote);
+  assert.equal(outcome.action, 'diverged');
+  assert.ok(outcome.conflictCopy && /Book \(Conflict \d{4}-\d\d-\d\d \d\d\.\d\d\.\d\d\)\.imageflow$/.test(outcome.conflictCopy));
+  const copy = JSON.parse(await readFile(join(outcome.conflictCopy, 'photos.json'), 'utf8'));
+  const copyProject = JSON.parse(await readFile(join(outcome.conflictCopy, 'project.json'), 'utf8'));
+  assert.equal(copy.shore.caption, 'Laptop, never synced');
+  assert.notEqual(copyProject.bookId, await bookId(a), 'the copy is a new lineage');
+  assert.equal((await readSyncState(outcome.conflictCopy)).lastSynced, undefined, 'and is not linked to the remote');
+  assert.notEqual((await manifests(b)).photos.shore.caption, 'Laptop, never synced');
+  assert.equal(await captureBookStateRevision(b.folder), (await tips(remote, a))[0].bookStateRevision);
+  assert.equal((await sync(b, remote)).action, 'in-sync');
+});
+
+test('two tips stay until the user picks one, which closes the fork with both as parents', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  // Both Macs edit offline; their pushes reach the remote independently.
+  const offline = new MemoryRemote();
+  for (const [key, value] of remote.commits) offline.commits.set(key, value);
+  for (const [key, value] of remote.blobs) offline.blobs.set(key, value);
+  await edit(a, caption('shore', 'Desktop'));
+  const [cA] = (await sync(a, remote)).pushed;
+  await edit(b, caption('shore', 'Laptop'));
+  const [cB] = (await sync(b, offline)).pushed;
+  for (const [key, value] of offline.commits) remote.commits.set(key, value);
+  for (const [key, value] of offline.blobs) if (!remote.blobs.has(key)) remote.blobs.set(key, value);
+  assert.equal((await tips(remote, a)).length, 2);
+  // Without a choice nothing changes.
+  const waiting = await sync(a, remote, { chooseTip: async () => undefined });
+  assert.equal(waiting.action, 'diverged');
+  assert.equal(waiting.changed, false);
+  assert.equal(waiting.tips?.length, 2);
+  assert.equal((await manifests(a)).photos.shore.caption, 'Desktop');
+  assert.equal((await tips(remote, a)).length, 2, 'never closed automatically');
+  // The desktop picks the laptop's version. Its own is on the remote already, so no copy is needed.
+  const offered: string[][] = [];
+  const resolved = await sync(a, remote, { chooseTip: async (choices) => { offered.push(choices.map(({ commitId }) => commitId)); return cB; } });
+  assert.deepEqual(offered[0].sort(), [cA, cB].sort());
+  assert.equal(resolved.pulled, cB);
+  assert.equal(resolved.conflictCopy, undefined);
+  assert.equal((await manifests(a)).photos.shore.caption, 'Laptop');
+  const after = await tips(remote, a);
+  assert.equal(after.length, 1);
+  assert.deepEqual([...after[0].parents].sort(), [cA, cB].sort());
+  assert.equal(after[0].commitId, resolved.pushed[0]);
+  assert.equal((await sync(a, remote)).action, 'in-sync');
+  assert.equal((await sync(b, remote)).action, 'fast-forward');
+  assert.equal((await sync(b, remote)).action, 'in-sync');
+});
+
+test('an original left at an older digest never overrides a re-export from another Mac, and is not pushed back', async (t) => {
+  const { a, b, remote } = await world(t);
+  // Both Macs have the owned photo `shore` and a linked photo, each in their own folder, at the same digest.
+  const desktopPhoto = join(a.external, 'shared.jpg');
+  await image(desktopPhoto, '#445566');
+  const linked = await on(a, async (book) => (await importIntoProject(book, { kind: 'photo', mode: 'link' }, [desktopPhoto])).imported[0]);
+  await sync(a, remote);
+  await copyBook(a, b);
+  const laptopFolder = join(b.external, 'Shared');
+  await mkdir(laptopFolder);
+  await cp(desktopPhoto, join(laptopFolder, 'shared.jpg'));
+  await on(b, async (book) => { assert.equal((await relinkFolder(book, laptopFolder)).repaired, 1); });
+  assert.equal((await sync(b, remote)).action, 'adopt');
+  assert.equal((await sync(b, remote)).action, 'in-sync');
+  // The desktop replaces both: the owned photo in the book and the linked one in its folder.
+  await image(join(a.folder, 'photos', 'shore.jpg'), '#ee0000', 200, 100);
+  await image(desktopPhoto, '#00ee00', 150, 100);
+  const shoreDigest = sha(await readFile(join(a.folder, 'photos', 'shore.jpg')));
+  const linkedDigest = sha(await readFile(desktopPhoto));
+  const fromDesktop = await sync(a, remote);
+  assert.equal(fromDesktop.action, 'push', 'the desktop’s re-exports go up');
+  const tip = (await tips(remote, a))[0];
+  assert.equal(stateOf(remote, tip).assetsMeta.assets.shore.digest, shoreDigest);
+  assert.equal(stateOf(remote, tip).assetsMeta.assets[linked].digest, linkedDigest);
+  // The laptop still has the old bytes of both. It takes the new facts and proxies and pushes nothing back.
+  const pulled = await sync(b, remote);
+  assert.equal(pulled.action, 'fast-forward');
+  assert.deepEqual(pulled.pushed, []);
+  assert.equal((await tips(remote, a))[0].commitId, tip.commitId);
+  const facts = await readAssetFacts(b.folder);
+  assert.equal(facts.shore.digest, shoreDigest);
+  assert.ok(await proxyFile(b, shoreDigest) && await proxyFile(b, linkedDigest), 'the new proxies arrived');
+  assert.equal(await lstat(join(b.folder, 'photos', 'shore.jpg')).catch(() => undefined), undefined, 'the replaced owned original went');
+  await on(b, async (book) => assert.equal(book.photos.get('shore')!.original, await proxyFile(b, shoreDigest)));
+  // No ping-pong: the stale linked copy is not news.
+  assert.equal((await sync(b, remote)).action, 'in-sync');
+  assert.equal((await tips(remote, a))[0].commitId, tip.commitId);
+  // Once the laptop's copies catch up, nothing changes either.
+  await cp(desktopPhoto, join(laptopFolder, 'shared.jpg'));
+  await on(b, async (book) => assert.deepEqual(await downloadOriginals({ remote, book }), ['shore']));
+  assert.equal((await sync(b, remote)).action, 'in-sync');
+  assert.equal(sha(await readFile(join(b.folder, 'photos', 'shore.jpg'))), shoreDigest);
+  // And a later re-export on the laptop is news again.
+  await image(join(laptopFolder, 'shared.jpg'), '#0000ee', 150, 100);
+  const laptopDigest = sha(await readFile(join(laptopFolder, 'shared.jpg')));
+  const fromLaptop = await sync(b, remote);
+  assert.equal(fromLaptop.action, 'push');
+  assert.equal(stateOf(remote, (await tips(remote, a))[0]).assetsMeta.assets[linked].digest, laptopDigest);
+});
+
+test('keep both leaves no conflict copy behind while the remote is still syncing', async (t) => {
+  const { b, a, remote } = await world(t);
+  await writeFile(join(a.folder, 'template', 'notes.txt'), 'remote');
+  await sync(a, remote);
+  await copyBook(a, b);
+  await edit(b, caption('shore', 'Laptop, never synced'));
+  const [tip] = await tips(remote, a);
+  const notes = contentBlobKey(stateOf(remote, tip).content['template/notes.txt']);
+  const bytes = remote.blobs.get(notes)!;
+  remote.blobs.delete(notes);
+  for (let attempt = 0; attempt < 2; attempt++) await assert.rejects(sync(b, remote), RemoteSyncingError);
+  const conflicts = async () => (await readdir(b.base)).filter((name) => name.includes('Conflict'));
+  assert.deepEqual(await conflicts(), []);
+  assert.equal((await manifests(b)).photos.shore.caption, 'Laptop, never synced');
+  remote.blobs.set(notes, bytes);
+  const outcome = await sync(b, remote);
+  assert.ok(outcome.conflictCopy);
+  assert.equal((await conflicts()).length, 1);
+});
+
+test('a sync finishes an interrupted pull first, also for a book that still needs its lineage ID', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  await edit(a, caption('shore', 'Pulled'));
+  await sync(a, remote);
+  const [tip] = await tips(remote, a);
+  await on(b, async (book) => { await stageSyncPull(remote, book, tip); });
+  // The interrupted pull is finished by the sync itself. Opening the laptop's book would finish it first, so the open
+  // book handed to the sync is the desktop's read under the laptop's folder.
+  const project = JSON.parse(await readFile(join(b.folder, 'project.json'), 'utf8'));
+  delete project.bookId;
+  await writeFile(join(b.folder, 'project.json'), JSON.stringify(project, null, 2) + '\n');
+  await use(b);
+  const release = await acquireProjectLock(b.folder);
+  try {
+    const book = { ...await loadProject(a.folder, a.cache, true), folder: b.folder, readOnly: false, cache: b.cache };
+    const outcome = await syncBook({ remote, book });
+    assert.equal(outcome.action, 'in-sync');
+    assert.equal(outcome.changed, true);
+  } finally { await AssetFacts.release(b.folder); await SourceStore.drain(); await release(); }
+  assert.equal((await manifests(b)).photos.shore.caption, 'Pulled');
+  assert.equal((await manifests(b)).project.bookId, await bookId(a));
+});
+
+test('a push refuses a proxy another Mac has not finished writing, and a failed download leaves no staging file', async (t) => {
+  const { a, b, remote } = await world(t);
+  const photo = join(a.external, 'both.jpg');
+  await image(photo, '#778899');
+  const id = await on(a, async (book) => (await importIntoProject(book, { kind: 'photo', mode: 'copy' }, [photo])).imported[0]);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  const [tip] = await tips(remote, a);
+  const state = stateOf(remote, tip);
+  const digest = sha(await readFile(photo));
+  const key = proxyBlobKey(digest, state.proxies[digest].ext);
+  const proxy = remote.blobs.get(key)!;
+  // A snapshot from a Mac that had no proxy for this photo, then the remote's proxy is cut short: the laptop's next
+  // push finds that proxy on the remote and would record it.
+  await forge(remote, tip, (next) => { delete next.proxies[digest]; });
+  assert.equal((await sync(b, remote)).action, 'fast-forward');
+  remote.blobs.set(key, proxy.slice(0, 200));
+  await edit(b, caption(id, 'Laptop'));
+  await on(b, async () => {});
+  const before = remote.commits.size;
+  await assert.rejects(sync(b, remote), RemoteSyncingError);
+  assert.equal(remote.commits.size, before, 'no commit records a damaged proxy');
+  remote.blobs.set(key, proxy);
+  assert.equal((await sync(b, remote)).action, 'push');
+  // The desktop lost its copy of the photo; a damaged original download stops without leaving files in the book.
+  await rm(join(a.folder, (await manifests(a)).photos[id].path));
+  await sync(a, remote);
+  const original = originalBlobKey(state.originals[id].digest, state.originals[id].ext);
+  const good = remote.blobs.get(original)!;
+  remote.blobs.set(original, good.slice(0, 100));
+  await assert.rejects(on(a, (book) => downloadOriginals({ remote, book })), RemoteSyncingError);
+  assert.deepEqual((await readdir(join(a.folder, 'photos'))).filter((name) => name.startsWith('.imageflow-write-')), []);
+  remote.blobs.set(original, good);
+  await on(a, async (book) => assert.deepEqual(await downloadOriginals({ remote, book }), [id]));
+});
+
+/** A commit on top of `tip` whose state blob is `change`d by hand, as another version or a hostile remote might write. */
+async function forge(remote: MemoryRemote, tip: CommitHeader, change: (state: Record<string, any>) => void) {
+  const state = JSON.parse(Buffer.from(remote.blobs.get(contentBlobKey(tip.stateDigest))!).toString('utf8'));
+  change(state);
+  const bytes = new TextEncoder().encode(canonicalJson(state));
+  const stateDigest = sha(bytes);
+  remote.blobs.set(contentBlobKey(stateDigest), bytes);
+  const bookStateRevision = await computeBookStateRevision({ project: projectSchema.parse(state.project), photos: photoIndexSchema.parse(state.photos), contentDigests: state.content });
+  const header: CommitHeader = { ...tip, commitId: crypto.randomUUID(), parents: [tip.commitId], stateDigest, bookStateRevision, createdAt: new Date().toISOString() };
+  await remote.putCommit(header);
+  return header;
+}
+
+test('a remote that lists nothing, or not this Mac’s last commit yet, is still syncing', async (t) => {
+  const { a, remote } = await world(t);
+  await sync(a, remote);
+  const empty = new MemoryRemote();
+  await assert.rejects(sync(a, empty), RemoteSyncingError);
+  assert.equal(empty.commits.size, 0, 'no second root commit');
+});
+
+test('a pull stages the snapshot as stored, so facts a newer version added never break it', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  const [tip] = await tips(remote, a);
+  const next = await forge(remote, tip, (state) => { state.assetsMeta.assets.shore.lens = 'from a newer version'; state.photos.shore.caption = 'Newer'; });
+  const outcome = await sync(b, remote);
+  assert.equal(outcome.action, 'fast-forward');
+  assert.equal(outcome.pulled, next.commitId);
+  assert.equal((await manifests(b)).photos.shore.caption, 'Newer');
+  assert.equal((await readSyncState(b.folder)).pull, undefined);
+});
+
+test('a pull that cannot be written is refused before it is marked, and one that fails later is given up, not retried at every open', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  await writeFile(join(a.folder, 'template', 'notes.txt'), 'new');
+  await edit(a, caption('shore', 'Remote'));
+  await sync(a, remote);
+  const [tip] = await tips(remote, a);
+  // A folder where the snapshot has a file: refused before anything changes.
+  await mkdir(join(b.folder, 'template', 'notes.txt'));
+  const before = await manifests(b);
+  await assert.rejects(sync(b, remote), /through a file or link|replace a folder/);
+  assert.deepEqual(await manifests(b), before);
+  assert.equal((await readSyncState(b.folder)).pull, undefined);
+  await on(b, async () => {});
+  await rm(join(b.folder, 'template', 'notes.txt'), { recursive: true });
+  // A pull that fails after it was marked (here: a staged blob lost) is given up when the book opens: it opens.
+  await on(b, (book) => stageSyncPull(remote, book, tip));
+  const staged = sha(new TextEncoder().encode('new'));
+  for (const name of await readdir(persistenceRoot)) await rm(join(persistenceRoot, name, 'sync', 'staged', staged), { force: true });
+  await on(b, async (book) => assert.ok(book.photoIndex.shore));
+  const state = await readSyncState(b.folder);
+  assert.equal(state.pull, undefined);
+  assert.equal(state.lastSynced, undefined, 'this Mac forgets what it last synced');
+  await on(b, async () => {});
+  // The next sync keeps whatever was written as a copy and pulls again.
+  const outcome = await sync(b, remote);
+  assert.equal(outcome.action, 'diverged');
+  assert.equal(await captureBookStateRevision(b.folder), tip.bookStateRevision);
+  assert.equal((await sync(b, remote)).action, 'in-sync');
+});
+
+test('commits and snapshots from a newer version stop sync with a request to update', async (t) => {
+  const { a, remote } = await world(t);
+  await sync(a, remote);
+  const [tip] = await tips(remote, a);
+  const id = await bookId(a);
+  remote.commits.set(id + '/future', { ...tip, version: 2, commitId: crypto.randomUUID(), parents: [tip.commitId] });
+  await assert.rejects(sync(a, remote), NewerSyncFormatError);
+  remote.commits.delete(id + '/future');
+  remote.commits.set(id + '/extra', { ...tip, commitId: crypto.randomUUID(), parents: [tip.commitId], signature: 'x' });
+  await assert.rejects(sync(a, remote), NewerSyncFormatError);
+  remote.commits.delete(id + '/extra');
+  await forge(remote, tip, (state) => { state.future = true; });
+  await assert.rejects(sync(a, remote), NewerSyncFormatError);
+});
+
+test('a pull refuses template folders a book never carries', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  const [tip] = await tips(remote, a);
+  const bytes = new TextEncoder().encode('module.exports = 1');
+  remote.blobs.set(contentBlobKey(sha(bytes)), bytes);
+  await forge(remote, tip, (state) => { state.content['template/node_modules/evil/index.js'] = sha(bytes); });
+  await assert.rejects(sync(b, remote), /stay inside the book/);
+  assert.equal(await lstat(join(b.folder, 'template', 'node_modules')).catch(() => undefined), undefined);
+});
+
+test('pushes reuse recorded proxies, and a pull reuses local bytes for a photo copied into the book elsewhere', async (t) => {
+  const { a, b, remote } = await world(t);
+  const photo = join(a.external, 'moved.jpg');
+  await image(photo, '#665544');
+  const id = await on(a, async (book) => (await importIntoProject(book, { kind: 'photo', mode: 'link' }, [photo])).imported[0]);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await cp(photo, join(b.external, 'moved.jpg'));
+  await on(b, async (book) => { assert.equal((await relinkFolder(book, b.external)).repaired, 1); });
+  await sync(b, remote);
+  // An edit pushes without reading any proxy from the remote again.
+  const getBlob = remote.getBlob.bind(remote);
+  const read: string[] = [];
+  remote.getBlob = async (key) => { read.push(key); return getBlob(key); };
+  await edit(a, caption('shore', 'Edited'));
+  assert.equal((await sync(a, remote)).action, 'push');
+  assert.deepEqual(read.filter((key) => key.startsWith('blobs/proxies/')), []);
+  remote.getBlob = getBlob;
+  // The desktop copies the linked photo into the book; the laptop has the same bytes in its own folder.
+  await on(a, async (book) => { await collectSources(book, ['photo:' + id]); });
+  assert.equal((await sync(a, remote)).action, 'push');
+  assert.equal((await sync(b, remote)).action, 'fast-forward');
+  const owned = (await manifests(b)).photos[id];
+  assert.equal(owned.linked, undefined);
+  assert.equal(sha(await readFile(join(b.folder, owned.path))), sha(await readFile(photo)));
+  await on(b, async (book) => assert.equal(book.sources!['photo:' + id].state, 'available'));
+  assert.equal((await sync(b, remote)).action, 'in-sync');
+});

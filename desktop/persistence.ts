@@ -123,6 +123,10 @@ async function stateFolder(folder: string, create: boolean) {
   return directory(join(await realpath(stateRoot), key), await realpath(stateRoot), create);
 }
 
+/** The book's App Support state folder (see above), for other machine-local state such as sync records; undefined
+ * when reading finds none. */
+export const bookStateFolder = (folder: string, create: boolean) => stateFolder(folder, create);
+
 // Releases before ADR 0010 kept this state inside the package. It is only read for migration, never created.
 async function legacyFolder(folder: string, ...names: string[]) {
   let path = await realpath(folder);

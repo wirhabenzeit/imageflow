@@ -24,7 +24,7 @@ type IndexedDigest = { state: ExistingInput; digest: string };
 type IndexState = { entries: Map<string, IndexedDigest>; generation: number; closed: boolean; metrics: InputIndexMetrics };
 const maximumIndexedFiles = 8192;
 
-const ignoredName = (name: string) => name === '.DS_Store' || name === '.imageflow' ||
+export const ignoredName = (name: string) => name === '.DS_Store' || name === '.imageflow' ||
   name === '.imageflow-sdk' ||
   // A Git repository an agent or user keeps for the template and texts; ImageFlow neither reads nor renders it.
   name === '.git' ||
@@ -330,16 +330,26 @@ export async function captureProjectRevision(folder: string, options?: CaptureOp
  * `template/`; a link leaving the book throws. An invalid manifest throws.
  */
 export async function captureBookStateRevision(folder: string): Promise<string> {
+  return (await captureBookState(folder)).revision;
+}
+
+/** The portable book state of a folder: its parsed manifests, the content digests the revision covers with the file
+ * each was read from (for sync, which uploads them), and the revision itself. */
+export async function captureBookState(folder: string) {
   const root = await realpath(folder);
   const parse = async (name: typeof manifests[number]) => JSON.parse(await readFile(join(root, name), 'utf8')) as unknown;
   const project = projectSchema.parse(await parse('project.json'));
   const photos = photoIndexSchema.parse(await parse('photos.json'));
   const contentDigests: Record<string, string> = {};
+  const files: Record<string, string> = {};
   const digestOf = async (path: string, folder: ContentFolder) => {
     // Containment is checked like in `capture`: a link leaving the book throws instead of being skipped.
     const state = await inspect(root, { path, folder });
     if (state.kind === 'missing') return state;
-    if (state.kind === 'file') contentDigests[portable(path)] = createHash('sha256').update(await readFile(state.actual)).digest('hex');
+    if (state.kind === 'file') {
+      contentDigests[portable(path)] = createHash('sha256').update(await readFile(state.actual)).digest('hex');
+      files[portable(path)] = state.actual;
+    }
     else if (state.kind !== 'directory') throw new ProjectRevisionError('source-unreadable', path);
     return state;
   };
@@ -361,5 +371,5 @@ export async function captureBookStateRevision(folder: string): Promise<string> 
     for (const name of names) await walk(join(relativePath, name));
   };
   await walk('template');
-  return computeBookStateRevision({ project, photos, contentDigests });
+  return { project, photos, contentDigests, files, revision: await computeBookStateRevision({ project, photos, contentDigests }) };
 }

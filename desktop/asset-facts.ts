@@ -31,6 +31,16 @@ export async function readAssetFacts(folder: string): Promise<Record<string, Ass
   } catch { return {}; }
 }
 
+/** Writes a book's whole assets-meta.json atomically. */
+async function writeAssetFacts(folder: string, facts: Record<string, AssetFact>) {
+  const bytes = canonicalJsonIndented({ version: 1, assets: facts }) + '\n';
+  const staging = join(folder, '.imageflow-write-' + randomUUID() + '.tmp');
+  try {
+    await writeFile(staging, bytes, { flag: 'wx', mode: 0o644 });
+    await rename(staging, join(folder, assetsMetaFile));
+  } finally { await rm(staging, { force: true }); }
+}
+
 const same = (a: AssetFact | undefined, b: AssetFact | undefined) => !!a && !!b &&
   canonicalJsonIndented({ ...a, verified: '' }) === canonicalJsonIndented({ ...b, verified: '' });
 
@@ -71,6 +81,21 @@ export class AssetFacts {
     const loaded = registry.get(folder);
     registry.delete(folder);
     await (await loaded?.catch(() => undefined))?.flush();
+  }
+
+  /** Whether an open session registered the facts of this book. */
+  static registered(folder: string) { return registry.has(folder); }
+  /**
+   * Replaces a book's facts with the ones a sync pull merged (ADR 0010, per-asset rule): written now, whether or not a
+   * session holds them, and adopted by a session that does, after writing what it had pending.
+   */
+  static async adoptSynced(folder: string, facts: Record<string, AssetFact>) {
+    const loaded = await registry.get(folder)?.catch(() => undefined);
+    if (loaded) {
+      await loaded.flush();
+      loaded.facts = { ...facts };
+    }
+    await writeAssetFacts(folder, facts);
   }
 
   get(id: string): AssetFact | undefined { return this.facts[id]; }
@@ -134,12 +159,7 @@ export class AssetFacts {
       const current = await readAssetFacts(this.folder);
       for (const id of removed) delete current[id];
       for (const id of changed) if (this.facts[id]) current[id] = this.facts[id];
-      const bytes = canonicalJsonIndented({ version: 1, assets: current }) + '\n';
-      const staging = join(this.folder, '.imageflow-write-' + randomUUID() + '.tmp');
-      try {
-        await writeFile(staging, bytes, { flag: 'wx', mode: 0o644 });
-        await rename(staging, join(this.folder, assetsMetaFile));
-      } finally { await rm(staging, { force: true }); }
+      await writeAssetFacts(this.folder, current);
       } catch (error) { requeue(); throw error; }
     }).catch((error) => console.warn('ImageFlow could not write assets-meta.json', error));
     this.writes = task;

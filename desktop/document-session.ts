@@ -22,7 +22,7 @@ import type { ImportProgress } from './project';
 import type { OpenProject } from './project';
 import { photoExtensions } from './photos';
 import { bundledFontNames } from './fonts';
-import { isProjectInputPath } from './revisions';
+import { captureBookStateRevision, isProjectInputPath } from './revisions';
 import type { ProjectInputIndex } from './revisions';
 import { checkProject } from './check';
 import { checkTemplateTypes } from './typecheck';
@@ -38,6 +38,11 @@ import { saveDocumentCopy } from './source-actions';
 import { rebuildTemplateDependencies } from './dependency-install';
 import type { DependencyRebuild } from './dependency-install';
 import { AssetFacts } from './asset-facts';
+import { syncBook } from './sync-engine';
+import type { SyncOptions } from './sync-engine';
+import type { SyncRemote } from './sync-remote';
+import { readSyncState, updateSyncState } from './sync-pull';
+import type { CommitHeader } from '../src/sync-snapshot';
 import { acquireProjectLock, CommittedProjectSaveError } from './persistence';
 import type { ProjectLock, SaveCheckpoint } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
@@ -262,6 +267,45 @@ export class DocumentSession {
       return;
     }
     await this.relocate(destination);
+  }
+  /**
+   * Syncs the book with a remote (ADR 0010, Milestone 1), serialized with every other edit of the book: the folder
+   * watcher is paused while the engine pushes or pulls, and a pull is adopted as an external change, which resets
+   * Undo and Redo. With several remote tips the user picks the one to continue from.
+   */
+  async sync(remote: SyncRemote, options: Pick<SyncOptions, 'keepOriginals'> = {}) {
+    return this.run(async () => {
+      this.stopWatch();
+      // What a pull changes: the book state, or (photos only) the commit this Mac last synced.
+      const mark = async () => [await captureBookStateRevision(this.book.folder).catch(() => ''),
+        (await readSyncState(this.book.folder).catch(() => undefined))?.lastSynced?.commitId ?? ''].join(':');
+      const before = await mark();
+      try {
+        const outcome = await syncBook({ remote, book: this.book, ...options, chooseTip: (tips) => this.chooseTip(tips) });
+        if (outcome.changed) this.notify({ value: this.activate(await loadProject(this.book.folder, this.cache), true) });
+        return outcome;
+      } catch (error) {
+        // A sync can fail after it changed the book (a pull, then a failed push or fork commit): the editor takes what
+        // is on disk now, so its next edit does not fail as a change made outside ImageFlow.
+        if (await mark() !== before) {
+          const next = await loadProject(this.book.folder, this.cache).catch(() => undefined);
+          if (next) this.notify({ value: this.activate(next, true) });
+        }
+        throw error;
+      } finally { this.watchProject(this.book); }
+    });
+  }
+  private async chooseTip(tips: CommitHeader[]) {
+    if (this.window.isDestroyed()) return undefined;
+    // At most four versions fit; Cancel follows them and answers nothing.
+    const shown = tips.slice(0, 4);
+    const label = (tip: CommitHeader) => tip.title + ' · ' + new Date(tip.createdAt).toLocaleString();
+    const { response } = await dialog.showMessageBox(this.window, {
+      type: 'question', buttons: [...shown.map(label), 'Cancel'], cancelId: shown.length, defaultId: 0,
+      message: 'This book was changed on two Macs.',
+      detail: 'Choose the version to continue with. Your version on this Mac is kept as a separate copy beside the book if it is not one of them.',
+    });
+    return shown[response]?.commitId;
   }
   async reload() {
     const next = await loadProject(this.book.folder, this.cache);
@@ -663,9 +707,14 @@ export class DocumentSession {
     while (this.askingNetwork) await this.askingNetwork.catch(() => {});
     const ask = (async () => {
       const known = await approvedNetwork(book.folder);
+      // A template that arrived through sync comes from an unauthenticated remote (ADR 0006, ADR 0010): sites it newly
+      // declares are asked about even in a trusted book, once.
+      const review = (await readSyncState(book.folder).catch(() => undefined))?.networkReview === true;
+      const unreviewed = review && origins.some((origin) => !known.includes(origin));
+      if (review && !unreviewed) await updateSyncState(book.folder, ({ networkReview: _, ...state }) => state).catch(() => {});
       // The user's own book (made here, or trusted once): every declared site, without asking. A site its template
       // newly declares is recorded and named in a quiet notice instead of a question.
-      if (await bookTrusted(book.folder)) {
+      if (!unreviewed && await bookTrusted(book.folder)) {
         const added = origins.filter((origin) => !known.includes(origin));
         if (added.length) {
           await approveNetwork(book.folder, added, hash);
@@ -677,6 +726,8 @@ export class DocumentSession {
       const trusted = await this.networkTrust?.(hash, origins).catch(() => []) ?? [];
       const approved = new Set([...known, ...trusted]);
       const pending = origins.filter((origin) => !approved.has(origin));
+      // Every newly declared site is allowed already, for example by the library's trust in this exact template.
+      if (review && !pending.length) await updateSyncState(book.folder, ({ networkReview: _, ...state }) => state).catch(() => {});
       // A book from elsewhere, or made from a template whose sites were not allowed: the one question, for the book.
       if (pending.length && !this.window.isDestroyed()) {
         const { response } = await dialog.showMessageBox(this.window, {
@@ -688,6 +739,7 @@ export class DocumentSession {
         if (response === 0) {
           await approveNetwork(book.folder, origins, hash);
           await trustBook(book.folder);
+          if (review) await updateSyncState(book.folder, ({ networkReview: _, ...state }) => state).catch(() => {});
           return origins;
         }
       }
