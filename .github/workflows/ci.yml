@@ -32,9 +32,32 @@ jobs:
       - name: Report compatibility surface changes
         run: npm run compat:report
 
+  changes:
+    # Pull requests that only touch files no desktop smoke script reads (the site, decision records, benchmarks)
+    # skip the macOS job. Pushes to main always run it.
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      desktop: ${{ steps.filter.outputs.desktop }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.x'
+      - id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/ci-changes.mjs
+
   desktop:
+    needs: changes
     # Keep private-repository PRs from consuming macOS minutes.
-    if: github.event.repository.private == false || github.event_name == 'push'
+    if: needs.changes.outputs.desktop == 'true' && (github.event.repository.private == false || github.event_name == 'push')
     runs-on: macos-latest
     # The focused smoke suite takes about five minutes on a hosted Mac; leave room so a passing run isn't cancelled.
     timeout-minutes: 10

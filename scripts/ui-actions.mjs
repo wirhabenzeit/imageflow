@@ -39,6 +39,21 @@ export async function retryBookRefresh(operation, ready, { attempts = 5, delay =
   return result;
 }
 
+// Asks the editor's book to reload from disk and returns once it did. The main process refuses a reload while it
+// is finishing another operation on the book (a watcher refresh, a linked-source rescan, a save), and the editor
+// reports that as an ordinary error result, so a bare `openProject('reload')` silently leaves a slow runner on the
+// previous revision. Retry until the reload ran, and fail loudly if it never does.
+export async function reloadBook(page, { timeout = 30000 } = {}) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const result = await page.evaluate(() => window.imageflow.openProject('reload'));
+    if (result.value) return result.value;
+    const busy = result.code === 'BOOK_BUSY' || /finishing another operation/.test(result.error ?? '');
+    if (!busy || Date.now() > deadline) throw new Error('The book did not reload: ' + JSON.stringify(result));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 // A native window can disappear before Electron acknowledges the click that closes it.
 export async function clickClosingWindow(page, button) {
   const closed = page.waitForEvent('close');

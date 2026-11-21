@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { closeApp, menuAction, testBook } from './ui-actions.mjs';
+import { closeApp, menuAction, reloadBook, testBook } from './ui-actions.mjs';
 import { createRouteFixture } from './route-fixture.mjs';
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
@@ -135,7 +135,7 @@ try {
   files.project.title = 'Changed after opening';
   const saved = await page.evaluate(({ id, files }) => window.imageflow.saveProject(id, files, 'Change title'), { id: beforeRevert.id, files });
   assert.ok(saved.value, JSON.stringify(saved));
-  await page.evaluate(() => window.imageflow.openProject('reload')); await page.reload(); await ready();
+  await reloadBook(page); await page.reload(); await ready();
   await app.evaluate(({ dialog }) => { dialog.showMessageBox = async () => ({ response: 0 }); });
   await command(page, 'revert-opened');
   await until(async () => (await current(page)).project.title === 'Book', 'Last Opened restores opening content');
