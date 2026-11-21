@@ -102,6 +102,7 @@ const sidebar: DefaultTheme.Sidebar = {
         { text: '0007 Template v1 baseline', link: '/decisions/0007-template-v1-baseline' },
         { text: '0008 Baseline freeze at release', link: '/decisions/0008-baseline-freeze-at-release' },
         { text: '0009 Page templates', link: '/decisions/0009-page-templates' },
+        { text: '0010 Sync, revisions and cloud assets', link: '/decisions/0010-sync-revisions-and-cloud-assets' },
       ],
     },
     {
