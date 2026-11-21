@@ -22,6 +22,7 @@ import { sourceEntries, sourcePath, sourceLinked, storedFileName } from '../src/
 import type { SourceStatus } from '../src/source-locations';
 import { digestBytes, SourceStore } from './source-store';
 import { AssetFacts } from './asset-facts';
+import { proxyStore } from './proxy-store';
 import type { AssetFact } from '../src/asset-facts';
 import { captureFields } from '../src/photo-metadata';
 import { approveSources, sourceBookKey } from './source-access';
@@ -266,6 +267,7 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
   // Derived facts follow photos the editor reads in place; a private export read changes nothing.
   if (writable) store.onDigest = (key, observation, digest) => { if (key.startsWith('photo:')) facts.digest(key.slice('photo:'.length), observation, digest); };
   const unavailablePhotos: Record<string, AssetFact> = {};
+  const proxies = proxyStore();
   for (let i = 0; i < entries.length; i += 8) {
     await Promise.all(entries.slice(i, i + 8).map(async (source) => {
       const { status, stored } = await store.resolve(book.folder, source, { pin: pinSources, cache: book.cache });
@@ -287,7 +289,26 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
             width: stored.width!, height: stored.height!, original: stored.snapshot,
             key: stored.direct ? status.problem ? digestBytes(Buffer.from(stored.key + ':stale')) : stored.key! : digestBytes(Buffer.from(stored.digest + ':rendition-3')),
             cache: renditionCacheFor(book.cache), ...(status.problem ? { problem: status.problem } : {}) });
-        } else if (facts.get(source.id)) unavailablePhotos[source.id] = facts.get(source.id)!;
+        } else if (facts.get(source.id)) {
+          const fact = facts.get(source.id)!;
+          // A sync proxy stored by digest stands in on the canvas for an original that is missing here (a linked photo not
+          // yet located, an owned photo not yet downloaded) or not approved on this Mac. It is read from the proxy store
+          // only, never from the original's path, so an unapproved location stays unread (ADR 0005, ADR 0010).
+          const proxy = status.state === 'missing' || status.state === 'unapproved' ? await (await proxies)?.path(fact.digest) : undefined;
+          const details = proxy ? await photoDetails(proxy, null).catch(() => undefined) : undefined;
+          if (proxy && details) {
+            const { title, caption, credit, altText } = book.photoIndex[source.id];
+            // The proxy's own size and capture data never reach layout: the original's do, from assets-meta.json, so
+            // aspect ratios, crop limits and resolution checks match the real photo.
+            const { captured: _captured, location: _location, camera: _camera, ...rendition } = details;
+            const capture = Object.fromEntries(captureFields.flatMap((field) => fact[field] ? [[field, fact[field]]] : []));
+            photos.set(source.id, { title, caption, credit, altText, ...rendition, ...capture, estimatedCapture: undefined,
+              width: fact.width, height: fact.height, original: proxy, key: digestBytes(Buffer.from(fact.digest + ':proxy-v1:' + details.observation)),
+              cache: renditionCacheFor(book.cache), problem: status.problem ?? 'Original unavailable' });
+            // Shown like a cached preview: the source keeps its honest state, and print marks and blocks it.
+            sources[source.key] = { ...status, cached: true };
+          } else unavailablePhotos[source.id] = fact;
+        }
       } else if (source.kind === 'markdown') {
         if (stored) texts[source.id] = await readFile(stored.snapshot, 'utf8');
       } else {

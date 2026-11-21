@@ -14,6 +14,7 @@ import { importIntoProject, loadProject, projectSummary, renderData, updateProje
 import { collectSources, relocateSource, relinkFolder, removeSources, renameSource, saveDocumentCopy } from '../desktop/source-actions';
 import { captureBookStateRevision, captureProjectInputs } from '../desktop/revisions';
 import { AssetFacts, readAssetFacts } from '../desktop/asset-facts';
+import { configureProxyStore } from '../desktop/proxy-store';
 import { acquireProjectLock, readSaveLedger, recoverProjectSave } from '../desktop/persistence';
 import { ProjectSession } from '../desktop/project-session';
 import { sourceEntries } from '../src/source-locations';
@@ -727,4 +728,107 @@ test('Save a Copy carries assets-meta.json along, since it is keyed by asset ID 
   await settleFacts(f);
   const copied = await saveDocumentCopy(await loadProject(f.folder, f.cache), join(f.root, 'Copy.imageflow'), true);
   assert.equal((await readMeta(copied)).assets[id].digest, sha(await readFile(f.photo)));
+});
+
+// Sync proxies (ADR 0010, #249): a book opened on a second Mac shows pulled proxies for originals that are not there.
+async function secondMac(t: { after: (fn: () => Promise<void>) => void }, f: { root: string; folder: string; cache: string; external: string }) {
+  const taken = join(f.external, 'dated.jpg');
+  await sharp({ create: { width: 90, height: 60, channels: 3, background: '#00ff00' } })
+    .withExif({ IFD2: { DateTimeOriginal: '2024:06:01 18:20:30', OffsetTimeOriginal: '+02:00' } }).jpeg().toFile(taken);
+  // Mac A: a linked photo and the sample's owned photos, with their facts in assets-meta.json.
+  const release = await acquireProjectLock(f.folder);
+  const added = await importIntoProject(await loadProject(f.folder, f.cache), { kind: 'photo', mode: 'link' }, [taken]);
+  const [linked] = added.imported;
+  await loadProject(f.folder, f.cache);
+  await settleFacts(f);
+  const facts = (await readMeta(f.folder)).assets;
+  await AssetFacts.release(f.folder);
+  await release();
+  await SourceStore.drain();
+  // Mac B: fresh source store, approvals and rendition cache; the owned original is not downloaded yet.
+  configureSourceStore(join(f.root, 'mac-b', 'source-cache'));
+  configureSourceAccess(join(f.root, 'mac-b', 'source-access'));
+  const cache = join(f.root, 'mac-b', 'cache');
+  await mkdir(cache, { recursive: true });
+  await configureRenditionCache(cache, join(f.root, 'mac-b', 'Cache', 'renditions'));
+  const proxies = await configureProxyStore(join(f.root, 'mac-b', 'Cache', 'proxies'));
+  t.after(async () => { configureProxyStore(undefined); });
+  const owned = join(f.folder, added.book.photoIndex.shore.path);
+  await rm(owned);
+  return { taken, linked, facts, cache, proxies, owned };
+}
+const proxyOf = (width: number, height: number) => sharp({ create: { width, height, channels: 3, background: '#0000ff' } }).jpeg().toBuffer();
+
+test('a second Mac renders pulled proxies with the originals\u2019 size and capture data, and print stays blocked', async (t) => {
+  const f = await fixture(t);
+  const mac = await secondMac(t, f);
+  // Proxies are smaller than the originals and have another aspect ratio, so the layout facts visibly come from assets-meta.json.
+  const linkedProxy = await mac.proxies.put(mac.facts[mac.linked].digest as string, await proxyOf(40, 40));
+  const ownedProxy = await mac.proxies.put(mac.facts.shore.digest as string, await proxyOf(30, 50));
+  const release = await acquireProjectLock(f.folder);
+  t.after(async () => { await AssetFacts.release(f.folder); await release(); });
+  const book = await loadProject(f.folder, mac.cache);
+  for (const [id, state, proxy] of [[mac.linked, 'unapproved', linkedProxy], ['shore', 'missing', ownedProxy]] as const) {
+    const source = book.sources!['photo:' + id];
+    assert.equal(source.state, state, 'the source keeps its honest state');
+    assert.equal(source.cached, true, 'shown like a cached preview, which the render frame reports as source-unavailable for print');
+    assert.ok(book.problems.some((problem) => problem.includes(id)));
+    const photo = book.photos.get(id)!;
+    assert.equal(photo.original, proxy);
+    assert.ok(photo.problem);
+    assert.deepEqual([photo.width, photo.height], [mac.facts[id].width, mac.facts[id].height]);
+    const rendered = renderData(book, 'x', 'edit').photos[id];
+    assert.deepEqual([rendered.width, rendered.height], [mac.facts[id].width, mac.facts[id].height]);
+    assert.ok(rendered.src.endsWith('/photo/' + id));
+    // The canvas draws renditions of the proxy.
+    const preview = await photoFile(photo, 'preview');
+    assert.equal((await sharp(preview).metadata()).width, (await sharp(proxy).metadata()).width);
+  }
+  assert.deepEqual([book.photos.get(mac.linked)!.width, book.photos.get(mac.linked)!.height], [90, 60]);
+  assert.deepEqual(book.photos.get(mac.linked)!.captured, { dateTime: '2024-06-01T18:20:30', offset: '+02:00' });
+  assert.deepEqual(projectSummary(book, 'x').photoDates?.[mac.linked], { captured: '2024-06-01T18:20:30+02:00' });
+  assert.equal(book.unavailablePhotos?.[mac.linked], undefined);
+  // Layout and crop edits work on a proxy-backed photo.
+  const files = structuredClone({ project: book.project, photoIndex: book.photoIndex });
+  const spread = files.project.spreads.find(({ boxes }) => Object.values(boxes).some((box) => box.photo === 'shore'))!;
+  const [boxId] = Object.entries(spread.boxes).find(([, box]) => box.photo === 'shore')!;
+  spread.boxes[boxId] = { ...spread.boxes[boxId], photo: mac.linked, crops: { [spread.definition]: { centerX: 0.4, centerY: 0.6, zoom: 2 } } };
+  const edited = await updateProject(book, files, true);
+  assert.equal(edited.project.spreads.find(({ id }) => id === spread.id)!.boxes[boxId].photo, mac.linked);
+  assert.equal(edited.photos.get(mac.linked)!.original, linkedProxy);
+  // Export loads pin the book: a proxy stands in there too, still marked unavailable, so print is blocked and the
+  // proof PDF marks its pages.
+  const job = join(mac.cache, 'job'); await mkdir(job);
+  const pinned = await loadProject(f.folder, job, true, true);
+  assert.equal(pinned.sources!['photo:' + mac.linked].state, 'unapproved');
+  assert.equal(pinned.sources!['photo:' + mac.linked].cached, true);
+  assert.equal(pinned.photos.get(mac.linked)!.original, linkedProxy);
+  // Collecting never reads a proxy: the originals are required.
+  await assert.rejects(collectSources(edited, ['photo:' + mac.linked]), /Cannot include/);
+  await assert.rejects(collectSources(edited, ['photo:shore']), /Cannot include/);
+  // Once the owned original arrives, it is used again and the proxy is ignored.
+  await sharp({ create: { width: mac.facts.shore.width as number, height: mac.facts.shore.height as number, channels: 3, background: 'white' } }).jpeg().toFile(mac.owned);
+  const restored = await loadProject(f.folder, mac.cache, true);
+  assert.equal(restored.sources!['photo:shore'].state, 'available');
+  assert.equal(restored.photos.get('shore')!.original, mac.owned);
+});
+
+test('an unapproved linked photo without a synced proxy exposes nothing from its path on this Mac', async (t) => {
+  const f = await fixture(t);
+  const mac = await secondMac(t, f);
+  // The foreign path holds a readable photo, and a proxy exists for another digest only.
+  await mac.proxies.put('f'.repeat(64), await proxyOf(40, 40));
+  const book = await loadProject(f.folder, mac.cache, true);
+  const source = book.sources!['photo:' + mac.linked];
+  assert.equal(source.state, 'unapproved');
+  assert.equal(source.cached, false);
+  assert.equal(book.photos.has(mac.linked), false);
+  assert.equal(mac.linked in renderData(book, 'x', 'edit').photos, false);
+  assert.equal(mac.linked in renderData(book, 'x', 'export').photos, false);
+  for (const photo of book.photos.values()) assert.notEqual(photo.original, mac.taken);
+  // Its layout facts still come from assets-meta.json alone.
+  assert.deepEqual(projectSummary(book, 'x').photoSizes[mac.linked], { width: 90, height: 60 });
+  // A missing owned photo without a proxy stays empty too.
+  assert.equal(book.photos.has('shore'), false);
+  assert.equal(book.sources!['photo:shore'].state, 'missing');
 });

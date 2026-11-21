@@ -67,6 +67,7 @@ import { capabilities } from '../src/runtime-exports';
 import { newSpread, openingSpreadStates } from '../src/editing';
 import { templateFolder, textSourcePath } from './document-actions';
 import { configureRenditionCache, pruneRenditions } from './rendition-cache';
+import { configureProxyStore, proxyStore } from './proxy-store';
 import { decodes, readTemplatePreview } from './template-preview-file';
 import { previewTypes } from '../src/template-preview';
 
@@ -384,6 +385,10 @@ function publishAssets(document: DocumentSession) {
   }
 }
 function publishRecents() { if (startWindow && !startWindow.isDestroyed()) startWindow.webContents.send(channels.recentsChanged); }
+// Evicted proxies are fetched again by digest on the next sync.
+async function pruneProxies() {
+  await (await proxyStore())?.prune(1024 * 1024 * 1024).catch((error) => console.warn('ImageFlow could not prune sync proxies', error));
+}
 async function maintainSources() {
   await pruneSourceCache((await recents.list()).map((entry) => entry.path)).catch((error) => console.warn('ImageFlow could not prune source snapshots', error));
 }
@@ -1291,6 +1296,8 @@ void app.whenReady().then(async () => {
   configureSourceStore(join(app.getPath('userData'), 'source-cache'));
   configureSourceAccess(join(app.getPath('userData'), 'source-access'));
   configurePersistence(join(app.getPath('userData'), 'persistence'));
+  // Sync proxies of photos whose originals are not on this Mac (ADR 0010); kept with the other caches, never in books.
+  void configureProxyStore(join(app.getPath('userData'), 'Cache', 'proxies')).catch((error) => console.warn('ImageFlow could not open the sync proxy cache', error));
   nativeTheme.themeSource = settings.value.appearance;
   const checkFeed = () => checkUpdateFeed({ baseURL: updateTestConfiguration?.baseURL ?? updateBaseURL,
     channel: settings.value.updateChannel, platform: process.platform + '-' + process.arch, installed: app.getVersion(),
@@ -1333,6 +1340,7 @@ void app.whenReady().then(async () => {
   const sourceMaintenance = setInterval(() => { if (![...documents.values()].some((document) => document.busy)) void maintainSources(); }, 5 * 60 * 1000);
   sourceMaintenance.unref();
   await pruneRenditions(renditions).catch((error) => console.warn('ImageFlow could not prune image previews', error));
+  await pruneProxies();
   powerMonitor.on('resume', () => { for (const document of documents.values()) document.projectSession.inputs.invalidate(); });
   app.on('browser-window-focus', () => { updateMenus(); publishUpdates(); });
   if (!app.isPackaged && process.env.IMAGEFLOW_BENCHMARK === '1') {
@@ -1441,6 +1449,7 @@ void app.whenReady().then(async () => {
       await previewQueue;
       await rm(cache, { recursive: true, force: true });
       await pruneRenditions(renditions).catch((error) => console.warn('ImageFlow could not prune image previews', error));
+      await pruneProxies();
     })().then(() => {
       quitReady = true;
       // Never call quitAndInstall until ordinary window close, saves and MCP/lock cleanup finish.
