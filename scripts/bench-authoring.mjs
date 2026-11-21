@@ -106,6 +106,7 @@ async function createBook(fixture, metadata) {
   await Promise.all(['template', 'texts'].map((folder) => mkdir(join(book, folder), { recursive: true })));
   const template = `import { defineTemplate, mm, Spread, PhotoBox, MarkdownBox } from 'imageflow';
 import './style.css';
+import { bookStateFile } from './book-state.mjs';
 export default defineTemplate({
   id:'authoring-performance',version:'1',contract:1,
   format:{label:'Large book proof',trim:{width:mm(210),height:mm(210)},
@@ -158,11 +159,14 @@ export default defineTemplate({
   }
 }
 
-async function restore(fixture, metadata, clearCache) {
+// `opened` is the profile of an app that has had the book open, whose writer and journal must be gone.
+async function restore(fixture, metadata, clearCache, opened) {
   const book = join(fixture, 'book.imageflow');
-  const writer = await stat(join(book, '.imageflow/writer.lock')).catch(() => undefined);
-  const journal = await stat(join(book, '.imageflow/persistence/pending-save.json')).catch(() => undefined);
-  assert.ok(!writer && !journal, 'Close the benchmark app cleanly before restoring fixture inputs or clearing derived caches.');
+  if (opened) {
+    const writer = await stat(await bookStateFile(opened, book, 'writer.lock')).catch(() => undefined);
+    const journal = await stat(await bookStateFile(opened, book, 'pending-save.json')).catch(() => undefined);
+    assert.ok(!writer && !journal, 'Close the benchmark app cleanly before restoring fixture inputs or clearing derived caches.');
+  }
   const originals = JSON.parse(await readFile(join(fixture, 'original-inputs.json'), 'utf8'));
   await Promise.all(Object.entries(originals).map(([path, bytes]) => writeFile(join(book, path), bytes)));
   await copyFile(join(fixture, 'original-photo.jpg'), join(book, 'photos', metadata.photos[0].name));
@@ -355,7 +359,7 @@ async function run(fixture, options) {
     clearInterval(sampler);
     await client?.close();
     await app?.close();
-    await restore(fixture, metadata, false);
+    await restore(fixture, metadata, false, profile);
   }
 }
 

@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { loadProject, updateProject } from '../desktop/project';
-import { bookFormatOf, bookFormatVersion, pagesUnsupportedMessage, projectSchema, scopeState, spreadSchema, unsupportedBookMessage } from '../src/project';
+import { bookFormatOf, bookFormatVersion, pagesUnsupportedMessage, photoIndexSchema, projectSchema, scopeState, spreadSchema, unsupportedBookMessage } from '../src/project';
+import './persistence-root';
 
 // Book format 2 adds page states (ADR 0009). A book is written in the lowest format that holds it. Every reference
 // consumer reads page states and replaced content (phase 2), so books that store them open; until pages are drawn
@@ -97,4 +98,113 @@ test('a book with pages shown opens unchanged; saving writes the lowest format',
       photoIndex: paged.photoIndex });
     assert.deepEqual((await loadProject(folder, join(root, 'cache'))).project, split.project);
   } finally { await rm(root, { recursive: true }); }
+});
+
+// Unknown fields (ADR 0010, guardrail 2): a build that predates an additive field keeps it when it saves the book.
+const unknownPage = { ...left, pageNote: 'p', boxes: { hero: { photo: 'b', params: {}, boxNote: 'bx', crops: { photoPage: { centerX: 0.4, centerY: 0.5, zoom: 1.2, cropNote: 1 } } } } };
+const withUnknown = () => structuredClone({
+  ...book([{ ...spread, spreadNote: 's', boxes: { hero: { photo: 'a', params: {}, boxNote: 'bx' } }, pages: { left: unknownPage }, displaced: [{ ...displaced[0], displacedNote: 'd' }] }], 2),
+  bookNote: 'abc', cover: { definition: 'cover', params: {}, boxes: {}, elements: { e: { params: {}, elementNote: 1 } }, coverNote: 'c' },
+  template: { id: 't', version: '1', templateNote: 't' },
+});
+
+test('unknown keys survive a parse at the book, spread, page, cover, box and element levels', () => {
+  const parsed = projectSchema.parse(withUnknown()) as Record<string, any>;
+  assert.equal(parsed.bookNote, 'abc');
+  assert.equal(parsed.template.templateNote, 't');
+  assert.equal(parsed.cover.coverNote, 'c');
+  assert.equal(parsed.cover.elements.e.elementNote, 1);
+  assert.equal(parsed.spreads[0].spreadNote, 's');
+  assert.equal(parsed.spreads[0].boxes.hero.boxNote, 'bx');
+  assert.equal(parsed.spreads[0].pages.left.pageNote, 'p');
+  assert.equal(parsed.spreads[0].pages.left.boxes.hero.boxNote, 'bx');
+  assert.equal(parsed.spreads[0].pages.left.boxes.hero.crops.photoPage.cropNote, 1);
+  assert.equal(parsed.spreads[0].displaced[0].displacedNote, 'd');
+  // Parsing the parsed book again changes nothing, and the format is still recomputed.
+  assert.deepEqual(projectSchema.parse(parsed), parsed);
+  assert.equal(parsed.schemaVersion, 3);
+});
+
+test('keys that could reach the prototype chain are refused at every level', () => {
+  for (const key of ['__proto__', 'constructor', 'prototype']) {
+    const plant = (target: Record<string, any>) => Object.defineProperty(target, key, { value: { x: 1 }, enumerable: true, configurable: true, writable: true });
+    const cases: ((b: any) => void)[] = [
+      (b) => plant(b), (b) => plant(b.spreads[0]), (b) => plant(b.spreads[0].pages.left), (b) => plant(b.spreads[0].boxes.hero),
+      (b) => plant(b.cover), (b) => plant(b.template), (b) => plant(b.spreads[0].displaced[0].state),
+    ];
+    for (const apply of cases) {
+      const copy = withUnknown();
+      apply(copy);
+      const result = projectSchema.safeParse(copy);
+      assert.equal(result.success, false, key);
+      assert.match(result.error!.issues[0].message, /reserved/);
+    }
+  }
+  // JSON.parse makes `__proto__` an own key, which a loose copy would otherwise turn into the result's prototype.
+  assert.equal(projectSchema.safeParse(JSON.parse('{"__proto__":{"polluted":true},' + JSON.stringify(withUnknown()).slice(1))).success, false);
+  assert.equal(({} as Record<string, unknown>).polluted, undefined);
+});
+
+test('unknown keys of photos.json entries are kept, reserved ones and capture fields are refused', () => {
+  const parsed = photoIndexSchema.parse({ a: { path: 'photos/a.jpg', title: 'T', syncRevision: 4 } }) as Record<string, any>;
+  assert.equal(parsed.a.syncRevision, 4);
+  assert.equal(photoIndexSchema.safeParse(JSON.parse('{"a":{"path":"p","__proto__":{"x":1}}}')).success, false);
+  assert.equal(photoIndexSchema.safeParse({ a: { path: 'p', constructor: 1 } }).success, false);
+  assert.equal(photoIndexSchema.safeParse({ a: { path: 'p', captured: { dateTime: '2024-01-01T00:00:00', offset: null } } }).success, false);
+  assert.equal(photoIndexSchema.safeParse({ a: { path: 'p', camera: 'x' } }).success, false);
+});
+
+test('a newer book format is still refused, unknown keys or not', () => {
+  const result = projectSchema.safeParse({ ...withUnknown(), schemaVersion: bookFormatVersion + 1 });
+  assert.equal(result.success, false);
+  assert.match(result.error!.issues[0].message, /newer version/);
+});
+
+const lineage = '3f0c2d5e-8a41-4c3b-9d57-0b1e6a7f2c90';
+test('bookId is an optional UUID that parses, survives a round trip and is refused when malformed', () => {
+  const parsed = projectSchema.parse({ ...book([spread]), bookId: lineage });
+  assert.equal(parsed.bookId, lineage);
+  assert.equal(projectSchema.parse(parsed).bookId, lineage);
+  assert.equal(projectSchema.parse(book([spread])).bookId, undefined);
+  for (const bad of ['', 'not-a-uuid', 7, null, lineage + 'x']) assert.equal(projectSchema.safeParse({ ...book([spread]), bookId: bad }).success, false);
+  // Adding it never changes the book format.
+  assert.equal(parsed.schemaVersion, 1);
+});
+
+test('saves keep a bookId, assign one to a legacy book with its first write, and never write just for it', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'imageflow-book-id-')));
+  const folder = join(root, 'Book');
+  try {
+    await mkdir(join(folder, 'template'), { recursive: true });
+    await writeFile(join(folder, 'template/index.tsx'), 'export default {};\n');
+    await writeFile(join(folder, 'photos.json'), '{}');
+    const saved = async () => JSON.parse(await readFile(join(folder, 'project.json'), 'utf8'));
+    await writeFile(join(folder, 'project.json'), JSON.stringify(book([spread])));
+    const legacy = await loadProject(folder, join(root, 'cache'));
+    assert.equal(legacy.project.bookId, undefined);
+    // Nothing changed: nothing is written, so no bookId yet.
+    assert.equal(await updateProject(legacy, { project: legacy.project, photoIndex: legacy.photoIndex }), legacy);
+    assert.equal((await saved()).bookId, undefined);
+    const first = await updateProject(legacy, { project: { ...legacy.project, title: 'One' }, photoIndex: legacy.photoIndex });
+    const id = (await saved()).bookId;
+    assert.match(id, /^[0-9a-f-]{36}$/);
+    assert.equal(first.project.bookId, id);
+    // Later edits, including ones built from a snapshot that lacks the field (Undo), keep it.
+    const { bookId: _omitted, ...withoutId } = first.project;
+    const second = await updateProject(first, { project: { ...withoutId, title: 'Two' }, photoIndex: first.photoIndex });
+    assert.equal((await saved()).bookId, id);
+    assert.equal(second.project.bookId, id);
+    // An edit cannot replace it, and a reload sees the same one.
+    await updateProject(second, { project: { ...second.project, title: 'Three', bookId: '11111111-1111-4111-8111-111111111111' }, photoIndex: second.photoIndex });
+    assert.equal((await saved()).bookId, id);
+    assert.equal((await saved()).title, 'Three');
+    assert.equal((await loadProject(folder, join(root, 'cache'))).project.bookId, id);
+  } finally { await rm(root, { recursive: true }); }
+});
+
+test('unknown keys of a linked text or file reference survive a parse', () => {
+  const linked = { path: '/Users/a/note.md', linked: true as const, futureKey: { nested: 1 } };
+  const parsed = projectSchema.parse({ ...withUnknown(), texts: { note: linked }, files: { route: { ...linked, path: '/Users/a/r.gpx' } } }) as Record<string, any>;
+  assert.deepEqual(parsed.texts.note, linked);
+  assert.equal(parsed.files.route.futureKey.nested, 1);
 });

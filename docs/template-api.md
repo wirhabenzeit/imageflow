@@ -1558,6 +1558,10 @@ A spread shown as two pages stores `split: true` and `pages.left`/`pages.right`,
 
 The same `hero` ID on the left and right is two assignments, addressed by page. A layout switch can move a whole box state, including focus, box parameters and per-layout crops, between these states. See [Switching layouts](#switching-layouts) for matching, memory and replacement rules.
 
+`project.json` and `photos.json` keep keys this version does not know when a book is opened and saved, so a field a newer build added without a format bump is not lost. Templates never see such keys, and the keys `__proto__`, `constructor` and `prototype` are refused anywhere in either file.
+
+`project.json` may carry a `bookId` (a UUID) naming the book's lineage across copies. ImageFlow assigns one when a book is created, duplicated or saved as a copy, and to an older book with its first save; ordinary saves, Undo and Redo keep it, and a Finder copy shares it. Templates do not see it; do not edit it.
+
 Any stored page state, split sheet or displaced content requires book `schemaVersion: 2`. Books without them remain format 1. Older apps refuse format 2 rather than dropping page data. Never edit manifests directly while the book is open; use page-addressed MCP commands for these edits ([Page layouts](#page-layouts)).
 
 Template `openingSpreads` may also declare page pairs for new books. Those declarations use `layout` and optional `params` per side; the created project stores them as `pages` with `definition`, alongside `split: true`. See [Template library](#template-library).

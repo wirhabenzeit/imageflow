@@ -3,7 +3,7 @@ import { useDelayed } from './useDelayed';
 import { pageSelectionRect, pageSelectionSide, pageSideAt, stepPageSelection } from './page-selection';
 import { canSwapPages, editableSpread, keptItems, layoutMime, placeKeptContent, shownContentTargets } from './page-editor';
 import type { ContentTarget, KeptItem } from './page-editor';
-import { coverInstance, scopeSpread } from './project';
+import { boxBase, coverInstance, scopeSpread } from './project';
 import { leavesEditorAlone } from './agent-footprint';
 import type { AgentFootprint } from './agent-footprint';
 import { coverLayoutsFor, resolveCover } from './cover';
@@ -884,7 +884,7 @@ export function App() {
     edit(({ project }) => {
       const artwork = coverActive ? project.cover : editableSpread(project.spreads.find(({ id }) => id === target), page);
       if (artwork?.definition !== state.definition || (coverActive && project.format !== summary.project.format)) return false;
-      for (const { box, source } of assignments) artwork.boxes[box] = { params: artwork.boxes[box]?.params ?? {}, ...(source.kind === 'photo' ? { photo: source.id } : { text: source.id }) };
+      for (const { box, source } of assignments) artwork.boxes[box] = { ...boxBase(artwork.boxes[box]), ...(source.kind === 'photo' ? { photo: source.id } : { text: source.id }) };
     }, 'Placed ' + assignments.length + ' of ' + sources.length + ' assets');
   }
   const onSourceCommand = useEffectEvent((request: import('./desktop').SourceCommand) => {
@@ -1297,7 +1297,7 @@ export function App() {
       case 'box-edit-text': openOwner(sheet, { type: 'markdown', id: top.id, page: top.page }); break;
       case 'asset-preview': if (source) setQuick(source); break;
       case 'box-show-assets': if (source) { choose(source); showPanel('bottom'); } break;
-      case 'box-remove-photo': case 'box-remove-text': changeSpreadAt(sheet, (spread) => { spread.boxes[top.id] = { params: spread.boxes[top.id]?.params ?? {} }; }, photo ? 'Photo removed' : 'Text removed', top.page); setCropping(undefined); break;
+      case 'box-remove-photo': case 'box-remove-text': changeSpreadAt(sheet, (spread) => { spread.boxes[top.id] = boxBase(spread.boxes[top.id]); }, photo ? 'Photo removed' : 'Text removed', top.page); setCropping(undefined); break;
     }
   }
   function changeFormat(format: string) {
@@ -1309,7 +1309,7 @@ export function App() {
   function assign(spread: string, box: string, source: SourceRef, page?: PageSide) {
     editCanvas(({ project }) => {
       const state = editableSpread(project.spreads.find(({ id }) => id === spread), page);
-      if (state) state.boxes[box] = { params: state.boxes[box]?.params ?? {}, ...(source.kind === 'photo' ? { photo: source.id } : { text: source.id }) };
+      if (state) state.boxes[box] = { ...boxBase(state.boxes[box]), ...(source.kind === 'photo' ? { photo: source.id } : { text: source.id }) };
     });
   }
 

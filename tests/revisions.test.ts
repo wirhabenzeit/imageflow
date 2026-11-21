@@ -7,7 +7,8 @@ import { mock, test } from 'node:test';
 import type { TestContext } from 'node:test';
 import sharp from 'sharp';
 import { photoDetails, photoFile } from '../desktop/photos';
-import { captureProjectInputs, captureProjectRevision, ProjectInputIndex, ProjectRevisionError } from '../desktop/revisions';
+import { computeBookStateRevision } from '../src/book-revision';
+import { captureBookStateRevision, captureProjectInputs, captureProjectRevision, ProjectInputIndex, ProjectRevisionError } from '../desktop/revisions';
 
 const project = {
   schemaVersion: 1,
@@ -323,4 +324,77 @@ test('removed sources are evicted and retired sessions cannot reuse their index'
   await assert.rejects(index.capture({ signal: AbortSignal.abort() }), { name: 'AbortError' });
   index.close();
   await assert.rejects(index.capture(), { code: 'source-changed' });
+});
+
+test('the portable book-state revision is the same for linked photos and texts on another Mac or with missing originals', async (t) => {
+  const alice = await makeProject(t), bob = await makeProject(t), bare = await makeProject(t);
+  const linked = (home: string) => ({
+    project: JSON.stringify({ ...project, texts: { note: { path: home + '/note.md', linked: true } }, files: { route: { path: home + '/route.gpx', linked: true } } }),
+    photos: JSON.stringify({ image: { path: home + '/photo.jpg', linked: true, caption: 'Sunrise' } }),
+  });
+  for (const [folder, home] of [[alice, '/Users/alice/Pictures'], [bob, '/Users/bob/Library/Mobile Documents'], [bare, '/Volumes/Gone']] as const) {
+    await writeFile(join(folder, 'project.json'), linked(home).project);
+    await writeFile(join(folder, 'photos.json'), linked(home).photos);
+  }
+  const revision = await captureBookStateRevision(alice);
+  assert.match(revision, /^[a-f0-9]{64}$/);
+  assert.equal(await captureBookStateRevision(bob), revision);
+  assert.equal(await captureBookStateRevision(bare), revision);
+  // Linked stays part of the state: the same photo copied into the book is another book state.
+  await writeFile(join(bob, 'photos.json'), JSON.stringify({ image: { path: 'photos/photo.jpg', caption: 'Sunrise' } }));
+  assert.notEqual(await captureBookStateRevision(bob), revision);
+});
+
+test('the portable book-state revision follows user-authored state and ignores originals, derived facts and temporary files', async (t) => {
+  const folder = await makeProject(t);
+  const revision = await captureBookStateRevision(folder);
+  await writeFile(join(folder, 'photos', 'image.jpg'), 'replaced photo bytes');
+  await writeFile(join(folder, 'assets-meta.json'), JSON.stringify({ version: 1, assets: {} }));
+  await writeFile(join(folder, '.imageflow-write-0b6e3f4a-0000-4000-8000-000000000000.tmp'), 'staging');
+  await writeFile(join(folder, 'template', '.DS_Store'), 'metadata');
+  assert.equal(await captureBookStateRevision(folder), revision);
+  const changes: [string, () => Promise<unknown>][] = [
+    ['caption', () => writeFile(join(folder, 'photos.json'), JSON.stringify({ image: { path: 'photos/image.jpg', caption: 'New caption' } }))],
+    ['spread', () => writeFile(join(folder, 'project.json'), JSON.stringify({ ...project, spreads: [...project.spreads, { id: 'next', definition: 'cover' }] }))],
+    ['text file', () => writeFile(join(folder, 'texts', 'note.md'), '# Changed note')],
+    ['parameter file', () => writeFile(join(folder, 'files', 'route.gpx'), '<gpx><trk/></gpx>')],
+    ['template file', () => writeFile(join(folder, 'template', 'styles.css'), newCss)],
+    ['template addition', () => writeFile(join(folder, 'template', 'extra.css'), 'p {}')],
+  ];
+  const seen = new Set([revision]);
+  for (const [name, change] of changes) {
+    await change();
+    const next = await captureBookStateRevision(folder);
+    assert.ok(!seen.has(next), name + ' produces a new revision');
+    seen.add(next);
+  }
+});
+
+test('computeBookStateRevision does not depend on key order and drops only linked paths', async () => {
+  const base = { schemaVersion: 1 as const, title: 'T', template: { id: 'sample', version: '1.0.0' }, spreads: [], texts: {}, files: {} };
+  const inputs = (photos: object, contentDigests: Record<string, string>) => ({ project: base as never, photos: photos as never, contentDigests });
+  const one = await computeBookStateRevision(inputs({ a: { path: 'photos/a.jpg', caption: 'x' }, b: { path: '/x/b.jpg', linked: true } }, { 'texts/a.md': '1', 'files/b': '2' }));
+  const two = await computeBookStateRevision(inputs({ b: { linked: true, path: '/y/b.jpg' }, a: { caption: 'x', path: 'photos/a.jpg' } }, { 'files/b': '2', 'texts/a.md': '1' }));
+  assert.equal(one, two);
+  assert.notEqual(one, await computeBookStateRevision(inputs({ a: { path: 'photos/other.jpg', caption: 'x' }, b: { path: '/x/b.jpg', linked: true } }, { 'texts/a.md': '1', 'files/b': '2' })));
+});
+
+test('the portable book-state revision ignores orphaned texts and files but follows referenced ones', async (t) => {
+  const folder = await makeProject(t);
+  const revision = await captureBookStateRevision(folder);
+  // `removeSources` leaves bytes behind for Undo; nothing references them, so they are not book state.
+  await writeFile(join(folder, 'texts', 'orphan.md'), '# Removed');
+  await writeFile(join(folder, 'files', 'orphan.gpx'), '<gpx/>');
+  assert.equal(await captureBookStateRevision(folder), revision);
+  await writeFile(join(folder, 'texts', 'note.md'), '# Changed');
+  assert.notEqual(await captureBookStateRevision(folder), revision);
+});
+
+test('the portable book-state revision refuses a link that leaves the book', async (t) => {
+  const folder = await makeProject(t);
+  const outside = join(folder, '..', 'outside-' + Date.now() + '.css');
+  await writeFile(outside, 'a {}');
+  t.after(() => rm(outside, { force: true }));
+  await symlink(outside, join(folder, 'template', 'linked.css'));
+  await assert.rejects(captureBookStateRevision(folder), { code: 'source-outside-project' });
 });

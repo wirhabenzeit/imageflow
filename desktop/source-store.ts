@@ -84,6 +84,10 @@ export class SourceStore {
     })());
     return stores.get(index)!;
   }
+  /** Waits for the background digests and registry writes of every open store (tests, before removing their folders). */
+  static async drain() {
+    for (const store of await Promise.all([...stores.values()].map((promise) => promise.catch(() => undefined)))) await store?.digested().catch(() => {});
+  }
   static async release(folder: string) {
     const identity = await sourceBookKey(folder).catch(() => undefined);
     for (const [key, promise] of stores) {
@@ -121,7 +125,7 @@ export class SourceStore {
         // Locate Folder finds a moved linked original by its content, so its digest is kept: from the last record while
         // the file is unchanged, and otherwise computed in the background, not while the book opens.
         const previous = this.saved[source.key];
-        const digest = source.linked && previous?.digest && previous.path === source.path && previous.observation === stamp(before) ? previous.digest : undefined;
+        const digest = previous?.digest && previous.path === source.path && previous.observation === stamp(before) ? previous.digest : undefined;
         // A re-exported photo keeps the renditions of the version before as a fallback, until its own exist: a file
         // caught half-written by the next export then still shows a picture.
         const earlier = previous?.direct && previous.key !== details.key ? [previous.preview, previous.thumb].filter((path): path is string => !!path)
@@ -129,7 +133,7 @@ export class SourceStore {
         const stored = { path: source.path, snapshot: actual, observation: stamp(before), direct: true, key: details.key, ...(digest ? { digest } : {}), ...(earlier?.length ? { earlier } : {}),
           width: details.width, height: details.height, modified: modifiedAt(before), preview: join(cache, details.key + '-preview' + extension), thumb: join(cache, details.key + '-thumb' + extension) };
         this.remember(source, stored);
-        if (source.linked && !digest) this.recordDigest(source.key, actual, stamp(before));
+        if (!digest) this.recordDigest(source.key, actual, stamp(before));
         return { status: { ...source, state: 'available', ...(digest ? { digest } : {}) }, stored };
       }
       const previous = this.saved[source.key];
@@ -187,13 +191,16 @@ export class SourceStore {
     }
   }
   private digests = Promise.resolve();
-  /** Records a linked photo's digest after it was read in place, one file at a time, if it is still the same file. */
+  /** Told when a background digest of a photo read in place is known (assets-meta.json records it, ADR 0010). */
+  onDigest?: (key: string, observation: string, digest: string) => void;
+  /** Records a photo's digest after it was read in place, one file at a time, if it is still the same file. */
   private recordDigest(key: string, path: string, observation: string) {
     this.digests = this.digests.then(async () => {
       if (this.saved[key]?.observation !== observation || this.saved[key]?.digest) return;
       const digest = await hashFile(path);
       if (stamp(await stat(path, { bigint: true })) !== observation || this.saved[key]?.observation !== observation) return;
       this.saved[key] = { ...this.saved[key], digest }; this.version++;
+      this.onDigest?.(key, observation, digest);
       await this.settled();
     }).catch(() => {});
   }

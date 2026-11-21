@@ -8,7 +8,7 @@ import { bundledFontCoverage } from './fonts';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { BuildFailure, Loader } from 'esbuild';
 import type { AuthoringDiagnostic } from '../src/authoring';
-import { parseDocument, photoIndexSchema, projectSchema, unsupportedBookMessage } from '../src/project';
+import { boxBase, parseDocument, photoIndexSchema, projectSchema, unsupportedBookMessage } from '../src/project';
 import type { FixtureMarking, PhotoIndex, Project, ProjectFile, ProjectFiles, RenderProject } from '../src/project';
 import { renderOrigin } from '../src/desktop';
 import type { ImportCounts, ImportRequest, ProjectSummary } from '../src/desktop';
@@ -21,6 +21,9 @@ import type { SaveCheckpoint } from './persistence';
 import { sourceEntries, sourcePath, sourceLinked, storedFileName } from '../src/source-locations';
 import type { SourceStatus } from '../src/source-locations';
 import { digestBytes, SourceStore } from './source-store';
+import { AssetFacts } from './asset-facts';
+import type { AssetFact } from '../src/asset-facts';
+import { captureFields } from '../src/photo-metadata';
 import { approveSources, sourceBookKey } from './source-access';
 import { runtimeExports } from '../src/runtime-exports';
 import { templateHash } from './template-library';
@@ -216,6 +219,9 @@ export type OpenProject = ProjectFiles & {
   folder: string; viewKey?: string; cache: string; assets: TemplateAssets; photos: Map<string, ProjectPhoto>;
   texts: Record<string, string>; files: Record<string, ProjectFile>; problems: string[]; readOnly: boolean;
   sources?: Record<string, SourceStatus>;
+  // Derived facts (assets-meta.json) of photos whose original is missing and that nothing else stands in for: their size
+  // and capture time still lay out the book, while the source stays missing (ADR 0005, ADR 0010).
+  unavailablePhotos?: Record<string, AssetFact>;
   manifests: Record<ManifestName, Buffer>;
   // Set only on synthetic fixture books rendered by authoring checks.
   fixture?: FixtureMarking;
@@ -247,8 +253,19 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
   const sources: Record<string, SourceStatus> = {};
   const problems: string[] = [];
   const entries = sourceEntries(book);
-  if (!entries.length) return { ...book, photos, texts, files, sources, problems };
+  // Only a writable, unpinned load keeps derived facts up to date, and only that one registers them for the session
+  // that owns the book; read-only, pinned and temporary loads just read the file.
+  const writable = !book.readOnly && !pinSources;
+  const facts = writable ? await AssetFacts.forBook(book.folder) : await AssetFacts.readOnly(book.folder);
+  if (!entries.length) {
+    // The last source was removed: its facts go too.
+    if (writable) facts.prune([]);
+    return { ...book, photos, texts, files, sources, problems };
+  }
   const store = await SourceStore.forBook(book.folder, book.cache);
+  // Derived facts follow photos the editor reads in place; a private export read changes nothing.
+  if (writable) store.onDigest = (key, observation, digest) => { if (key.startsWith('photo:')) facts.digest(key.slice('photo:'.length), observation, digest); };
+  const unavailablePhotos: Record<string, AssetFact> = {};
   for (let i = 0; i < entries.length; i += 8) {
     await Promise.all(entries.slice(i, i + 8).map(async (source) => {
       const { status, stored } = await store.resolve(book.folder, source, { pin: pinSources, cache: book.cache });
@@ -256,15 +273,21 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
       if (status.problem && source.kind !== 'file') problems.push(source.kind + ' ' + source.id + ' · ' + status.problem);
       if (source.kind === 'photo') {
         if (stored) {
-          const { path: _path, linked: _linked, ...metadata } = book.photoIndex[source.id];
+          // Only the editable metadata reaches templates; unknown keys of the entry stay in photos.json (ADR 0010).
+          const { title, caption, credit, altText } = book.photoIndex[source.id];
           const details = await photoDetails(stored.snapshot, null);
           // Without an EXIF capture time, photo views use the original's modification time, not the snapshot's.
-          const estimate = details.captured ? undefined : stored.modified ?? details.estimatedCapture;
-          photos.set(source.id, { ...metadata, ...details, estimatedCapture: estimate, observation: stored.direct && status.state === 'available' ? stored.observation : details.observation,
+          const present = status.state === 'available' && !status.problem;
+          const remembered = present ? undefined : facts.get(source.id);
+          // A rendition has no EXIF block, so a missing original's capture data comes from assets-meta.json.
+          const capture = remembered ? Object.fromEntries(captureFields.flatMap((field) => remembered[field] ? [[field, remembered[field]]] : [])) : {};
+          const estimate = details.captured || remembered?.captured ? undefined : stored.modified ?? details.estimatedCapture;
+          if (present && writable) facts.note(source.id, stored.observation, details, status.digest ?? stored.digest);
+          photos.set(source.id, { title, caption, credit, altText, ...details, ...capture, estimatedCapture: estimate, observation: stored.direct && status.state === 'available' ? stored.observation : details.observation,
             width: stored.width!, height: stored.height!, original: stored.snapshot,
             key: stored.direct ? status.problem ? digestBytes(Buffer.from(stored.key + ':stale')) : stored.key! : digestBytes(Buffer.from(stored.digest + ':rendition-3')),
             cache: renditionCacheFor(book.cache), ...(status.problem ? { problem: status.problem } : {}) });
-        }
+        } else if (facts.get(source.id)) unavailablePhotos[source.id] = facts.get(source.id)!;
       } else if (source.kind === 'markdown') {
         if (stored) texts[source.id] = await readFile(stored.snapshot, 'utf8');
       } else {
@@ -274,7 +297,8 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
     }));
   }
   await store.settled();
-  return { ...book, photos, texts, files, sources, problems: problems.sort() };
+  if (writable) facts.prune(Object.keys(book.photoIndex));
+  return { ...book, photos, texts, files, sources, problems: problems.sort(), ...(Object.keys(unavailablePhotos).length ? { unavailablePhotos } : {}) };
 }
 
 function projectJson(value: unknown) {
@@ -284,11 +308,18 @@ function projectJson(value: unknown) {
 export async function updateProject(book: OpenProject, files: ProjectFiles, reloadContent = false,
   checkpoint: SaveCheckpoint = { origin: 'app', label: 'Project edit' }) {
   if (book.readOnly) throw new Error('Use New Project to make an editable copy of the sample.');
-  const project = parseDocument(projectSchema, files.project, 'project.json');
+  // `bookId` is the book's lineage (ADR 0010): an ordinary save, an undo or a redo never changes it, even when the files
+  // handed in come from an older snapshot or a caller that does not know the field.
+  let project = parseDocument(projectSchema, { ...files.project, ...(book.project.bookId ? { bookId: book.project.bookId } : {}) }, 'project.json');
   const photoIndex = parseDocument(photoIndexSchema, files.photoIndex, 'photos.json');
+  const unchanged = projectJson(book.project) === projectJson(project);
+  // A legacy book gets its `bookId` with the first save that writes something, so it adds no undo step of its own and
+  // no write when nothing changed.
+  // Parsed again, so the field takes its place in the schema's key order like one read from disk.
+  if (!project.bookId && !unchanged) project = parseDocument(projectSchema, { ...project, bookId: randomUUID() }, 'project.json');
   const projectSource = projectJson(project);
   const indexSource = projectJson(photoIndex);
-  const projectChanged = projectJson(book.project) !== projectSource;
+  const projectChanged = !unchanged || project.bookId !== book.project.bookId;
   const indexChanged = projectJson(book.photoIndex) !== indexSource;
   if (!projectChanged && !indexChanged) return book;
   const [projectFile, photoFile] = await Promise.all([readProjectManifest(book.folder, 'project.json'), readProjectManifest(book.folder, 'photos.json')]);
@@ -438,7 +469,7 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
       if (!spread) throw new Error('The selected spread no longer exists.');
       const id = request.target.box;
       spread.boxes[id] = {
-        params: spread.boxes[id]?.params ?? {},
+        ...boxBase(spread.boxes[id]),
         ...(request.kind === 'photo' ? { photo: imported[0] } : { text: imported[0] }),
       };
     }
@@ -462,8 +493,8 @@ export function projectSummary(book: OpenProject, id: string): ProjectSummary {
     id, folder: basename(book.folder), viewKey: book.viewKey ?? createHash('sha256').update(book.folder).digest('hex'), project: book.project, photoIndex: book.photoIndex,
     photos: Object.fromEntries([...book.photos.keys()].map((photo) => [photo, base + '/thumb/' + photo])),
     photoRevisions: Object.fromEntries([...book.photos].map(([id, photo]) => [id, photo.key])),
-    photoDates: Object.fromEntries([...book.photos].flatMap(([id, photo]) => { const date = photoDate(photo); return date ? [[id, date]] : []; })),
-    photoSizes: Object.fromEntries([...book.photos].map(([photo, { width, height }]) => [photo, { width, height }])),
+    photoDates: Object.fromEntries([...Object.entries(book.unavailablePhotos ?? {}), ...book.photos].flatMap(([id, photo]) => { const date = photoDate(photo); return date ? [[id, date]] : []; })),
+    photoSizes: Object.fromEntries([...Object.entries(book.unavailablePhotos ?? {}), ...book.photos].map(([photo, { width, height }]) => [photo, { width, height }])),
     texts: book.texts, sources: book.sources, ...(book.templateHash ? { templateHash: book.templateHash } : {}),
   };
 }

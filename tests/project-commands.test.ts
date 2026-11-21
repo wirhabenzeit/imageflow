@@ -393,3 +393,29 @@ test('page layout transitions, blank pages and sheet operations share editor rul
   const restricted = applyProjectCommands(files(), info, [{ op: 'switch_layout', spread: 'one', page: 'left', definition: 'left' }]);
   assert.throws(() => applyProjectCommands(restricted.files, info, [{ op: 'swap_pages', spread: 'one' }]), /restricted/);
 });
+
+test('commands keep unknown fields they do not touch, and a content change keeps the box\'s other keys (ADR 0010)', () => {
+  const original = files();
+  const raw = { project: structuredClone(original.project) as Record<string, any>, photoIndex: structuredClone(original.photoIndex) as Record<string, any> };
+  raw.project.bookNote = 'abc';
+  raw.project.spreads[0].spreadNote = 's';
+  raw.project.spreads[0].boxes.hero.boxNote = 'bx';
+  raw.photoIndex.p1.syncRevision = 4;
+  const loaded = { project: projectSchema.parse(raw.project), photoIndex: photoIndexSchema.parse(raw.photoIndex) };
+  const result = applyProjectCommands(loaded, template, [
+    { op: 'assign_source', spread: 'one', box: 'hero', kind: 'photo', source: 'p2' },
+    { op: 'set_photo_metadata', photo: 'p1', values: { caption: 'New' } },
+    { op: 'duplicate_spread', spread: 'one', ref: 'copy' },
+  ]);
+  const project = result.files.project as Record<string, any>;
+  assert.equal(project.bookNote, 'abc');
+  assert.equal(project.spreads[0].spreadNote, 's');
+  assert.equal(project.spreads[0].boxes.hero.photo, 'p2');
+  assert.equal(project.spreads[0].boxes.hero.crops, undefined);
+  assert.equal(project.spreads[0].boxes.hero.boxNote, 'bx');
+  // A duplicate is a copy of the whole state.
+  assert.equal(project.spreads[1].spreadNote, 's');
+  const index = result.files.photoIndex as Record<string, any>;
+  assert.equal(index.p1.syncRevision, 4);
+  assert.equal(index.p1.caption, 'New');
+});

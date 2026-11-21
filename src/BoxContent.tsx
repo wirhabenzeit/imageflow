@@ -4,6 +4,7 @@ import { Icon } from './Icon';
 import { ActionMenu, Submenu } from './ActionMenu';
 import { Field } from './Fields';
 import type { ProjectSummary } from './desktop';
+import { boxBase } from './project';
 import type { SpreadState } from './project';
 import { textChoices, textMenuChoices } from './source-items';
 import { sourceEntries } from './source-locations';
@@ -37,13 +38,13 @@ export function PhotoContent({ summary, spread, box, label, change, inspect, adj
   function choosePhoto(photo: string) {
     if (!photo || photo === assigned) return;
     reassigned?.();
-    change((item) => { item.boxes[box] = { params: item.boxes[box]?.params ?? {}, photo }; },
+    change((item) => { item.boxes[box] = { ...boxBase(item.boxes[box]), photo }; },
       (summary.photoIndex[photo]?.title || photo) + ' placed in ' + label);
   }
   function removePhoto() {
     reassigned?.();
     change((item) => {
-      if (item.boxes[box]) item.boxes[box] = { params: item.boxes[box].params };
+      if (item.boxes[box]) item.boxes[box] = boxBase(item.boxes[box]);
     }, 'Photo removed from ' + label);
   }
   const pick = <select className="box-photo-pick" aria-label={(assigned ? 'Replace photo in ' : 'Choose photo for ') + label} value=""
@@ -164,7 +165,7 @@ export function TextContent({ summary, spread, box, label, change, importText, i
   }
   function assign(value?: string) {
     change((item) => {
-      item.boxes[box] = { params: item.boxes[box]?.params ?? {}, ...(value ? { text: value } : {}) };
+      item.boxes[box] = { ...boxBase(item.boxes[box]), ...(value ? { text: value } : {}) };
     }, value ? (choices.find(([id]) => id === value)?.[1] ?? value) + ' placed in ' + label : 'Text removed from ' + label);
   }
   // The text's own editor first, and the book's other texts in a submenu: dragging a text onto the box is the usual way

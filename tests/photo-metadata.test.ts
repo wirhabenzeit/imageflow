@@ -12,6 +12,7 @@ import { captureMetadata, exifDateTime, exifOffset } from '../src/photo-metadata
 import { photoIndexSchema } from '../src/project';
 import { projectOperationsSchema } from '../src/project-commands';
 import { copySample } from '../desktop/sample-book.mjs';
+import './persistence-root';
 
 type Exif = Parameters<ReturnType<typeof sharp>['withExif']>[0];
 const jpeg = (exif?: Exif, width = 60, height = 40) => {

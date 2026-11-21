@@ -11,6 +11,7 @@ import { ProjectSession } from '../desktop/project-session';
 import { removeSources } from '../desktop/source-actions';
 import { projectSchema } from '../src/project';
 import type { ProjectFiles } from '../src/project';
+import './persistence-root';
 
 const filesOf = ({ project, photoIndex }: ProjectFiles): ProjectFiles => structuredClone({ project, photoIndex });
 const withTitle = (book: ProjectFiles, title: string): ProjectFiles => {

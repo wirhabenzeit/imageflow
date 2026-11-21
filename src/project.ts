@@ -14,15 +14,36 @@ const scalar = z.union([z.string(), z.boolean(), z.number()]);
 // as a nested object, is not a project ImageFlow wrote and fails to load like any other malformed value.
 export const values = z.record(identifier, z.union([scalar, z.array(z.record(z.string(), scalar))])).default({});
 const unit = z.number().min(0).max(1);
-const crop = z.object({ centerX: unit, centerY: unit, zoom: z.number().min(1).max(20) });
+// Objects of project.json and photos.json keep keys this version does not know on load and save (ADR 0010, guardrail 2),
+// so a build that predates an additive field never drops it when it saves a book that has it. The schema is loose at
+// run time but typed as stripping, so `Project` and `PhotoIndex` (and the templates built from them) never see such keys.
+const object = <S extends z.ZodRawShape>(shape: S) => z.looseObject(shape) as unknown as z.ZodObject<S, z.core.$strip>;
+// Keys that could reach the prototype chain are refused anywhere in a document, before a schema copies any of them
+// (`JSON.parse` makes `__proto__` an own key, and copying it onto a result would replace the result's prototype).
+const reservedKeys = ['__proto__', 'constructor', 'prototype'];
+function reservedKeyPath(value: unknown, path: PropertyKey[] = []): PropertyKey[] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  for (const key of Object.keys(value)) {
+    if (reservedKeys.includes(key)) return [...path, key];
+    const found = reservedKeyPath((value as Record<string, unknown>)[key], [...path, key]);
+    if (found) return found;
+  }
+  return undefined;
+}
+const guarded = <T extends z.ZodType>(schema: T) => z.preprocess((input, ctx) => {
+  const path = reservedKeyPath(input);
+  if (path) ctx.issues.push({ code: 'custom', input, path, message: 'The key ' + String(path.at(-1)) + ' is reserved. Remove it.' });
+  return input;
+}, schema) as unknown as z.ZodPipe<z.ZodUnknown, T>;
+const crop = object({ centerX: unit, centerY: unit, zoom: z.number().min(1).max(20) });
 // A box's content is shared by every layout that declares a box with its ID; layouts without that box keep it on the
 // spread. Crops depend on the frame, so each layout has its own. A layout without one fills its frame around
 // `focus`, the centre of the crop set last.
-const box = z.object({
+const box = object({
   photo: identifier.optional(),
   text: identifier.optional(),
   crops: z.record(identifier, crop).optional(),
-  focus: z.object({ centerX: unit, centerY: unit }).optional(),
+  focus: object({ centerX: unit, centerY: unit }).optional(),
   params: values,
 }).refine(({ photo, text, crops, focus }) => !(photo && text) && (!(crops || focus) || !!photo),
   'A box holds one assignment, and only photos have a crop.');
@@ -65,26 +86,26 @@ const layoutState = {
   definition: identifier,
   params: values,
   boxes: z.record(identifier, box).default({}),
-  elements: z.record(identifier, z.object({ params: values })).default({}),
+  elements: z.record(identifier, object({ params: values })).default({}),
 };
 // A page without `definition` shows ImageFlow's blank page (ADR 0009 §3), which every template has without declaring
 // it; the page still keeps what it stores for other layouts.
-const pageState = z.object({ ...layoutState, definition: identifier.optional() });
+const pageState = object({ ...layoutState, definition: identifier.optional() });
 export const pageSides = ['left', 'right'] as const;
 
 // A spread as format 2 defines it. The release gates above apply to whole books (`projectSchema`), so this schema
 // stays testable and ready for the phases that lift them.
-export const spreadSchema = z.object({
+export const spreadSchema = object({
   id: identifier,
   ...layoutState,
   // Each page's own state, once the spread was shown as page layouts (ADR 0009). A page keeps it, and its layout,
   // while the spread shows a spread layout, so showing pages again restores them.
-  pages: z.object({ left: pageState.optional(), right: pageState.optional() }).optional(),
+  pages: object({ left: pageState.optional(), right: pageState.optional() }).optional(),
   // The spread shows its pages' layouts rather than `definition`.
   split: z.literal(true).optional(),
   // Content a layout change replaced (ADR 0009 §3), with the state it came from. Unlike content a layout has no box
   // for, it never shows again by itself: only *Place in…* returns it, and *Discard* removes it.
-  displaced: z.array(z.object({
+  displaced: z.array(object({
     from: z.enum(['spread', ...pageSides]),
     box: identifier,
     state: box.refine(({ photo, text }) => !!(photo || text), 'Only content is set aside: a photo or a text.'),
@@ -96,15 +117,18 @@ export function bookFormatOf(project: { cover?: unknown; spreads: readonly { pag
   if (project.cover !== undefined) return 3;
   return project.spreads.some(({ pages, split, displaced }) => pages !== undefined || split !== undefined || displaced !== undefined) ? 2 : 1;
 }
-const coverState = z.object(layoutState);
+const coverState = object(layoutState);
 
-export const projectSchema = z.object({
+export const projectSchema = guarded(object({
   schemaVersion,
   title: label,
+  // The book's logical lineage across copies of one book (ADR 0010). Never an instance or security key (that is
+  // `sourceBookKey`): a Finder copy shares it. New Book, Duplicate and Save a Copy start a new one.
+  bookId: z.uuid().optional(),
   importMode: importModeSchema.optional(),
   // `hash` is the template source's hash when the book was created from the template library; it tells a later
   // template update whether the book's copy was edited since.
-  template: z.object({ id: identifier, version: label, hash: z.string().regex(/^[a-f0-9]{64}$/).optional() }),
+  template: object({ id: identifier, version: label, hash: z.string().regex(/^[a-f0-9]{64}$/).optional() }),
   // The template format chosen in template controls; templates with one format ignore it.
   format: identifier.optional(),
   params: values,
@@ -116,9 +140,9 @@ export const projectSchema = z.object({
   spreads: z.array(spreadSchema.refine((spread) => !gated(spread), pagesUnsupportedMessage))
     .refine((spreads) => new Set(spreads.map((spread) => spread.id)).size === spreads.length, 'Spread IDs must be unique.'),
   // Every parsed book carries the format that holds it, so saving it writes that format.
-}).transform((project) => ({ ...project, schemaVersion: bookFormatOf(project) }));
+}).transform((project) => ({ ...project, schemaVersion: bookFormatOf(project) })));
 
-export const photoIndexSchema = z.record(identifier, z.object({
+export const photoIndexSchema = guarded(z.record(identifier, object({
   path: z.string(),
   linked: z.boolean().optional(),
   caption: z.string().optional(),
@@ -128,7 +152,7 @@ export const photoIndexSchema = z.record(identifier, z.object({
   // Capture time, location and camera are read from the photo file and cannot be written here.
   ...Object.fromEntries(captureFields.map((field) => [field, z.custom<never>(() => false,
     { message: field + ' is read from the photo file and is read-only. Remove it from photos.json.' }).optional()])),
-}));
+})));
 
 export type Project = z.infer<typeof projectSchema>;
 export type SpreadState = Project['spreads'][number];
@@ -141,6 +165,13 @@ export type PageState = NonNullable<NonNullable<SpreadState['pages']>[PageSide]>
 /** The state a box, element or parameter of a spread lives in: one of its pages', or the spread's own without a page. */
 export const scopeState = (spread: SpreadState, page?: PageSide): SpreadState | PageState | undefined => page ? spread.pages?.[page] : spread;
 export type BoxState = z.infer<typeof box>;
+/** A box with its content (assignment, crops and focus) removed: its parameters, and any keys this version does not
+ * know, stay. Code that replaces a box's content builds the new state from this rather than from `params` alone, so
+ * an unknown key of the box survives (ADR 0010). */
+export const boxBase = (box?: BoxState): BoxState => {
+  const { photo: _photo, text: _text, crops: _crops, focus: _focus, params, ...rest } = box ?? {} as Partial<BoxState>;
+  return { ...rest, params: params ?? {} };
+};
 /** Where a spread stores a state: its own, or one of its pages'. */
 export type StateLocation = 'spread' | PageSide;
 export type LayoutState = SpreadState | PageState;

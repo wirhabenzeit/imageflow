@@ -10,9 +10,12 @@ import { syncBuiltinESMExports } from 'node:module';
 import { test } from 'node:test';
 import { build } from 'esbuild';
 import sharp from 'sharp';
-import { acquireProjectLock, CommittedProjectSaveError, maximumManifestBytes, persistProjectManifests, recoverProjectSave } from '../desktop/persistence';
+import { acquireProjectLock, CommittedProjectSaveError, maximumManifestBytes, persistProjectManifests, readSaveLedger, recoverProjectSave } from '../desktop/persistence';
 import type { ProjectLock, ProjectManifests } from '../desktop/persistence';
+import { createLockOwner } from '../desktop/lock-owner';
+import { sourceBookKey } from '../desktop/source-identity';
 import { importIntoProject, loadProject, updateProject } from '../desktop/project';
+import { persistenceRoot } from './persistence-root';
 
 const project = {
   schemaVersion: 1, title: 'Before', template: { id: 'test', version: '1' }, params: {}, texts: {}, files: {},
@@ -37,11 +40,13 @@ async function manifests(folder: string) {
   return { 'project.json': await readFile(join(folder, 'project.json')), 'photos.json': await readFile(join(folder, 'photos.json')) };
 }
 
-const journalPath = (folder: string) => join(folder, '.imageflow/persistence/pending-save.json');
+// Runtime state lives in App Support, keyed by the book's identity (ADR 0010).
+const state = async (folder: string) => join(persistenceRoot, await sourceBookKey(folder));
+const journalPath = async (folder: string) => join(await state(folder), 'pending-save.json');
 
 async function publishJournal(folder: string, original = before, intended = after) {
-  await mkdir(join(folder, '.imageflow/persistence'), { recursive: true });
-  await writeFile(journalPath(folder), JSON.stringify({
+  await mkdir(await state(folder), { recursive: true });
+  await writeFile(await journalPath(folder), JSON.stringify({
     version: 1, transaction: randomUUID(), manifests: Object.fromEntries((['project.json', 'photos.json'] as const).map((name) =>
       [name, { before: original[name].toString('base64'), after: intended[name].toString('base64') }])),
   }));
@@ -60,12 +65,12 @@ async function failPhotoPublication(run: () => Promise<unknown>, folder: string)
 test('manifest persistence commits both files and removes only its completed journal', async () => {
   const { root, folder } = await fixture();
   try {
-    await mkdir(join(folder, '.imageflow/persistence/abandoned'), { recursive: true });
-    await writeFile(join(folder, '.imageflow/persistence/abandoned/notes'), 'preserve');
+    await mkdir(join(await state(folder), 'abandoned'), { recursive: true });
+    await writeFile(join(await state(folder), 'abandoned/notes'), 'preserve');
     await persistProjectManifests(folder, before, after);
     assert.deepEqual(await manifests(folder), after);
-    await assert.rejects(lstat(journalPath(folder)), { code: 'ENOENT' });
-    assert.equal(await readFile(join(folder, '.imageflow/persistence/abandoned/notes'), 'utf8'), 'preserve');
+    await assert.rejects(lstat(await journalPath(folder)), { code: 'ENOENT' });
+    assert.equal(await readFile(join(await state(folder), 'abandoned/notes'), 'utf8'), 'preserve');
     await recoverProjectSave(folder);
     assert.deepEqual(await manifests(folder), after);
   } finally { await rm(root, { recursive: true }); }
@@ -78,16 +83,16 @@ test('interruption between publications leaves durable intent and load rolls for
       await assert.rejects(persistProjectManifests(folder, before, after), CommittedProjectSaveError);
     }, folder);
     assert.deepEqual(await manifests(folder), { 'project.json': after['project.json'], 'photos.json': before['photos.json'] });
-    const journal = await readFile(journalPath(folder));
+    const journal = await readFile(await journalPath(folder));
     await failPhotoPublication(async () => {
       await assert.rejects(recoverProjectSave(folder), /Injected interruption/);
     }, folder);
-    assert.deepEqual(await readFile(journalPath(folder)), journal);
+    assert.deepEqual(await readFile(await journalPath(folder)), journal);
     const book = await loadProject(folder, cache);
     assert.equal(book.project.title, 'Saved together');
     assert.equal(book.photoIndex.picture.title, 'A saved photo');
     assert.deepEqual(book.manifests, after);
-    await assert.rejects(lstat(journalPath(folder)), { code: 'ENOENT' });
+    await assert.rejects(lstat(await journalPath(folder)), { code: 'ENOENT' });
     await recoverProjectSave(folder);
     assert.deepEqual(await manifests(folder), after);
   } finally { await rm(root, { recursive: true }); }
@@ -99,13 +104,13 @@ test('recovery checks both files for external changes before publishing and pres
     await publishJournal(folder);
     const outsideEdit = Buffer.from(JSON.stringify({ elsewhere: { path: 'photos/elsewhere.jpg' } }));
     await writeFile(join(folder, 'photos.json'), outsideEdit);
-    const journal = await readFile(journalPath(folder));
+    const journal = await readFile(await journalPath(folder));
     await assert.rejects(recoverProjectSave(folder), /photos.json changed outside ImageFlow/);
     assert.deepEqual(await manifests(folder), { 'project.json': before['project.json'], 'photos.json': outsideEdit });
-    assert.deepEqual(await readFile(journalPath(folder)), journal);
+    assert.deepEqual(await readFile(await journalPath(folder)), journal);
     await rm(join(folder, 'photos.json'));
     await assert.rejects(recoverProjectSave(folder), /photos.json changed outside ImageFlow/);
-    assert.deepEqual(await readFile(journalPath(folder)), journal);
+    assert.deepEqual(await readFile(await journalPath(folder)), journal);
     await writeFile(join(folder, 'photos.json'), before['photos.json']);
     await recoverProjectSave(folder);
     assert.deepEqual(await manifests(folder), after);
@@ -118,12 +123,12 @@ test('a pending committed save blocks new persistence and unrelated changed data
     await publishJournal(folder);
     await assert.rejects(persistProjectManifests(folder, before, after), /previous project save needs recovery/);
     assert.deepEqual(await manifests(folder), before);
-    await rm(journalPath(folder));
+    await rm(await journalPath(folder));
     const external = Buffer.from(JSON.stringify({ ...project, title: 'Written by someone else' }));
     await writeFile(join(folder, 'project.json'), external);
     await assert.rejects(persistProjectManifests(folder, before, after), /changed on disk/);
     assert.deepEqual(await readFile(join(folder, 'project.json')), external);
-    await assert.rejects(lstat(journalPath(folder)), { code: 'ENOENT' });
+    await assert.rejects(lstat(await journalPath(folder)), { code: 'ENOENT' });
   } finally { await rm(root, { recursive: true }); }
 });
 
@@ -137,11 +142,11 @@ test('read-only loading creates no internal folders and refuses recovery without
     await publishJournal(folder);
     await writeFile(join(folder, 'project.json'), after['project.json']);
     const snapshot = await manifests(folder);
-    const journal = await readFile(journalPath(folder));
+    const journal = await readFile(await journalPath(folder));
     const entries = await readdir(folder, { recursive: true });
     await assert.rejects(loadProject(folder, cache, true), /Open it as a writable project to recover/);
     assert.deepEqual(await manifests(folder), snapshot);
-    assert.deepEqual(await readFile(journalPath(folder)), journal);
+    assert.deepEqual(await readFile(await journalPath(folder)), journal);
     assert.deepEqual(await readdir(folder, { recursive: true }), entries);
     await assert.rejects(updateProject(book, { project: { ...book.project, title: 'Rejected' }, photoIndex: book.photoIndex }), /editable copy/);
   } finally { await rm(root, { recursive: true }); }
@@ -151,7 +156,7 @@ test('journal validation rejects extra paths, unknown versions, invalid bytes, i
   const { root, folder } = await fixture();
   try {
     await publishJournal(folder);
-    const valid = JSON.parse(await readFile(journalPath(folder), 'utf8'));
+    const valid = JSON.parse(await readFile(await journalPath(folder), 'utf8'));
     const invalid = [
       { ...valid, version: 3 },
       { ...valid, destination: '../outside' },
@@ -161,32 +166,30 @@ test('journal validation rejects extra paths, unknown versions, invalid bytes, i
     ];
     for (const journal of invalid) {
       const source = JSON.stringify(journal);
-      await writeFile(journalPath(folder), source);
+      await writeFile(await journalPath(folder), source);
       await assert.rejects(recoverProjectSave(folder), /pending save|pending save journal/);
-      assert.equal(await readFile(journalPath(folder), 'utf8'), source);
+      assert.equal(await readFile(await journalPath(folder), 'utf8'), source);
       assert.deepEqual(await manifests(folder), before);
     }
-    await truncate(journalPath(folder), maximumManifestBytes * 6 + 1);
+    await truncate(await journalPath(folder), maximumManifestBytes * 6 + 1);
     await assert.rejects(recoverProjectSave(folder), /bounded regular file/);
     assert.deepEqual(await manifests(folder), before);
   } finally { await rm(root, { recursive: true }); }
 });
 
-test('journal and persistence directories cannot escape through symlinks', async () => {
+test('journal and state directories cannot escape through symlinks', async () => {
   const { root, folder } = await fixture();
   const outside = join(root, 'outside');
   await mkdir(outside);
   await writeFile(join(outside, 'keep'), 'unchanged');
   try {
-    await symlink(outside, join(folder, '.imageflow'));
-    await assert.rejects(persistProjectManifests(folder, before, after), /real directory inside/);
-    await rm(join(folder, '.imageflow'));
-    await mkdir(join(folder, '.imageflow'));
-    await symlink(outside, join(folder, '.imageflow/persistence'));
-    await assert.rejects(recoverProjectSave(folder), /real directory inside/);
-    await rm(join(folder, '.imageflow/persistence'));
-    await mkdir(join(folder, '.imageflow/persistence'));
-    await symlink(join(outside, 'keep'), journalPath(folder));
+    await mkdir(persistenceRoot, { recursive: true });
+    await symlink(outside, await state(folder));
+    await assert.rejects(persistProjectManifests(folder, before, after), /real directory/);
+    await assert.rejects(acquireProjectLock(folder), /real directory/);
+    await rm(await state(folder));
+    await mkdir(await state(folder));
+    await symlink(join(outside, 'keep'), await journalPath(folder));
     await assert.rejects(recoverProjectSave(folder), { code: 'ELOOP' });
     assert.equal(await readFile(join(outside, 'keep'), 'utf8'), 'unchanged');
     assert.deepEqual(await readdir(outside), ['keep']);
@@ -203,7 +206,7 @@ test('updateProject uses recoverable publication and preserves untouched manifes
     assert.equal(next.project.title, 'Changed normally');
     assert.equal(await readFile(join(folder, 'photos.json'), 'utf8'), ' \n{ }\n');
     assert.deepEqual(next.manifests, await manifests(folder));
-    await assert.rejects(lstat(journalPath(folder)), { code: 'ENOENT' });
+    await assert.rejects(lstat(await journalPath(folder)), { code: 'ENOENT' });
   } finally { await rm(root, { recursive: true }); }
 });
 
@@ -219,12 +222,12 @@ test('title-only journal stores a guard for the unchanged photo manifest and ret
     fs.rename = async () => { throw new Error('Interrupted before the title was published'); };
     await assert.rejects(persistProjectManifests(folder, original, intended), CommittedProjectSaveError);
     fs.rename = publish;
-    const journalBytes = await readFile(journalPath(folder));
+    const journalBytes = await readFile(await journalPath(folder));
     assert.ok(journalBytes.length < 2048);
     const journal = JSON.parse(journalBytes.toString());
     assert.equal(journal.version, 3);
     assert.deepEqual(journal.manifests['photos.json'], { sha256: createHash('sha256').update(photoBytes).digest('hex') });
-    const internal = join(folder, '.imageflow/persistence');
+    const internal = await state(folder);
     for (const entry of await readdir(internal)) {
       if (entry.startsWith('save-')) assert.equal((await readdir(join(internal, entry))).includes('photos.json'), false);
     }
@@ -293,7 +296,7 @@ test('writer lock excludes another owner, releases idempotently, and preserves u
     await release();
     await release();
     const nextRelease = await acquireProjectLock(folder);
-    const path = join(folder, '.imageflow/writer.lock');
+    const path = join(await state(folder), 'writer.lock');
     const replacement = JSON.stringify({ version: 1, pid: process.pid, token: randomUUID() });
     await writeFile(path, replacement);
     await nextRelease();
@@ -304,15 +307,15 @@ test('writer lock excludes another owner, releases idempotently, and preserves u
 test('invalid lock ownership and an interrupted acquisition gate require explicit recovery', async () => {
   const { root, folder } = await fixture();
   try {
-    await mkdir(join(folder, '.imageflow'));
-    const lock = join(folder, '.imageflow/writer.lock');
+    await mkdir(await state(folder), { recursive: true });
+    const lock = join(await state(folder), 'writer.lock');
     await writeFile(lock, 'unrecognized ownership');
     await assert.rejects(acquireProjectLock(folder), /writer lock is invalid/);
     assert.equal(await readFile(lock, 'utf8'), 'unrecognized ownership');
-    await mkdir(join(folder, '.imageflow/writer-lock-acquire'));
-    await writeFile(join(folder, '.imageflow/writer-lock-acquire/evidence'), 'keep');
+    await mkdir(join(await state(folder), 'writer-lock-acquire'));
+    await writeFile(join(await state(folder), 'writer-lock-acquire/evidence'), 'keep');
     await assert.rejects(acquireProjectLock(folder), /acquisition is in progress or was interrupted/);
-    assert.equal(await readFile(join(folder, '.imageflow/writer-lock-acquire/evidence'), 'utf8'), 'keep');
+    assert.equal(await readFile(join(await state(folder), 'writer-lock-acquire/evidence'), 'utf8'), 'keep');
   } finally { await rm(root, { recursive: true }); }
 });
 
@@ -325,7 +328,7 @@ test('the original lock capability follows a renamed folder and releases ownersh
     await assert.rejects(acquireProjectLock(moved), /already open for editing/);
     assert.equal(await lock.tryRelocate(moved), true);
     await lock();
-    await assert.rejects(lstat(join(moved, '.imageflow/writer.lock')), { code: 'ENOENT' });
+    await assert.rejects(lstat(join(await state(moved), 'writer.lock')), { code: 'ENOENT' });
     await assert.rejects(lstat(folder), { code: 'ENOENT' });
     assert.equal(await lock.tryRelocate(moved), false);
     const next = await acquireProjectLock(moved);
@@ -354,8 +357,9 @@ test('relocation refuses copied lock files and hard-linked candidates while the 
   const moved = join(root, 'Moved book');
   try {
     const lock = await acquireProjectLock(folder);
-    await mkdir(join(candidate, '.imageflow'), { recursive: true });
-    await link(join(folder, '.imageflow/writer.lock'), join(candidate, '.imageflow/writer.lock'));
+    await mkdir(candidate);
+    await mkdir(await state(candidate), { recursive: true });
+    await link(join(await state(folder), 'writer.lock'), join(await state(candidate), 'writer.lock'));
     assert.equal(await lock.tryRelocate(candidate), false);
     await rm(candidate, { recursive: true });
     await rename(folder, moved);
@@ -363,7 +367,7 @@ test('relocation refuses copied lock files and hard-linked candidates while the 
     assert.equal(await lock.tryRelocate(candidate), false);
     assert.equal(await lock.tryRelocate(moved), true);
     await lock();
-    assert.ok(await lstat(join(candidate, '.imageflow/writer.lock')));
+    await assert.rejects(lstat(join(await state(moved), 'writer.lock')), { code: 'ENOENT' });
   } finally { await rm(root, { recursive: true }); }
 });
 
@@ -371,13 +375,13 @@ test('release retires ownership after the project folder or lock file disappears
   const { root, folder } = await fixture();
   try {
     const lock = await acquireProjectLock(folder);
-    const owner = JSON.parse(await readFile(join(folder, '.imageflow/writer.lock'), 'utf8'));
+    const owner = JSON.parse(await readFile(join(await state(folder), 'writer.lock'), 'utf8'));
     await rm(folder, { recursive: true });
     await lock();
     await assert.rejects(lstat(owner.endpoint), { code: 'ENOENT' });
     await mkdir(folder);
     const second = await acquireProjectLock(folder);
-    await rm(join(folder, '.imageflow/writer.lock'));
+    await rm(join(await state(folder), 'writer.lock'));
     await second();
     const third = await acquireProjectLock(folder);
     await third();
@@ -388,7 +392,7 @@ test('release retires its proof when a malformed lock record must be preserved',
   const { root, folder } = await fixture();
   try {
     const lock = await acquireProjectLock(folder);
-    const path = join(folder, '.imageflow/writer.lock');
+    const path = join(await state(folder), 'writer.lock');
     const owner = JSON.parse(await readFile(path, 'utf8'));
     await writeFile(path, 'malformed ownership evidence');
     await assert.rejects(lock(), /ownership was retired.*Preserve/);
@@ -404,7 +408,7 @@ test('a permission failure reading the old record still retires the proof withou
   const open = fs.open;
   try {
     const lock = await acquireProjectLock(folder);
-    const path = join(folder, '.imageflow/writer.lock');
+    const path = join(await state(folder), 'writer.lock');
     const bytes = await readFile(path);
     const owner = JSON.parse(bytes.toString('utf8'));
     let denied = false;
@@ -431,8 +435,8 @@ test('a symlink replacing the internal directory cannot strand a live ownership 
   const { root, folder } = await fixture();
   try {
     const lock = await acquireProjectLock(folder);
-    const internal = join(folder, '.imageflow');
-    const evidence = join(folder, 'preserved-locks');
+    const internal = await state(folder);
+    const evidence = join(root, 'preserved-locks');
     const bytes = await readFile(join(internal, 'writer.lock'));
     const owner = JSON.parse(bytes.toString('utf8'));
     await rename(internal, evidence);
@@ -449,8 +453,9 @@ test('an invalid unrelated relocation candidate leaves the current owner exclusi
   const other = join(root, 'Other book');
   const lock = await acquireProjectLock(folder);
   try {
-    await mkdir(join(other, '.imageflow'), { recursive: true });
-    const path = join(other, '.imageflow/writer.lock');
+    await mkdir(other);
+    await mkdir(await state(other), { recursive: true });
+    const path = join(await state(other), 'writer.lock');
     await writeFile(path, 'invalid unrelated metadata');
     assert.equal(await lock.tryRelocate(other), false);
     assert.equal(await readFile(path, 'utf8'), 'invalid unrelated metadata');
@@ -464,17 +469,18 @@ test('a moved project can be left for another book and reopened while the same p
   const other = join(root, 'Other book');
   try {
     const first = await acquireProjectLock(folder);
-    const owner = JSON.parse(await readFile(join(folder, '.imageflow/writer.lock'), 'utf8'));
+    const owner = JSON.parse(await readFile(join(await state(folder), 'writer.lock'), 'utf8'));
     await rename(folder, moved);
     await mkdir(other);
     const second = await acquireProjectLock(other);
     assert.equal(await first.tryRelocate(other), false);
+    // Ownership is keyed by the book, not its path, so the unrelocated capability still retires its own record.
     await first();
+    await assert.rejects(lstat(join(await state(moved), 'writer.lock')), { code: 'ENOENT' });
     const reopened = await acquireProjectLock(moved);
-    const current = JSON.parse(await readFile(join(moved, '.imageflow/writer.lock'), 'utf8'));
+    const current = JSON.parse(await readFile(join(await state(moved), 'writer.lock'), 'utf8'));
     assert.equal(current.pid, owner.pid);
     assert.notEqual(current.token, owner.token);
-    assert.deepEqual(JSON.parse(await readFile(join(moved, '.imageflow/writer-stale-' + owner.token + '.json'), 'utf8')), owner);
     await second();
     await reopened();
   } finally { await rm(root, { recursive: true }); }
@@ -484,7 +490,7 @@ test('a live ownership proof excludes contenders even when its recorded process 
   const { root, folder } = await fixture();
   const lock = await acquireProjectLock(folder);
   try {
-    const path = join(folder, '.imageflow/writer.lock');
+    const path = join(await state(folder), 'writer.lock');
     const owner = JSON.parse(await readFile(path, 'utf8'));
     owner.pid = 2147483647;
     await writeFile(path, JSON.stringify(owner));
@@ -498,7 +504,7 @@ test('permission errors contacting an owner fail closed and preserve its lock', 
   const lock = await acquireProjectLock(folder);
   const connect = net.createConnection;
   try {
-    const path = join(folder, '.imageflow/writer.lock');
+    const path = join(await state(folder), 'writer.lock');
     const owner = await readFile(path);
     net.createConnection = (() => {
       const socket = new net.Socket();
@@ -515,8 +521,8 @@ test('permission errors contacting an owner fail closed and preserve its lock', 
 test('legacy locks require manual resolution for live process IDs and reclaim only proven dead IDs', async () => {
   const { root, folder } = await fixture();
   try {
-    await mkdir(join(folder, '.imageflow'));
-    const path = join(folder, '.imageflow/writer.lock');
+    await mkdir(await state(folder), { recursive: true });
+    const path = join(await state(folder), 'writer.lock');
     const owner = { version: 1, pid: process.pid, token: randomUUID() };
     await writeFile(path, JSON.stringify(owner));
     await assert.rejects(acquireProjectLock(folder), /legacy writer lock.*live or reused process ID/);
@@ -524,7 +530,7 @@ test('legacy locks require manual resolution for live process IDs and reclaim on
     owner.pid = 2147483647;
     await writeFile(path, JSON.stringify(owner));
     const lock = await acquireProjectLock(folder);
-    assert.deepEqual(JSON.parse(await readFile(join(folder, '.imageflow/writer-stale-' + owner.token + '.json'), 'utf8')), owner);
+    assert.deepEqual(JSON.parse(await readFile(join(await state(folder), 'writer-stale-' + owner.token + '.json'), 'utf8')), owner);
     await lock();
   } finally { await rm(root, { recursive: true }); }
 });
@@ -550,7 +556,8 @@ test('separate processes contend for one writer lock and a crashed owner is reco
   let child: ChildProcess | undefined;
   try {
     await build({ stdin: { contents: `
-      import { acquireProjectLock } from './desktop/persistence';
+      import { acquireProjectLock, configurePersistence } from './desktop/persistence';
+      configurePersistence(process.argv[3]);
       try {
         const release = await acquireProjectLock(process.argv[2]);
         process.on('message', async () => { await release(); process.exit(0); });
@@ -558,21 +565,21 @@ test('separate processes contend for one writer lock and a crashed owner is reco
       } catch (error) { process.send({ error: error.message }); process.exitCode = 1; }
     `, resolveDir: resolve('.') }, outfile: helper, bundle: true, packages: 'external', platform: 'node', format: 'esm' });
     const release = await acquireProjectLock(folder);
-    child = fork(helper, [folder], { silent: true });
+    child = fork(helper, [folder, persistenceRoot], { silent: true });
     assert.match((await firstMessage(child)).error ?? '', /already open for editing/);
     await exited(child);
     await release();
-    child = fork(helper, [folder], { silent: true });
+    child = fork(helper, [folder, persistenceRoot], { silent: true });
     assert.equal((await firstMessage(child)).locked, true);
     await assert.rejects(acquireProjectLock(folder), /already open for editing/);
-    const old = JSON.parse(await readFile(join(folder, '.imageflow/writer.lock'), 'utf8'));
+    const old = JSON.parse(await readFile(join(await state(folder), 'writer.lock'), 'utf8'));
     child.kill('SIGKILL');
     await exited(child);
     const claims = await Promise.allSettled([acquireProjectLock(folder), acquireProjectLock(folder)]);
     const winners = claims.filter((claim): claim is PromiseFulfilledResult<ProjectLock> => claim.status === 'fulfilled');
     assert.equal(winners.length, 1);
     assert.equal(claims.filter(({ status }) => status === 'rejected').length, 1);
-    const preserved = JSON.parse(await readFile(join(folder, '.imageflow/writer-stale-' + old.token + '.json'), 'utf8'));
+    const preserved = JSON.parse(await readFile(join(await state(folder), 'writer-stale-' + old.token + '.json'), 'utf8'));
     assert.deepEqual(preserved, old);
     await winners[0].value();
   } finally {
@@ -581,4 +588,179 @@ test('separate processes contend for one writer lock and a crashed owner is reco
     await rm(root, { recursive: true });
     await rm(output, { recursive: true });
   }
+});
+
+test('unknown fields survive an import and a save, and stay out of the photos templates read (ADR 0010)', async () => {
+  const { root, folder, cache } = await fixture();
+  try {
+    await mkdir(join(folder, 'photos'));
+    await sharp({ create: { width: 8, height: 8, channels: 3, background: '#375b48' } }).png().toFile(join(folder, 'photos/old.png'));
+    const json = { ...project, bookNote: 'b-1', template: { ...project.template, channel: 'beta' },
+      spreads: [{ ...project.spreads[0], rev: 2, boxes: { hero: { photo: 'old', params: {}, pinned: true } } }] };
+    await writeFile(join(folder, 'project.json'), JSON.stringify(json));
+    await writeFile(join(folder, 'photos.json'), JSON.stringify({ old: { path: 'photos/old.png', title: 'Old', syncRevision: 7 } }));
+    const book = await loadProject(folder, cache);
+    // The index entry keeps its unknown field, but the photo a template reads has only the known metadata.
+    assert.equal((book.photoIndex.old as Record<string, unknown>).syncRevision, 7);
+    assert.equal('syncRevision' in book.photos.get('old')!, false);
+    assert.equal(book.photos.get('old')!.title, 'Old');
+    const source = join(root, 'new.png');
+    await sharp({ create: { width: 8, height: 8, channels: 3, background: '#112233' } }).png().toFile(source);
+    // Placing a new photo replaces the box's content and keeps the box's other fields.
+    const imported = await importIntoProject(book, { kind: 'photo', target: { spread: 'one', box: 'hero' } }, [source]);
+    const saved = JSON.parse(await readFile(join(folder, 'project.json'), 'utf8'));
+    const index = JSON.parse(await readFile(join(folder, 'photos.json'), 'utf8'));
+    assert.equal(saved.bookNote, 'b-1');
+    assert.equal(saved.template.channel, 'beta');
+    assert.equal(saved.spreads[0].rev, 2);
+    assert.equal(saved.spreads[0].boxes.hero.pinned, true);
+    assert.equal(saved.spreads[0].boxes.hero.photo, imported.imported[0]);
+    assert.equal(index.old.syncRevision, 7);
+  } finally { await rm(root, { recursive: true }); }
+});
+
+test('a book whose files hold a reserved key is refused when it opens', async () => {
+  const { root, folder, cache } = await fixture();
+  try {
+    await writeFile(join(folder, 'project.json'), '{"__proto__":{"polluted":true},' + JSON.stringify(project).slice(1));
+    await assert.rejects(loadProject(folder, cache), /reserved/);
+    await writeFile(join(folder, 'project.json'), before['project.json']);
+    await writeFile(join(folder, 'photos.json'), '{"p":{"path":"photos/a.jpg","constructor":1}}');
+    await assert.rejects(loadProject(folder, cache), /reserved/);
+    assert.equal(({} as Record<string, unknown>).polluted, undefined);
+  } finally { await rm(root, { recursive: true }); }
+});
+
+const intendedJournal = (original = before, intended = after) => JSON.stringify({
+  version: 1, transaction: randomUUID(), manifests: Object.fromEntries((['project.json', 'photos.json'] as const).map((name) =>
+    [name, { before: original[name].toString('base64'), after: intended[name].toString('base64') }])),
+});
+
+test('a save and a writer lock create no runtime files inside the book package', async () => {
+  const { root, folder } = await fixture();
+  try {
+    const lock = await acquireProjectLock(folder);
+    await persistProjectManifests(folder, before, after);
+    await persistProjectManifests(folder, after, before);
+    await lock();
+    await assert.rejects(lstat(join(folder, '.imageflow')), { code: 'ENOENT' });
+    // The staged manifests are renamed into place, never left behind.
+    assert.deepEqual((await readdir(folder)).sort(), ['photos.json', 'project.json', 'template']);
+    // The runtime state, including the save ledger, went to App Support.
+    assert.ok((await readdir(await state(folder))).includes('history'));
+    assert.equal((await readSaveLedger(folder)).records.length, 2);
+  } finally { await rm(root, { recursive: true }); }
+});
+
+test('same-volume moves keep their runtime state while Finder duplicates get their own', async () => {
+  const { root, folder } = await fixture();
+  const moved = join(root, 'Moved book');
+  const copy = join(root, 'Copy.imageflow');
+  try {
+    const original = await state(folder);
+    const lock = await acquireProjectLock(folder);
+    await publishJournal(folder);
+    await rename(folder, moved);
+    // Identity survives the rename: the lock and the interrupted save are still found at the new path.
+    assert.equal(await state(moved), original);
+    await assert.rejects(acquireProjectLock(moved), /already open for editing/);
+    assert.equal(await lock.tryRelocate(moved), true);
+    await lock();
+    await recoverProjectSave(moved);
+    assert.deepEqual(await manifests(moved), after);
+    await persistProjectManifests(moved, after, before);
+    // A duplicate has its own identity, so it sees neither the original's lock, journal nor history.
+    await publishJournal(moved, before, after);
+    const holder = await acquireProjectLock(moved);
+    await cp(moved, copy, { recursive: true });
+    assert.notEqual(await state(copy), original);
+    await assert.rejects(lstat(await state(copy)), { code: 'ENOENT' });
+    assert.deepEqual((await readSaveLedger(copy)).records, []);
+    await recoverProjectSave(copy);
+    assert.deepEqual(await manifests(copy), before);
+    const independent = await acquireProjectLock(copy);
+    await independent();
+    await holder();
+  } finally { await rm(root, { recursive: true }); }
+});
+
+test('a live legacy in-package writer lock still blocks, and nothing is written inside .imageflow', async () => {
+  const { root, folder } = await fixture();
+  try {
+    const internal = join(folder, '.imageflow');
+    await mkdir(internal);
+    const path = join(internal, 'writer.lock');
+    const owner = { version: 1, pid: process.pid, token: randomUUID() };
+    await writeFile(path, JSON.stringify(owner));
+    await assert.rejects(acquireProjectLock(folder), /legacy writer lock.*live or reused process ID/);
+    // A live version 2 owner proves itself over its socket, wherever its record was written.
+    const proof = await createLockOwner(owner.token);
+    try {
+      const info = await lstat(folder, { bigint: true });
+      await writeFile(path, JSON.stringify({ version: 2, pid: process.pid, token: owner.token, endpoint: proof.endpoint,
+        directory: { device: String(info.dev), inode: String(info.ino) } }));
+      await assert.rejects(acquireProjectLock(folder), /already open for editing/);
+    } finally { await proof.close(); }
+    // A dead legacy owner no longer blocks and its record is left exactly as it was.
+    const dead = JSON.stringify({ ...owner, pid: 2147483647 });
+    await writeFile(path, dead);
+    const lock = await acquireProjectLock(folder);
+    await lock();
+    assert.equal(await readFile(path, 'utf8'), dead);
+    assert.deepEqual(await readdir(internal), ['writer.lock']);
+  } finally { await rm(root, { recursive: true }); }
+});
+
+test('a legacy in-package pending save is recovered and then removed', async () => {
+  const { root, folder } = await fixture();
+  try {
+    const legacy = join(folder, '.imageflow/persistence');
+    await mkdir(legacy, { recursive: true });
+    await writeFile(join(legacy, 'pending-save.json'), intendedJournal());
+    await assert.rejects(loadProject(folder, join(root, 'cache'), true), /Open it as a writable project to recover/);
+    await assert.rejects(persistProjectManifests(folder, before, after), /needs recovery/);
+    await recoverProjectSave(folder);
+    assert.deepEqual(await manifests(folder), after);
+    await assert.rejects(lstat(join(legacy, 'pending-save.json')), { code: 'ENOENT' });
+    assert.deepEqual(await readdir(legacy), []);
+    await persistProjectManifests(folder, after, before);
+    assert.deepEqual(await manifests(folder), before);
+  } finally { await rm(root, { recursive: true }); }
+});
+
+test('an in-package ledger of an older release is read, then imported by the next save without being modified', async () => {
+  const { root, folder } = await fixture();
+  try {
+    await persistProjectManifests(folder, before, after, { origin: 'app', label: 'Old release save' });
+    const history = join(folder, '.imageflow/history');
+    await mkdir(history, { recursive: true });
+    const legacy = join(history, 'ledger.jsonl');
+    await rename(join(await state(folder), 'history/ledger.jsonl'), legacy);
+    const bytes = await readFile(legacy);
+    assert.deepEqual((await readSaveLedger(folder)).records.map(({ label }) => label), ['Old release save']);
+    await persistProjectManifests(folder, after, before, { origin: 'app', label: 'New save' });
+    assert.deepEqual((await readSaveLedger(folder)).records.map(({ label }) => label), ['Old release save', 'New save']);
+    assert.deepEqual(await readFile(legacy), bytes);
+  } finally { await rm(root, { recursive: true }); }
+});
+
+test('acquiring the writer lock sweeps stale staging files from the book root and nothing else', async () => {
+  const { root, folder } = await fixture();
+  const stale = '.imageflow-write-' + randomUUID() + '.tmp';
+  const keep = ['.imageflow-write-notes.tmp', '.imageflow-write-' + randomUUID() + '.tmp.bak', 'photos.tmp', '.imageflow-write-' + randomUUID() + '.tmp-dir'];
+  try {
+    await writeFile(join(folder, stale), 'interrupted save');
+    for (const name of keep.slice(0, 3)) await writeFile(join(folder, name), 'user file');
+    await mkdir(join(folder, keep[3]));
+    // Without the lock nothing is touched: a live writer in another process may be mid-save.
+    const other = await acquireProjectLock(folder);
+    await writeFile(join(folder, stale), 'a save in progress under the other writer');
+    await assert.rejects(acquireProjectLock(folder), /already open for editing/);
+    assert.equal(await readFile(join(folder, stale), 'utf8'), 'a save in progress under the other writer');
+    await other();
+    const lock = await acquireProjectLock(folder);
+    await assert.rejects(lstat(join(folder, stale)), { code: 'ENOENT' });
+    for (const name of keep) await lstat(join(folder, name));
+    await lock();
+  } finally { await rm(root, { recursive: true }); }
 });

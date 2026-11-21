@@ -198,14 +198,14 @@ export async function removeSources(book: OpenProject, keys: readonly string[]) 
 }
 
 /** Save a consistent copy. Collection is prepared before publishing any destination document. */
-export async function saveDocumentCopy(source: OpenProject, destination: string, includeAssets: boolean, importMode?: ImportMode) {
+export async function saveDocumentCopy(source: OpenProject, destination: string, includeAssets: boolean, importMode?: ImportMode, keepLineage = false) {
   const before = await captureProjectInputs(source.folder);
   const book = await loadProject(source.folder, source.cache, true);
   const result = await createDocument(destination, async (stage) => {
     await cp(book.folder, stage, { recursive: true, dereference: true, filter: async (path) => {
       // Installed packages are not part of the book; it uses the saved bundle in template/vendor (ADR 0006).
       // A Git repository, at any depth, can hold deleted captions and metadata, as .imageflow/ can.
-      if (basename(path) === '.imageflow' || basename(path) === 'node_modules' || basename(path) === '.git') return false;
+      if (basename(path) === '.imageflow' || basename(path) === 'node_modules' || basename(path) === '.git' || basename(path).startsWith('.imageflow-write-')) return false;
       const actual = await realpath(path);
       if (actual !== book.folder && !within(book.folder, actual)) throw new Error('The package contains a link outside the book: ' + path);
       return true;
@@ -224,7 +224,7 @@ export async function saveDocumentCopy(source: OpenProject, destination: string,
     await writeFile(join(stage, 'photos.json'), JSON.stringify(files.photoIndex, null, 2) + '\n');
     const after = await captureProjectInputs(source.folder);
     if (before.revision !== after.revision || before.observation !== after.observation) throw new Error('Sources changed while preparing the saved copy. Retry after the external save finishes.');
-  });
+  }, { keepLineage });
   if (!includeAssets) await transferSourceAccess(book.folder, result, sourceEntries(book));
   // A copy of the user's own book is theirs too (ADR 0006).
   await transferBookTrust(book.folder, result);

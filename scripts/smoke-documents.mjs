@@ -7,6 +7,7 @@ import { _electron } from 'playwright-core';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { clickClosingWindow, reloadBook, waitForPage } from './ui-actions.mjs';
+import { bookStateFile } from './book-state.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await realpath(await mkdtemp(join(root, '.build/documents-smoke-')));
@@ -186,8 +187,11 @@ try {
   const inspections = await Promise.all([firstHandle, secondHandle].map((project) => call('inspect_book', { project, view: 'summary' })));
   assert.equal(inspections[0].data.title, 'First');
   assert.equal(inspections[1].data.title, 'Second edited');
+  const firstLock = await bookStateFile(profile, first, 'writer.lock');
+  await stat(firstLock); // An open book records its writer in App Support
+  await assert.rejects(stat(join(first, '.imageflow/writer.lock')), { code: 'ENOENT' }, 'No writer lock is written inside the book');
   await one.close();
-  for (let attempt = 0; await stat(join(first, '.imageflow/writer.lock')).catch(() => false); attempt++) {
+  for (let attempt = 0; await stat(firstLock).catch(() => false); attempt++) {
     assert.ok(attempt < 200, 'Book close releases its writer');
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
