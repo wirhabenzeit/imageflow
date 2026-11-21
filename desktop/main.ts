@@ -13,7 +13,7 @@ import type { ContextMenuItem, ContextMenuResult } from '../src/desktop';
 import type { RegisteredCommand } from '../src/commands';
 import { bookName } from '../src/book-name';
 import { collectSources, relocateSource, relinkFolder, saveDocumentCopy, removeSources, renameSource } from './source-actions';
-import { originalPath } from './source-store';
+import { originalPath, within } from './source-store';
 import { sourceEntries } from '../src/source-locations';
 import type { SourceEntry } from '../src/source-locations';
 import { assetPageLabels, assetUsage, usageLabel } from '../src/asset-usage';
@@ -30,7 +30,7 @@ import { basename, dirname, extname, join, isAbsolute, parse } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, renderOrigins, settingsURL, startURL, starterURL, assetsURL, templatesURL } from '../src/desktop';
-import type { AgentLeaseReply, BookMenuState, Command, ImportRequest, OpenAction, ProjectSummary, Result, MarkdownAction, McpClientTarget, McpSettings, SourceAction, TemplateInfo } from '../src/desktop';
+import type { AgentLeaseReply, BookMenuState, Command, ImportRequest, OpenAction, ProjectSummary, Result, MarkdownAction, McpClientTarget, McpSettings, SourceAction, SyncAction, TemplateInfo } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
 import { renderPolicy } from './csp';
 import { assetTypes, loadProject, renderData, TemplateCompileError } from './project';
@@ -38,7 +38,10 @@ import type { OpenProject } from './project';
 import { photoFile } from './photos';
 import { captureBookPreview, checkBookRender } from './preview';
 import { PreviewError } from '../src/preview';
-import { DocumentSession } from './document-session';
+import { chooseSyncTip, DocumentSession } from './document-session';
+import { cloneFromRemote } from './sync-engine';
+import { remoteBooks } from './sync-remote';
+import { FolderRemote } from './sync-remote-folder';
 import { configureMacHeader, setToolbarDragRegions } from './mac-header';
 import type { RenderSessions } from './document-session';
 import { AssetFacts } from './asset-facts';
@@ -515,6 +518,8 @@ async function openDocument(path: string): Promise<DocumentSession | undefined> 
         }
       });
       document.networkTrust = bookNetworkTrust;
+      document.keepOriginals = () => !!settings.value.keepOriginals;
+      document.syncChanged = () => updateMenus();
       document.dependencyCache = dependencyCache();
       document.authoringTypes = join(__dirname, 'authoring-types');
       document.authoringSkills = join(__dirname, 'skills');
@@ -535,7 +540,7 @@ async function openDocument(path: string): Promise<DocumentSession | undefined> 
       });
       identities.set(identity, document);
       lastDocument = document;
-      editor.on('focus', () => { lastDocument = current; updateMenus(); });
+      editor.on('focus', () => { lastDocument = current; updateMenus(); refreshSyncOnFocus(current); });
       editor.on('blur', () => { if (covers.get(current)?.dirty) scheduleCover(current, current.book); });
       let closingTextEditors = false;
       editor.on('close', (event) => {
@@ -1022,6 +1027,100 @@ async function revertOpened(document: DocumentSession) {
   const result = await document.run(async () => document.notify({ value: document.activate(await document.projectSession.revertOpened()) }));
   if ('error' in result) throw new Error(result.error);
 }
+/** Coming back to a book that syncs looks at its sync folder again, at most every few seconds (#251). */
+const syncLooked = new WeakMap<DocumentSession, number>();
+function refreshSyncOnFocus(document: DocumentSession) {
+  if (!document.syncView || Date.now() - (syncLooked.get(document) ?? 0) < 5000) return;
+  syncLooked.set(document, Date.now());
+  void document.refreshSync().catch((error) => console.warn('ImageFlow could not read the sync status', error));
+}
+
+/** Syncs the focused book with its sync folder (#251), or asks for a folder first. */
+async function syncDocument(document: DocumentSession) {
+  if (!await document.syncFolder()) { await linkSyncFolder(document); return; }
+  await document.syncNow();
+}
+
+/** Lets the book sync through a folder the user chooses, such as one in iCloud Drive or Dropbox, then syncs. */
+async function linkSyncFolder(document: DocumentSession) {
+  const current = await document.syncFolder();
+  const choice = await dialog.showOpenDialog(document.window, { title: 'Sync with Folder', buttonLabel: 'Sync', properties: ['openDirectory', 'createDirectory'],
+    message: 'Choose a folder that your Macs share, for example in iCloud Drive or Dropbox. Every Mac syncing this book chooses the same folder.',
+    ...(current ? { defaultPath: current } : {}) });
+  const folder = choice.filePaths[0];
+  if (choice.canceled || !folder || document.closing) return;
+  if (within(document.book.folder, folder) || folder === document.book.folder) throw new Error('Choose a folder outside the book.');
+  // A folder without this book either has never seen it, or has not finished downloading what another Mac synced; a
+  // first sync now would start a second history there, which shows later as changed on two Macs.
+  if (await document.startsHistory(folder)) {
+    const { response } = await dialog.showMessageBox(document.window, { type: 'question', buttons: ['Start Syncing', 'Cancel'], defaultId: 0, cancelId: 1,
+      message: 'Start syncing “' + bookName(document.book.folder) + '” in “' + basename(folder) + '”?',
+      detail: 'This folder has no copy of this book yet. If another Mac already syncs it to this folder, cancel and wait until the folder has finished downloading here.' });
+    if (response !== 0) return;
+  }
+  await document.linkSync(folder);
+  await document.syncNow();
+}
+
+async function unlinkSyncFolder(document: DocumentSession) {
+  const folder = await document.syncFolder();
+  if (!folder) return;
+  const { response } = await dialog.showMessageBox(document.window, { type: 'question', buttons: ['Stop Syncing', 'Cancel'], defaultId: 0, cancelId: 1,
+    message: 'Stop syncing this book on this Mac?', detail: 'The book and the sync folder “' + basename(folder) + '” stay as they are. Other Macs keep syncing.' });
+  if (response === 0) await document.unlinkSync();
+}
+
+/**
+ * Open from Sync Folder (#251): lists the books another Mac synced to a folder, by the titles in their commit headers,
+ * and makes a new local book from the one chosen. It starts untrusted (ADR 0006).
+ */
+async function openFromSyncFolder(owner: BrowserWindow | undefined) {
+  const parent = owner && !owner.isDestroyed() ? owner : undefined;
+  const ask = <T extends Electron.MessageBoxOptions>(options: T) => parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options);
+  const options = { title: 'Open from Sync Folder', buttonLabel: 'Choose', properties: ['openDirectory' as const],
+    message: 'Choose the folder another Mac syncs its books to, for example in iCloud Drive or Dropbox.' };
+  const choice = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
+  const folder = choice.filePaths[0];
+  if (choice.canceled || !folder) return;
+  const remote = new FolderRemote(folder);
+  const books = await remoteBooks(remote);
+  if (!books.length) {
+    await ask({ type: 'info', message: 'There are no ImageFlow books in this folder yet.',
+      detail: 'Sync a book to it on another Mac (File → Sync → Sync with Folder…), wait until the folder has finished syncing here, then try again.' });
+    return;
+  }
+  let book = books[0];
+  if (books.length > 1) {
+    const shown = books.slice(0, 6);
+    const { response } = await ask({ type: 'question', buttons: [...shown.map(({ title, newer }) => newer ? 'A Book Synced by a Newer ImageFlow' : title || 'Untitled'), 'Cancel'], cancelId: shown.length, defaultId: 0,
+      message: 'Which book do you want to open?', detail: books.length > shown.length ? 'The ' + shown.length + ' most recently synced books are shown.' : undefined });
+    if (!shown[response]) return;
+    book = shown[response];
+  }
+  if (book.newer) {
+    await ask({ type: 'info', message: 'This book was synced by a newer version of ImageFlow.', detail: 'Update ImageFlow to open it.' });
+    return;
+  }
+  const tipId = book.tips.length === 1 ? book.tips[0].commitId : parent ? await chooseSyncTip(parent, book.tips) : book.tips.at(-1)!.commitId;
+  const tip = book.tips.find(({ commitId }) => commitId === tipId);
+  if (!tip) return;
+  const saveOptions = { title: 'Save Book from Sync Folder', buttonLabel: 'Save',
+    defaultPath: join(app.getPath('documents'), (book.title || 'Untitled').replace(/[/\\:]/g, '-') + '.imageflow'), filters: [{ name: 'ImageFlow Book', extensions: ['imageflow'] }] };
+  const save = parent ? await dialog.showSaveDialog(parent, saveOptions) : await dialog.showSaveDialog(saveOptions);
+  if (save.canceled || !save.filePath) return;
+  const path = await cloneFromRemote({ remote, tip, destination: documentPath(save.filePath), syncFolder: folder });
+  const document = await openDocument(path);
+  if (document && settings.value.keepOriginals) void document.downloadSyncedOriginals().catch((error) => report(document.window, error));
+}
+
+async function syncCommand(document: DocumentSession, action: SyncAction) {
+  if (action === 'sync') await syncDocument(document);
+  else if (action === 'download') await document.downloadSyncedOriginals();
+  else if (action === 'link') await linkSyncFolder(document);
+  else if (action === 'unlink') await unlinkSyncFolder(document);
+  else throw new Error('Unknown sync action.');
+}
+
 function installMenu() {
   const registered = (id: RegisteredCommand, command: Command | undefined = id as Command, type?: 'checkbox' | 'radio'): MenuItemConstructorOptions => {
     const item = commandState(id, emptyMenuState);
@@ -1061,7 +1160,19 @@ function installMenu() {
       { label: 'Revert To', submenu: [registered('revert-opened'), registered('reload')] },
       { type: 'separator' },
       registered('import'),
-      registered('export'), { type: 'separator' }, registered('reveal-book'),
+      registered('export'), { type: 'separator' },
+      { id: 'open-sync-folder', label: 'Open from Sync Folder…', click: (_item, owner) => {
+        const window = owner ? BrowserWindow.fromId(owner.id) ?? undefined : undefined;
+        void openFromSyncFolder(window).catch((error) => report(window ?? startWindow, error));
+      } },
+      { label: 'Sync', submenu: ([['sync-now', 'Sync Now', 'sync'], ['sync-download', 'Download Originals', 'download'], ['sync-link', 'Sync with Folder…', 'link'],
+        ['sync-unlink', 'Stop Syncing This Book…', 'unlink']] as const).flatMap(([id, label, action]) => [
+        ...id === 'sync-link' ? [{ type: 'separator' as const }] : [],
+        { id, label, enabled: false, click: (_item: Electron.MenuItem, owner?: BaseWindow) => {
+          const document = focusedDocument(owner);
+          if (document && !document.closing) void syncCommand(document, action).catch((error) => report(document.window, error));
+        } }]) },
+      { type: 'separator' }, registered('reveal-book'),
     ] },
     { label: 'Edit', submenu: [
       registered('undo'), registered('redo'),
@@ -1129,6 +1240,11 @@ function updateMenus() {
   if (stopTrusting) stopTrusting.enabled = state.document;
   const rebuild = menu?.getMenuItemById('rebuild-dependencies');
   if (rebuild) rebuild.enabled = state.document && state.writable;
+  const sync = document && !document.closing ? document.syncView : undefined;
+  const syncEnabled: Record<string, boolean> = { 'sync-now': state.document && state.writable && !sync?.syncing,
+    'sync-download': !!sync && !sync.syncing && (sync.status?.pendingOriginals ?? 0) > 0, 'sync-link': state.document && state.writable && !sync?.syncing,
+    'sync-unlink': !!sync && !sync.syncing };
+  for (const [id, enabled] of Object.entries(syncEnabled)) { const item = menu?.getMenuItemById(id); if (item) item.enabled = enabled; }
   const zoomAlias = menu?.getMenuItemById('zoom-in-equals');
   if (zoomAlias) zoomAlias.enabled = commandState('zoom-in', state).enabled;
   for (const direction of ['undo', 'redo']) {
@@ -1733,6 +1849,17 @@ void app.whenReady().then(async () => {
     document.projectSession.record(next, 'Source location changed', false);
     return { summary: activate(document.activate(next)), message };
   }));
+  ipcMain.handle(channels.syncState, (event): Result<unknown> => {
+    const document = editorOwner(event);
+    return document ? { value: document.syncView ?? null } : { error: 'Request is only available to an open book.' };
+  });
+  ipcMain.handle(channels.syncAction, async (event, action: unknown): Promise<Result<void>> => {
+    const document = editorOwner(event);
+    if (!document || quitting) return { error: 'Request is only available to an open book.' };
+    if (action !== 'sync' && action !== 'download' && action !== 'link' && action !== 'unlink') return { error: 'Unknown sync action.' };
+    try { await syncCommand(document, action); return { value: undefined }; }
+    catch (error) { return { error: errorMessage(error) }; }
+  });
   ipcMain.handle(channels.saveCopy, (event, includeAssets?: boolean) => fromEditor(event, async (document) => {
     if (includeAssets === undefined) {
       const answer = await dialog.showMessageBox(document.window, { type: 'question', message: 'Duplicate this book?',
