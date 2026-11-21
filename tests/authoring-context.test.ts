@@ -707,16 +707,19 @@ test('context lists reference topics and returns only the requested ones', async
     (error) => error instanceof AuthoringError && error.code === 'DOC_NOT_FOUND' && error.message.includes('authoring-workflow'));
 });
 
-test('context returns no source by default and lists generated template folders once', async (t) => {
+test('context returns no source by default and lists generated template folders and fonts once', async (t) => {
   const { folder, call } = await fixture(t);
   await mkdir(join(folder, 'template/vendor/modules'), { recursive: true });
   await writeFile(join(folder, 'template/vendor/manifest.json'), '{}');
   await writeFile(join(folder, 'template/vendor/modules/m0.js'), '');
   await mkdir(join(folder, 'template/.imageflow-sdk'));
   await writeFile(join(folder, 'template/.imageflow-sdk/index.d.ts'), '');
+  await mkdir(join(folder, 'template/fonts'));
+  await writeFile(join(folder, 'template/fonts/a-400.woff2'), '');
+  await writeFile(join(folder, 'template/fonts/a-OFL.txt'), '');
   const result = await call('get_authoring_context');
   assert.deepEqual(result.sources, {});
-  assert.deepEqual(result.templateFiles, ['template/.imageflow-sdk/', 'template/index.tsx', 'template/vendor/']);
+  assert.deepEqual(result.templateFiles, ['template/.imageflow-sdk/', 'template/fonts/', 'template/index.tsx', 'template/vendor/']);
   const read = await call('get_authoring_context', { includeSource: ['template/index.tsx'] });
   assert.equal((read.sources as Record<string, { text: string }>)['template/index.tsx'].text, source);
 });

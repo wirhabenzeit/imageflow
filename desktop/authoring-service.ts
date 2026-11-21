@@ -134,8 +134,9 @@ async function contextSource(folder: string, path: string, signal: AbortSignal) 
     truncated: bytes.length > 32_000, observation: before.stamp };
 }
 
-// Generated folders (the saved dependency bundle and the authoring SDK) are listed once, not file by file.
-const generatedTemplateFolders = ['template/vendor/', 'template/.imageflow-sdk/'];
+// Folders nobody edits file by file are listed once: the generated ones (the saved dependency bundle and the authoring
+// SDK) and the bundled fonts, which the template's own source names.
+const generatedTemplateFolders = ['template/vendor/', 'template/.imageflow-sdk/', 'template/fonts/'];
 
 async function contextTemplateFiles(folder: string) {
   const root = join(folder, 'template');
