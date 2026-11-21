@@ -1,5 +1,6 @@
-import { closeApp, testBook } from './ui-actions.mjs';
+import { closeApp, exportAction, testBook } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -92,6 +93,47 @@ try {
   assert.deepEqual([failed[0].spread, failed[0].details.composition], ['fails', 'broken']);
   assert.match(shown.fails, /^<p data-s="0" data-e="\d+">A short note that its composition cannot shape\.<\/p>$/);
   assert.deepEqual(shown.findings.filter(({ code }) => code === 'text-overflow'), [], 'The composed text fits its two boxes');
+
+  // Layout previews start each layout's text themselves: each shows the composition its own box names, and a
+  // composition that throws leaves the preview its plain text.
+  // The book's first sheet is a single page, which has no spread layouts to offer; the second spread has all three.
+  await w.locator('.spread-thumb[data-spread="continues"]').click();
+  await w.waitForFunction(() => {
+    const frame = document.querySelector('iframe.book-frame-layouts[data-current][data-ready]:not([aria-hidden])');
+    return frame && new URL(frame.src).searchParams.get('spread') === 'continues';
+  });
+  const previews = await w.frameLocator('iframe.book-frame-layouts[data-current]').locator('body').evaluate(() =>
+    Object.fromEntries(['story', 'plain', 'broken'].map((layout) => {
+      const box = document.querySelector('[data-spread="' + layout + '"] [data-box="story"]');
+      return [layout, { first: box.firstElementChild?.className ?? '', composed: !!box.querySelector('.story-title'), text: /\S/.test(box.textContent) }];
+    })));
+  assert.deepEqual(previews.story, { first: 'story-date', composed: true, text: true }, 'The preview of a composing layout shows the composition');
+  assert.deepEqual(previews.plain, { first: '', composed: false, text: true }, 'The preview of a plain layout shows plain Markdown');
+  assert.deepEqual(previews.broken, { first: '', composed: false, text: true }, 'A failing composition leaves its preview the plain text');
+
+  // The exported PDF carries the composed text: what the composition added is on the pages where the text starts,
+  // where its heading falls and where it ends.
+  const output = join(work, 'composed.pdf');
+  await app.evaluate(({ dialog }, filePath) => {
+    dialog.showSaveDialog = async () => ({ canceled: false, filePath });
+    // The book is too short to print and has a deliberate error; export it as a proof.
+    dialog.showMessageBox = async () => ({ response: 1 });
+  }, output);
+  await exportAction(w);
+  await w.waitForFunction(() => document.querySelector('.status-error') || document.querySelector('.status')?.textContent?.startsWith('PDF saved'), null, { timeout: 45000 });
+  assert.match(await w.locator('.status').textContent(), /^PDF saved\./);
+  const pageText = (page) => {
+    try { return execFileSync('pdftotext', ['-f', String(page), '-l', String(page), '-layout', output, '-']).toString(); } catch (error) {
+      if (error.code === 'ENOENT') throw new Error('Install Poppler to run the text composition PDF checks.');
+      throw error;
+    }
+  };
+  // One PDF page per trimmed page: each spread's story box is on its right page.
+  const [opens, continues, fails] = [2, 4, 6].map(pageText);
+  assert.match(opens, /12 June\s+Song-Kul\s+Paragraph 1 /, 'The PDF opens the text with the date and the title');
+  assert.ok(!/Song-Kul|12 June/.test(continues), 'The PDF does not repeat the lead');
+  assert.match(continues, /13 June\s+The pass\s+Paragraph 5 [\s\S]*The end\s*$/, 'The PDF has the replaced heading and the end mark');
+  assert.match(fails, /A short note that its composition cannot shape\./);
   console.log('ImageFlow text composition passed.');
 } finally {
   await closeApp(app);
