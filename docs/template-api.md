@@ -544,6 +544,27 @@ export default defineTemplate({
 - **Static.** A composition renders once per text, off the page, before the flow. Use plain elements and your own helper components. Content that arrives later — such as a `<RenderedImage>` or an `<img>` without fixed dimensions (images are decoded before the flow runs) — and platform components (`PhotoBox`, `MarkdownBox`, `Element`, `ctx.Text`) are not supported inside it.
 - **Errors.** A composition that throws is a `text-composition-failed` error on the text's first box, and the text flows as plain Markdown until it is fixed. A box that names a composition the template does not declare fails the template's validation.
 
+### One box over several rectangles
+
+`rects` draws one Markdown box over several rectangles, such as the two pages of a spread, so a text can run across the fold without two boxes and a `flowOrder` pairing:
+
+```tsx
+const left = ctx.geometry.page('left', 'safe');
+const right = ctx.geometry.page('right', 'safe');
+// A text spread: both pages in full.
+<ctx.MarkdownBox id="body" columns={2} rects={[left, right]} />
+// An opener band: the text sits in the bottom quarter of both pages, level below the head that opens it.
+<ctx.MarkdownBox id="body" columns={2} rects={[bandLeft, bandRight]} alignHeads />
+```
+
+- **One box.** There is one ID, one label, one text assignment and one drop target. The text cannot differ between the rectangles, and `text.part` counts the box once. `rect` and `rects` are mutually exclusive; `className` and `style` apply to every rectangle.
+- **Flow.** Text runs down the columns of the first rectangle, then those of the next, then continues in the next box that holds the same text, as with chained boxes. Every rectangle has `columns` columns. Rectangles may differ in size and position; the space between pages is whatever lies between the rectangles, so it can differ from the column gap.
+- **Without `alignHeads`** each rectangle behaves like a box of its own in a chain. A head (an element with `column-span: all`, such as a composition's day head) spans the columns of the rectangle it lands in and moves nothing else, so facing pages keep the same top line and only the page a head opens is lowered. This is the usual setting for running text, where heads fall wherever the text breaks.
+- **With `alignHeads`,** a head that opens the box, as the first thing in its first rectangle, leaves the same room at the top of every other rectangle, so the columns on all pages start on one line below it. The room is the head's full height: its padding and its bottom margin count. A later rectangle that itself opens with a head grows that head to the same height instead of adding a gap. Use it for opener bands, where the head belongs to the whole band. Give heads and text whole baseline-grid lines (a head of three lines, text in the same line height) and the columns stay on the grid across the fold.
+- **Only a head that opens the box counts.** A head in the middle of a rectangle, or at the top of a later rectangle, spans that rectangle's columns and does not change the others. The room costs capacity: a text that just fitted may now need another box, and a head as tall as a later rectangle leaves no room, which is reported as `text-overflow`.
+- **Column fill.** Columns fill top to bottom and the text continues in the next rectangle, as in chained boxes; the platform sets this, so a template's `column-fill` has no effect. A short text therefore fills the first rectangle's columns before the next. Balancing across rectangles is not supported.
+- **Existing books.** A book made with two boxes (`body` and `bodyMore`) keeps the second assignment when a spread switches to a layout with one box over two rectangles: what a layout does not show stays with the spread, `switch_layout` reports it as kept, and only the box the layout draws flows. `clear_box` discards the leftover assignment; switching back shows both boxes again. IDs are identity, so renaming `body` or dropping `bodyMore` from a template is a breaking change for books that use them.
+
 ## Print format
 
 `format` is a single `PrintFormat` as sketched in `spikes/pdf-format/print-format-sketch.md` (PR #2): trim, bleed per edge, safe insets, structure (`delivery: 'pages' | 'spreads'`, `ends: 'single-pages' | 'inside-covers'`, page-count rule), and output constraints (container, colour space, transparency policy, resolution range, raster size, font rules, minimum text size). The platform resolves it into concrete geometry once.
@@ -1389,7 +1410,7 @@ Use `page` and `spread` for physical layouts that keep margins in millimetres on
 | `<Spread>` | Root of a spread layout. Sizes the spread to two trims plus bleed, sets geometry CSS variables, and handles page halves. |
 | `<Page>` | Root of a `page()` layout. Uses page-local coordinates, exposes `data-side`, and supplies mirrored safe/bleed variables; the host composes it with its facing page. See [Page layouts](#page-layouts). |
 | `<PhotoBox id>` | Renders the assigned photo with its crop (the photo always covers the box; the saved crop picks the visible region), using a preview-size image in the editor and a rendition capped at the format maximum resolution in export (300 ppi when omitted). Its element is the box's geometry and drop zone. Users select the photo in the editor and drag and pinch it; templates do not handle the crop. A render callback as its child draws the photo with the template's own markup (see PhotoBox render callbacks). |
-| `<MarkdownBox id>` | Receives the flowed fragment of the assigned Markdown source. Its element is the box's geometry and drop zone. |
+| `<MarkdownBox id>` | Receives the flowed fragment of the assigned Markdown source. Its element is the box's geometry and drop zone. `rects` draws one box over several rectangles ([One box over several rectangles](#one-box-over-several-rectangles)). |
 | `<Element id>` | Wraps generated artwork so the editor can highlight it, and opens its parameters when clicked; an element can supply its own editor (see Element editors). |
 | `<ctx.Text parameter>` | Shows a string parameter and makes it editable by clicking it (see Click-to-edit). Only on the render context, because it reads the layout's values. |
 | `asset(path)` | Resolves a file in `template/assets/` for use in `src` or CSS. |
@@ -1584,7 +1605,7 @@ export const story = spread({
 
 Helpers shared between layouts can take a slice of the typed context, such as `Pick<RenderContext<{ label: string }, typeof documentParameters>, 'document' | 'geometry'>`, as the starter's `Paper` and `Caption` do. `mm`, `pt`, and `inch` produce structured lengths for the print-format declaration; use CSS strings such as `'30mm'` in React styles. They are not CSS values.
 
-`MarkdownBox` accepts `columns` (default 1, rounded and clamped to 1–6). Use `style={{ columnGap: '5mm' }}` for the gap. Text continues down each column, then through the next assigned box in spread/flow order. Expose a box parameter and pass its resolved value to `columns` if users should control it. Column layout remains platform-owned; avoid overriding its flow machinery with CSS.
+`MarkdownBox` accepts `columns` (default 1, rounded and clamped to 1–6). Use `style={{ columnGap: '5mm' }}` for the gap. Text continues down each column, then through the next assigned box in spread/flow order. Expose a box parameter and pass its resolved value to `columns` if users should control it. Column layout remains platform-owned; avoid overriding its flow machinery with CSS. `rects` draws one box over several rectangles, such as both pages of a spread; `alignHeads` starts their columns level below a head that opens the box (see [One box over several rectangles](#one-box-over-several-rectangles)).
 
 Numeric `step` is a control increment, not a runtime divisibility constraint. Month precision changes the picker; it writes `YYYY-MM-01`, but existing valid ISO dates are not normalized. Use first-of-month defaults and bounds for month parameters.
 

@@ -5,7 +5,7 @@
 | `<Spread>` | Root of a spread layout. Sizes the spread to two trims plus bleed, sets geometry CSS variables, and handles page halves. |
 | `<Page>` | Root of a `page()` layout. Uses page-local coordinates, exposes `data-side`, and supplies mirrored safe/bleed variables; the host composes it with its facing page. See [Page layouts](page-layouts.md). |
 | `<PhotoBox id>` | Renders the assigned photo with its crop (the photo always covers the box; the saved crop picks the visible region), using a preview-size image in the editor and a rendition capped at the format maximum resolution in export (300 ppi when omitted). Its element is the box's geometry and drop zone. Users select the photo in the editor and drag and pinch it; templates do not handle the crop. A render callback as its child draws the photo with the template's own markup (see PhotoBox render callbacks). |
-| `<MarkdownBox id>` | Receives the flowed fragment of the assigned Markdown source. Its element is the box's geometry and drop zone. |
+| `<MarkdownBox id>` | Receives the flowed fragment of the assigned Markdown source. Its element is the box's geometry and drop zone. `rects` draws one box over several rectangles ([One box over several rectangles](boxes-and-elements.md#one-box-over-several-rectangles)). |
 | `<Element id>` | Wraps generated artwork so the editor can highlight it, and opens its parameters when clicked; an element can supply its own editor (see Element editors). |
 | `<ctx.Text parameter>` | Shows a string parameter and makes it editable by clicking it (see Click-to-edit). Only on the render context, because it reads the layout's values. |
 | `asset(path)` | Resolves a file in `template/assets/` for use in `src` or CSS. |

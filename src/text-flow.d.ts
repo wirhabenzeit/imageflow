@@ -1,5 +1,5 @@
 export const flow: {
-  run(html: string, boxes: HTMLElement[], strategy: 'measure' | 'columns'): {
+  run(html: string, boxes: HTMLElement[], strategy: 'measure' | 'columns', groups?: number[]): {
     elapsed: number;
     results: { retries: number; unresolved?: boolean; failed?: boolean }[];
     overflowText: string;

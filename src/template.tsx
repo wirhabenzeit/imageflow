@@ -997,21 +997,34 @@ function LayoutGlyph({ kind }: { kind: 'photo' | 'text' }) {
 }
 
 // `columns` splits the box into that many columns; text flows down each column before moving to the next box.
-export function MarkdownBox({ id, className, style, rect, columns = 1, decorative, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker &
-  IssueMarker & DecorativeMarker & { id: string; columns?: number | `${number}` }) {
+// `rects` draws one box over several rectangles, such as the two pages of a spread: the text flows through them in
+// order, each with `columns` columns. With `alignHeads`, a head that opens the box leaves the same room at the top of every
+// rectangle, so the columns on both pages start on one line below it.
+export function MarkdownBox({ id, className, style, rect, rects, alignHeads, columns = 1, decorative, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker &
+  IssueMarker & DecorativeMarker & { id: string; columns?: number | `${number}`; rects?: readonly Rect[]; alignHeads?: boolean }) {
   const { spread, book, definition } = useSpread();
   const text = spread.boxes[id]?.text;
   const count = Math.max(1, Math.min(6, Math.round(Number(columns)) || 1));
-  return (
+  if (rects && rect) throw new Error('MarkdownBox ' + id + ' takes rect or rects, not both.');
+  if (rects && !rects.length) throw new Error('MarkdownBox ' + id + ' needs at least one rectangle in rects.');
+  const shapes = rects ?? [rect];
+  const empty = !(text !== undefined && book.texts[text] !== undefined);
+  const classes = ['if-markdown', className].filter(Boolean).join(' ');
+  return (<>
     <div data-box={id} data-box-type="markdown" data-columns={count > 1 ? count : undefined}
       data-edit={editTarget(book, 'boxes.' + id + '.', definition.boxes[id]?.parameters, marked)}
-      data-empty={text !== undefined && book.texts[text] !== undefined ? undefined : ''}
-      className={['if-markdown', className].filter(Boolean).join(' ')} style={place(rect, style)} {...decorativeOn(decorative)} {...issueOn(marker)}>
+      data-empty={empty ? '' : undefined} data-align-heads={rects && alignHeads ? '' : undefined}
+      className={classes} style={place(shapes[0], style)} {...decorativeOn(decorative)} {...issueOn(marker)}>
       {renderView(book) === 'canvas' && (!text || book.texts[text] === undefined) &&
         <span className="if-placeholder">{text ? 'Missing Markdown' : 'Drop a Markdown file'}</span>}
       {renderView(book) === 'layout-preview' && (!text || book.texts[text] === undefined) && <LayoutGlyph kind="text" />}
     </div>
-  );
+    {shapes.slice(1).map((shape, i) => (
+      <div key={i} data-box-rect={id} data-rect={i + 1} data-box-type="markdown" data-columns={count > 1 ? count : undefined}
+        data-empty={empty ? '' : undefined} className={classes} style={place(shape, style)} {...decorativeOn(decorative)}>
+        {renderView(book) === 'layout-preview' && empty && <LayoutGlyph kind="text" />}
+      </div>))}
+  </>);
 }
 
 // A top-level block of a Markdown text, as a composition receives it. `node` is the block as ImageFlow renders it and

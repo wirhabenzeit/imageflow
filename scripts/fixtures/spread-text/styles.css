@@ -1,0 +1,10 @@
+@font-face { font-family: "Fixture Serif"; src: url("./fonts/source-serif-4-latin-400-normal.woff2") format("woff2"); font-weight: 400; }
+@font-face { font-family: "Fixture Serif"; src: url("./fonts/source-serif-4-latin-600-normal.woff2") format("woff2"); font-weight: 600; }
+@font-face { font-family: "Fixture Sans"; src: url("./fonts/inter-latin-500-normal.woff2") format("woff2"); font-weight: 500; }
+/* Baseline grid with a fractional line (10.7pt × 1.5 = 21.4px): every line and every head is a whole number of lines. */
+.body { --line: calc(10.7pt * 1.5); font: 400 10.7pt/var(--line) "Fixture Serif"; column-gap: 8mm; hyphens: manual; }
+.body p { margin: 0; }
+.body p + p { text-indent: 1.2em; }
+.body .day-head { column-span: all; margin: 0 0 var(--line); }
+.body .day-head .day { display: block; font: 500 8pt/var(--line) "Fixture Sans"; letter-spacing: .16em; text-transform: uppercase; }
+.body .day-head h3 { margin: 0; font: 600 21pt/calc(var(--line) * 2) "Fixture Serif"; }
