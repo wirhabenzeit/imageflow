@@ -36,6 +36,10 @@
     "4e8529b426ddee0a4d1380bc429d7c9604bbc293d8f7afb577cb4d298a261317": {
       "template": "starter",
       "app": "1.0.0-beta.12"
+    },
+    "edbae78b569410df6b0673cb39c0f0d0ebd411ea1ebd689aa2881966102585be": {
+      "template": "starter",
+      "app": "1.0.0-beta.17"
     }
   }
 }
