@@ -47,7 +47,7 @@ import { AuthoringError } from './authoring-service';
 import { createMcpConnection } from './mcp-connection';
 import { addToCodex, bridgeLaunch, claudeCodeCommand, claudeExtension, findCodex, skillArchive } from './mcp-setup';
 import { authoringErrorResult } from './authoring-errors';
-import { acquireProjectLock } from './persistence';
+import { acquireProjectLock, configurePersistence } from './persistence';
 import type { ProjectLock } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
 import type { SettingsPane } from '../src/settings';
@@ -1285,6 +1285,7 @@ void app.whenReady().then(async () => {
   await Promise.all([settings.load(), recents.load()]);
   configureSourceStore(join(app.getPath('userData'), 'source-cache'));
   configureSourceAccess(join(app.getPath('userData'), 'source-access'));
+  configurePersistence(join(app.getPath('userData'), 'persistence'));
   nativeTheme.themeSource = settings.value.appearance;
   const checkFeed = () => checkUpdateFeed({ baseURL: updateTestConfiguration?.baseURL ?? updateBaseURL,
     channel: settings.value.updateChannel, platform: process.platform + '-' + process.arch, installed: app.getVersion(),

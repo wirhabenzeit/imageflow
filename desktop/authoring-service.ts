@@ -493,7 +493,7 @@ export function createAuthoringService(hooks: Hooks) {
     try { ledger = await readSaveLedger(session.book.folder); }
     catch (error) {
       // Without the history a retried request could commit twice, so nothing is applied.
-      throw new AuthoringError('HISTORY_UNAVAILABLE', 'Could not read the book history in .imageflow/history (' +
+      throw new AuthoringError('HISTORY_UNAVAILABLE', 'Could not read the book history in its ImageFlow app data folder (' +
         (error instanceof Error ? error.message : String(error)) + '). No changes were made. Make the folder and its ledger.jsonl readable and writable, then retry.');
     }
     return ledger.records.findLast((record) => record.mcp?.idempotencyKey === key);

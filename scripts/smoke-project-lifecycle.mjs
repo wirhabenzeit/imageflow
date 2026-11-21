@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
+import { bookStateFile } from './book-state.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'lifecycle-smoke-'));
@@ -33,7 +34,7 @@ try {
   assert.equal((await window.evaluate(() => window.imageflow.currentProject())).value.folder, 'moved.imageflow');
   await window.close();
   window = await testBook(app, second);
-  const lockPath = join(second, '.imageflow/writer.lock');
+  const lockPath = await bookStateFile(join(work, 'profile'), second, 'writer.lock');
   const oldOwner = JSON.parse(await readFile(lockPath, 'utf8'));
   await writeFile(lockPath, 'damaged ownership evidence');
   await window.close();
@@ -96,8 +97,8 @@ try {
   await app.evaluate(({app}) => { app.quit(); });
   await new Promise(resolve => setTimeout(resolve, 150));
   assert.equal(closed, false, 'quit waits for the durable save');
-  await stat(join(second,'.imageflow/writer.lock'));
-  await stat(join(second,'.imageflow/persistence/pending-save.json'));
+  await stat(await bookStateFile(join(work,'profile'), second, 'writer.lock'));
+  await stat(await bookStateFile(join(work,'profile'), second, 'pending-save.json'));
   await app.evaluate(() => globalThis.lifecycleGate.release());
   await new Promise(resolve => setTimeout(resolve, 150));
   assert.equal(closed, false, 'quit also waits for unpublished connection setup');
@@ -106,8 +107,8 @@ try {
   await saving;
   await enabling;
   assert.equal(JSON.parse(await readFile(join(second,'project.json'),'utf8')).title, 'Save completed before quit');
-  await assert.rejects(stat(join(second,'.imageflow/writer.lock')), { code:'ENOENT' });
-  await assert.rejects(stat(join(second,'.imageflow/persistence/pending-save.json')), { code:'ENOENT' });
+  await assert.rejects(stat(await bookStateFile(join(work,'profile'), second, 'writer.lock')), { code:'ENOENT' });
+  await assert.rejects(stat(await bookStateFile(join(work,'profile'), second, 'pending-save.json')), { code:'ENOENT' });
   await assert.rejects(stat(connectionDirectory), { code:'ENOENT' });
   await assert.rejects(stat(join(work,'profile/mcp-connection.json')), { code:'ENOENT' });
   console.log('ImageFlow project move, removal, and orderly shutdown passed.');

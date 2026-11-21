@@ -16,6 +16,8 @@ import type { RenderStatus } from '../src/desktop';
 import { mm } from '../src/format';
 import { p } from '../src/parameters';
 import { checkedOutput } from './mcp-output-check';
+import { persistenceRoot } from './persistence-root';
+import { sourceBookKey } from '../desktop/source-identity';
 
 const layout = (label: string, parameters = {}) => ({ label, span: 'spread' as const, parameters, boxes: {}, elements: {} });
 const status: Extract<RenderStatus, { state: 'ready' }> = {
@@ -33,8 +35,10 @@ const status: Extract<RenderStatus, { state: 'ready' }> = {
   },
 };
 const saved = { schemaVersion: 1, title: 'Ledger book', template: { id: 'test', version: '1' }, spreads: [{ id: 'one', definition: 'main', params: { heading: 'Hello' } }] };
-const ledgerPath = (folder: string) => join(folder, '.imageflow/history/ledger.jsonl');
-const journalPath = (folder: string) => join(folder, '.imageflow/persistence/pending-save.json');
+// Runtime state lives in App Support, keyed by the book's identity (ADR 0010).
+const state = async (folder: string) => join(persistenceRoot, await sourceBookKey(folder));
+const ledgerPath = async (folder: string) => join(await state(folder), 'history/ledger.jsonl');
+const journalPath = async (folder: string) => join(await state(folder), 'pending-save.json');
 
 async function book(t: TestContext) {
   const work = await realpath(await mkdtemp(join(tmpdir(), 'imageflow-ledger-')));
@@ -176,7 +180,7 @@ async function interruptedSave(t: TestContext) {
   fs.rename = async () => { throw new Error('Interrupted before publication'); };
   try { await assert.rejects(session.save(files, 'Interrupted save'), CommittedProjectSaveError); }
   finally { fs.rename = rename; }
-  const journal = JSON.parse(await readFile(journalPath(folder), 'utf8')) as { version: number; transaction: string; checkpoint: string };
+  const journal = JSON.parse(await readFile(await journalPath(folder), 'utf8')) as { version: number; transaction: string; checkpoint: string };
   assert.equal(journal.version, 3);
   return { folder, cache, journal };
 }
@@ -194,13 +198,13 @@ async function recoveredTwice(folder: string, cache: string, transaction: string
 
 test('recovery completes an append interrupted mid-line exactly once', async (t) => {
   const { folder, cache, journal } = await interruptedSave(t);
-  await fs.appendFile(ledgerPath(folder), journal.checkpoint.slice(0, Math.floor(journal.checkpoint.length / 2)));
+  await fs.appendFile(await ledgerPath(folder), journal.checkpoint.slice(0, Math.floor(journal.checkpoint.length / 2)));
   await recoveredTwice(folder, cache, journal.transaction);
 });
 
 test('recovery keeps a durable record whose journal was not yet removed', async (t) => {
   const { folder, cache, journal } = await interruptedSave(t);
-  await fs.appendFile(ledgerPath(folder), journal.checkpoint + '\n');
+  await fs.appendFile(await ledgerPath(folder), journal.checkpoint + '\n');
   await recoveredTwice(folder, cache, journal.transaction);
 });
 
@@ -208,8 +212,8 @@ test('an unrelated unterminated tail is sealed instead of blocking saves', async
   const { folder, cache } = await book(t);
   const session = new ProjectSession(await loadProject(folder, cache));
   t.after(() => session.close());
-  await mkdir(join(folder, '.imageflow/history'), { recursive: true });
-  await writeFile(ledgerPath(folder), 'not a record');
+  await mkdir(join(await state(folder), 'history'), { recursive: true });
+  await writeFile(await ledgerPath(folder), 'not a record');
   const files = filesOf(session.book);
   files.project.title = 'Saved anyway';
   await session.save(files, 'Saved anyway');
@@ -231,14 +235,14 @@ test('the ledger is pruned to its newest records, and an expired key is no longe
     files.project.title = 'Title ' + i;
     await agent.session.save(files, 'Rename ' + i);
   }
-  const { size } = await fs.stat(ledgerPath(folder));
+  const { size } = await fs.stat(await ledgerPath(folder));
   assert.ok(size <= ledgerLimits.bytes, 'The ledger stays within its bound');
   const { records } = await readSaveLedger(folder);
   assert.equal(records.at(-1)!.label, 'Rename 15');
   assert.ok(!records.some(({ checkpoint }) => checkpoint === committed.checkpointId));
   const looked = await agent.call('list_book_checkpoints', { idempotencyKey: 'early' });
   assert.deepEqual(looked.checkpoints, []);
-  assert.ok((await readdir(join(folder, '.imageflow/history'))).every((name) => name === 'ledger.jsonl'));
+  assert.ok((await readdir(join(await state(folder), 'history'))).every((name) => name === 'ledger.jsonl'));
 });
 
 /** The prototype shared by every FileHandle, to simulate the file system under a live save. */
@@ -265,7 +269,7 @@ test('a short write during a live save still leaves a complete record before the
   try { await session.save(files, 'Short writes'); }
   finally { prototype.write = write; }
   assert.ok(short > 0, 'The ledger append went through FileHandle.write');
-  await assert.rejects(fs.stat(journalPath(folder)), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(await journalPath(folder)), { code: 'ENOENT' });
   const { records, unreadable } = await readSaveLedger(folder);
   assert.equal(unreadable, 0);
   assert.deepEqual(records.map(({ label }) => label), ['Short writes']);
@@ -276,22 +280,23 @@ test('an unreadable history fails the receipt lookup before a batch commits', as
   const agent = await open(t, folder, cache);
   const request = { expectedRevision: await agent.revision(), idempotencyKey: 'blocked', label: 'Blocked batch', operations: [insertChapter] };
   // Not a directory: validation fails instead of reading as an empty history.
-  await mkdir(join(folder, '.imageflow'), { recursive: true });
-  await writeFile(join(folder, '.imageflow/history'), 'not a folder');
+  await mkdir(await state(folder), { recursive: true });
+  await writeFile(join(await state(folder), 'history'), 'not a folder');
   await assert.rejects(readSaveLedger(folder));
   await assert.rejects(agent.call('apply_project_changes', request), (error: { code?: string }) => error.code === 'HISTORY_UNAVAILABLE');
   await assert.rejects(agent.call('list_book_checkpoints'));
   assert.equal((await spreads(folder)).length, 1);
-  await assert.rejects(fs.stat(journalPath(folder)), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(await journalPath(folder)), { code: 'ENOENT' });
 
   if (process.getuid?.() === 0) return;
   // A folder that can't be searched.
-  await rm(join(folder, '.imageflow/history'));
-  await mkdir(join(folder, '.imageflow/history/locked'), { recursive: true });
-  await fs.chmod(join(folder, '.imageflow'), 0o000);
-  t.after(() => fs.chmod(join(folder, '.imageflow'), 0o700).catch(() => {}));
+  await rm(join(await state(folder), 'history'));
+  await mkdir(join(await state(folder), 'history/locked'), { recursive: true });
+  await fs.chmod(await state(folder), 0o000);
+  const locked = await state(folder);
+  t.after(() => fs.chmod(locked, 0o700).catch(() => {}));
   await assert.rejects(agent.call('apply_project_changes', request), (error: { code?: string }) => error.code === 'HISTORY_UNAVAILABLE');
-  await fs.chmod(join(folder, '.imageflow'), 0o700);
+  await fs.chmod(await state(folder), 0o700);
   assert.equal((await spreads(folder)).length, 1);
 });
 
@@ -307,8 +312,8 @@ test('an oversized ledger is pruned and read from its newest records with bounde
   files.project.title = 'Before growth';
   await session.save(files, 'Before growth');
   // Grown to 1 MiB outside ImageFlow, for example in a restored backup, with the newest record last.
-  const record = await readFile(ledgerPath(folder), 'utf8');
-  await writeFile(ledgerPath(folder), ('x'.repeat(1023) + '\n').repeat(1024) + record);
+  const record = await readFile(await ledgerPath(folder), 'utf8');
+  await writeFile(await ledgerPath(folder), ('x'.repeat(1023) + '\n').repeat(1024) + record);
   assert.deepEqual((await readSaveLedger(folder)).records.map(({ label }) => label), ['Before growth']);
 
   const prototype = await fileHandlePrototype(folder);
@@ -324,7 +329,7 @@ test('an oversized ledger is pruned and read from its newest records with bounde
   try { await session.save(files, 'After growth'); }
   finally { prototype.read = read; }
   assert.ok(largest <= 64 * 1024, 'Pruning read ' + largest + ' bytes at once');
-  const { size } = await fs.stat(ledgerPath(folder));
+  const { size } = await fs.stat(await ledgerPath(folder));
   assert.ok(size <= ledgerLimits.retainedBytes);
   // Filler lines that still fit the retained window are kept and skipped as unreadable.
   const { records } = await readSaveLedger(folder);

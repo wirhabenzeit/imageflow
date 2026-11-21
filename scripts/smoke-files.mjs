@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
+import { bookStateFile } from './book-state.mjs';
 
 // File parameters (#16): a test-only route map reads an optional GPX track from the project's files/.
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -205,7 +206,8 @@ try {
 
   // A file of a type the parameter does not accept, registered by hand, is reported rather than parsed.
   // The book may show an Undo before its save has finished; editing project.json from outside meanwhile is a conflict.
-  for (let i = 0; i < 200 && existsSync(join(project, '.imageflow/persistence/pending-save.json')); i++) await new Promise((resolve) => setTimeout(resolve, 25));
+  const journal = await bookStateFile(join(work, 'profile'), project, 'pending-save.json');
+  for (let i = 0; i < 200 && existsSync(journal); i++) await new Promise((resolve) => setTimeout(resolve, 25));
   const data = await read();
   data.files.notes = 'files/notes.txt';
   data.spreads.find(({ id }) => id === 'road').elements.route.params.track = 'notes';
