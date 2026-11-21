@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, readFile, readdir, realpath, rename, rm, utimes, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, mkdir, open, readdir, realpath, rename, rm, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import sharp from 'sharp';
 
@@ -15,6 +16,17 @@ const extensions = ['.jpg', '.png'] as const;
 // The size of a preview rendition is bounded (desktop/photos.ts), so anything far larger is not a proxy.
 const maximumBytes = 16 * 1024 * 1024;
 
+const tooLarge = 'A proxy must be at most 16 MB.';
+/** A proxy file read whole, without following a symbolic link and only when it is small enough to be one. */
+async function readBounded(path: string) {
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) throw new Error('A proxy must be a regular file.');
+    if (info.size > maximumBytes) throw new Error(tooLarge);
+    return await handle.readFile();
+  } finally { await handle.close(); }
+}
 const fileName = (digest: string, extension: typeof extensions[number]) => digest + '-preview-v1' + extension;
 function requireDigest(digest: string) {
   if (!digestPattern.test(digest)) throw new Error('A proxy needs the original’s SHA-256 digest.');
@@ -32,8 +44,8 @@ export class ProxyStore {
   /** Stores a proxy for the original with this digest, atomically, replacing an earlier one. Returns its path. */
   async put(digest: string, source: string | Uint8Array) {
     requireDigest(digest);
-    const bytes = typeof source === 'string' ? await readFile(source) : Buffer.from(source);
-    if (bytes.length > maximumBytes) throw new Error('A proxy must be at most 16 MB.');
+    const bytes = typeof source === 'string' ? await readBounded(source) : Buffer.from(source);
+    if (bytes.length > maximumBytes) throw new Error(tooLarge);
     const metadata = await sharp(bytes).metadata();
     if ((metadata.format !== 'jpeg' && metadata.format !== 'png') || !metadata.width || !metadata.height || (metadata.pages ?? 1) > 1) {
       throw new Error('A proxy must be a still JPEG or PNG image.');

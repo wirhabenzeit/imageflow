@@ -785,6 +785,15 @@ test('a second Mac renders pulled proxies with the originals\u2019 size and capt
     assert.equal((await sharp(preview).metadata()).width, (await sharp(proxy).metadata()).width);
   }
   assert.deepEqual([book.photos.get(mac.linked)!.width, book.photos.get(mac.linked)!.height], [90, 60]);
+  // Another load looks the proxy up again, which touches its times for LRU pruning: the open book still draws it, and
+  // its renditions are reused rather than made again.
+  const thumbless = book.photos.get('shore')!;
+  const again = await loadProject(f.folder, mac.cache, true);
+  assert.equal(again.photos.get(mac.linked)!.key, book.photos.get(mac.linked)!.key);
+  await photoFile(thumbless, 'thumb');
+  // A proof export never enlarges a proxy to the original's size.
+  const exported = await photoFile(book.photos.get(mac.linked)!, 'export', 80);
+  assert.ok((await sharp(exported).metadata()).width! <= 40);
   assert.deepEqual(book.photos.get(mac.linked)!.captured, { dateTime: '2024-06-01T18:20:30', offset: '+02:00' });
   assert.deepEqual(projectSummary(book, 'x').photoDates?.[mac.linked], { captured: '2024-06-01T18:20:30+02:00' });
   assert.equal(book.unavailablePhotos?.[mac.linked], undefined);

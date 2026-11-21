@@ -108,7 +108,8 @@ export async function photoFile(photo: ProjectPhoto, rendition: Rendition, width
         const size = rendition === 'thumb' ? 240 : 1400;
         image.resize({ width: size, height: size, fit: 'inside', withoutEnlargement: true });
       } else if (resample) {
-        image.resize({ width: resample, kernel: 'lanczos3' });
+        // Never enlarged: a sync proxy that stands in for a missing original is smaller than the original it reports.
+        image.resize({ width: resample, kernel: 'lanczos3', withoutEnlargement: true });
       }
       if (photo.alpha) image.png(); else image.jpeg({ quality: rendition === 'export' ? 95 : 86, chromaSubsampling: rendition === 'export' ? '4:4:4' : '4:2:0' });
       const candidate = join(staging, 'photo' + extension);

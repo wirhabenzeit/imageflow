@@ -302,8 +302,12 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
             // aspect ratios, crop limits and resolution checks match the real photo.
             const { captured: _captured, location: _location, camera: _camera, ...rendition } = details;
             const capture = Object.fromEntries(captureFields.flatMap((field) => fact[field] ? [[field, fact[field]]] : []));
-            photos.set(source.id, { title, caption, credit, altText, ...rendition, ...capture, estimatedCapture: undefined,
-              width: fact.width, height: fact.height, original: proxy, key: digestBytes(Buffer.from(fact.digest + ':proxy-v1:' + details.observation)),
+            // A proxy is never changed in place: `put` replaces it by a rename, which gives it another inode. So it carries no
+            // observation (looking a proxy up touches its times for LRU pruning, which must not count as a change), and its
+            // renditions are keyed by inode and size only, so they survive reopening.
+            const identity = details.observation.split(':').slice(0, 2).join(':');
+            photos.set(source.id, { title, caption, credit, altText, ...rendition, ...capture, estimatedCapture: undefined, observation: undefined,
+              width: fact.width, height: fact.height, original: proxy, key: digestBytes(Buffer.from(fact.digest + ':proxy-v1:' + identity)),
               cache: renditionCacheFor(book.cache), problem: status.problem ?? 'Original unavailable' });
             // Shown like a cached preview: the source keeps its honest state, and print marks and blocks it.
             sources[source.key] = { ...status, cached: true };

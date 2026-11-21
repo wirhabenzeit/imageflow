@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { lstat, mkdtemp, readdir, readFile, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, readdir, readFile, realpath, rm, symlink, truncate, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
@@ -55,6 +55,19 @@ test('path never follows a symbolic link', async (t) => {
   await writeFile(outside, await jpeg());
   await symlink(outside, join(proxies.root, digest('d') + '-preview-v1.jpg'));
   assert.equal(await proxies.path(digest('d')), undefined);
+  // Nor does put read a proxy through one.
+  const link = join(root, 'link.jpg');
+  await symlink(outside, link);
+  await assert.rejects(proxies.put(digest('d'), link), { code: 'ELOOP' });
+});
+
+test('put refuses an oversized proxy file before reading it', async (t) => {
+  const { root, proxies } = await store(t);
+  const large = join(root, 'large.jpg');
+  await writeFile(large, await jpeg());
+  await truncate(large, 17 * 1024 * 1024);
+  await assert.rejects(proxies.put(digest('e'), large), /at most 16 MB/);
+  assert.equal(await proxies.path(digest('e')), undefined);
 });
 
 test('prune evicts the least recently used proxies down to the limit and keeps unrelated files', async (t) => {
