@@ -38,6 +38,7 @@ import { Icon } from './Icon';
 import { BookFrame } from './BookFrame';
 import type { CropPreview } from './BookFrame';
 import { AgentStatus } from './AgentStatus';
+import { SyncStatus } from './SyncStatus';
 import { revealIn } from './reveal';
 import { EditPopover, MarkedFields } from './EditPopover';
 import { CropEditor } from './CropEditor';
@@ -2353,6 +2354,7 @@ export function App() {
         {!issue && (busy || updating || agentWorking) && <span className="status-spinner" aria-hidden="true" />}{issue || busy || (agentWorking ? agentText : notice || (updating ? updatingText : ''))}
       </span>
       {exporting && <button type="button" className="status-cancel" onClick={() => void api?.cancelExport()}>Cancel</button>}
+      {summary && <SyncStatus api={api} notice={setNotice} />}
       <AgentStatus api={api} />
       {summary && <BookCheckIndicator requestSpread={checkScope} request={checkRequest} check={combinedCheck} checking={!checkCurrent || checkingCover}
         spread={coverActive ? coverInstance : spreadSelected ? spread?.id ?? '' : ''} select={(id, page) => select(id, true, page)} refresh={refreshCoverCheck} />}

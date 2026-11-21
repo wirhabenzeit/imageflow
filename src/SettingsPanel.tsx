@@ -124,6 +124,12 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
               update?.status === 'initializing' ? 'Preparing update checks…' : update?.status === 'checking' ? 'Checking for updates…' : update?.status === 'downloading' ? 'Downloading update…' :
               update?.status === 'ready' ? 'An update is ready to install.' : update?.message ?? ''}</p>
           </div>
+          <span className="settings-label">Sync:</span>
+          <div className="settings-control">
+            <label><input type="checkbox" checked={settings?.keepOriginals ?? false} disabled={!settings}
+              onChange={(event) => void choose({ keepOriginals: event.target.checked })} /> Keep originals of synced books on this Mac</label>
+            <p className="settings-note">Otherwise photos copied into a book on another Mac show as previews until you choose File → Sync → Download Originals.</p>
+          </div>
           {error && <p role="alert" className="error-text settings-control">{error}</p>}
         </div>}
         {pane === 'agents' && <AgentSettings api={api} />}

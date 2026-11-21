@@ -26,11 +26,24 @@ export interface SyncRemote {
   getBlob(key: string): Promise<Uint8Array | undefined>;
   /** Writes a blob to a new local file at `destination`; false when the remote does not have it (yet). For large blobs. */
   downloadBlob(key: string, destination: string): Promise<boolean>;
+  /** The IDs of the books with commits on this remote, for Open from Sync Folder. */
+  listBooks(): Promise<string[]>;
 }
 
 /** A book's commits on a remote. Throws `NewerSyncFormatError` for one a newer version wrote. */
 export async function remoteCommits(remote: SyncRemote, bookId: string) {
   return (await remote.listCommits(bookId)).map(readCommitHeader).filter((header) => header !== undefined && header.bookId === bookId) as CommitHeader[];
+}
+
+/** The books on a remote with their tips, newest tip first, skipping books whose commits have not arrived yet. */
+export async function remoteBooks(remote: SyncRemote) {
+  const books: { bookId: string; tips: CommitHeader[]; title: string; updatedAt: string }[] = [];
+  for (const bookId of await remote.listBooks()) {
+    const tips = await remoteTips(remote, bookId);
+    const latest = tips.at(-1);
+    if (latest) books.push({ bookId, tips, title: latest.title, updatedAt: latest.createdAt });
+  }
+  return books.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.title.localeCompare(b.title));
 }
 
 /** The tips of a book on a remote: commits that no other commit names as a parent. */
@@ -57,6 +70,9 @@ export class MemoryRemote implements SyncRemote {
   async getCommit(bookId: string, commitId: string) {
     const header = this.commits.get(bookId + '/' + commitId);
     return header && structuredClone(header);
+  }
+  async listBooks() {
+    return [...new Set([...this.commits.keys()].map((key) => key.split('/')[0]))];
   }
   async listCommits(bookId: string) {
     return [...this.commits.entries()].filter(([key]) => key.startsWith(bookId + '/')).map(([, header]) => structuredClone(header));

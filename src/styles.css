@@ -840,12 +840,22 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .sources-host > .sources { height: 100%; min-height: 0; }
 .panel-divider-bottom { cursor: row-resize; border-inline: 0; border-block: 1px solid var(--edge); }
 /* Transient status has a reserved home; normal operation stays quiet. */
-.status-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto 34px 48px; gap: 6px; padding: 0 12px; }
+.status-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto auto 34px 48px; gap: 6px; padding: 0 12px; }
 .status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-bar .status-cancel { grid-column: 2; }
 .studio .status-bar .status-cancel { height: 20px; min-height: 0; padding: 0 8px; font-size: 11px; }
-.status-bar .agent-status { grid-column: 3; position: relative; margin: 0; }
-.status-bar .book-check-list { grid-column: 4; min-width: 0; margin: 0; }
+.status-bar .sync-status { grid-column: 3; }
+.status-bar .agent-status { grid-column: 4; position: relative; margin: 0; }
+.status-bar .book-check-list { grid-column: 5; min-width: 0; margin: 0; }
+/* Sync status (#251): quiet when in sync, the attention color when the user has something to do. */
+.studio .sync-status { height: 20px; min-height: 0; margin: 0; padding: 0 8px; display: flex; align-items: center; gap: 4px; border: 0; background: transparent;
+  box-shadow: none; color: var(--muted); font-size: 11px; font-weight: 400; white-space: nowrap; }
+.studio .sync-status:hover:not(:disabled) { background: var(--selection-surface); }
+.studio .sync-status:disabled { opacity: 1; }
+.sync-status .status-spinner { display: inline-block; }
+.sync-status.sync-ahead, .sync-status.sync-behind { color: var(--info-text); }
+.sync-status.sync-diverged, .sync-status.sync-abandoned, .sync-status.sync-newer, .sync-status.sync-unavailable { color: var(--error-text); }
+.sync-pending { font-weight: 700; }
 .studio .agent-status, .studio .book-check-toggle { width: 100%; height: 24px; min-height: 0; padding: 3px; display: flex; justify-content: center; align-items: center; gap: 4px; }
 .connection-dot { position: absolute; right: 3px; top: 2px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
 .status-spinner { width: 12px; height: 12px; border: 1.5px solid var(--edge); border-top-color: var(--muted); border-radius: 50%; animation: status-spin .8s linear infinite; }
