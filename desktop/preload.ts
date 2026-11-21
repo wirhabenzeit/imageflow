@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import type { AgentFootprint } from '../src/agent-footprint';
 import { channels } from '../src/desktop';
 import type { DesktopApi } from '../src/desktop';
 
@@ -67,8 +68,8 @@ const api: DesktopApi = {
   mcpSettings: (enabled) => ipcRenderer.invoke(channels.mcp, enabled),
   onMcpChanged: (listener) => listen(channels.mcpChanged, listener),
   installMcp: (target) => ipcRenderer.invoke(channels.mcpInstall, target),
-  onAgentLease: (listener) => listen<string>(channels.agentLease, (id) => {
-    ipcRenderer.send(channels.agentLeaseReply, id, listener(id));
+  onAgentLease: (listener) => listen<{ id: string; footprint?: AgentFootprint }>(channels.agentLease, ({ id, footprint }) => {
+    ipcRenderer.send(channels.agentLeaseReply, id, listener(id, footprint));
   }),
   onAgentRelease: (listener) => listen(channels.agentRelease, listener),
   importFiles: (id, request) => ipcRenderer.invoke(channels.import, id, request),

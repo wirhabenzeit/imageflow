@@ -3,7 +3,10 @@ import { BookFrame } from './BookFrame';
 import { renderOrigin } from './desktop';
 import type { ProjectSummary, TemplateInfo } from './desktop';
 import { hasFacingPages } from './format';
-import { presentationPage, presentationUnits } from './presentation-model';
+import { presentationPage, presentationUnits, presentsCover } from './presentation-model';
+import type { PresentationUnit } from './presentation-model';
+import { coverInstance } from './project';
+import type { CoverResolution } from './cover';
 
 export function Presentation({ summary, start, close }: {
   summary: ProjectSummary; start: string; close: (spread: string) => void;
@@ -20,15 +23,26 @@ export function Presentation({ summary, start, close }: {
   const [activity, setActivity] = useState(0);
   const [error, setError] = useState('');
   const [ready, setReady] = useState(false);
+  // A newer revision that failed to render while an earlier one is shown: the artwork stays, with a short notice.
+  const [stale, setStale] = useState('');
   // Navigation uses messages after startup; keep the initial URL stable while choosing other spreads.
   const [query] = useState(() => new URLSearchParams({ spread: start }).toString());
+  const cover = !!template && presentsCover(summary.project.cover, template);
+  // The cover's sheet, once its frame has drawn it, to fit it to the screen.
+  const [sheet, setSheet] = useState<Exclude<CoverResolution, { status: 'unavailable' }>['geometry']['sheet']>();
+  const [coverError, setCoverError] = useState('');
   const units = useMemo(() => template ? presentationUnits(summary.project.spreads, template, single) : [], [summary.project.spreads, template, single]);
-  const at = Math.max(0, units.findIndex((unit) => unit.spread === selected.spread && (!single || !selected.page || unit.pages.includes(selected.page))));
-  const unit = units[at];
-  const view = useMemo(() => unit && ({ spread: unit.spread, side: unit.side, bounds: bleed ? 'bleed' as const : 'trim' as const, overview }), [unit, bleed, overview]);
+  // The cover comes first, before the content: a unit of its own, which the spreads' frame does not draw.
+  const items = useMemo<PresentationUnit[]>(() => cover ? [{ spread: coverInstance, side: 'spread', pages: [], label: 'Cover' }, ...units] : units, [cover, units]);
+  const at = Math.max(0, items.findIndex((unit) => unit.spread === selected.spread && (!single || !selected.page || !unit.pages.length || unit.pages.includes(selected.page))));
+  const unit = items[at];
+  const onCover = unit?.spread === coverInstance && !overview;
+  // The spreads' frame keeps the content unit last shown while the cover is on screen.
+  const spreadUnit = unit?.spread === coverInstance ? units[0] : unit;
+  const view = useMemo(() => spreadUnit && ({ spread: spreadUnit.spread, side: spreadUnit.side, bounds: bleed ? 'bleed' as const : 'trim' as const, overview }), [spreadUnit, bleed, overview]);
   const wake = () => { setActive(true); setActivity((value) => value + 1); };
   function choose(index: number) {
-    const next = units[Math.max(0, Math.min(units.length - 1, index))];
+    const next = items[Math.max(0, Math.min(items.length - 1, index))];
     if (next) setSelected({ spread: next.spread, page: next.pages[0] ?? 0 });
     wake();
   }
@@ -51,13 +65,13 @@ export function Presentation({ summary, start, close }: {
     } else if (/^\d$/.test(event.key)) setDigits((value) => (value + event.key).slice(-5));
     else if (event.key === 'Enter' && digits) {
       const index = presentationPage(units, Number(digits));
-      if (index >= 0) choose(index);
+      if (index >= 0) choose(index + items.length - units.length);
       setDigits(''); setOverview(false);
     } else if (event.key === 'Enter' && overview) setOverview(false);
     else if (['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace', 'Delete'].includes(event.key) || (event.key === ' ' && event.shiftKey)) choose(at - 1);
     else if (['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'].includes(event.key)) choose(at + 1);
     else if (event.key === 'Home') choose(0);
-    else if (event.key === 'End') choose(units.length - 1);
+    else if (event.key === 'End') choose(items.length - 1);
     else if (event.key.toLowerCase() === 'f' && template && hasFacingPages(template.format)) setSingle((value) => !value);
     else if (event.key.toLowerCase() === 'b') setBleed((value) => !value);
     else if (event.key.toLowerCase() === 'g') setOverview((value) => !value);
@@ -90,13 +104,27 @@ export function Presentation({ summary, start, close }: {
     }}>
     <BookFrame project={summary.id} view="present" query={query} title="Presentation artwork" presentation={view}
       onGeometry={() => {}} onStatus={(status) => {
-        setReady(status.state === 'ready'); setError(status.state === 'error' ? status.message : '');
-        if (status.state === 'ready') setTemplate(status.template);
+        if (status.state === 'ready') { setReady(true); setError(''); setStale(''); setTemplate(status.template); }
+        else if (ready) setStale(status.message);
+        else setError(status.message);
       }} />
+    {/* Above the spreads' frame, which stays ready for the first spread. */}
+    {cover && <div className={'presentation-cover' + (onCover ? '' : ' presentation-cover-hidden')} aria-hidden={!onCover || undefined}>
+      <div className="presentation-cover-sheet" style={sheet ? { aspectRatio: sheet.width / sheet.height,
+        width: 'min(100%, calc((100vh - 48px) * ' + sheet.width / sheet.height + '))' } : { width: '100%', height: '100%' }}>
+        <BookFrame project={summary.id} view="cover" title="Presentation cover artwork" onStatus={(status) => {
+          if (status.state === 'ready') { setCoverError(''); if (status.cover) setSheet(status.cover.geometry.sheet); }
+          else if (!sheet) setCoverError(status.message);
+        }} />
+      </div>
+    </div>}
     {!ready && !error && <p className="presentation-message" role="status">Preparing presentation…</p>}
     {((ready && !unit) || error) && <p className="presentation-message">{error || 'This book has no spreads yet.'}</p>}
+    {onCover && coverError && !error && <p className="presentation-message">{coverError}</p>}
+    {stale && <p className="presentation-notice" role="status" title={stale}>
+      The latest changes could not be shown; this is the previous version. The book check lists the problem.</p>}
     <div className={'presentation-indicator' + (active || digits ? ' visible' : '')} aria-live="polite">
-      {digits ? 'Go to page ' + digits + ' ↵' : unit ? (unit.pages.length > 1 ? 'pp. ' : 'p. ') + unit.label + ' · ' + (at + 1) + ' / ' + units.length : ''}
+      {digits ? 'Go to page ' + digits + ' ↵' : unit ? (!unit.pages.length ? unit.label : (unit.pages.length > 1 ? 'pp. ' : 'p. ') + unit.label) + ' · ' + (at + 1) + ' / ' + items.length : ''}
     </div>
     {(help || (ready && !unit) || error) && <div className="presentation-help">
       <p>← / → · Space / Shift Space · Page Up / Down · Return: navigate</p>

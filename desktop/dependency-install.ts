@@ -184,6 +184,7 @@ export type DependencyRebuild = {
   imports: string[];
   /** Imports without type declarations. */
   untyped: string[];
+  /** npm did not run: the install was reused. The bundle is rebuilt regardless, linked `file:` folders from their source. */
   reused: boolean;
   lockfileUpdated: boolean;
   /** template/node_modules still exists; the book does not use it. */

@@ -189,6 +189,14 @@ function bookStyle(p: Palette) {
       filter: ['>', ['get', 'level'], 0], layout: { 'line-join': 'round' }, paint: { 'line-color': p.contour, 'line-width': .8 } })] : []),
     ...fill('water', 'water', 'water', { filter: ['!=', ['get', 'brunnel'], 'tunnel'], ...(p.waterOpacity ? { paint: { 'fill-color': p.water, 'fill-opacity': p.waterOpacity, 'fill-antialias': false } } : {}) }),
     ...line('shore', 'water', 'shore', width(4, .35, 10, .7, 14, 1.1), { filter: ['!=', ['get', 'brunnel'], 'tunnel'] }),
+    // The height of every major contour line. MapLibre places few labels along winding contours, and the SVG draws only
+    // placed ones, so maplibre-svg labels the lines of `contours-major` itself (`features-of`): one label per height
+    // within the spacing, on the straightest stretch near the line's middle.
+    ...(p.contour ? [(roles['contour-labels'] = { 'text-color': 'label', 'text-halo-color': 'halo' }, { id: 'contour-labels', type: 'symbol',
+      source: 'contours', 'source-layer': 'contours', filter: ['>', ['get', 'level'], 0], metadata: { 'maplibre-svg:features-of': 'contours-major' },
+      layout: { 'symbol-placement': 'line', 'text-field': ['to-string', ['get', 'ele']], 'text-font': fontFor.plain, 'text-size': 8,
+        'symbol-spacing': 250, 'text-max-angle': 180, 'text-allow-overlap': true, 'text-ignore-placement': true },
+      paint: { 'text-color': p.label, 'text-halo-color': p.halo, 'text-halo-width': 1.2 } })] : []),
     ...line('river', 'waterway', 'waterway', width(8, .5, 11, 1.2, 14, 2.6), { filter: is('class', 'river') }),
     ...line('stream', 'waterway', 'waterway', width(11, .3, 14, 1), { filter: is('class', 'stream', 'canal'), minzoom: 11 }),
     ...fill('building', 'building', 'building', { minzoom: 14 }),

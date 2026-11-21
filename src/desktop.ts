@@ -181,7 +181,8 @@ export type DesktopApi = {
   mcpSettings(enabled?: boolean): Promise<Result<McpSettings>>;
   onMcpChanged(listener: (settings: McpSettings) => void): () => void;
   installMcp(target: McpClientTarget): Promise<Result<string>>;
-  onAgentLease(listener: (id: string) => AgentLeaseReply): () => void;
+  // `footprint`: the layouts the agent's save changes, or the whole book (agent-footprint.ts).
+  onAgentLease(listener: (id: string, footprint?: import('./agent-footprint').AgentFootprint) => AgentLeaseReply): () => void;
   onAgentRelease(listener: () => void): () => void;
   importFiles(id: string, request: ImportRequest): Promise<Result<{ summary: ProjectSummary; imported: string[]; counts?: ImportCounts } | null>>;
   // Asks once per book to let its frames reach the template's declared origins; resolves to those allowed, with a new

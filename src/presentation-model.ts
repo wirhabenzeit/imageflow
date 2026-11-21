@@ -1,8 +1,9 @@
 import { layoutFootprint } from './layouts';
 import { hasFacingPages, pageLabel, pageNumbers, pageSequence } from './format';
 import type { PrintSide } from './format';
-import type { SpreadState } from './project';
+import type { CoverState, SpreadState } from './project';
 import type { TemplateInfo } from './desktop';
+import { coverLayoutsFor } from './cover';
 
 export type PresentationUnit = { spread: string; side: PrintSide; pages: number[]; label: string };
 export type PresentationView = { spread: string; side: PrintSide; bounds: 'trim' | 'bleed'; overview: boolean };
@@ -27,4 +28,10 @@ export function presentationUnits(spreads: SpreadState[], template: Pick<Templat
 }
 export function presentationPage(units: PresentationUnit[], page: number) {
   return units.findIndex((unit) => unit.pages.includes(page));
+}
+// The exterior cover opens the presentation when the book has one in a layout of its format (its own sheet: back,
+// spine and front, the way the Cover view shows it).
+export function presentsCover(cover: CoverState | undefined, template: Pick<TemplateInfo, 'coverFormats' | 'coverLayouts' | 'formatId'>) {
+  return !!cover && !!template.coverFormats && Object.hasOwn(template.coverFormats, template.formatId) &&
+    Object.hasOwn(coverLayoutsFor(template.coverLayouts, template.formatId), cover.definition);
 }

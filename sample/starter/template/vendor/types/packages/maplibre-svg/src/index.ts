@@ -208,7 +208,11 @@ export function mapToSvg(map: MapLibreMap, view: MapView, options: SvgOptions = 
       }
       continue;
     }
-    const list = features.get(spec.id);
+    // A symbol layer may label the features of another layer (metadata "maplibre-svg:features-of"): MapLibre places few
+    // labels along winding lines such as contours, and only placed symbols are queryable, so the lines themselves are
+    // labelled here, along their longest visible stretch.
+    const borrowed = (spec as { metadata?: Record<string, unknown> }).metadata?.['maplibre-svg:features-of'];
+    const list = layer.type === 'symbol' && typeof borrowed === 'string' ? features.get(borrowed) : features.get(spec.id);
     if (!list?.length) continue;
     if (layer.type === 'fill' || layer.type === 'fill-extrusion') {
       const prefix = layer.type === 'fill' ? 'fill' : 'fill-extrusion';
@@ -319,6 +323,12 @@ class Labels {
       }
       const textWidth = text.length * size * .55 + text.length * spacing * size;
       if (length(best) < textWidth * 1.2) return;
+      // Set the text on the straightest stretch near the middle that it fits, not along every bend: on a winding line,
+      // such as a contour, text that follows the line is unreadable. A stretch counts as straight when its chord is at
+      // least nine tenths of its length.
+      const stretch = straightStretch(best, textWidth * 1.3, .9);
+      if (!stretch) return;
+      best = stretch;
       if (best[best.length - 1][0] < best[0][0]) best = [...best].reverse();
       const middle = best[Math.floor(best.length / 2)];
       if (blocked(middle[0], middle[1], 250)) return;
@@ -345,6 +355,11 @@ class Labels {
     const block = rows.length * lineHeight;
     const top = anchor.startsWith('top') ? y : anchor.startsWith('bottom') ? y - block : y - block / 2;
     const textAnchor = anchor.endsWith('left') ? 'start' : anchor.endsWith('right') ? 'end' : 'middle';
+    // A label the map's edge would cut is left out, as MapLibre does at the viewport. The width is estimated as for labels
+    // along lines, with a margin, since the page may set the label in a wider font than the style names.
+    const textWidth = Math.max(...rows.map((row) => row.length)) * size * (.6 + spacing);
+    const left = textAnchor === 'start' ? x : textAnchor === 'end' ? x - textWidth : x - textWidth / 2;
+    if (left < 0 || left + textWidth > width || top < 0 || top + block > height) return;
     this.svg.push(this.draw('<text' + attributes + ' text-anchor="' + textAnchor + '">' + rows.map((row, i) =>
       '<tspan x="' + round(x) + '" y="' + round(top + i * lineHeight + lineHeight / 2 + size * .35) + '">' + escape(row) + '</tspan>').join('') + '</text>',
       fill, halo, haloWidth, opacity));
@@ -360,6 +375,25 @@ class Labels {
     return '<g' + (opacity < 1 ? ' opacity="' + opacity + '"' : '') + '>' +
       (shifted ? '<g' + paintAttribute('fill', halo!) + ' aria-hidden="true">' + shifted + '</g>' : '') + '<g' + paintAttribute('fill', fill) + '>' + element + '</g></g>';
   }
+}
+
+// The stretch of a line nearest its middle that is at least `need` long and whose chord is at least `straightness` of
+// its length, or nothing when the line has no such stretch.
+function straightStretch(line: Line, need: number, straightness: number): Line | undefined {
+  const along = [0];
+  for (let i = 1; i < line.length; i++) along.push(along[i - 1] + Math.hypot(line[i][0] - line[i - 1][0], line[i][1] - line[i - 1][1]));
+  const total = along[along.length - 1];
+  let found: { stretch: Line; offset: number } | undefined;
+  for (let start = 0; start < line.length - 1; start++) {
+    let end = start + 1;
+    while (end < line.length - 1 && along[end] - along[start] < need) end++;
+    if (along[end] - along[start] < need) break;
+    const chord = Math.hypot(line[end][0] - line[start][0], line[end][1] - line[start][1]);
+    if (chord < (along[end] - along[start]) * straightness) continue;
+    const offset = Math.abs((along[start] + along[end]) / 2 - total / 2);
+    if (!found || offset < found.offset) found = { stretch: line.slice(start, end + 1), offset };
+  }
+  return found?.stretch;
 }
 
 // MapLibre breaks labels wider than text-max-width at spaces; this estimates the width from the character count.

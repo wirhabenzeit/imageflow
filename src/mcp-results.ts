@@ -181,7 +181,7 @@ export const mcpOutputSchemas = {
     packages: z.record(z.string(), z.string()).optional().describe('Packages and versions in the new saved bundle.'),
     imports: z.array(z.string()).optional().describe('The package imports the new bundle provides.'),
     untyped: z.array(z.string()).optional().describe('Imports without type declarations; add their @types packages and rebuild.'),
-    reused: z.boolean().optional().describe('An earlier install of the same package.json and lockfile was reused.'),
+    reused: z.boolean().optional().describe('npm did not run: an earlier install of the same package.json and lockfile was reused. The bundle is rebuilt either way, from the current sources of linked `file:` packages too.'),
     lockfileUpdated: z.boolean().optional().describe('npm updated template/package-lock.json.'),
     leftoverNodeModules: z.boolean().optional().describe('template/node_modules exists. The book does not use it; ask the user before deleting it.'),
     notice: z.string().optional(),

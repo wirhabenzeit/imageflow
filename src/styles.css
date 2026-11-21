@@ -927,6 +927,12 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
   font: 13px/1.45 var(--ui-font, -apple-system, BlinkMacSystemFont, system-ui, sans-serif); }
 .presentation .book-frame { position: absolute; inset: 0; width: 100%; height: 100% !important; border: 0; pointer-events: none; }
 .presentation-overview .book-frame { pointer-events: auto; }
+.presentation-cover { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; background: #111; }
+/* Transparent, not hidden, so the cover is drawn and ready before it is shown. Its frame must not take the overview's
+   clicks either: the overview's `pointer-events: auto` on every book frame would otherwise win over the cover's none. */
+.presentation-cover-hidden { opacity: 0; pointer-events: none; }
+.presentation-cover-hidden .book-frame { pointer-events: none !important; }
+.presentation-cover-sheet { position: relative; max-height: 100%; }
 .presentation .book-frame-pending { visibility: hidden; }
 .presentation-idle, .presentation-idle * { cursor: none; }
 .presentation-indicator { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 6px 12px;
@@ -935,8 +941,12 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .presentation-help { position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%); background: #242424f5;
   border: 1px solid #666; padding: 20px 28px; border-radius: 12px; color: #eee; font-size: 14px; }
 .presentation-help button { color: #eee; background: #444; border: 1px solid #888; }
-.presentation-message { position: absolute; top: 50%; width: 100%; margin: 0; padding: 0 32px; transform: translateY(-50%);
-  font-size: 24px; font-weight: 400; line-height: 1.4; letter-spacing: -.015em; text-align: center; color: #ccc; }
+.presentation-message { position: absolute; top: 50%; box-sizing: border-box; width: 100%; max-height: 60vh; overflow: hidden; margin: 0;
+  padding: 0 32px; transform: translateY(-50%); font-size: 24px; font-weight: 400; line-height: 1.4; letter-spacing: -.015em;
+  text-align: center; color: #ccc; overflow-wrap: anywhere; }
+.presentation-notice { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); max-width: min(560px, calc(100% - 32px));
+  box-sizing: border-box; margin: 0; padding: 6px 12px; border-radius: 8px; background: #000c; color: #ddd; font-size: 12px;
+  text-align: center; pointer-events: none; }
 .source-items-photo { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; align-items: stretch; overflow-anchor: none; }
 .source-items-photo .source-photo { width: auto; height: 100%; grid-template-rows: minmax(0, 1fr); }
 .source-items-photo .source-photo .source-title { display: none; }

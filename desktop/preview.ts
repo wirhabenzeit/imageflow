@@ -114,9 +114,11 @@ export function checkBookRender(url: string, signal?: AbortSignal, inspect?: Ins
 export function checkCoverRender(url: string, signal?: AbortSignal, onActivity?: () => void) {
   return withRenderedBook(url, new URLSearchParams({ view: 'cover-check' }), signal, (_window, status) => status, onActivity);
 }
-// How often a capture without the sentinel is retried before the preview fails, and how long to wait between.
-const captureAttempts = 8;
-const captureRetryMs = 250;
+// The least time before each capture attempt, beyond a fresh paint; a capture without the sentinel is retried after
+// the next wait, and the preview fails after the last. The waits grow: retrying after just two more frames, eight times,
+// gave up on contact sheets of several spreads with large pictures that were still compositing (beta.16, "painted
+// before the artwork"), while the same sheet with fewer spreads went through.
+const captureWaitsMs = [0, 0, 100, 250, 500, 1000, 1500, 2500];
 
 /**
  * Checks, in the page, that the artwork frame of this request is the one on screen: placed at the origin at the size
@@ -138,8 +140,11 @@ function artworkOnScreen(window: BrowserWindow, sentinel: string, width: number,
   })()`);
 }
 
-const nextFrame = (window: BrowserWindow) => window.webContents.executeJavaScript(
-  `new Promise((resolve) => { requestAnimationFrame(() => requestAnimationFrame(resolve)); setTimeout(resolve, ${captureRetryMs}); })`);
+// After two animation frames (or 250 ms when the hidden window draws none), and at least `waitMs`.
+const nextFrame = (window: BrowserWindow, waitMs: number) => window.webContents.executeJavaScript(`Promise.all([
+  new Promise((resolve) => { requestAnimationFrame(() => requestAnimationFrame(resolve)); setTimeout(resolve, 250); }),
+  new Promise((resolve) => setTimeout(resolve, ${waitMs})),
+])`);
 
 /** Captures the artwork and the sentinel below it in one frame: the artwork's pixels, or undefined without the sentinel. */
 async function captureArtwork(window: BrowserWindow, sentinel: Sentinel, width: number, height: number) {
@@ -181,12 +186,12 @@ export async function captureBookPreview(url: string, request: PreviewRequest, s
     let problem = 'the artwork was not painted';
     try {
       await window.webContents.executeJavaScript('document.fonts.ready.then(() => true)');
-      for (let attempt = 0; attempt < captureAttempts; attempt++) {
+      for (const waitMs of captureWaitsMs) {
         signal?.throwIfAborted();
         // A ready layout can precede its compositor paint in a hidden window, especially on Linux and after heavy GPU
         // work such as large maps. Ask for a fresh paint, and accept only a frame that shows this request's sentinel.
         window.webContents.invalidate();
-        await nextFrame(window);
+        await nextFrame(window, waitMs);
         problem = await artworkOnScreen(window, marker, width, height);
         if (problem) continue;
         const raster = await captureArtwork(window, sentinel, width, height);
