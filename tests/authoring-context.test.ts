@@ -18,6 +18,7 @@ import type { RenderStatus } from '../src/desktop';
 import { mm } from '../src/format';
 import { PreviewError } from '../src/preview';
 import { docTopics } from '../src/doc-topics';
+import './persistence-root';
 
 const source = 'export default {};';
 const project = { schemaVersion: 1, title: 'Context book', template: { id: 'test', version: '1' }, spreads: [{ id: 'one', definition: 'main' }] };

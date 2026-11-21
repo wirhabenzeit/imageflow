@@ -18,13 +18,23 @@ const books = join(root, 'tests', 'compat', 'books');
 const expected = JSON.parse(await readFile(join(root, 'tests', 'compat', 'expected.json'), 'utf8'));
 const work = await mkdtemp(join(build, 'compat-books-'));
 
+// `assets-meta.json` is derived: opening a book writes it in the background, outside the save journal (ADR 0010), so
+// it is not part of "unchanged". `contents` leaves it out; `derivedFacts` checks that, if present, it is valid.
+const derivedFile = 'assets-meta.json';
+async function derivedFacts(folder) {
+  let text;
+  try { text = await readFile(join(folder, derivedFile), 'utf8'); } catch (error) { if (error.code === 'ENOENT') return; throw error; }
+  const parsed = JSON.parse(text);
+  assert.equal(parsed.version, 1, derivedFile + ' version');
+  assert.equal(typeof parsed.assets, 'object', derivedFile + ' assets');
+}
 async function contents(folder) {
   const files = {};
   const walk = async (directory) => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name);
       if (entry.isDirectory()) { if (path !== join(folder, '.imageflow')) await walk(path); }
-      else files[relative(folder, path).split(sep).join('/')] = createHash('sha256').update(await readFile(path)).digest('hex');
+      else if (path !== join(folder, derivedFile)) files[relative(folder, path).split(sep).join('/')] = createHash('sha256').update(await readFile(path)).digest('hex');
     }
   };
   await walk(folder);
@@ -71,6 +81,7 @@ try {
       near(box.height, trim[1], name + ' page ' + (index + 1) + ' trim height');
     }
     assert.deepEqual(await contents(folder), before, name + ' was changed by opening and exporting it');
+    await derivedFacts(folder);
     await w.close();
     console.log('Compatibility book ' + name + ': ' + status.pages + ' pages, ' + pdf.getPageCount() + ' PDF pages.');
   }

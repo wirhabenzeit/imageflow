@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { createDocument, documentIdentity, RecentDocuments } from '../desktop/documents';
 import { templateFolder, textSourcePath } from '../desktop/document-actions';
 import { approveSource } from '../desktop/source-access';
+import './persistence-root';
 
 async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'imageflow-documents-')));
@@ -157,4 +158,32 @@ test('recent books survive restart, expose missing paths, recover moves, and rem
   await restored.remove(id);
   assert.deepEqual(await restored.list(), []);
   assert.equal(JSON.parse(await readFile(join(moved, 'project.json'), 'utf8')).title, 'Book');
+});
+
+test('every new document gets its own bookId, also from a starter or copy that already has one', async (t) => {
+  const { root, starter } = await fixture(t);
+  const first = await createDocument(join(root, 'First'), starter);
+  const second = await createDocument(join(root, 'Second'), starter);
+  const read = async (folder: string) => JSON.parse(await readFile(join(folder, 'project.json'), 'utf8'));
+  const [a, b] = [await read(first), await read(second)];
+  assert.match(a.bookId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.notEqual(a.bookId, b.bookId);
+  assert.deepEqual(a.spreads, [{ id: 'one' }]);
+  // Duplicate and Save a Copy start from an existing book: its bookId is not inherited.
+  const copy = await createDocument(join(root, 'Copy'), first);
+  assert.equal((await read(copy)).title, 'Copy');
+  assert.notEqual((await read(copy)).bookId, a.bookId);
+  // A plain file copy (Finder) keeps it.
+  await cp(first, join(root, 'Finder.imageflow'), { recursive: true });
+  assert.equal((await read(join(root, 'Finder.imageflow'))).bookId, a.bookId);
+});
+
+test('a move keeps the bookId while Save a Copy starts a new lineage', async (t) => {
+  const { root, starter } = await fixture(t);
+  const first = await createDocument(join(root, 'First'), starter);
+  const read = async (folder: string) => JSON.parse(await readFile(join(folder, 'project.json'), 'utf8'));
+  const moved = await createDocument(join(root, 'Moved'), first, { keepLineage: true });
+  assert.equal((await read(moved)).bookId, (await read(first)).bookId);
+  assert.equal((await read(moved)).title, 'Moved');
+  assert.notEqual((await read(await createDocument(join(root, 'Copied'), first))).bookId, (await read(first)).bookId);
 });

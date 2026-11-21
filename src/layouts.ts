@@ -1,6 +1,6 @@
 import { isParameterValue } from './parameters';
 import type { Parameter, Parameters } from './parameters';
-import { pageSides, scopeSpread, scopeState, storedBoxes } from './project';
+import { boxBase, pageSides, scopeSpread, scopeState, storedBoxes } from './project';
 import type { LayoutState, PageSide, PageState, SpreadState, StateLocation, Values } from './project';
 import { hasFacingPages, spanFits, spanRequiredAt } from './format';
 import type { PrintFormat, Span } from './format';
@@ -557,8 +557,8 @@ export function swapContent(from: LayoutState, fromBox: string, to: LayoutState,
   const moving = content(from.boxes[fromBox]);
   if (!moving.photo && !moving.text) throw new Error('There is no content in box ' + fromBox + '.');
   const displaced = content(to.boxes[toBox]);
-  to.boxes[toBox] = { params: to.boxes[toBox]?.params ?? {}, ...moving };
-  from.boxes[fromBox] = { params: from.boxes[fromBox]?.params ?? {}, ...displaced };
+  to.boxes[toBox] = { ...boxBase(to.boxes[toBox]), ...moving };
+  from.boxes[fromBox] = { ...boxBase(from.boxes[fromBox]), ...displaced };
   return displaced.photo ?? displaced.text;
 }
 
@@ -572,7 +572,7 @@ export function moveContent(spread: SpreadState, from: string, to: string) {
 // Removes kept content from the spread; the source stays in the project.
 export function discardContent(spread: LayoutState, id: string) {
   const box = spread.boxes[id];
-  if (box) spread.boxes[id] = { params: box.params };
+  if (box) spread.boxes[id] = boxBase(box);
 }
 
 // Element settings the spread keeps for other layouts, by element ID.

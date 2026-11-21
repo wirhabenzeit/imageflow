@@ -12,14 +12,18 @@ import { photoFile } from '../desktop/photos';
 import { isUnavailableSource } from '../src/source-diagnostics';
 import { importIntoProject, loadProject, projectSummary, renderData, updateProject } from '../desktop/project';
 import { collectSources, relocateSource, relinkFolder, removeSources, renameSource, saveDocumentCopy } from '../desktop/source-actions';
-import { captureProjectInputs } from '../desktop/revisions';
+import { captureBookStateRevision, captureProjectInputs } from '../desktop/revisions';
+import { AssetFacts, readAssetFacts } from '../desktop/asset-facts';
+import { acquireProjectLock, readSaveLedger, recoverProjectSave } from '../desktop/persistence';
 import { ProjectSession } from '../desktop/project-session';
 import { sourceEntries } from '../src/source-locations';
 import { copySample } from '../desktop/sample-book.mjs';
+import './persistence-root';
 
 async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'if-linked-')));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  // Background digests keep writing the source registry; let them finish before removing it.
+  t.after(async () => { await SourceStore.drain(); await rm(root, { recursive: true, force: true }); });
   const folder = join(root, 'Book.imageflow');
   const external = join(root, 'external');
   const cache = join(root, 'cache');
@@ -587,4 +591,140 @@ test('a file stored in the book is renamed in place, keeping its ID, extension a
   await symlink(outside, join(f.folder, 'files'));
   await assert.rejects(renameSource(withLink, 'file:' + id, 'Escaped'), /book’s own folder|must be inside|points outside/);
   assert.equal(await readFile(join(outside, id + '-stage 05- song kul.gpx'), 'utf8'), '<gpx><trk/></gpx>');
+});
+
+// assets-meta.json (ADR 0010): derived facts that live outside the save journal, ledger and portable revision.
+const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+async function writable(t: { after: (fn: () => Promise<void>) => void }, f: { folder: string }) {
+  const release = await acquireProjectLock(f.folder);
+  t.after(async () => { await AssetFacts.release(f.folder); await release(); });
+}
+async function settleFacts(f: { folder: string; cache: string }) {
+  await (await SourceStore.forBook(f.folder, f.cache)).digested();
+  await (await AssetFacts.forBook(f.folder)).flush();
+}
+const readMeta = async (folder: string) => JSON.parse(await readFile(join(folder, 'assets-meta.json'), 'utf8')) as { version: number; assets: Record<string, Record<string, unknown>> };
+const stagingFiles = async (folder: string) => (await readdir(folder)).filter((name) => name.startsWith('.imageflow-write-'));
+
+test('background digests update assets-meta.json without a new revision, ledger record or pending journal', async (t) => {
+  const f = await fixture(t);
+  await writable(t, f);
+  const added = await importIntoProject(f.book, { kind: 'photo', mode: 'link' }, [f.photo]);
+  const id = added.imported[0];
+  const records = (await readSaveLedger(f.folder)).records.length;
+  const portable = await captureBookStateRevision(f.folder);
+  const local = (await captureProjectInputs(f.folder)).revision;
+  await loadProject(f.folder, f.cache);
+  await settleFacts(f);
+  const meta = await readMeta(f.folder);
+  assert.equal(meta.version, 1);
+  // The sample book's copied photos are recorded as well.
+  assert.ok(Object.keys(meta.assets).length > 1 && id in meta.assets);
+  assert.equal(meta.assets[id].digest, sha(await readFile(f.photo)));
+  assert.equal(meta.assets[id].width, 120);
+  assert.equal(meta.assets[id].height, 80);
+  assert.ok(!Number.isNaN(Date.parse(meta.assets[id].verified as string)));
+  // Nothing user-authored moved: not the portable revision, not the local render-input revision, not the ledger.
+  assert.equal(await captureBookStateRevision(f.folder), portable);
+  assert.equal((await captureProjectInputs(f.folder)).revision, local);
+  assert.equal((await readSaveLedger(f.folder)).records.length, records);
+  await recoverProjectSave(f.folder, { readOnly: true });
+  assert.deepEqual(await stagingFiles(f.folder), []);
+  // Unchanged facts are not written again.
+  const before = await stat(join(f.folder, 'assets-meta.json'), { bigint: true });
+  await loadProject(f.folder, f.cache);
+  await settleFacts(f);
+  assert.equal((await stat(join(f.folder, 'assets-meta.json'), { bigint: true })).ino, before.ino);
+  assert.equal((await readMeta(f.folder)).assets[id].verified, meta.assets[id].verified);
+});
+
+test('copied photos get facts too, and an in-place replacement refreshes the digest and dimensions', async (t) => {
+  const f = await fixture(t);
+  await writable(t, f);
+  const added = await importIntoProject(f.book, { kind: 'photo', mode: 'link' }, [f.photo]);
+  const [id] = added.imported;
+  await loadProject(f.folder, f.cache);
+  await settleFacts(f);
+  const first = (await readMeta(f.folder)).assets[id];
+  assert.equal(first.digest, sha(await readFile(f.photo)));
+  const replacement = join(f.external, 'replacement.png');
+  await sharp({ create: { width: 80, height: 160, channels: 3, background: '#0000ff' } }).png().toFile(replacement);
+  await rename(replacement, f.photo);
+  const records = (await readSaveLedger(f.folder)).records.length;
+  await loadProject(f.folder, f.cache);
+  await settleFacts(f);
+  const second = (await readMeta(f.folder)).assets[id];
+  assert.equal(second.digest, sha(await readFile(f.photo)));
+  assert.notEqual(second.digest, first.digest);
+  assert.deepEqual([second.width, second.height], [80, 160]);
+  assert.equal((await readSaveLedger(f.folder)).records.length, records);
+  // A photo that left the book leaves the facts too.
+  const stripped = structuredClone({ project: added.book.project, photoIndex: added.book.photoIndex });
+  delete stripped.photoIndex[id];
+  const next = await updateProject(await loadProject(f.folder, f.cache), stripped, true);
+  assert.ok(!next.photos.has(id));
+  await (await AssetFacts.forBook(f.folder)).flush();
+  assert.equal(id in (await readMeta(f.folder)).assets, false);
+});
+
+test('a missing original keeps its state and print blocking but still lays out from assets-meta.json', async (t) => {
+  const f = await fixture(t);
+  await writable(t, f);
+  const taken = join(f.external, 'dated.jpg');
+  await sharp({ create: { width: 90, height: 60, channels: 3, background: '#00ff00' } })
+    .withExif({ IFD2: { DateTimeOriginal: '2024:06:01 18:20:30', OffsetTimeOriginal: '+02:00' } }).jpeg().toFile(taken);
+  const added = await importIntoProject(f.book, { kind: 'photo', mode: 'link' }, [taken]);
+  const [id] = added.imported;
+  await loadProject(f.folder, f.cache);
+  await settleFacts(f);
+  await rm(taken);
+  const missing = await loadProject(f.folder, f.cache, true);
+  assert.equal(missing.sources!['photo:' + id].state, 'missing');
+  assert.ok(missing.problems.some((problem) => problem.includes(id)));
+  assert.equal(missing.photos.has(id), false, 'the photo itself stays missing, so its boxes stay empty and export is blocked');
+  assert.equal(id in renderData(missing, 'x', 'export').photos, false);
+  const summary = projectSummary(missing, 'x');
+  assert.deepEqual(summary.photoSizes[id], { width: 90, height: 60 });
+  assert.deepEqual(summary.photoDates?.[id], { captured: '2024-06-01T18:20:30+02:00' });
+});
+
+test('an invalid assets-meta.json is ignored while opening and regenerated by the writer', async (t) => {
+  const f = await fixture(t);
+  await writable(t, f);
+  const added = await importIntoProject(f.book, { kind: 'photo', mode: 'link' }, [f.photo]);
+  const [id] = added.imported;
+  await writeFile(join(f.folder, 'assets-meta.json'), '{ "version": 7, "assets": ');
+  assert.deepEqual(await readAssetFacts(f.folder), {});
+  await AssetFacts.release(f.folder);
+  const reopened = await loadProject(f.folder, f.cache);
+  assert.ok(reopened.photos.has(id));
+  await settleFacts(f);
+  assert.equal((await readMeta(f.folder)).assets[id].digest, sha(await readFile(f.photo)));
+  await writeFile(join(f.folder, 'assets-meta.json'), JSON.stringify({ version: 1, assets: { [id]: { digest: 'nope', width: 1, height: 1, verified: 'x' } } }));
+  assert.deepEqual(await readAssetFacts(f.folder), {});
+});
+
+test('a book opened without the writer lock only reads assets-meta.json', async (t) => {
+  const f = await fixture(t);
+  const added = await importIntoProject(f.book, { kind: 'photo', mode: 'link' }, [f.photo]);
+  const [id] = added.imported;
+  await loadProject(f.folder, f.cache, true);
+  await settleFacts(f);
+  await assert.rejects(stat(join(f.folder, 'assets-meta.json')), { code: 'ENOENT' });
+  assert.deepEqual(await stagingFiles(f.folder), []);
+  const existing = { version: 1, assets: { [id]: { digest: 'a'.repeat(64), width: 5, height: 6, verified: '2026-01-01T00:00:00.000Z' } } };
+  await writeFile(join(f.folder, 'assets-meta.json'), JSON.stringify(existing));
+  assert.deepEqual((await readAssetFacts(f.folder))[id].width, 5);
+  await AssetFacts.release(f.folder);
+});
+
+test('Save a Copy carries assets-meta.json along, since it is keyed by asset ID and regenerates anyway', async (t) => {
+  const f = await fixture(t);
+  await writable(t, f);
+  const added = await importIntoProject(f.book, { kind: 'photo', mode: 'link' }, [f.photo]);
+  const [id] = added.imported;
+  await loadProject(f.folder, f.cache);
+  await settleFacts(f);
+  const copied = await saveDocumentCopy(await loadProject(f.folder, f.cache), join(f.root, 'Copy.imageflow'), true);
+  assert.equal((await readMeta(copied)).assets[id].digest, sha(await readFile(f.photo)));
 });

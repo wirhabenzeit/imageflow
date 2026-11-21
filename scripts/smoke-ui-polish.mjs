@@ -6,6 +6,7 @@ import electron from 'electron';
 import { _electron } from 'playwright-core';
 import { closeApp, menuAction, reloadBook, testBook } from './ui-actions.mjs';
 import { createRouteFixture } from './route-fixture.mjs';
+import { bookStateFile } from './book-state.mjs';
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -126,7 +127,8 @@ try {
   book = join(destination, 'Renamed.imageflow');
   await until(async () => (await (await app.browserWindow(page)).evaluate((window) => window.getRepresentedFilename())) === book, 'Move updates the live document');
   assert.equal((await current(page)).handle, beforeMove.handle);
-  await stat(join(book, '.imageflow/writer.lock'));
+  await stat(await bookStateFile(join(work, 'profile'), book, 'writer.lock'));
+  await assert.rejects(stat(join(book, '.imageflow/writer.lock')), { code: 'ENOENT' });
   assert.deepEqual(JSON.parse(await readFile(join(book, 'photos.json'), 'utf8')), beforeMove.photoIndex);
   await ready();
 

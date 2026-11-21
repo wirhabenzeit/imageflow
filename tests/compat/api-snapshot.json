@@ -16,6 +16,11 @@
           "type": "string",
           "minLength": 1
         },
+        "bookId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
         "importMode": {
           "type": "string",
           "enum": [
@@ -42,7 +47,8 @@
           "required": [
             "id",
             "version"
-          ]
+          ],
+          "additionalProperties": {}
         },
         "format": {
           "type": "string",
@@ -258,7 +264,8 @@
                         "centerX",
                         "centerY",
                         "zoom"
-                      ]
+                      ],
+                      "additionalProperties": {}
                     }
                   },
                   "focus": {
@@ -278,7 +285,8 @@
                     "required": [
                       "centerX",
                       "centerY"
-                    ]
+                    ],
+                    "additionalProperties": {}
                   },
                   "params": {
                     "default": {},
@@ -327,7 +335,8 @@
                       ]
                     }
                   }
-                }
+                },
+                "additionalProperties": {}
               }
             },
             "elements": {
@@ -387,13 +396,15 @@
                       ]
                     }
                   }
-                }
+                },
+                "additionalProperties": {}
               }
             }
           },
           "required": [
             "definition"
-          ]
+          ],
+          "additionalProperties": {}
         },
         "spreads": {
           "type": "array",
@@ -502,7 +513,8 @@
                           "centerX",
                           "centerY",
                           "zoom"
-                        ]
+                        ],
+                        "additionalProperties": {}
                       }
                     },
                     "focus": {
@@ -522,7 +534,8 @@
                       "required": [
                         "centerX",
                         "centerY"
-                      ]
+                      ],
+                      "additionalProperties": {}
                     },
                     "params": {
                       "default": {},
@@ -571,7 +584,8 @@
                         ]
                       }
                     }
-                  }
+                  },
+                  "additionalProperties": {}
                 }
               },
               "elements": {
@@ -631,7 +645,8 @@
                         ]
                       }
                     }
-                  }
+                  },
+                  "additionalProperties": {}
                 }
               },
               "pages": {
@@ -738,7 +753,8 @@
                                   "centerX",
                                   "centerY",
                                   "zoom"
-                                ]
+                                ],
+                                "additionalProperties": {}
                               }
                             },
                             "focus": {
@@ -758,7 +774,8 @@
                               "required": [
                                 "centerX",
                                 "centerY"
-                              ]
+                              ],
+                              "additionalProperties": {}
                             },
                             "params": {
                               "default": {},
@@ -807,7 +824,8 @@
                                 ]
                               }
                             }
-                          }
+                          },
+                          "additionalProperties": {}
                         }
                       },
                       "elements": {
@@ -867,10 +885,12 @@
                                 ]
                               }
                             }
-                          }
+                          },
+                          "additionalProperties": {}
                         }
                       }
-                    }
+                    },
+                    "additionalProperties": {}
                   },
                   "right": {
                     "type": "object",
@@ -973,7 +993,8 @@
                                   "centerX",
                                   "centerY",
                                   "zoom"
-                                ]
+                                ],
+                                "additionalProperties": {}
                               }
                             },
                             "focus": {
@@ -993,7 +1014,8 @@
                               "required": [
                                 "centerX",
                                 "centerY"
-                              ]
+                              ],
+                              "additionalProperties": {}
                             },
                             "params": {
                               "default": {},
@@ -1042,7 +1064,8 @@
                                 ]
                               }
                             }
-                          }
+                          },
+                          "additionalProperties": {}
                         }
                       },
                       "elements": {
@@ -1102,12 +1125,15 @@
                                 ]
                               }
                             }
-                          }
+                          },
+                          "additionalProperties": {}
                         }
                       }
-                    }
+                    },
+                    "additionalProperties": {}
                   }
-                }
+                },
+                "additionalProperties": {}
               },
               "split": {
                 "type": "boolean",
@@ -1170,7 +1196,8 @@
                               "centerX",
                               "centerY",
                               "zoom"
-                            ]
+                            ],
+                            "additionalProperties": {}
                           }
                         },
                         "focus": {
@@ -1190,7 +1217,8 @@
                           "required": [
                             "centerX",
                             "centerY"
-                          ]
+                          ],
+                          "additionalProperties": {}
                         },
                         "params": {
                           "default": {},
@@ -1239,21 +1267,24 @@
                             ]
                           }
                         }
-                      }
+                      },
+                      "additionalProperties": {}
                     }
                   },
                   "required": [
                     "from",
                     "box",
                     "state"
-                  ]
+                  ],
+                  "additionalProperties": {}
                 }
               }
             },
             "required": [
               "id",
               "definition"
-            ]
+            ],
+            "additionalProperties": {}
           }
         }
       },
@@ -1262,7 +1293,8 @@
         "title",
         "template",
         "spreads"
-      ]
+      ],
+      "additionalProperties": {}
     },
     "photos.json": {
       "type": "object",
@@ -1297,7 +1329,8 @@
         },
         "required": [
           "path"
-        ]
+        ],
+        "additionalProperties": {}
       }
     }
   },

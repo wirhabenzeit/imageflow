@@ -1,4 +1,4 @@
-import { bookFormatOf, coverInstance, scopeSpread } from '../src/project';
+import { bookFormatOf, boxBase, coverInstance, scopeSpread } from '../src/project';
 import { hidden } from './background-mode';
 import { AppUpdater } from './updates';
 import { copySample } from './sample-book.mjs';
@@ -41,13 +41,14 @@ import { PreviewError } from '../src/preview';
 import { DocumentSession } from './document-session';
 import { configureMacHeader, setToolbarDragRegions } from './mac-header';
 import type { RenderSessions } from './document-session';
+import { AssetFacts } from './asset-facts';
 import { createDocument, documentIdentity, documentPath, isDocument, RecentDocuments } from './documents';
 import { SettingsStore } from './settings';
 import { AuthoringError } from './authoring-service';
 import { createMcpConnection } from './mcp-connection';
 import { addToCodex, bridgeLaunch, claudeCodeCommand, claudeExtension, findCodex, skillArchive } from './mcp-setup';
 import { authoringErrorResult } from './authoring-errors';
-import { acquireProjectLock } from './persistence';
+import { acquireProjectLock, configurePersistence } from './persistence';
 import type { ProjectLock } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
 import type { SettingsPane } from '../src/settings';
@@ -584,7 +585,11 @@ async function openDocument(path: string): Promise<DocumentSession | undefined> 
     } finally {
       if (!registered && release) {
         // Releasing the source registry must neither mask the open's own result nor keep the writer lock.
-        if (loadStarted) await SourceStore.release(folder).catch((error) => console.warn('ImageFlow could not release book sources', error));
+        if (loadStarted) {
+          await SourceStore.release(folder).catch((error) => console.warn('ImageFlow could not release book sources', error));
+          // An aborted open leaves no derived facts registered; this flushes them while the writer lock is still held.
+          await AssetFacts.release(folder).catch((error) => console.warn('ImageFlow could not release asset facts', error));
+        }
         if (document) await document.close();
         else await release();
       }
@@ -1285,6 +1290,7 @@ void app.whenReady().then(async () => {
   await Promise.all([settings.load(), recents.load()]);
   configureSourceStore(join(app.getPath('userData'), 'source-cache'));
   configureSourceAccess(join(app.getPath('userData'), 'source-access'));
+  configurePersistence(join(app.getPath('userData'), 'persistence'));
   nativeTheme.themeSource = settings.value.appearance;
   const checkFeed = () => checkUpdateFeed({ baseURL: updateTestConfiguration?.baseURL ?? updateBaseURL,
     channel: settings.value.updateChannel, platform: process.platform + '-' + process.arch, installed: app.getVersion(),
@@ -1886,7 +1892,7 @@ void app.whenReady().then(async () => {
         const files = structuredClone({ project: document.book.project, photoIndex: document.book.photoIndex });
         const spread = scopeSpread(files.project.spreads.find(({ id }) => id === request.target!.spread), request.target.page);
         if (!spread) throw new Error('The spread changed.');
-        spread.boxes[request.target.box] = { params: spread.boxes[request.target.box]?.params ?? {},
+        spread.boxes[request.target.box] = { ...boxBase(spread.boxes[request.target.box]),
           ...(request.kind === 'photo' ? { photo: source.id } : { text: source.id }) };
         return { summary: document.activate(await document.projectSession.save(files, 'Place asset')), imported: [source.id] };
       }

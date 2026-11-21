@@ -37,6 +37,7 @@ import { ImportReceipts } from './import-receipts';
 import { saveDocumentCopy } from './source-actions';
 import { rebuildTemplateDependencies } from './dependency-install';
 import type { DependencyRebuild } from './dependency-install';
+import { AssetFacts } from './asset-facts';
 import { acquireProjectLock, CommittedProjectSaveError } from './persistence';
 import type { ProjectLock, SaveCheckpoint } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
@@ -221,6 +222,8 @@ export class DocumentSession {
   async relocate(folder: string) {
     if (this.unlockProject && !await this.unlockProject.tryRelocate(folder)) throw new Error('Could not verify the moved book’s writer lock.');
     this.stopWatch();
+    // The old folder's facts are written and released before the directory is gone from under them.
+    await AssetFacts.release(this.book.folder).catch(() => {});
     this.projectSession.relocate(folder);
     this.projectSession.book = { ...this.book, folder };
     const next = await loadProject(folder, this.cache);
@@ -231,12 +234,15 @@ export class DocumentSession {
     const original = this.book.folder;
     if (destination === original) return;
     await mkdir(destination); // Exclusive reservation: never replace even an empty existing package.
+    // Flush and release the facts of the old folder while it is still there; the new folder gets its own afterwards.
+    await AssetFacts.release(original).catch(() => {});
     try {
       await rename(original, destination);
     } catch (error) {
       await rmdir(destination).catch(() => {});
       if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error;
-      const copied = await saveDocumentCopy(this.book, destination, false);
+      // A move keeps the book's lineage (bookId); only copies start a new one.
+      const copied = await saveDocumentCopy(this.book, destination, false, undefined, true);
       let release: ProjectLock | undefined;
       try {
         release = await acquireProjectLock(copied);
@@ -248,6 +254,7 @@ export class DocumentSession {
         this.projectSession.relocate(copied);
         this.notify({ value: this.activate(next) }); this.watchProject(next);
       } catch (error) {
+        await AssetFacts.release(copied).catch(() => {});
         if (release) { await release(); await rm(copied, { recursive: true, force: true }); }
         this.watchProject(this.book);
         throw error;
@@ -347,6 +354,8 @@ export class DocumentSession {
       await this.queue.whenIdle();
       // Published saves must settle before releasing the single-writer capability.
       while (this.busy) await new Promise((resolve) => setTimeout(resolve, 10));
+      // Derived asset facts are written while the lock is still held (ADR 0010); failures never block closing.
+      await AssetFacts.release(this.book.folder).catch(() => {});
       try { await this.unlockProject?.(); }
       finally {
         this.unlockProject = undefined;

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
 import { testBook } from './ui-actions.mjs';
+import { bookStateFile } from './book-state.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build/quit-smoke-'));
@@ -38,7 +39,7 @@ async function scenario(name, operation) {
       await trigger();
       const [code] = await exited;
       assert.equal(code, 0);
-      await assert.rejects(stat(join(folder, '.imageflow/writer.lock')), { code: 'ENOENT' });
+      await assert.rejects(stat(await bookStateFile(join(work, name + '-profile'), folder, 'writer.lock')), { code: 'ENOENT' });
     };
     await operation({ instance, page, folder, id, exit });
     console.log(name + ' passed');
@@ -70,16 +71,17 @@ try {
     await exit();
   });
   await scenario('failed-field-save-recovery', async ({ instance, page, folder, exit }) => {
-    await instance.evaluate((_, folder) => {
+    const journal = await bookStateFile(join(work, 'failed-field-save-recovery-profile'), folder, 'pending-save.json');
+    await instance.evaluate((_, journal) => {
       const fs = process.getBuiltinModule('node:fs/promises'), link = fs.link;
       fs.link = async (...args) => {
-        if (args[1] === folder + '/.imageflow/persistence/pending-save.json') {
+        if (args[1] === journal) {
           fs.link = link;
           throw new Error('Simulated save failure');
         }
         return link(...args);
       };
-    }, folder);
+    }, journal);
     await page.evaluate(() => { globalThis.quitMessages = []; window.imageflow.onAppError((message) => globalThis.quitMessages.push(message)); });
     const heading = page.getByRole('textbox', { name: 'Heading', exact: true });
     await heading.fill('Retry after failure');
@@ -100,17 +102,18 @@ try {
   });
   await scenario('slow-healthy-save', async ({ instance, page, folder, exit }) => {
     // A save that outlasts the acknowledgement window must finish without a "not responding" question.
-    await instance.evaluate(({ dialog }, folder) => {
+    const journal = await bookStateFile(join(work, 'slow-healthy-save-profile'), folder, 'pending-save.json');
+    await instance.evaluate(({ dialog }, journal) => {
       dialog.showMessageBox = async (_owner, options) => { throw new Error('Unexpected question: ' + options.message); };
       const fs = process.getBuiltinModule('node:fs/promises'), link = fs.link;
       fs.link = async (...args) => {
-        if (args[1] === folder + '/.imageflow/persistence/pending-save.json') {
+        if (args[1] === journal) {
           fs.link = link;
           await new Promise((resolve) => setTimeout(resolve, 12000));
         }
         return link(...args);
       };
-    }, folder);
+    }, journal);
     await page.getByRole('textbox', { name: 'Heading', exact: true }).fill('Saved slowly');
     await exit();
     assert.equal(JSON.parse(await readFile(join(folder, 'project.json'), 'utf8')).spreads[0].params.heading, 'Saved slowly');

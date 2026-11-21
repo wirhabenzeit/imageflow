@@ -6,7 +6,7 @@ import { join, relative, resolve, sep } from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { loadProject } from '../desktop/project';
-import { configureSourceStore } from '../desktop/source-store';
+import { configureSourceStore, SourceStore } from '../desktop/source-store';
 import { bookFormatVersion, projectSchema } from '../src/project';
 
 // The compatibility books (tests/compat/README.md) keep opening with the current app without being rewritten.
@@ -32,9 +32,10 @@ async function contents(folder: string) {
 
 async function copy(t: TestContext, name: string) {
   const work = await realpath(await mkdtemp(join(tmpdir(), 'imageflow-compat-')));
-  t.after(() => rm(work, { recursive: true, force: true }));
-  configureSourceStore(join(work, 'source-cache'));
   const folder = join(work, name);
+  // Background digests of the photos keep writing the source registry; let them finish before removing it.
+  t.after(async () => { await SourceStore.drain(); await SourceStore.release(folder); await rm(work, { recursive: true, force: true }); });
+  configureSourceStore(join(work, 'source-cache'));
   await cp(join(books, name), folder, { recursive: true });
   return { folder, cache: join(work, 'cache') };
 }
