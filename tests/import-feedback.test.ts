@@ -12,3 +12,8 @@ test('unsupported, unreadable, and empty selections have distinct explanations',
   assert.equal(importFeedback(0, { ...empty, failed: 1 }), 'No files imported. 1 unreadable or invalid file skipped.');
   assert.match(importFeedback(0, empty), /No files found.*hidden files are ignored/);
 });
+
+test('files already in the book are counted, not imported again (F-044)', () => {
+  assert.equal(importFeedback(216, { ...empty, photos: 53, existing: 163 }), 'Imported 53 photos; 163 files are already in this book.');
+  assert.equal(importFeedback(1, { ...empty, existing: 1 }), '1 file is already in this book; nothing new to import.');
+});

@@ -11,7 +11,7 @@ import type { AuthoringDiagnostic } from '../src/authoring';
 import { boxBase, parseDocument, photoIndexSchema, projectSchema, unsupportedBookMessage } from '../src/project';
 import type { FixtureMarking, PhotoIndex, Project, ProjectFile, ProjectFiles, RenderProject } from '../src/project';
 import { renderOrigin } from '../src/desktop';
-import type { ImportRequest, ProjectSummary } from '../src/desktop';
+import type { ImportCounts, ImportRequest, ProjectSummary } from '../src/desktop';
 import { importPhotoDetails, photoDetails, photoExtensions } from './photos';
 import { renditionCacheFor } from './rendition-cache';
 import { photoDate } from './capture-time';
@@ -369,7 +369,7 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
   if (mode !== 'copy' && mode !== 'link') throw new Error('Unknown import mode.');
   const imported: string[] = [];
   const copied: string[] = [];
-  const counts = { photos: 0, texts: 0, files: 0, skipped: 0, failed: 0 };
+  const counts: ImportCounts = { photos: 0, texts: 0, files: 0, skipped: 0, failed: 0 };
   const createdDirectories: string[] = [];
   const prepare = async (folder: string) => {
     const destination = join(book.folder, folder);
@@ -408,17 +408,39 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
     }
   }));
   const approvals: { key: string; kind: 'photo' | 'markdown' | 'file'; path: string; linked: true }[] = [];
+  // What the book holds already (F-044): a file it links, or whose copy it stores, by path, or with the same bytes
+  // elsewhere, is reported as already in the book rather than added again. Under the book's import policy that holds
+  // whether the source is linked or copied; a copy or link asked for explicitly may add the other kind of source.
+  type Held = { kind: 'photo' | 'markdown' | 'file'; id: string; path: string; linked: boolean };
+  const held: Held[] = [
+    ...Object.entries(photoIndex).map(([id, photo]) => ({ kind: 'photo' as const, id, linked: !!photo.linked, path: photo.linked ? photo.path : join(book.folder, photo.path) })),
+    ...Object.entries(project.texts).map(([id, ref]) => ({ kind: 'markdown' as const, id, linked: sourceLinked(ref), path: sourceLinked(ref) ? sourcePath(ref) : join(book.folder, sourcePath(ref)) })),
+    ...Object.entries(project.files).map(([id, ref]) => ({ kind: 'file' as const, id, linked: sourceLinked(ref), path: sourceLinked(ref) ? sourcePath(ref) : join(book.folder, sourcePath(ref)) })),
+  ];
+  const sizes = new Map<string, Promise<number | undefined>>();
+  const digests = new Map<string, Promise<string | undefined>>();
+  const sizeOf = (path: string) => sizes.get(path) ?? sizes.set(path, stat(path).then((info) => info.isFile() ? info.size : undefined, () => undefined)).get(path)!;
+  const digestOf = (path: string) => digests.get(path) ?? digests.set(path, readFile(path).then(digestBytes, () => undefined)).get(path)!;
+  async function alreadyHeld(kind: Held['kind'], file: string, original: string, size: number) {
+    const same = held.filter((entry) => entry.kind === kind && (!request.mode || entry.linked === (mode === 'link') || isInside(book.folder, file)));
+    const byPath = same.find(({ path }) => path === file || path === original);
+    if (byPath) return byPath.id;
+    for (const entry of same) {
+      if (await sizeOf(entry.path) !== size) continue;
+      const digest = await digestOf(original);
+      if (digest && await digestOf(entry.path) === digest) return entry.id;
+    }
+  }
   try {
     for (const entry of checked) {
       if (entry === 'skipped' || entry === 'failed') { counts[entry]++; continue; }
       const { file, kind, info } = entry;
       const folder = kind === 'photo' ? 'photos' : kind === 'file' ? 'files' : 'texts';
       const registry = kind === 'file' ? project.files : project.texts;
-      const previous = kind === 'photo'
-        ? Object.entries(photoIndex).find(([, photo]) => (!!photo.linked === (mode === 'link') || isInside(book.folder, file)) && (photo.linked ? photo.path : join(book.folder, photo.path)) === file)?.[0]
-        : Object.entries(registry).find(([, ref]) => (sourceLinked(ref) === (mode === 'link') || isInside(book.folder, file)) && (sourceLinked(ref) ? sourcePath(ref) : join(book.folder, sourcePath(ref))) === file)?.[0];
+      const previous = await alreadyHeld(kind, file, await realpath(file), info.size);
       if (previous) {
-        if (kind === 'photo') counts.photos++; else if (kind === 'markdown') counts.texts++; else counts.files++;
+        counts.existing = (counts.existing ?? 0) + 1;
+        // One ID per file, in order: an agent's import maps them to the paths it asked for.
         imported.push(previous);
         continue;
       }
@@ -436,10 +458,12 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
       else registry[id] = linked ? { path: original, linked: true } : relativePath;
       if (kind === 'photo') counts.photos++; else if (kind === 'markdown') counts.texts++; else counts.files++;
       imported.push(id);
+      held.push({ kind, id, linked, path: linked ? original : path });
     }
     // Links are approved before the book refers to them, all in one write.
     await approveSources(book.folder, approvals, request.accept);
-    if (!imported.length) return { book, imported, copied, createdDirectories, counts };
+    // Nothing new, and nothing to place: the book is unchanged.
+    if (!imported.length || (!request.target && !(counts.photos + counts.texts + counts.files))) return { book, imported, copied, createdDirectories, counts };
     if (request.target && request.kind && request.kind !== 'file') {
       const spread = scopeSpread(project.spreads.find(({ id }) => id === request.target?.spread), request.target.page);
       if (!spread) throw new Error('The selected spread no longer exists.');

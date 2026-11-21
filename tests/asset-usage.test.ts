@@ -75,3 +75,15 @@ test('the template\'s file parameters decide which file types can be imported', 
   assert.equal(usageLabel('4–5'), 'Pages 4–5');
   assert.equal(usageLabel('Book settings'), 'Book settings');
 });
+
+test('a missing photo offers Locate… and Locate Folder…, which finds every missing asset in the folder (F-045)', () => {
+  const summary: ProjectSummary = { id: 'book', folder: 'Book', photos: {}, photoSizes: {}, texts: {},
+    photoIndex: { a: { path: '/elsewhere/a.jpg', linked: true }, b: { path: '/elsewhere/b.jpg', linked: true } },
+    sources: { 'photo:a': { state: 'unapproved' }, 'photo:b': { state: 'unapproved' } },
+    project: projectSchema.parse({ schemaVersion: 1, title: 'Book', template: { id: 't', version: '1' }, spreads: [] }) } as unknown as ProjectSummary;
+  const commands = (keys: string[]) => assetMenu(summary, keys).flatMap((item) => typeof item === 'object' && 'command' in item ? [item.command] : []);
+  assert.ok(commands(['photo:a']).includes('asset-locate'));
+  assert.ok(commands(['photo:a']).includes('asset-locate-folder'));
+  assert.ok(!commands(['photo:a', 'photo:b']).includes('asset-locate'));
+  assert.ok(commands(['photo:a', 'photo:b']).includes('asset-locate-folder'));
+});

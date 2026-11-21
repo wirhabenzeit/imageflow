@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { excerpt, textChoices, words } from '../src/source-items';
+import { excerpt, textChoices, textMenuChoices, words } from '../src/source-items';
+import { projectSchema } from '../src/project';
 import { sourceFileName, storedFileName } from '../src/source-locations';
 
 const summary = (texts: Record<string, string | { path: string; linked: true }>) => ({ project: { texts } }) as unknown as Parameters<typeof textChoices>[0];
@@ -43,4 +44,17 @@ test('stored file names keep umlauts, also when macOS hands them over decomposed
   assert.equal(storedFileName('Café crème.md'), 'Café crème.md');
   assert.equal(storedFileName('a/b:c?.gpx'), 'a-b-c-.gpx');
   assert.equal(storedFileName('क्षेत्र.md'), 'क्षेत्र.md', 'scripts with marks that do not compose keep them');
+});
+
+test('the text box menu names texts by heading and date, not by file name (F-043)', () => {
+  const project = projectSchema.parse({ schemaVersion: 1, title: 'Book', template: { id: 't', version: '1' }, spreads: [],
+    texts: { a: 'texts/tx-aaaaaaaa-aaa-Bishkek.md', b: 'notes/Bishkek.md', c: 'texts/tx-cccccccc-ccc-Plain.md', d: 'texts/tx-dddddddd-ddd-Gone.md' } });
+  const texts = {
+    a: '---\ntitle: "Nachtflug nach Bishkek"\ndate: 2026-08-15\n---\n\nText.',
+    b: '# Bishkek\n\nBack in town.',
+    c: 'Just a paragraph.',
+  };
+  assert.deepEqual(textMenuChoices({ project, texts }).map(({ title }) => title),
+    ['Nachtflug nach Bishkek · 15 Aug', 'Bishkek', 'Plain.md', 'Gone.md']);
+  assert.equal(textMenuChoices({ project, texts })[0].file, 'Bishkek.md — texts');
 });

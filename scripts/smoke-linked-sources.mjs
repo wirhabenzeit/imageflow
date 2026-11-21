@@ -20,7 +20,8 @@ const text = join(external, 'Story.md');
 const file = join(external, 'Route.gpx');
 await sharp({ create: { width: 3200, height: 2400, channels: 3, background: '#275a48' } }).png().toFile(photo);
 await writeFile(text, '# Linked story\n\nWords from outside the book.');
-await cp(join(root, 'sample/starter/files/senja-road.gpx'), file);
+// Not byte for byte the book's own track, which an import would recognise as already in the book (F-044).
+await writeFile(file, (await readFile(join(root, 'sample/starter/files/senja-road.gpx'), 'utf8')) + '\n<!-- linked -->\n');
 const packaged = process.argv.includes('--packaged');
 const app = await _electron.launch({ executablePath: packaged ? packagedMacExecutable(root) : electron, args: [...(packaged ? [] : [join(root, '.build/desktop')]), '--user-data-dir=' + join(work, 'profile')], env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 const stderr = [];
@@ -177,7 +178,9 @@ try {
   await reload(page);
   // An unavailable unused library original is a warning, not a reason to block printing.
   const unused = join(external, 'Unused.png');
-  await writeFile(unused, photoBytes);
+  // Another picture than the linked one, which an import would recognise as already in the book (F-044).
+  const unusedBytes = await sharp({ create: { width: 320, height: 240, channels: 3, background: '#5a4827' } }).png().toBuffer();
+  await writeFile(unused, unusedBytes);
   const unusedImport = await page.evaluate(async (path) => {
     const { value } = await window.imageflow.currentProject();
     return window.imageflow.importFiles(value.id, { kind: 'photo', mode: 'link', paths: [path] });
@@ -193,7 +196,7 @@ try {
   assert.ok(printable.value, JSON.stringify(printable));
   assert.deepEqual(printable.value.errors, [], 'An unused missing original does not introduce export errors');
   await stat(unusedPrint);
-  await writeFile(unused, photoBytes);
+  await writeFile(unused, unusedBytes);
   // Verify that the open editor renders the restored revision through its file watcher.
   await waitForPage(page, async (id) => {
     const { value } = await window.imageflow.currentProject();
@@ -247,7 +250,7 @@ try {
   });
   await unapprovedRow.click({ button: 'right' });
   await accessWindow.waitForFunction(() => !document.querySelector('[data-source="file:notchosen"]')?.textContent.includes('Locate to approve'));
-  assert.deepEqual(await app.evaluate(() => globalThis.assetMenuLabels), ['Quick Look', 'Choose Files in a Spread’s Settings', 'Rename… (Copy into Book First)', '', 'Show in Finder', 'Locate…', 'Copy into Book', '', 'Remove from Book']);
+  assert.deepEqual(await app.evaluate(() => globalThis.assetMenuLabels), ['Quick Look', 'Choose Files in a Spread’s Settings', 'Rename… (Copy into Book First)', '', 'Show in Finder', 'Locate…', 'Locate Folder…', 'Copy into Book', '', 'Remove from Book']);
   assert.deepEqual((await current(page)).history, historyBeforeLocate, 'Locate does not add an empty Undo step');
   await accessWindow.close();
   // Locate publishes a new revision to the open book. Verify that very frame can read the approved file.

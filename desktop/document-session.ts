@@ -531,10 +531,13 @@ export class DocumentSession {
         try {
           notify({ building: true });
           const next = await loadProject(folder, this.cache).then((book) => ({ book }), (error: unknown) => ({ error: errorMessage(error) }));
-          if (!watching() || this.active !== current) return;
-          if (this.observedChanges.size) {
-            // A newer edit arrived during the build. The debounced reload will read it and resolve the building state.
+          if (!watching()) return;
+          // The editor was told the book is building, so the build must end with a revision or an error. A revision
+          // published meanwhile (for example once network access was updated) did not see these files: read them again.
+          if (this.active !== current || this.observedChanges.size) {
+            // A newer edit arrived during the build. The debounced reload reads it and resolves the building state.
             for (const [i, file] of files.entries()) if (external[i]) this.observedChanges.add(file);
+            scheduleReload(250);
             return;
           }
           for (const [i, file] of files.entries()) if (external[i]) this.importedWrites.delete(file);
@@ -635,10 +638,12 @@ export class DocumentSession {
       const path = relative(book.folder, file);
       this.importedWrites.set(path, await fingerprint(file), this.observedChanges.has(path));
     }
-    if (!imported.length) return { summary: this.summary, imported, counts };
+    if (!imported.length || next === book) return { summary: this.summary, imported, counts };
     if (owner.isDestroyed()) return null;
     this.projectSession!.adoptExternal(book);
-    this.projectSession!.record(next, 'Import sources', !!request.target);
+    // One Undo step removes what the import added, and what it placed in a box (F-044). Copied files stay in the book
+    // for Redo, as when assets are removed; sources the book already held are kept.
+    this.projectSession!.record(next, 'Import sources', true, false);
     return { summary: this.activate(next), imported, counts };
   }
 

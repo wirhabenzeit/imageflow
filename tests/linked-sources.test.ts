@@ -593,6 +593,44 @@ test('a file stored in the book is renamed in place, keeping its ID, extension a
   assert.equal(await readFile(join(outside, id + '-stage 05- song kul.gpx'), 'utf8'), '<gpx><trk/></gpx>');
 });
 
+test('importing photos the book already holds, linked or copied, adds nothing under the book’s policy (F-044)', async (t) => {
+  const f = await fixture(t);
+  // The book copies by default; its photo was linked explicitly earlier.
+  const linked = await importIntoProject(f.book, { kind: 'photo', mode: 'link' }, [f.photo]);
+  const again = await importIntoProject(linked.book, { kind: 'photo' }, [f.photo]);
+  assert.equal(again.book, linked.book, 'Nothing changes');
+  assert.deepEqual(again.imported, linked.imported);
+  assert.equal(again.counts.existing, 1);
+  assert.equal(again.counts.photos, 0);
+  assert.equal(again.copied.length, 0);
+  // A copied photo is recognised by its bytes, wherever the original is now; new photos in the same import are added.
+  const other = join(f.external, 'other.png');
+  await sharp({ create: { width: 90, height: 60, channels: 3, background: '#00ff00' } }).png().toFile(other);
+  const copied = await importIntoProject(linked.book, { kind: 'photo', mode: 'copy' }, [other]);
+  const moved = join(f.external, 'moved'); await mkdir(moved);
+  await cp(other, join(moved, 'other.png'));
+  const fresh = join(f.external, 'fresh.png');
+  await sharp({ create: { width: 70, height: 50, channels: 3, background: '#0000ff' } }).png().toFile(fresh);
+  const mixed = await importIntoProject(copied.book, { kind: 'photo' }, [join(moved, 'other.png'), f.photo, fresh]);
+  assert.equal(mixed.counts.existing, 2);
+  assert.equal(mixed.counts.photos, 1);
+  assert.deepEqual(mixed.imported.slice(0, 2), [copied.imported[0], linked.imported[0]]);
+  assert.equal(Object.keys(mixed.book.photoIndex).length, Object.keys(copied.book.photoIndex).length + 1);
+});
+
+test('an import is one Undo step that removes the sources it added (F-044)', async (t) => {
+  const f = await fixture(t);
+  const session = new ProjectSession(f.book);
+  t.after(() => session.close());
+  const added = await importIntoProject(f.book, { kind: 'photo' }, [f.photo]);
+  session.record(added.book, 'Import sources', true, false);
+  assert.equal(session.history.undo, 'Import sources');
+  const undone = await session.undo('undo');
+  assert.equal(undone.photoIndex[added.imported[0]], undefined);
+  const redone = await session.undo('redo');
+  assert.ok(redone.photoIndex[added.imported[0]]);
+});
+
 // assets-meta.json (ADR 0010): derived facts that live outside the save journal, ledger and portable revision.
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 async function writable(t: { after: (fn: () => Promise<void>) => void }, f: { folder: string }) {
