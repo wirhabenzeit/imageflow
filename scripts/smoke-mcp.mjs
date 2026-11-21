@@ -77,7 +77,7 @@ try {
   assert.match((await window.evaluate(()=>window.imageflow.installMcp('claude'))).error,/only available to Settings/);
   await closeSettings(app);
   const tools = await client.listTools();
-  assert.deepEqual(tools.tools.map(t=>t.name).sort(),['apply_project_changes','check_book','get_authoring_context','import_sources','inspect_book','list_book_checkpoints','list_projects','list_templates','rebuild_dependencies','save_template_to_library'].sort());
+  assert.deepEqual(tools.tools.map(t=>t.name).sort(),['apply_project_changes','check_book','get_authoring_context','import_sources','inspect_book','list_book_checkpoints','list_projects','list_templates','rebuild_dependencies','rename_source','save_template_to_library'].sort());
   const call = async(name,args={}) => {
     const response=await client.callTool({name,arguments:args},{timeout:110000});
     return {response,data:response.structuredContent ?? JSON.parse(response.content.find(c=>c.type==='text').text)};

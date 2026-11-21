@@ -11,7 +11,7 @@ import { loadProject } from '../desktop/project';
 import type { OpenProject } from '../desktop/project';
 import { ProjectSession } from '../desktop/project-session';
 import { captureProjectInputs } from '../desktop/revisions';
-import { saveDocumentCopy } from '../desktop/source-actions';
+import { renameSource, saveDocumentCopy } from '../desktop/source-actions';
 import type { RenderStatus } from '../src/desktop';
 import { mm } from '../src/format';
 import { p } from '../src/parameters';
@@ -61,6 +61,11 @@ async function open(t: TestContext, folder: string, cache: string, client = { na
     session: () => session, cache, docs: resolve('docs'),
     check: (book, request, signal, index, draft) => checkProject(book, cache, request, async () => ({ status }), signal, index, undefined, draft),
     changed: () => {}, recovery: () => {}, import: async () => assert.fail('No imports in this test.'),
+    rename: async (key, name, base, checkpoint) => {
+      const next = await renameSource(base, key, name, checkpoint);
+      if (next !== base) session.record(next, 'Source location changed', false);
+      return next;
+    },
   });
   const call = (name: string, args: Record<string, unknown> = {}) =>
     service(name, { project: session.handle, ...args }, new AbortController().signal, client).then((result) => checkedOutput(name, result));
@@ -114,6 +119,29 @@ test('a committed agent batch is found and replayed by its key after the reply i
     (error: { code?: string }) => error.code === 'IDEMPOTENCY_CONFLICT');
   await assert.rejects(second.call('import_sources', { expectedRevision, idempotencyKey: 'add-chapter', kind: 'photo', paths: ['inbox/a.jpg'] }),
     (error: { code?: string }) => error.code === 'IDEMPOTENCY_CONFLICT');
+});
+
+test('rename_source renames a stored text, keeps its ID, records a checkpoint and replays by key', async (t) => {
+  const { folder, cache } = await book(t);
+  await mkdir(join(folder, 'texts'));
+  await writeFile(join(folder, 'texts/tx-0123456789ab-So-ng Kul.md'), '# Day 3\n');
+  await writeFile(join(folder, 'project.json'), JSON.stringify({ ...saved, texts: { 'tx-0123456789ab': 'texts/tx-0123456789ab-So-ng Kul.md' } }));
+  const agent = await open(t, folder, cache);
+  const expectedRevision = await agent.revision();
+  const request = { expectedRevision, idempotencyKey: 'rename-day-3', source: 'tx-0123456789ab', name: 'Song-Kul' };
+  const renamed = await agent.call('rename_source', request);
+  assert.equal(renamed.committed, true);
+  assert.deepEqual(renamed.source, { id: 'tx-0123456789ab', kind: 'markdown', path: 'texts/tx-0123456789ab-Song-Kul.md' });
+  assert.deepEqual(await readdir(join(folder, 'texts')), ['tx-0123456789ab-Song-Kul.md']);
+  assert.equal(JSON.parse(await readFile(join(folder, 'project.json'), 'utf8')).texts['tx-0123456789ab'], 'texts/tx-0123456789ab-Song-Kul.md');
+  const [record] = (await agent.call('list_book_checkpoints', { idempotencyKey: 'rename-day-3' })).checkpoints as { label: string; mcp: { tool: string } }[];
+  assert.deepEqual([record.label, record.mcp.tool], ['Rename source', 'rename_source']);
+  // The same request again is answered from its receipt, and the same name changes nothing.
+  assert.equal((await agent.call('rename_source', request)).replayed, true);
+  const same = await agent.call('rename_source', { ...request, expectedRevision: renamed.revision, idempotencyKey: 'rename-again' });
+  assert.equal(same.committed, false);
+  await assert.rejects(agent.call('rename_source', { ...request, expectedRevision: renamed.revision, idempotencyKey: 'rename-missing', source: 'tx-missing' }),
+    (error: { code?: string }) => error.code === 'SOURCE_NOT_FOUND');
 });
 
 test('dry runs, no-op batches and failures before commit add no checkpoints', async (t) => {

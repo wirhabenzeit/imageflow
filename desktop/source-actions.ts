@@ -12,6 +12,7 @@ import { readAssetFacts } from './asset-facts';
 import { loadProject, updateProject } from './project';
 import type { OpenProject } from './project';
 import { CommittedProjectSaveError } from './persistence';
+import type { SaveCheckpoint } from './persistence';
 import { captureProjectInputs } from './revisions';
 import { digestBytes, originalPath, SourceStore, within } from './source-store';
 import { approveSource, approvedExtensions, transferSourceAccess, transferBookTrust } from './source-access';
@@ -45,7 +46,8 @@ const storedPrefix = /^(?:ph|tx|fl)-[a-f0-9-]{12}-/;
  * working. Not undoable, like other changes of a source's location; Undo and Revert keep the current paths. A linked
  * original is never renamed, and a photo is named by its title.
  */
-export async function renameSource(book: OpenProject, key: string, requested: unknown) {
+export async function renameSource(book: OpenProject, key: string, requested: unknown,
+  checkpoint: SaveCheckpoint = { origin: 'app', label: 'Rename asset' }) {
   const source = sourceEntries(book).find((entry) => entry.key === key);
   if (!source) throw new Error('This asset is no longer in the book.');
   if (source.kind === 'photo') throw new Error('A photo is named by its title. Change the title in the Inspector.');
@@ -80,7 +82,7 @@ export async function renameSource(book: OpenProject, key: string, requested: un
   await rename(from, to);
   const files = filesOf(book);
   reference(files, source, relative, false);
-  try { return await updateProject(book, files, true, { origin: 'app', label: 'Rename asset' }); }
+  try { return await updateProject(book, files, true, checkpoint); }
   catch (error) {
     if (!(error instanceof CommittedProjectSaveError)) await rename(to, from).catch(() => {});
     throw error;

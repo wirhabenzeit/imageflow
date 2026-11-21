@@ -1,12 +1,14 @@
 import type { PageSide } from './project';
 import { controlCycles, controlsSchema } from './controls';
+import type { ControlItem } from './controls';
 import type { Parameters } from './parameters';
 
 // Findings about a template declaration that the schema accepts but that are probably mistakes. They are warnings,
 // not errors, so a contract-1 template that loaded before keeps loading. The authoring types reject the same
 // mistakes at compile time; this covers untyped templates and spreads typed separately with spreadFor().
 export type DeclarationWarning = {
-  code: 'declaration-unknown-property' | 'declaration-document-mismatch' | 'declaration-control-cycle' | 'declaration-span-unused' | 'declaration-ends-missing';
+  code: 'declaration-unknown-property' | 'declaration-document-mismatch' | 'declaration-control-cycle' | 'declaration-control-missing'
+    | 'declaration-span-unused' | 'declaration-ends-missing';
   message: string; path: string; details: Record<string, string>; suggestion: string;
 };
 
@@ -121,6 +123,7 @@ export function declarationWarnings(declared: unknown, schema: Schema): Declarat
   unknownKeys(declared, schema, [], found);
   if (plain(declared)) documentMismatches(declared, found);
   if (plain(declared)) controlCycleWarnings(declared, found);
+  if (plain(declared)) missingControlWarnings(declared, found);
   if (plain(declared)) spanWarnings(declared, found);
   // A misspelling repeated in many layouts is reported for each; cap the list like schema errors.
   return found.slice(0, 50);
@@ -203,19 +206,49 @@ function controlCycleWarnings(declared: Record<string, unknown>, found: Declarat
   }
 }
 
+// Document parameters that an arranged `controls` list leaves out get no control in Book settings, which is easy to miss
+// when adding a setting (beta finding LOG-062). Only a non-empty list counts: an empty one deliberately shows no
+// generated controls. Parameters a document editor owns have their control in the editor. `details.edit` lets the
+// Book check drop the warning when a spread marks the parameter on the page (placeControlWarnings).
+function missingControlWarnings(declared: Record<string, unknown>, found: DeclarationWarning[]) {
+  if (!plain(declared.parameters)) return;
+  const controls = controlsSchema.safeParse(declared.controls);
+  if (!controls.success || !controls.data?.length) return;
+  const listed = new Set<string>();
+  const walk = (items: ControlItem[]) => {
+    for (const item of items) {
+      if (typeof item === 'string') listed.add(item);
+      else if ('group' in item) walk(item.controls);
+      else listed.add(item.parameter);
+    }
+  };
+  walk(controls.data);
+  const owned = new Set(Object.values(plain(declared.editors) ? declared.editors : {})
+    .flatMap((editor) => plain(editor) && Array.isArray(editor.parameters) ? editor.parameters.filter((key): key is string => typeof key === 'string') : []));
+  for (const key of Object.keys(declared.parameters)) {
+    if (listed.has(key) || owned.has(key)) continue;
+    found.push({
+      code: 'declaration-control-missing', path: 'controls',
+      message: 'Book settings: document parameter ' + key + ' is not in the template\'s controls, so it has no control in Book settings.',
+      details: { parameter: key, controls: key, layout: '', edit: 'document.' },
+      suggestion: 'Add ' + key + ' to controls, or mark it on the page with ctx.edit or ctx.Text as document.' + key + '. Leave it out only when the user should not change it.',
+    });
+  }
+}
+
 // Where control-cycle warnings apply in a rendered book. A layout (spread) parameter is reachable on a spread that
 // marks it on the page (ctx.edit, ctx.Text), since a marked node's popover always shows layout parameters; whether a
 // spread marks it can depend on its own values, so this is decided per spread, not per layout. A cycle among layout
 // parameters is therefore reported once for each spread using the layout that marks none of them, located on that
 // spread, and not at all when every such spread marks one. Box and element parameters follow the same `controls` and
 // conditions in a marked node's popover, so marking them opens no way back: those warnings, and warnings about
-// layouts no spread uses, stay as they are. A cycle among document parameters is dropped when any spread marks one of
-// them as `document.<id>`, since that node's popover shows it from any page.
+// layouts no spread uses, stay as they are. A cycle among document parameters, or a document parameter missing from
+// `controls`, is dropped when any spread marks one of them as `document.<id>`, since that node's popover shows it from any page.
 export type RenderedSpread = { spread: string; page?: PageSide; layout: string; marked: ReadonlySet<string> };
 export function placeControlWarnings(warnings: DeclarationWarning[], rendered: RenderedSpread[]): (DeclarationWarning & { spread?: string; page?: PageSide })[] {
   return warnings.flatMap((warning) => {
     const { code, details } = warning;
-    if (code === 'declaration-control-cycle' && details.edit === 'document.') {
+    if ((code === 'declaration-control-cycle' || code === 'declaration-control-missing') && details.edit === 'document.') {
       const keys = details.controls.split(', ').map((key) => 'document.' + key);
       return rendered.some(({ marked }) => keys.some((key) => marked.has(key))) ? [] : [warning];
     }

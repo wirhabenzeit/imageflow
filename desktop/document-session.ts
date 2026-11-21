@@ -34,7 +34,7 @@ import type { McpClientSession } from './mcp-connection';
 import { AuthoringQueue } from './authoring-queue';
 import { authoringErrorResult } from './authoring-errors';
 import { ImportReceipts } from './import-receipts';
-import { saveDocumentCopy } from './source-actions';
+import { renameSource, saveDocumentCopy } from './source-actions';
 import { rebuildTemplateDependencies } from './dependency-install';
 import type { DependencyRebuild } from './dependency-install';
 import { AssetFacts } from './asset-facts';
@@ -203,6 +203,12 @@ export class DocumentSession {
         const result = await this.importFiles(this.window, this.active.id, { ...request, paths }, base, false, checkpoint);
         if (!result) throw new AuthoringError('PROJECT_CLOSED', 'The book closed before import completed.');
         return { imported: result.imported };
+      },
+      // As Rename… in the Assets panel: a change of the source's location, not an Undo step.
+      rename: async (key, name, base, checkpoint) => {
+        const next = await renameSource(base, key, name, checkpoint);
+        if (next !== base) this.projectSession!.record(next, 'Source location changed', false);
+        return next;
       },
     });
     this.guardNavigation(window);
@@ -502,10 +508,10 @@ export class DocumentSession {
     try {
       return await this.queue.run(async (queuedSignal) => {
         requestSignal = queuedSignal;
-        const mutation = (name === 'apply_project_changes' && args.dryRun !== true) || name === 'import_sources';
+        const mutation = (name === 'apply_project_changes' && args.dryRun !== true) || name === 'import_sources' || name === 'rename_source';
         let locked = false;
         try {
-          if (mutation) await this.agentLease(queuedSignal, agentFootprint(name, args), name === 'import_sources');
+          if (mutation) await this.agentLease(queuedSignal, agentFootprint(name, args), name === 'import_sources' || name === 'rename_source');
           queuedSignal.throwIfAborted();
           if (mutation) {
             if (this.busy) throw new AuthoringError('EDIT_IN_PROGRESS', 'An editor operation started. Let it finish, then retry.');
@@ -1019,7 +1025,7 @@ export class DocumentSession {
         const field = reply.field ? ' for ' + reply.field : '';
         const cover = reply.spread === coverInstance;
         const location = cover ? ' on the cover' : reply.spread ? ' on spread ' + reply.spread + (reply.page ? ' (' + reply.page + ' page)' : '') : '';
-        // An import is always book-wide, so no narrower change would have saved in its place.
+        // An import or a rename is always book-wide, so no narrower change would have saved in its place.
         const meanwhile = reply.spread && reply.label !== 'crop editor' && !wholeBook
           ? 'Changes that leave ' + (cover ? 'the cover' : reply.page ? 'that page' : 'that spread') + ' and book-wide settings alone (no title, format, document parameters, photo metadata, or inserting, moving or removing spreads) can be saved meanwhile.'
           : 'Nothing can be saved while it is open.';

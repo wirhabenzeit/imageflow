@@ -27,6 +27,17 @@ export const mapParameters = {
     },
     max: 12,
   }),
+  // The base map names each country at one point, which is often outside a regional map (OpenMapTiles): China,
+  // Kazakhstan and Uzbekistan go unnamed beside Kyrgyzstan. These name a country where the map should show it.
+  countries: p.list({
+    label: 'Country names',
+    item: {
+      name: p.string({ label: 'Name', default: '', maxLength: 40, placeholder: 'China' }),
+      longitude: p.number({ label: 'Longitude', default: 0, min: -180, max: 180, step: .00001 }),
+      latitude: p.number({ label: 'Latitude', default: 0, min: -85, max: 85, step: .00001 }),
+    },
+    max: 12,
+  }),
   style: p.enum({ label: 'Map style', default: 'book', options: mapStyles }),
   longitude: p.number({ label: 'Longitude', default: 17.75, min: -180, max: 180, step: .00001 }),
   latitude: p.number({ label: 'Latitude', default: 69.35, min: -85, max: 85, step: .00001 }),
@@ -39,7 +50,10 @@ export const insetMapParameters = { ...mapParameters, style: p.enum({ label: 'Ma
 // The editor owns the view; the tracks, style and line width are the element's generated controls.
 export const mapEditorParameters = ['longitude', 'latitude', 'zoom'] as const;
 type Track = { id: string; track: string; colour: string; label: string };
-type MapValues = { tracks: Track[]; style: MapStyle; longitude: number; latitude: number; zoom: number };
+type Country = { id: string; name: string; longitude: number; latitude: number };
+type MapValues = { tracks: Track[]; countries: Country[]; style: MapStyle; longitude: number; latitude: number; zoom: number };
+/** The country names the map sets itself, without unnamed items. */
+const namedCountries = (countries: Country[]) => countries.filter(({ name }) => name.trim());
 export type MapEditorProps = ElementEditorProps<typeof mapParameters, typeof mapEditorParameters[number]>;
 
 const cssPerMm = 96 / 25.4;
@@ -125,10 +139,10 @@ const labelRole = (stack: string[]) => {
  * set (fonts.settable): the fonts cover Latin and Cyrillic, letters lose marks the fonts lack (ş → s), and characters
  * they have no glyphs for, such as a Chinese or Arabic line of a name, are left out.
  */
-async function drawMap(style: MapStyle, view: View, signal: AbortSignal, places: Place[] = []) {
+async function drawMap(style: MapStyle, view: View, signal: AbortSignal, avoid: [number, number][] = []) {
   try {
     return await drawMapSvg({ maplibre: await loadMapLibre(), style: mapStyle(style), view, signal,
-      avoid: places.map(({ longitude, latitude }) => ({ at: [longitude, latitude] as [number, number], radius: placeRoom })),
+      avoid: avoid.map((at) => ({ at, radius: placeRoom })),
       // The Book style's colours as CSS variables, which the map element sets from the colour theme.
       color: mapColor(style),
       font: (stack) => ({ className: labelRole(stack).className }),
@@ -139,7 +153,7 @@ async function drawMap(style: MapStyle, view: View, signal: AbortSignal, places:
   }
 }
 
-/** The map as the page draws it: the map picture, the tracks over it in list order, and the places on top. */
+/** The map as the page draws it: the map picture, the tracks over it in list order, and the places and country names on top. */
 export function MapView({ values, trackWidth, rect, theme, className, Element, places = [] }: {
   values: MapValues; trackWidth: number; rect: Rect;
   // Marked with a dot and their name, such as the places of the story beside the map.
@@ -155,19 +169,29 @@ export function MapView({ values, trackWidth, rect, theme, className, Element, p
   const view = { longitude: values.longitude, latitude: values.latitude, zoom: values.zoom };
   // The drawn map and the tracks share one projection of the element's printed size.
   const project = projector({ ...view, width, height });
+  const countries = namedCountries(values.countries);
+  // Base map labels give way to the places and country names the page sets over the map.
+  const avoid = [...places, ...countries].map(({ longitude, latitude }) => [longitude, latitude] as [number, number]);
+  const inside = ({ longitude, latitude }: { longitude: number; latitude: number }) => {
+    const [x, y] = project([longitude, latitude]);
+    return x >= 0 && x <= width && y >= 0 && y <= height ? { left: (x / width * 100) + '%', top: (y / height * 100) + '%' } : undefined;
+  };
   return <Element id="map" className={'map' + (className ? ' ' + className : '')} rect={rect}>
     {/* The theme reaches the drawn map only through these CSS variables, so a theme change does not draw it again. */}
     <RenderedImage className="map-image" label="Map" output="vector" style={mapThemeColors(values.style, theme)}
-      inputs={{ style: values.style, ...view, width: rect.width, height: rect.height, avoid: places.map(({ longitude, latitude }) => [longitude, latitude]) }}
-      draw={(target) => drawMap(values.style, { ...view, width: target.width, height: target.height }, target.signal, places)} />
+      inputs={{ style: values.style, ...view, width: rect.width, height: rect.height, avoid }}
+      draw={(target) => drawMap(values.style, { ...view, width: target.width, height: target.height }, target.signal, avoid)} />
     {tracks.some(({ points }) => points) && <svg className="map-track" viewBox={'0 0 ' + width.toFixed(1) + ' ' + height.toFixed(1)} preserveAspectRatio="none" aria-label="Route">
       {tracks.map(({ id, points, colour, label }) => points && <polyline key={id} points={projectTrack(points, project)}
         style={{ stroke: colour, strokeWidth: trackWidth * cssPerMm }}>{label && <title>{label}</title>}</polyline>)}
     </svg>}
+    {countries.map((country) => {
+      const at = inside(country);
+      return at && <span key={country.id} className="map-country" style={at}>{country.name.trim()}</span>;
+    })}
     {places.map((place, i) => {
-      const [x, y] = project([place.longitude, place.latitude]);
-      return x >= 0 && x <= width && y >= 0 && y <= height &&
-        <span key={i} className="map-place" style={{ left: (x / width * 100) + '%', top: (y / height * 100) + '%' }}>{place.name}</span>;
+      const at = inside(place);
+      return at && <span key={i} className="map-place" style={at}>{place.name}</span>;
     })}
     {tracks.map(({ id, problem, track, label }, index) => problem && <span key={id} hidden {...issue({ code: 'gpx-invalid',
       message: 'Track ' + (index + 1) + (label ? ' (' + label + ')' : '') + ': ' + problem + ' The track is left out.',
@@ -204,14 +228,20 @@ export function MapEditor({ values, set, readOnly, context, document, presentati
   // The places of the story beside the map, where the page marks them, so the view can be framed around them.
   const { places } = placesBeside(context);
   const placed = React.useRef<{ remove(): void }[]>([]);
+  const countries = namedCountries(values.countries);
+  // The places and country names as markers, where the page sets them.
   const drawPlaces = (maplibregl: Awaited<ReturnType<typeof loadMapLibre>>, target: MapLibreMap) => {
     placed.current.forEach((marker) => marker.remove());
-    placed.current = places.map(({ name, longitude, latitude }) => {
+    const marker = (className: string, name: string, at: [number, number], anchor: 'top-left' | 'center') => {
       const element = window.document.createElement('span');
-      element.className = 'map-place map-place-editor';
+      element.className = className;
       element.textContent = name;
-      return new maplibregl.Marker({ element, anchor: 'top-left' }).setLngLat([longitude, latitude]).addTo(target);
-    });
+      return new maplibregl.Marker({ element, anchor }).setLngLat(at).addTo(target);
+    };
+    placed.current = [
+      ...countries.map(({ name, longitude, latitude }) => marker('map-country', name.trim(), [longitude, latitude], 'center')),
+      ...places.map(({ name, longitude, latitude }) => marker('map-place map-place-editor', name, [longitude, latitude], 'top-left')),
+    ];
   };
   const library = React.useRef<Awaited<ReturnType<typeof loadMapLibre>>>(undefined);
   // The editor map's CSS pixels per printed CSS pixel: 1 inline, where the frame has the printed size; less in the panel.
@@ -307,7 +337,7 @@ export function MapEditor({ values, set, readOnly, context, document, presentati
     current.jumpTo({ center: [latest.current.longitude, latest.current.latitude], zoom: editorZoom(latest.current.zoom) });
   }, [rect?.width, rect?.height]);
   React.useEffect(() => { if (map.current?.isStyleLoaded()) drawTrack(map.current); }, [JSON.stringify(values.tracks), values.trackWidth]);
-  React.useEffect(() => { if (map.current && library.current) drawPlaces(library.current, map.current); }, [JSON.stringify(places)]);
+  React.useEffect(() => { if (map.current && library.current) drawPlaces(library.current, map.current); }, [JSON.stringify(places), JSON.stringify(countries)]);
   React.useEffect(() => { map.current?.setStyle(mapStyle(values.style, theme)); }, [values.style, theme]);
   React.useEffect(() => {
     const button = holder.current?.querySelector<HTMLButtonElement>('.map-fit-track');

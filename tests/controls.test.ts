@@ -190,13 +190,31 @@ test('document controls arrange Book settings, are checked like other scopes and
   assert.equal(templateSchema.safeParse(declared(['show', 'track'], {})).success, true);
   // A cycle among document parameters warns, unless a spread marks one of them as document.<id>.
   const cyclic = declared([{ group: 'Options', when: { show: true }, controls: ['show', 'tilt'] }]);
-  const warnings = declarationWarnings(cyclic, templateSchema as unknown as Schema);
+  const warnings = declarationWarnings(cyclic, templateSchema as unknown as Schema).filter(({ code }) => code === 'declaration-control-cycle');
   assert.deepEqual(warnings.map(({ code, path, details }) => [code, path, details]),
     [['declaration-control-cycle', 'controls', { controls: 'show', layout: '', edit: 'document.' }]]);
   assert.match(warnings[0].message, /^Book settings: /);
   assert.match(warnings[0].suggestion, /mark it as editable on the page/);
   assert.deepEqual(placeControlWarnings(warnings, [{ spread: 'a', layout: 'main', marked: new Set(['show']) }]), warnings);
   assert.deepEqual(placeControlWarnings(warnings, [{ spread: 'a', layout: 'main', marked: new Set(['document.show']) }]), []);
+});
+
+test('a document parameter left out of a non-empty controls list warns, unless an editor owns it or a spread marks it', () => {
+  const declared = (controls: unknown) => ({ id: 't', version: '1', contract: 1, format, parameters, controls,
+    editors: { route: { parameters: ['track'], component: () => null } }, spreads: { main: { label: 'Main', render: () => null } } });
+  const missing = (controls: unknown) => declarationWarnings(declared(controls), templateSchema as unknown as Schema)
+    .filter(({ code }) => code === 'declaration-control-missing');
+  const warnings = missing(['show', { group: 'Stamp', controls: [{ parameter: 'text', label: 'Words' }, 'tilt'] }]);
+  assert.deepEqual(warnings.map(({ path, details }) => [path, details]),
+    [['controls', { parameter: 'kind', controls: 'kind', layout: '', edit: 'document.' }]]);
+  assert.match(warnings[0].message, /^Book settings: document parameter kind is not in/);
+  // No list, an empty list (no generated controls on purpose) or a complete one: nothing to say.
+  assert.deepEqual(missing(undefined), []);
+  assert.deepEqual(missing([]), []);
+  assert.deepEqual(missing(['show', 'kind', 'text', 'tilt']), []);
+  // Marked on the page as document.kind, the parameter is reachable there.
+  assert.deepEqual(placeControlWarnings(warnings, [{ spread: 'a', layout: 'main', marked: new Set(['kind']) }]), warnings);
+  assert.deepEqual(placeControlWarnings(warnings, [{ spread: 'a', layout: 'main', marked: new Set(['document.kind']) }]), []);
 });
 
 test('control cycles are attributed independently on pages sharing a layout', () => {
