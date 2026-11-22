@@ -22,6 +22,17 @@ The six signing secrets in [Mac signing and notarization](signing.md) must be co
 
    The **Packaged app** workflow runs on every push to `main`. It builds the app and runs the packaged smoke tests the release repeats after signing, so a break shows up when it merges, not when you tag. Before tagging, check that the run for the commit you will tag is green.
 
+   The same tests run again after signing, inside the release, and a failure there burns the version, because a tag can't be moved. To catch it first, run them on your Mac from the merged commit on `main`, with the Developer ID identity installed ([Local credentials](signing.md#local-credentials)):
+
+   ```sh
+   git switch main && git pull --ff-only
+   export APPLE_SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+   npm run package:mac
+   npm run test:packaged:existing
+   ```
+
+   This signs with the hardened runtime, as the release does, without notarizing, and runs the packaged smokes against that build. It needs Poppler (`brew install poppler`) and takes over the desktop for several minutes, so use a disposable account or VM if you work while it runs. A run on a fast Mac can pass where a slow CI runner fails; for a timing failure, see [Flaky tests](development/testing.md#flaky-tests).
+
 2. From the merged commit on `main`, create and push the matching tag:
 
    ```sh
