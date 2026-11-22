@@ -138,7 +138,7 @@ export const projectOperationSchema = z.discriminatedUnion('op', [
     caption: z.string().nullable().optional().describe('Caption text that templates may print with the photo.'),
     credit: z.string().nullable().optional().describe('Photographer or source credit.'),
     altText: z.string().nullable().optional().describe('Description of the photo for accessibility.'),
-  }).describe('Fields to change; null clears a field, omitted fields stay as they are.') })
+  }).describe('Fields to change; null clears a field or reverts it to its source, omitted fields stay.') })
     .describe('Change the title, caption, credit or alt text saved with a photo.'),
 ]);
 export const projectOperationsSchema = z.array(projectOperationSchema).min(1).max(100)

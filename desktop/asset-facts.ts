@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { open, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { assetFactSchema, assetsMetaFile, assetsMetaSchema } from '../src/asset-facts';
-import type { AssetFact } from '../src/asset-facts';
+import { assetFactSchema, assetsMetaFile, assetsMetaSchema, assetsMetaVersion } from '../src/asset-facts';
+import type { AssetFact, ProvidedMetadata } from '../src/asset-facts';
 import { canonicalJsonIndented } from '../src/canonical-json';
 import { captureFields } from '../src/photo-metadata';
 import { holdsProjectLock } from './persistence';
@@ -18,22 +18,40 @@ import { holdsProjectLock } from './persistence';
 const maximumBytes = 16 * 1024 * 1024;
 const flushDelay = 400;
 
-/** Reads the facts of a book folder; `{}` for a missing, oversized or invalid file. */
-export async function readAssetFacts(folder: string): Promise<Record<string, AssetFact>> {
+/**
+ * What a book folder's assets-meta.json holds. `facts` is `{}` for a missing, oversized or invalid file, which
+ * regenerates. `newer` is set for a file of another version than this build's: it reads as empty too, but it is never
+ * written over, so a build that predates its format leaves it as it is (ADR 0011). `rest` are the file's keys this
+ * version does not know, which a write keeps.
+ */
+type AssetsMetaFile = { facts: Record<string, AssetFact>; newer?: true; rest: Record<string, unknown> };
+async function readAssetsMeta(folder: string): Promise<AssetsMetaFile> {
   try {
     const handle = await open(join(folder, assetsMetaFile), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
       const info = await handle.stat();
-      if (!info.isFile() || info.size > maximumBytes) return {};
-      const parsed = assetsMetaSchema.safeParse(JSON.parse(await handle.readFile('utf8')));
-      return parsed.success ? parsed.data.assets : {};
+      if (!info.isFile() || info.size > maximumBytes) return { facts: {}, rest: {} };
+      const value: unknown = JSON.parse(await handle.readFile('utf8'));
+      const version = value && typeof value === 'object' ? (value as { version?: unknown }).version : undefined;
+      if (typeof version === 'number' && version !== assetsMetaVersion) return { facts: {}, newer: true, rest: {} };
+      const parsed = assetsMetaSchema.safeParse(value);
+      if (!parsed.success) return { facts: {}, rest: {} };
+      const { version: _version, assets, ...rest } = parsed.data as typeof parsed.data & Record<string, unknown>;
+      return { facts: assets, rest };
     } finally { await handle.close(); }
-  } catch { return {}; }
+  } catch { return { facts: {}, rest: {} }; }
 }
 
-/** Writes a book's whole assets-meta.json atomically. */
-async function writeAssetFacts(folder: string, facts: Record<string, AssetFact>) {
-  const bytes = canonicalJsonIndented({ version: 1, assets: facts }) + '\n';
+/** Reads the facts of a book folder; `{}` for a missing, oversized, invalid or newer file. */
+export async function readAssetFacts(folder: string): Promise<Record<string, AssetFact>> {
+  return (await readAssetsMeta(folder)).facts;
+}
+
+/** Writes a book's whole assets-meta.json atomically, keeping the keys of the file this version does not know. */
+async function writeAssetFacts(folder: string, facts: Record<string, AssetFact>, current?: AssetsMetaFile) {
+  const { newer, rest } = current ?? await readAssetsMeta(folder);
+  if (newer) { console.warn('ImageFlow keeps assets-meta.json, which a newer version of ImageFlow wrote.'); return; }
+  const bytes = canonicalJsonIndented({ ...rest, version: assetsMetaVersion, assets: facts }) + '\n';
   const staging = join(folder, '.imageflow-write-' + randomUUID() + '.tmp');
   try {
     await writeFile(staging, bytes, { flag: 'wx', mode: 0o644 });
@@ -45,6 +63,12 @@ const same = (a: AssetFact | undefined, b: AssetFact | undefined) => !!a && !!b 
   canonicalJsonIndented({ ...a, verified: '' }) === canonicalJsonIndented({ ...b, verified: '' });
 
 type Capture = Partial<Pick<AssetFact, typeof captureFields[number]>>;
+const knownKeys = new Set(Object.keys(assetFactSchema.shape));
+// The keys of a fact this version does not know, carried into a new fact of the same original: a newer build's
+// additions survive this one noting the photo again.
+const unknownOf = (fact: AssetFact | undefined) => Object.fromEntries(Object.entries(fact ?? {}).filter(([key]) => !knownKeys.has(key)));
+/** What a provider reported for a photo without a file, once its preview is stored (desktop/provided-photos.ts). */
+export type ProvidedFact = Pick<AssetFact, 'digest' | 'width' | 'height' | 'revisions'> & Capture & { provided?: ProvidedMetadata; extra?: Record<string, unknown> };
 type Note = { observation: string; width: number; height: number; capture: Capture };
 const captureOf = (source: Capture): Capture => Object.fromEntries(captureFields.flatMap((field) => source[field] ? [[field, source[field]]] : []));
 
@@ -59,7 +83,8 @@ export class AssetFacts {
   private removed = new Set<string>();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private writes: Promise<void> = Promise.resolve();
-  private constructor(readonly folder: string) {}
+  // A read-only set keeps what it learns in memory for its load and never writes it.
+  private constructor(readonly folder: string, private readonly writable = true) {}
 
   /** The facts of a book, loaded once per open session; `release` drops them. */
   static forBook(folder: string): Promise<AssetFacts> {
@@ -72,7 +97,7 @@ export class AssetFacts {
   }
   /** The facts of a book that is only read (read-only, pinned or temporary loads): never registered, never written. */
   static async readOnly(folder: string): Promise<AssetFacts> {
-    const facts = new AssetFacts(folder);
+    const facts = new AssetFacts(folder, false);
     facts.facts = await readAssetFacts(folder);
     return facts;
   }
@@ -116,7 +141,9 @@ export class AssetFacts {
     const note = this.notes.get(id);
     const digest = this.digests.get(id);
     if (!note || !digest || note.observation !== digest.observation) return;
-    const fact = assetFactSchema.safeParse({ digest: digest.digest, width: note.width, height: note.height, ...note.capture, verified: new Date().toISOString() });
+    const previous = this.facts[id];
+    const fact = assetFactSchema.safeParse({ ...(previous?.digest === digest.digest ? unknownOf(previous) : {}),
+      digest: digest.digest, width: note.width, height: note.height, ...note.capture, verified: new Date().toISOString() });
     if (!fact.success) return;
     // Nothing changed: keep the older `verified` and write nothing.
     if (same(this.facts[id], fact.data)) return;
@@ -124,6 +151,25 @@ export class AssetFacts {
     this.removed.delete(id);
     this.dirty.add(id);
     this.schedule();
+  }
+  /**
+   * Records what a provider reported for a photo without a file (ADR 0011): its facts, revisions and provided values,
+   * with the digest of its stored preview. Keys of the earlier fact this version does not know stay while the digest
+   * does. Returns whether the fact changed.
+   */
+  provide(id: string, reported: ProvidedFact): boolean {
+    const previous = this.facts[id];
+    const { digest, width, height, revisions, provided, extra } = reported;
+    const fact = assetFactSchema.safeParse({ ...(previous?.digest === digest ? unknownOf(previous) : {}), digest, width, height, ...captureOf(reported),
+      ...(revisions ? { revisions } : {}), ...(provided && Object.keys(provided).length ? { provided } : {}), ...(extra ? { extra } : {}),
+      verified: new Date().toISOString() });
+    if (!fact.success || same(previous, fact.data)) return false;
+    this.facts[id] = fact.data;
+    this.notes.delete(id); this.digests.delete(id);
+    this.removed.delete(id);
+    this.dirty.add(id);
+    this.schedule();
+    return true;
   }
   /** Drops facts of photos that left the book. Facts of photos with a missing original stay: they are the fallback. */
   prune(ids: Iterable<string>) {
@@ -134,7 +180,7 @@ export class AssetFacts {
     }
   }
   private schedule() {
-    if (this.timer) return;
+    if (this.timer || !this.writable) return;
     this.timer = setTimeout(() => { this.timer = undefined; void this.flush(); }, flushDelay);
     this.timer.unref?.();
   }
@@ -156,10 +202,11 @@ export class AssetFacts {
       if (!await holdsProjectLock(this.folder)) return;
       try {
       // Merge into what is on disk, so entries another replica or session added are kept.
-      const current = await readAssetFacts(this.folder);
+      const file = await readAssetsMeta(this.folder);
+      const current = file.facts;
       for (const id of removed) delete current[id];
       for (const id of changed) if (this.facts[id]) current[id] = this.facts[id];
-      await writeAssetFacts(this.folder, current);
+      await writeAssetFacts(this.folder, current, file);
       } catch (error) { requeue(); throw error; }
     }).catch((error) => console.warn('ImageFlow could not write assets-meta.json', error));
     this.writes = task;

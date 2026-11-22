@@ -5,11 +5,15 @@ import { access, mkdir, mkdtemp, realpath, rename, rm, stat } from 'node:fs/prom
 import { extname, join } from 'node:path';
 import sharp from 'sharp';
 import type { Photo } from '../src/project';
+import type { ProvidedMetadata } from '../src/asset-facts';
 import { captureMetadata } from '../src/photo-metadata';
 
 export const photoExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp']);
 type Rendition = 'thumb' | 'preview' | 'export';
-export type ProjectPhoto = Photo & { estimatedCapture?: string; original: string; cache: string; key: string; alpha: boolean; passthrough: boolean; problem?: string; observation?: string };
+// `provided`: the title, caption, credit and alt text of a photo's provider (ADR 0011), which the book's own values in
+// photos.json override field by field.
+export type ProjectPhoto = Photo & { estimatedCapture?: string; original: string; cache: string; key: string; alpha: boolean; passthrough: boolean; problem?: string; observation?: string;
+  provided?: ProvidedMetadata };
 // The same stamp as the source store's, because a photo's observation may come from either (src/file-stamp).
 const observation = fileStamp;
 

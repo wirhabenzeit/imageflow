@@ -4,9 +4,10 @@ import { extname } from 'node:path';
 import { sourceBookKey, readSourceRegistry } from './source-identity';
 export { sourceBookKey } from './source-identity';
 import { z } from 'zod';
-import type { SourceEntry } from '../src/source-locations';
+import { fileSourceOf } from '../src/source-locations';
+import type { SourceEntry, SourceKind } from '../src/source-locations';
 
-type Target = Pick<SourceEntry, 'kind' | 'path' | 'linked'> & { key?: string };
+type Target = { kind: SourceKind; path: string; linked: boolean; key?: string };
 const grantsSchema = z.record(z.string(), z.object({ path: z.string(), accept: z.array(z.string()).optional(), hash: z.string().optional() }));
 type Grants = z.infer<typeof grantsSchema>;
 let root: string | undefined;
@@ -72,7 +73,7 @@ export async function approveSources(folder: string, sources: readonly Target[],
 }
 /** An explicit Save a Copy may retain only this book's already approved links. */
 export async function transferSourceAccess(from: string, to: string, entries: SourceEntry[]) {
-  for (const entry of entries) if (entry.linked && await approvedSource(from, entry)) {
+  for (const entry of entries.map(fileSourceOf)) if (entry?.linked && await approvedSource(from, entry)) {
     const accept = await approvedExtensions(from, entry.key);
     const { key, book } = await accessFor(to);
     const task = book.writes.then(async () => {

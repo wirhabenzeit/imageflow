@@ -1,4 +1,4 @@
-import { sourcePath } from './source-locations';
+import { photoName, photoSourceName, sourceFile, sourcePath } from './source-locations';
 import { usageLabel } from './asset-usage';
 import { Fragment, useMemo, useState } from 'react';
 import { renderOrigin } from './desktop';
@@ -57,18 +57,24 @@ export function SourceInspector({ summary, source, template, render, usage, writ
     if (import.meta.env.IMAGEFLOW_PROFILE) performance.measure('imageflow.captureFact', { start: profileStart, end: performance.now() });
     const ppi = template?.format.output.resolution?.target;
     const print = size && ppi && [size.width, size.height].map((px) => (px / ppi * 2.54).toFixed(1)).join(' × ');
+    const status = summary.sources?.['photo:' + source.id];
+    const file = status && sourceFile(status);
+    const storage = file ? file.linked ? 'Linked' : 'In book' : undefined;
+    // What the photo's provider reports for each field (ADR 0011): shown while the book has no value of its own, which
+    // Revert removes again.
+    const provided = summary.photoProvided?.[source.id];
     return <div className="source-inspector">
       <div className="si-head">
         <p className="eyebrow">Photo</p>
-        <h2>{photo.title || fileName(photo.path)}</h2>
-        <p className="muted">{photo.linked ? 'Linked · ' : 'In book · '}{fileName(photo.path)}</p>
+        <h2>{photoName(summary, source.id)}</h2>
+        <p className="muted">{storage ? storage + ' · ' : ''}{photoSourceName(summary, source.id)}</p>
         {summary.sources?.['photo:' + source.id]?.problem && <p className="error-text">{summary.sources['photo:' + source.id].problem}{summary.sources['photo:' + source.id].cached ? ' · Showing cached preview' : ''}</p>}
       </div>
       {summary.photos[source.id]
         ? <button type="button" className="si-preview" title="Quick Look (Space)" onClick={quickLook}>
             <img src={renderOrigin + '/render/' + summary.id + '/photo/' + source.id} alt={photo.altText || photo.title || ''} />
           </button>
-        : <p className="error-text">The photo file is missing from photos/.</p>}
+        : <p className="error-text">{file ? 'The photo file is missing from photos/.' : 'No preview of this photo is on this Mac.'}</p>}
       {(date || size) && <dl className="si-facts">
         {date && <><dt className={photoDate(summary, source.id)?.capturedEstimated ? 'muted' : undefined}>{date.label}</dt><dd title={date.title} className={photoDate(summary, source.id)?.capturedEstimated ? 'muted' : undefined}>{date.value}</dd></>}
         {size && <><dt>Size</dt><dd>{size.width} × {size.height} px · {(size.width * size.height / 1e6).toFixed(1)} MP</dd></>}
@@ -79,9 +85,16 @@ export function SourceInspector({ summary, source, template, render, usage, writ
       </details>
       <details open><summary>Details</summary>
         <fieldset disabled={!writable}>
-          {photoFields.map(([key, label]) => <Field key={source.id + ':' + key}
-            param={{ type: 'string', label, default: '', multiline: key === 'caption' || key === 'altText' }} value={photo[key] ?? ''}
-            change={(value) => edit(({ photoIndex }) => { if (photoIndex[source.id]) photoIndex[source.id][key] = String(value); }, label + ' updated')} />)}
+          {photoFields.map(([key, label]) => {
+            const overridden = provided?.[key] !== undefined && Object.hasOwn(photo, key);
+            return <Fragment key={source.id + ':' + key}>
+              <Field param={{ type: 'string', label: overridden ? label + ' (changed in this book)' : label, default: '', multiline: key === 'caption' || key === 'altText',
+                ...(provided?.[key] ? { placeholder: provided[key] } : {}) }} value={photo[key] ?? ''}
+                change={(value) => edit(({ photoIndex }) => { if (photoIndex[source.id]) photoIndex[source.id][key] = String(value); }, label + ' updated')} />
+              {overridden && <button type="button" className="link si-revert" onClick={() => edit(({ photoIndex }) => { if (photoIndex[source.id]) delete photoIndex[source.id][key]; }, label + ' reverted')}>
+                Revert to the source’s {label.toLocaleLowerCase()}</button>}
+            </Fragment>;
+          })}
         </fieldset>
       </details>
     </div>;

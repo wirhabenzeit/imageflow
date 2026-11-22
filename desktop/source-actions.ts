@@ -5,9 +5,10 @@ import { basename, dirname, extname, join, posix } from 'node:path';
 import { coverInstance, storedBoxes } from '../src/project';
 import type { ProjectFiles } from '../src/project';
 import { clearFileAssignments, fileAssigned } from '../src/asset-usage';
-import { sourceEntries, sourceFolder, storedFileName } from '../src/source-locations';
-import type { ImportMode, SourceEntry } from '../src/source-locations';
+import { fileSourceOf, sourceEntries, sourceFolder, storedFileName } from '../src/source-locations';
+import type { FileSource, ImportMode, SourceEntry } from '../src/source-locations';
 import { relocatedEntry } from '../src/source-locator';
+import type { FileLocator } from '../src/source-locator';
 import { createDocument } from './documents';
 import { readAssetFacts } from './asset-facts';
 import { loadProject, updateProject } from './project';
@@ -21,10 +22,10 @@ import { approveSource, approvedExtensions, transferSourceAccess, transferBookTr
 const filesOf = (book: OpenProject): ProjectFiles => structuredClone({ project: book.project, photoIndex: book.photoIndex });
 function reference(files: ProjectFiles, source: SourceEntry, path: string, linked: boolean) {
   if (source.kind === 'photo') {
-    files.photoIndex[source.id] = relocatedEntry(files.photoIndex[source.id], { provider: linked ? 'linked' : 'package', path });
+    files.photoIndex[source.id] = relocatedEntry(files.photoIndex[source.id], { provider: linked ? 'linked' : 'package', path } as FileLocator);
   } else files.project[source.kind === 'markdown' ? 'texts' : 'files'][source.id] = linked ? { path, linked: true } : path;
 }
-async function managedCopy(folder: string, source: SourceEntry, snapshot: string, copied: string[]) {
+async function managedCopy(folder: string, source: FileSource, snapshot: string, copied: string[]) {
   const directory = join(folder, sourceFolder(source.kind));
   await mkdir(directory, { recursive: true });
   if (await realpath(directory) !== directory) throw new Error('Asset folder must be inside the book.');
@@ -93,16 +94,21 @@ export async function renameSource(book: OpenProject, key: string, requested: un
 export async function relocateSource(book: OpenProject, key: string, selection?: string, copy = false, accept?: string[]) {
   const source = sourceEntries(book).find((source) => source.key === key);
   if (!source) throw new Error('This source is no longer registered.');
-  const chosen = selection ? { ...source, path: await realpath(selection), linked: true } : source;
-  if (selection) await approveSource(book.folder, chosen, accept ?? await approvedExtensions(book.folder, key));
+  // A photo that is not a file can only be located as a file chosen for it, which then links it.
+  const own = fileSourceOf(source) ?? (selection ? { key: source.key, kind: source.kind, id: source.id, path: '', linked: true } : undefined);
+  if (!own) throw new Error('This photo is not a file. Choose the file to use for it.');
+  const file = selection ? { ...own, path: await realpath(selection), linked: true } : own;
+  const chosen: SourceEntry = source.kind === 'photo' ? { ...source, locator: { provider: file.linked ? 'linked' : 'package', path: file.path } as FileLocator }
+    : { ...source, path: file.path, linked: file.linked };
+  if (selection) await approveSource(book.folder, file, accept ?? await approvedExtensions(book.folder, key));
   const store = await SourceStore.forBook(book.folder, book.cache);
   const resolved = await store.resolve(book.folder, chosen);
   if (resolved.status.state !== 'available' || !resolved.stored) throw new Error(resolved.status.problem ?? 'The selected source is unavailable.');
   const files = filesOf(book);
   const copied: string[] = [];
   try {
-    const linked = !copy && source.linked;
-    const path = linked ? chosen.path : await managedCopy(book.folder, chosen, resolved.stored.snapshot, copied);
+    const linked = !copy && file.linked;
+    const path = linked ? file.path : await managedCopy(book.folder, file, resolved.stored.snapshot, copied);
     reference(files, source, path, linked);
     const next = await updateProject(book, files, true, { origin: 'app', label: 'Locate source' });
     await store.settled();
@@ -119,11 +125,14 @@ export async function collectSources(book: OpenProject, keys?: readonly string[]
   const linked = sourceEntries(book).filter(({ key }) => !keys || keys.includes(key));
   const originals = await Promise.all(linked.map(async (source) => ({ source, resolved: await store.resolve(book.folder, source) })));
   const missing = originals.filter(({ resolved }) => resolved.status.state !== 'available');
-  if (missing.length) throw new Error('Cannot include all assets. Locate or restore: ' + missing.map(({ source }) => basename(source.path)).join(', ') + '.');
+  if (missing.length) throw new Error('Cannot include all assets. Locate or restore: ' + missing.map(({ source }) => source.name).join(', ') + '.');
   const files = filesOf(book);
   const copied: string[] = [];
   try {
-    for (const { source, resolved } of originals) if (source.linked) reference(files, source, await managedCopy(book.folder, source, resolved.stored!.snapshot, copied), false);
+    for (const { source, resolved } of originals) {
+      const file = fileSourceOf(source);
+      if (file?.linked) reference(files, source, await managedCopy(book.folder, file, resolved.stored!.snapshot, copied), false);
+    }
     const after = await captureProjectInputs(book.folder);
     if (before.revision !== after.revision || before.observation !== after.observation) throw new Error('Sources changed while collecting assets. Please retry.');
     files.project.importMode = 'copy';
@@ -146,13 +155,16 @@ export async function relinkFolder(book: OpenProject, directory: string, keys?: 
   const ambiguous: string[] = [];
   let repaired = 0;
   for (const source of sourceEntries(book).filter(({ key }) => !keys || keys.includes(key))) {
+    // A folder holds files: a photo that is not one is not found in it.
+    const file = fileSourceOf(source);
+    if (!file) continue;
     const state = await store.resolve(book.folder, source);
     if (state.status.state === 'available') continue;
     // Explicit folder selection can reapprove the registered original even when its cache was lost.
     // A same-named file elsewhere still requires a known digest; never guess by filename.
-    if (state.status.state === 'unapproved' && source.linked && within(root, source.path) && candidates.includes(source.path) &&
-        await realpath(source.path).then((actual) => actual === source.path, () => false)) {
-      next = await relocateSource(next, source.key, source.path); repaired++;
+    if (state.status.state === 'unapproved' && file.linked && within(root, file.path) && candidates.includes(file.path) &&
+        await realpath(file.path).then((actual) => actual === file.path, () => false)) {
+      next = await relocateSource(next, source.key, file.path); repaired++;
       continue;
     }
     // A linked photo that arrived from another Mac has no record here yet; its synced fact names its content (ADR 0010).
@@ -160,7 +172,7 @@ export async function relinkFolder(book: OpenProject, directory: string, keys?: 
     if (!digest) continue;
     const matches: string[] = [];
     for (const path of candidates) {
-      if (basename(path) !== basename(source.path)) continue;
+      if (basename(path) !== basename(file.path)) continue;
       const actual = await realpath(path);
       if (!within(root, actual) || (await stat(actual)).size > 50 * 1024 * 1024) continue;
       if (digestBytes(await readFile(actual)) === digest) matches.push(actual);
@@ -219,9 +231,10 @@ export async function saveDocumentCopy(source: OpenProject, destination: string,
     const store = await SourceStore.forBook(book.folder, book.cache);
     for (const entry of sourceEntries(book)) {
       const { status, stored } = await store.resolve(book.folder, entry);
-      if (includeAssets && status.state !== 'available') throw new Error('Cannot include all assets. Locate or restore ' + basename(entry.path) + '.');
-      if (includeAssets && entry.linked && stored) {
-        reference(files, entry, await managedCopy(stage, entry, stored.snapshot, []), false);
+      if (includeAssets && status.state !== 'available') throw new Error('Cannot include all assets. Locate or restore ' + entry.name + '.');
+      const file = fileSourceOf(entry);
+      if (includeAssets && file?.linked && stored) {
+        reference(files, entry, await managedCopy(stage, file, stored.snapshot, []), false);
       }
     }
     if (includeAssets) files.project.importMode = 'copy'; else if (importMode) files.project.importMode = importMode;

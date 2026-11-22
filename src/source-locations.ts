@@ -1,6 +1,8 @@
 import { z } from 'zod';
-import type { ProjectFiles } from './project';
-import { locatorOf, readableFileName } from './source-locator';
+import type { PhotoIndex, ProjectFiles } from './project';
+import type { ProvidedMetadata } from './asset-facts';
+import { isFileLocator, locatorName, locatorOf, readableFileName, readLocator } from './source-locator';
+import type { Locator } from './source-locator';
 
 // Like the objects of project.json: unknown keys survive a load and save (ADR 0010), but the type strips them.
 const looseObject = <S extends z.ZodRawShape>(shape: S) => z.looseObject(shape) as unknown as z.ZodObject<S, z.core.$strip>;
@@ -14,8 +16,57 @@ export type SourceKey = `${SourceKind}:${string}`;
 export const sourcePath = (source: SourceReference | { path: string }) => typeof source === 'string' ? source : source.path;
 export const sourceFileName = (source: SourceReference | { path: string }) => readableFileName(sourcePath(source));
 export const sourceLinked = (source: SourceReference | { path: string; linked?: boolean }) => typeof source !== 'string' && 'linked' in source && source.linked === true;
-export type SourceEntry = { key: SourceKey; kind: SourceKind; id: string; path: string; linked: boolean };
-export type SourceStatus = SourceEntry & { state: 'available' | 'missing' | 'unreadable' | 'denied' | 'unapproved'; problem?: string; cached?: boolean; digest?: string };
+/** Where a file source is: relative to the book, or `linked`, an absolute path elsewhere on this Mac. */
+export type SourceFile = { path: string; linked: boolean };
+type SourceBase<K extends SourceKind> = { key: `${K}:${string}`; kind: K; id: string;
+  /** A readable name: a file's name without its storage prefix, or what a photo's locator offers (ADR 0011). */
+  name: string };
+/** A text or a file: always a file (ADR 0011 leaves them out of the provider contract). */
+export type FileSourceEntry = (SourceBase<'markdown'> | SourceBase<'file'>) & SourceFile;
+/** A photo, read through its locator's provider; only a file locator has a path (see `sourceFile`). */
+export type PhotoSourceEntry = SourceBase<'photo'> & { locator: Locator };
+export type SourceEntry = FileSourceEntry | PhotoSourceEntry;
+/**
+ * Why a source cannot be read. `offline` (the provider's app or server is not reachable) and `needs-sign-in` come from
+ * providers without files; a file is never in either.
+ */
+export type SourceState = 'available' | 'missing' | 'unreadable' | 'denied' | 'unapproved' | 'offline' | 'needs-sign-in';
+/** What can be offered for a source that cannot be read, as its provider answers (`SourceProvider.repairs`). */
+export type SourceRepair = 'locate' | 'locate-folder' | 'launch' | 'sign-in';
+export type SourceStatus = SourceEntry & { state: SourceState; problem?: string; cached?: boolean; digest?: string;
+  /** The repairs to offer while the source is unavailable; Retry is always offered. */
+  repairs?: SourceRepair[];
+  /**
+   * Only the provider's preview of this photo is on this Mac (ADR 0011): it is laid out and drawn from it, and printed
+   * only as a proof until full-resolution export exists for its provider.
+   */
+  previewOnly?: boolean;
+  /** The photo's aspect ratio changed in its source after it was placed: a crop may frame another part of it. */
+  reshaped?: boolean };
+/**
+ * Why print cannot use a source's original here, or undefined when it can: it is drawn from a cached preview, or only
+ * its provider's preview is on this Mac (ADR 0011). Print marks such a page ORIGINAL UNAVAILABLE and is a proof only.
+ */
+export function printProblem(status: SourceStatus | undefined): string | undefined {
+  if (!status) return undefined;
+  if (status.state !== 'available' && status.cached) return status.problem ?? 'Original unavailable';
+  if (status.previewOnly) return 'Only a preview of this photo is on this Mac';
+  return undefined;
+}
+/** The file a source is, for a text, a file, or a photo whose locator is a file; undefined for any other photo. */
+export const sourceFile = (source: SourceEntry): SourceFile | undefined => source.kind !== 'photo' ? { path: source.path, linked: source.linked }
+  : isFileLocator(source.locator) ? { path: source.locator.path, linked: source.locator.provider === 'linked' } : undefined;
+/** A source as a file: what finding, reading, approving and watching a file needs. */
+export type FileSource = SourceFile & { key: SourceKey; kind: SourceKind; id: string };
+/** A source as a file, or undefined for a photo that is not one. */
+export const fileSourceOf = (source: SourceEntry): FileSource | undefined => {
+  const file = sourceFile(source);
+  return file && { key: source.key, kind: source.kind, id: source.id, ...file };
+};
+/** Whose storage a source is in: `package` for the book's own, `linked` for a file elsewhere, or a provider. */
+export const sourceProvider = (source: SourceEntry) => source.kind === 'photo' ? source.locator.provider : source.linked ? 'linked' : 'package';
+/** The folder a file source is in, for display; undefined for a photo that is not a file. */
+export const sourceFolderName = (source: SourceEntry) => sourceFile(source)?.path.split(/[\\/]/).slice(-2, -1)[0];
 /**
  * A file name as ImageFlow stores a copy under: letters, digits, combining marks, spaces, `.`, `_` and `-`; anything
  * else becomes `-`. Composed first (NFC), because macOS hands over names decomposed: `ö` as `o` and U+0308, whose
@@ -23,14 +74,31 @@ export type SourceStatus = SourceEntry & { state: 'available' | 'missing' | 'unr
  */
 export const storedFileName = (name: string) => name.normalize('NFC').replace(/[^\p{L}\p{M}\p{N} ._-]/gu, '-');
 export const sourceFolder = (kind: SourceKind) => kind === 'photo' ? 'photos' : kind === 'markdown' ? 'texts' : 'files';
+/**
+ * A photo's title as the book resolves it (ADR 0011): the book's own where photos.json has the key, else its
+ * provider's. A present empty title is an override that blanks the provider's.
+ */
+export function photoTitle(files: { photoIndex: PhotoIndex; photoProvided?: Record<string, ProvidedMetadata> }, id: string) {
+  const entry = files.photoIndex[id];
+  return entry && (Object.hasOwn(entry, 'title') ? entry.title : files.photoProvided?.[id]?.title);
+}
+/** What a photo's locator offers as its name (a file's name without its storage prefix), else its ID. */
+export function photoSourceName(files: { photoIndex: PhotoIndex }, id: string) {
+  const entry = files.photoIndex[id];
+  const locator = entry && readLocator(entry);
+  return locator ? locatorName(id, locator) : id;
+}
+/** The name shown for a photo: its title, else what its locator offers. */
+export const photoName = (files: { photoIndex: PhotoIndex; photoProvided?: Record<string, ProvidedMetadata> }, id: string) =>
+  photoTitle(files, id) || photoSourceName(files, id);
 export function sourceEntries(files: ProjectFiles): SourceEntry[] {
   return [
-    // A photo's source is read through its locator (ADR 0011). Every locator of this version names a file.
-    ...Object.entries(files.photoIndex).map(([id, entry]) => {
+    // A photo's source is read through its locator (ADR 0011), and named by it.
+    ...Object.entries(files.photoIndex).map(([id, entry]): PhotoSourceEntry => {
       const locator = locatorOf(entry);
-      return { key: `photo:${id}` as const, kind: 'photo' as const, id, path: locator.path, linked: locator.provider === 'linked' };
+      return { key: `photo:${id}`, kind: 'photo', id, locator, name: locatorName(id, locator) };
     }),
-    ...Object.entries(files.project.texts).map(([id, ref]) => ({ key: `markdown:${id}` as const, kind: 'markdown' as const, id, path: sourcePath(ref), linked: sourceLinked(ref) })),
-    ...Object.entries(files.project.files).map(([id, ref]) => ({ key: `file:${id}` as const, kind: 'file' as const, id, path: sourcePath(ref), linked: sourceLinked(ref) })),
+    ...Object.entries(files.project.texts).map(([id, ref]): FileSourceEntry => ({ key: `markdown:${id}`, kind: 'markdown', id, path: sourcePath(ref), linked: sourceLinked(ref), name: sourceFileName(ref) })),
+    ...Object.entries(files.project.files).map(([id, ref]): FileSourceEntry => ({ key: `file:${id}`, kind: 'file', id, path: sourcePath(ref), linked: sourceLinked(ref), name: sourceFileName(ref) })),
   ];
 }

@@ -1,5 +1,6 @@
 import { authoringSnapshotState } from './authoring-sdk';
 import { layoutFootprint } from '../src/layouts';
+import type { FileSourceEntry } from '../src/source-locations';
 import { sourceEntries, sourcePath, sourceLinked } from '../src/source-locations';
 import { DependencyInstallError } from './dependency-install';
 import { createHash, randomUUID } from 'node:crypto';
@@ -503,7 +504,7 @@ export function createAuthoringService(hooks: Hooks) {
   };
   // A renamed source as the book now names it.
   const renamed = (book: OpenProject, id: string) => {
-    const entry = sourceEntries(book).find((source) => source.id === id && source.kind !== 'photo');
+    const entry = sourceEntries(book).find((source): source is FileSourceEntry => source.id === id && source.kind !== 'photo');
     return entry ? { source: { id, kind: entry.kind, path: entry.path } } : {};
   };
   const ledgerReplay = async (session: ProjectSession, name: string, args: Record<string, any>, record: CheckpointRecord, signal: AbortSignal) => {

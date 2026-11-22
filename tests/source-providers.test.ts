@@ -64,7 +64,7 @@ test('an export load reads owned and linked photos from private copies named by 
   const ownedId = added.imported[0];
   const job = join(f.cache, 'job'); await mkdir(job);
   const pinned = await loadProject(f.folder, job, true, true);
-  for (const [id, original] of [[linkedId, linked], [ownedId, join(f.folder, book.photoIndex[ownedId].path)]]) {
+  for (const [id, original] of [[linkedId, linked], [ownedId, join(f.folder, book.photoIndex[ownedId].path!)]]) {
     const photo = pinned.photos.get(id)!;
     const digest = sha256(await readFile(original));
     assert.equal(dirname(photo.original), await realpath(join(job, 'pinned-sources')));
@@ -80,7 +80,7 @@ test('an export load reads owned and linked photos from private copies named by 
   assert.deepEqual(await readFile(pinned.photos.get(linkedId)!.original), before);
   const editor = await loadProject(f.folder, f.cache);
   assert.equal(editor.photos.get(linkedId)!.original, linked);
-  assert.equal(editor.photos.get(ownedId)!.original, join(f.folder, book.photoIndex[ownedId].path));
+  assert.equal(editor.photos.get(ownedId)!.original, join(f.folder, book.photoIndex[ownedId].path!));
 });
 
 const linkedRef = (id: string, path: string, revision?: string) => ({ id, locator: { provider: 'linked' as const, path }, ...(revision ? { known: { revision } } : {}) });
@@ -104,7 +104,7 @@ test('the file providers report a file to read in place, or why there is none', 
 
   // A photo in the package needs no approval, and must be inside photos/.
   const { book, imported: [id] } = await importIntoProject(f.book, { kind: 'photo', mode: 'copy' }, [await f.picture('owned.png', '#00ff00')]);
-  const path = book.photoIndex[id].path;
+  const path = book.photoIndex[id].path!;
   const owned = (path: string) => ({ id, locator: { provider: 'package' as const, path } });
   assert.deepEqual(await packageProvider.observe(f.folder, [owned(path)]),
     [{ state: 'available', revisions: { revision: await stamp(join(f.folder, path)) }, modified: await modified(join(f.folder, path)), file: join(f.folder, path) }]);

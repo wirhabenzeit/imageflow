@@ -3,7 +3,7 @@ import type { FSWatcher } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { copyFile, realpath, rm, stat } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import type { SourceEntry } from '../../src/source-locations';
+import type { SourceKind } from '../../src/source-locations';
 import { sourceFolder } from '../../src/source-locations';
 import type { LinkedLocator, PackageLocator } from '../../src/source-locator';
 import { fileStamp } from '../file-stamp';
@@ -16,7 +16,7 @@ import type { Materialized, MaterializeOptions, Observed, Revisions, SourceProvi
  * an approval, how large it may be and who watches it. They share how a file is found, observed and copied, and so do
  * texts and files, which are not behind the provider contract and call the same functions directly.
  */
-type FileSource = Pick<SourceEntry, 'kind' | 'path' | 'linked'> & { key?: string };
+export type FileSource = { kind: SourceKind; path: string; linked: boolean; key?: string };
 /** The states a file can be in; no file is ever offline or behind a sign-in. */
 export type FileUnavailable = Exclude<Unavailable, 'offline' | 'needs-sign-in'>;
 export type ObservedFile = { state: 'available'; revisions: Revisions; modified: string; file: string } | { state: FileUnavailable; problem: string };

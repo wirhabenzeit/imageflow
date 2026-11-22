@@ -1,5 +1,5 @@
 import { sourcePath, sourceLinked } from '../src/source-locations';
-import { locatorOf } from '../src/source-locator';
+import { fileLocatorOf } from '../src/source-locator';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import type { BigIntStats } from 'node:fs';
@@ -9,13 +9,16 @@ import type { ProjectRevision, RevisionDiagnosticCode } from '../src/authoring';
 import { photoIndexSchema, projectSchema } from '../src/project';
 import { computeBookStateRevision } from '../src/book-revision';
 import { approvedSource } from './source-access';
+import { AssetFacts, readAssetFacts } from './asset-facts';
 
 const manifests = ['project.json', 'photos.json'] as const;
 const contentFolders = ['template', 'texts', 'photos', 'files'] as const;
 type ContentFolder = typeof contentFolders[number];
-type Input = { path: string; external?: string; folder?: ContentFolder };
+// `token` stands for a photo without a file (ADR 0011): the revision its provider last reported, in place of bytes.
+type Input = { path: string; external?: string; folder?: ContentFolder; token?: string };
 type ExistingInput = { kind: 'file' | 'directory'; actual: string; info: BigIntStats };
-type InputState = { kind: 'missing' } | { kind: 'unavailable' } | ExistingInput;
+type InputState = { kind: 'missing' } | { kind: 'unavailable' } | { kind: 'provided'; token: string } | ExistingInput;
+const isExisting = (state: InputState): state is ExistingInput => state.kind === 'file' || state.kind === 'directory';
 type Entry = { input: Input; state: InputState; digest?: string; children?: string[] };
 type CaptureOptions = { signal?: AbortSignal; attempts?: 1 | 2 | 3 };
 export type ProjectInputCapture = { revision: ProjectRevision; observation: string; metadataObservation: string };
@@ -64,7 +67,8 @@ function isInside(base: string, path: string) {
   return rel !== '' && rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel);
 }
 
-async function inspect(root: string, { path, folder, external }: Input): Promise<InputState> {
+async function inspect(root: string, { path, folder, external, token }: Input): Promise<InputState> {
+  if (token !== undefined) return token ? { kind: 'provided', token } : { kind: 'unavailable' };
   const base = folder ? join(root, folder) : root;
   const candidate = external ?? resolve(root, path);
   const isTemplateRoot = path === 'template' && folder === 'template';
@@ -104,7 +108,8 @@ function sameFile(a: BigIntStats, b: BigIntStats) {
 }
 
 function sameState(a: InputState, b: InputState) {
-  if (a.kind === 'missing' || a.kind === 'unavailable' || b.kind === 'missing' || b.kind === 'unavailable') return a.kind === b.kind;
+  if (a.kind === 'provided' || b.kind === 'provided') return a.kind === 'provided' && b.kind === 'provided' && a.token === b.token;
+  if (!isExisting(a) || !isExisting(b)) return a.kind === b.kind;
   return a.kind === b.kind && a.actual === b.actual && (a.kind === 'file'
     ? sameFile(a.info, b.info)
     : a.info.dev === b.info.dev && a.info.ino === b.info.ino);
@@ -221,9 +226,15 @@ async function capture(folder: string, signal?: AbortSignal, index?: IndexState)
       ? { path: '@file/' + id, external: sourcePath(ref), folder: 'files' } : { path: sourcePath(ref), folder: 'files' });
   }
   if (photos.success) {
+    // The revisions the host stored for photos without a file: in memory while a session holds the book's facts, which
+    // is newer than the file it writes a moment later.
+    let provided: Record<string, { revisions?: { revision: string } }> | undefined;
     for (const [id, photo] of Object.entries(photos.data)) {
-      const locator = locatorOf(photo);
-      sources.push(locator.provider === 'linked' ? { path: '@photo/' + id, external: locator.path, folder: 'photos' } : { path: locator.path, folder: 'photos' });
+      const locator = fileLocatorOf(photo);
+      if (!locator) {
+        provided ??= AssetFacts.registered(root) ? (await AssetFacts.forBook(root)).all() : await readAssetFacts(root);
+        sources.push({ path: '@photo/' + id, folder: 'photos', token: provided?.[id]?.revisions?.revision ?? '' });
+      } else sources.push(locator.provider === 'linked' ? { path: '@photo/' + id, external: locator.path, folder: 'photos' } : { path: locator.path, folder: 'photos' });
     }
   }
   for (const input of sources) {
@@ -252,9 +263,9 @@ async function capture(folder: string, signal?: AbortSignal, index?: IndexState)
         JSON.stringify(children) !== JSON.stringify(await directoryNames(current, path)))) {
       throw new ProjectRevisionError('source-changed', path);
     }
-    const actual = state.kind === 'missing' || state.kind === 'unavailable' ? null : portable(relative(root, state.actual));
-    hash.update(JSON.stringify([portable(path), input.external ?? null, state.kind, actual, digest ?? null]) + '\n');
-    if (current.kind !== 'missing' && current.kind !== 'unavailable') {
+    const actual = isExisting(state) ? portable(relative(root, state.actual)) : null;
+    hash.update(JSON.stringify([portable(path), input.external ?? null, state.kind, actual, state.kind === 'provided' ? state.token : digest ?? null]) + '\n');
+    if (isExisting(current)) {
       const { dev, ino, size, mtimeNs, ctimeNs } = current.info;
       observation.update(JSON.stringify([portable(path), [dev, ino, size, mtimeNs, ctimeNs].join(':')]) + '\n');
     }

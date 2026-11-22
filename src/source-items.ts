@@ -1,6 +1,6 @@
 import { orderedPhotos, photoGroups, defaultPhotoView } from './photo-view';
 import type { PhotoView } from './photo-view';
-import { sourceFileName, sourcePath } from './source-locations';
+import { photoName, sourceFileName, sourcePath } from './source-locations';
 import type { SourceReference } from './source-locations';
 import type { ProjectSummary } from './desktop';
 import { splitFrontmatter } from './frontmatter';
@@ -43,7 +43,7 @@ export function excerpt(source: string) {
 
 export function sourceList(summary: ProjectSummary, kind: SourceKind, view?: PhotoView) {
   return kind === 'photo'
-    ? photoGroups(summary, orderedPhotos(summary, view), view ?? defaultPhotoView).flatMap((group) => group.ids).map((id) => ({ id, title: summary.photoIndex[id].title || fileName(summary.photoIndex[id].path), path: summary.photoIndex[id].path }))
+    ? photoGroups(summary, orderedPhotos(summary, view), view ?? defaultPhotoView).flatMap((group) => group.ids).map((id) => ({ id, title: photoName(summary, id), path: summary.photoIndex[id].path ?? '' }))
     : Object.entries(summary.project.texts).map(([id, path]) => ({ id, title: fileName(path), path: sourcePath(path) }));
 }
 
@@ -94,7 +94,7 @@ export function textMenuChoices(summary: Pick<ProjectSummary, 'project' | 'texts
 
 // The name shown for a photo or Markdown source.
 export function sourceTitle(summary: ProjectSummary, kind: SourceKind, id: string) {
-  if (kind === 'photo') return summary.photoIndex[id]?.title || (summary.photoIndex[id] ? fileName(summary.photoIndex[id].path) : id);
+  if (kind === 'photo') return photoName(summary, id);
   return summary.project.texts[id] ? fileName(summary.project.texts[id]) : id;
 }
 

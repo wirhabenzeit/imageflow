@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { portablePhotos } from '../src/book-revision';
 import { parseDocument, photoIndexSchema, projectSchema } from '../src/project';
-import { sourceEntries } from '../src/source-locations';
+import { sourceEntries, sourceFile } from '../src/source-locations';
 import { linkedLocator, packageLocator } from '../src/source-locator';
 import type { LocatorFields } from '../src/source-locator';
 import { portableManifests, projectManifests } from '../src/sync-snapshot';
@@ -38,8 +38,9 @@ test('a photos.json entry reads as a package or a linked locator and writes back
 test('the locators agree with sourceEntries on path, linked and name', () => {
   for (const source of sourceEntries({ project, photoIndex: photos })) {
     const { kind, locator } = read[source.id];
-    assert.equal(kind.key(locator), source.path);
-    assert.equal(kind.provider === 'linked', source.linked);
+    assert.equal(kind.key(locator), sourceFile(source)!.path);
+    assert.equal(kind.provider === 'linked', sourceFile(source)!.linked);
+    assert.equal(kind.name(locator), source.name);
   }
   assert.equal(read.owned.kind.name(read.owned.locator), 'Segla.jpg');
   assert.equal(read.linked.kind.name(read.linked.locator), 'DSC_0042.jpg');

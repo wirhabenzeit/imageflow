@@ -199,8 +199,8 @@ The provider contract needs nothing for this: the host asks whether a photo's pr
 
 ### Other prerequisites
 
-- **Older builds.** An entry without `path` is rejected by builds that predate it, so provider locators ship behind a `schemaVersion` bump (ADR 0009 and 0010's mixed-version rules). The format is derived from `project.json` alone today (`bookFormatOf`, `src/project.ts`), so it must come to depend on the photo index.
-- **Facts of older builds.** `assets-meta.json` is parsed with a schema that drops unknown fields, and a file with another `version` reads as empty and is written over. A build that predates the `provided` and `lightroom` objects removes them when it saves the book, so they need the same gate, or a fact schema that keeps unknown fields shipped a release earlier.
+- **Older builds.** An entry without `path` is rejected by builds that predate it, so provider locators ship behind a `schemaVersion` bump (ADR 0009 and 0010's mixed-version rules). *Done:* book format 4, which `bookFormatOf` derives from the photo index as well as `project.json` ([plan](../development/source-provider-plan.md#photos-without-a-file)).
+- **Facts of older builds.** `assets-meta.json` was parsed with a schema that drops unknown fields, and a file with another `version` read as empty and was written over, so a build that predates the `provided` and revision objects would remove them when it saves the book. *Done:* facts and the file keep unknown fields, and a file of another version is never written over; this ships a release before any such book exists.
 - **Proxy stand-in.** Today a proxy stands in only for `missing` or `unapproved` originals (`desktop/project.ts`). A provider photo whose provider is offline needs the `offline` state. Print is blocked or proof-only for it, using the same source-diagnostic codes and `ORIGINAL UNAVAILABLE` marking as ADR 0005.
 - **Colour.** Materializations are 8-bit sRGB JPEGs for Lightroom, as ImageFlow's own pipeline produces (`withIccProfile('srgb')`), so there is no loss against today. Wide-gamut or 16-bit renders are out of scope.
 

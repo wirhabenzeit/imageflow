@@ -4,7 +4,7 @@ import fs, { link, lstat, mkdir, mkdtemp, open, readdir, realpath, rm, stat, unl
 import type { FileHandle } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { z } from 'zod';
-import { photoIndexSchema, projectSchema } from '../src/project';
+import { bookFormatOf, photoIndexSchema, projectSchema } from '../src/project';
 import { createLockOwner, isLockOwnerAlive } from './lock-owner';
 import { sourceBookKey } from './source-identity';
 
@@ -181,6 +181,16 @@ function validateManifest(name: typeof names[number], bytes: Buffer) {
   if (!(name === 'project.json' ? projectSchema : photoIndexSchema).safeParse(value).success) {
     throw new Error(name + ' contains invalid project data in the pending save.');
   }
+}
+
+// A photo index that holds a photo without a file needs a project.json of book format 4 beside it, so builds that cannot
+// read such an entry refuse the book with a request to update instead of failing on photos.json (ADR 0011). Every
+// writer sets it (`withBookFormat`); this is the check that none forgot.
+function requireBookFormat(manifests: ProjectManifests) {
+  const project = projectSchema.parse(JSON.parse(manifests['project.json'].toString('utf8')));
+  const photos = photoIndexSchema.parse(JSON.parse(manifests['photos.json'].toString('utf8')));
+  const written = (JSON.parse(manifests['project.json'].toString('utf8')) as { schemaVersion: number }).schemaVersion;
+  if (bookFormatOf(project, photos) === 4 && written < 4) throw new Error('project.json must be saved as book format 4 for photos.json. Nothing was saved.');
 }
 
 function decodeSource(name: typeof names[number], text: string) {
@@ -482,6 +492,7 @@ export async function persistProjectManifests(folder: string, before: ProjectMan
     validateManifest(name, before[name]);
     if (!before[name].equals(after[name])) validateManifest(name, after[name]);
   }
+  requireBookFormat(after);
   const internal = await stateFolder(root, true);
   if (!internal) throw new Error('Could not create the project save directory.');
   if (await pendingJournal(root)) throw new Error('A previous project save needs recovery. Reload this project before making another edit.');

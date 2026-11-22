@@ -4,7 +4,7 @@ import { lstat, mkdir, open, readdir, readFile, realpath, rename, rm, rmdir } fr
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import type { AssetFact } from '../src/asset-facts';
-import { parseDocument, photoIndexSchema, projectSchema } from '../src/project';
+import { parseDocument, photoIndexSchema, projectSchema, withBookFormat } from '../src/project';
 import type { PhotoIndex, Project } from '../src/project';
 import { projectManifests, stateBlobSchema } from '../src/sync-snapshot';
 import type { StateBlob } from '../src/sync-snapshot';
@@ -210,8 +210,8 @@ function projectedManifests(blob: StateBlob, before: Awaited<ReturnType<typeof m
   const parse = <T>(bytes: Buffer, schema: z.ZodType<T>) => { try { return schema.safeParse(JSON.parse(bytes.toString('utf8'))).data; } catch { return undefined; } };
   const local = { project: parse<Project>(before['project.json'], projectSchema), photos: parse<PhotoIndex>(before['photos.json'], photoIndexSchema) };
   const projected = projectManifests(blob, local);
-  const project = parseDocument(projectSchema, projected.project, 'project.json');
   const photos = parseDocument(photoIndexSchema, projected.photos, 'photos.json');
+  const project = withBookFormat(parseDocument(projectSchema, projected.project, 'project.json'), photos);
   return { project, photos, after: { 'project.json': Buffer.from(manifestJson(project)), 'photos.json': Buffer.from(manifestJson(photos)) } };
 }
 

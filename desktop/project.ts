@@ -8,7 +8,7 @@ import { bundledFontCoverage } from './fonts';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { BuildFailure, Loader } from 'esbuild';
 import type { AuthoringDiagnostic } from '../src/authoring';
-import { boxBase, parseDocument, photoIndexSchema, projectSchema, unsupportedBookMessage } from '../src/project';
+import { boxBase, parseDocument, photoIndexSchema, projectSchema, unsupportedBookMessage, withBookFormat } from '../src/project';
 import type { FixtureMarking, PhotoIndex, Project, ProjectFile, ProjectFiles, RenderProject } from '../src/project';
 import { renderOrigin } from '../src/desktop';
 import type { ImportCounts, ImportRequest, ProjectSummary } from '../src/desktop';
@@ -18,14 +18,21 @@ import { photoDate } from './capture-time';
 import type { ProjectPhoto } from './photos';
 import { CommittedProjectSaveError, persistProjectManifests, recoverProjectSave } from './persistence';
 import type { SaveCheckpoint } from './persistence';
-import { sourceEntries, sourcePath, sourceLinked, storedFileName } from '../src/source-locations';
-import type { SourceEntry, SourceStatus } from '../src/source-locations';
+import { fileSourceOf, sourceEntries, sourcePath, sourceLinked, storedFileName } from '../src/source-locations';
+import type { PhotoSourceEntry, SourceEntry, SourceStatus } from '../src/source-locations';
+import { isFileLocator } from '../src/source-locator';
+import type { Locator } from '../src/source-locator';
+import { providerOf } from './providers';
+import type { Observed, SourceRef } from './source-provider';
+import { refreshProvided } from './provided-photos';
+import type { ProvidedOutcome } from './provided-photos';
 import { digestBytes, SourceStore } from './source-store';
 import type { ResolvedSource } from './source-store';
 import { AssetFacts } from './asset-facts';
 import { proxyStore } from './proxy-store';
 import { resumeSyncPull } from './sync-pull';
-import type { AssetFact } from '../src/asset-facts';
+import { providedFieldNames } from '../src/asset-facts';
+import type { AssetFact, ProvidedField, ProvidedMetadata } from '../src/asset-facts';
 import { captureFields } from '../src/photo-metadata';
 import { approveSources, sourceBookKey } from './source-access';
 import { runtimeExports } from '../src/runtime-exports';
@@ -248,7 +255,7 @@ export async function loadProject(path: string, fallback: string, readOnly = fal
   const hash = await templateHash(join(folder, 'template')).catch(() => undefined);
   const assets = await bundleTemplate(folder);
   const cache = fallback;
-  return readContent({ folder, viewKey: createHash('sha256').update(await sourceBookKey(folder)).digest('hex'), assets, cache, readOnly, project, photoIndex, ...(hash ? { templateHash: hash } : {}), manifests: { 'project.json': projectFile, 'photos.json': photoFile } }, pinSources);
+  return readContent({ folder, viewKey: createHash('sha256').update(await sourceBookKey(folder)).digest('hex'), assets, cache, readOnly, project: withBookFormat(project, photoIndex), photoIndex, ...(hash ? { templateHash: hash } : {}), manifests: { 'project.json': projectFile, 'photos.json': photoFile } }, pinSources);
 }
 
 async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' | 'problems'>, pinSources = false): Promise<OpenProject> {
@@ -271,9 +278,21 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
   // Derived facts follow photos the editor reads in place; a private export read changes nothing.
   if (writable) store.onDigest = (key, observation, digest) => { if (key.startsWith('photo:')) facts.digest(key.slice('photo:'.length), observation, digest); };
   const unavailablePhotos: Record<string, AssetFact> = {};
+  // Each provider is asked about all its photos at once (ADR 0011), and photos it reports facts for get their facts
+  // and previews brought up to date before they load.
+  const observed = await observePhotos(book.folder, entries, store, facts);
+  const provided = await refreshPhotos(book, observed, facts);
   for (let i = 0; i < entries.length; i += 8) {
     await Promise.all(entries.slice(i, i + 8).map(async (source) => {
-      const { status, stored } = await store.resolve(book.folder, source, { pin: pinSources, cache: book.cache });
+      if (source.kind === 'photo' && provided.has(source.id)) {
+        const { status, loaded } = await loadProvidedPhoto(book, source, provided.get(source.id)!, store);
+        sources[source.key] = status;
+        if (status.problem) problems.push('photo ' + source.id + ' · ' + status.problem);
+        if (loaded?.photo) photos.set(source.id, loaded.photo);
+        if (loaded?.fact) unavailablePhotos[source.id] = loaded.fact;
+        return;
+      }
+      const { status, stored } = await store.resolve(book.folder, source, { pin: pinSources, cache: book.cache, observed: source.kind === 'photo' ? observed.get(source.id)?.observed : undefined });
       sources[source.key] = status;
       if (status.problem && source.kind !== 'file') problems.push(source.kind + ' ' + source.id + ' · ' + status.problem);
       if (source.kind === 'photo') {
@@ -295,18 +314,106 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
   return { ...book, photos, texts, files, sources, problems: problems.sort(), ...(Object.keys(unavailablePhotos).length ? { unavailablePhotos } : {}) };
 }
 
+type ObservedPhoto = { ref: SourceRef<Locator>; observed: Observed };
+/**
+ * The state of every photo of a book, from one `observe` per provider (ADR 0011). Each photo is handed in with the
+ * revisions last stored for it: a file's last read stamp, or the revisions recorded with the fact of a photo that is not
+ * a file. A provider that fails as a whole leaves its photos unreadable.
+ */
+export async function observePhotos(folder: string, entries: readonly SourceEntry[], store: Pick<SourceStore, 'observed'>, facts: Pick<AssetFacts, 'get'>): Promise<Map<string, ObservedPhoto>> {
+  const photos = entries.filter((entry): entry is PhotoSourceEntry => entry.kind === 'photo');
+  const result = new Map<string, ObservedPhoto>();
+  await Promise.all([...new Set(photos.map(({ locator }) => locator.provider))].map(async (name) => {
+    const refs = photos.filter(({ locator }) => locator.provider === name).map((entry): SourceRef<Locator> => {
+      const stamp = isFileLocator(entry.locator) ? store.observed(entry.key) : undefined;
+      const known = stamp ? { revision: stamp } : facts.get(entry.id)?.revisions;
+      return { id: entry.id, locator: entry.locator, ...(known ? { known: { ...known } } : {}) };
+    });
+    let answers: Observed[];
+    try {
+      answers = await providerOf(refs[0].locator).observe(folder, refs);
+      if (answers.length !== refs.length) throw new Error('The source answered for ' + answers.length + ' of ' + refs.length + ' photos.');
+    } catch (error) {
+      const problem = 'Original unavailable: ' + (error instanceof Error ? error.message : String(error));
+      answers = refs.map(() => ({ state: 'unreadable', problem }));
+    }
+    refs.forEach((ref, index) => result.set(ref.id, { ref, observed: answers[index] }));
+  }));
+  return result;
+}
+
+/** Brings the facts and previews of the photos whose provider reported facts up to date, one provider at a time. */
+async function refreshPhotos(book: Pick<OpenProject, 'folder' | 'cache'>, observed: Map<string, ObservedPhoto>, facts: AssetFacts) {
+  const reported = [...observed.values()].filter(({ observed }) => observed.state === 'available' && observed.facts);
+  const outcomes = new Map<string, ProvidedOutcome>();
+  for (const name of new Set(reported.map(({ ref }) => ref.locator.provider))) {
+    const group = reported.filter(({ ref }) => ref.locator.provider === name);
+    const results = await refreshProvided(book.folder, providerOf(group[0].ref.locator), group.map(({ ref }) => ref), group.map(({ observed }) => observed), facts,
+      { staging: join(book.cache, 'provider-staging') });
+    for (const [id, outcome] of results) outcomes.set(id, outcome);
+  }
+  return outcomes;
+}
+
+/** A photo's title, caption, credit and alt text: the book's override where photos.json has the key, else its provider's. */
+export function photoMetadata(entry: PhotoIndex[string], provided?: ProvidedMetadata) {
+  return Object.fromEntries(providedFieldNames.flatMap((field) => {
+    const value = Object.hasOwn(entry, field) ? entry[field] : provided?.[field];
+    return value === undefined ? [] : [[field, value]];
+  })) as Pick<ProjectPhoto, ProvidedField>;
+}
+
+/**
+ * A photo without a file, from what its provider reported: laid out from its fact and drawn from its preview in the
+ * proxy store. Available, it has no problem; it is printed as a proof only (`previewOnly`), since its original is not on
+ * this Mac. A photo whose preview could not be stored keeps its state and stands in from what was stored before.
+ */
+async function loadProvidedPhoto(book: Pick<OpenProject, 'folder' | 'photoIndex' | 'cache'>, source: PhotoSourceEntry, outcome: ProvidedOutcome, store: SourceStore):
+  Promise<{ status: SourceStatus; loaded?: { photo?: ProjectPhoto; fact?: AssetFact } }> {
+  // The status of a photo that cannot be shown as reported, with the repairs its provider offers.
+  const failed = async (failure: { state: Exclude<SourceStatus['state'], 'available'>; problem: string }) =>
+    (await store.resolve(book.folder, source, { observed: failure })).status;
+  if (outcome.state !== 'available' && !('fact' in outcome)) return { status: await failed(outcome) };
+  const fact = outcome.fact;
+  const status: SourceStatus = outcome.state === 'available' ? { ...source, state: 'available', previewOnly: true, digest: outcome.fact.digest } : await failed(outcome);
+  if (!fact) return { status };
+  const photo = await proxyPhoto(book, source.id, fact, outcome.state === 'available' ? undefined : outcome.problem);
+  if (!photo) return { status, loaded: { fact } };
+  return { status: outcome.state === 'available' ? status : { ...status, cached: true }, loaded: { photo } };
+}
+
+/** A photo drawn from its proxy, with the size and capture data of its fact, and the problem it is shown with. */
+async function proxyPhoto(book: Pick<OpenProject, 'photoIndex' | 'cache'>, id: string, fact: AssetFact, problem: string | undefined): Promise<ProjectPhoto | undefined> {
+  const proxy = await (await proxyStore())?.path(fact.digest);
+  const details = proxy ? await photoDetails(proxy, null).catch(() => undefined) : undefined;
+  if (!proxy || !details) return undefined;
+  // The proxy's own size and capture data never reach layout: the original's do, from assets-meta.json, so
+  // aspect ratios, crop limits and resolution checks match the real photo.
+  const { captured: _captured, location: _location, camera: _camera, ...rendition } = details;
+  const capture = Object.fromEntries(captureFields.flatMap((field) => fact[field] ? [[field, fact[field]]] : []));
+  // A proxy is never changed in place: `put` replaces it by a rename, which gives it another inode. So it carries no
+  // observation (looking a proxy up touches its times for LRU pruning, which must not count as a change), and its
+  // renditions are keyed by inode and size only, so they survive reopening.
+  const identity = details.observation.split(':').slice(0, 2).join(':');
+  return { ...photoMetadata(book.photoIndex[id], fact.provided), ...rendition, ...capture, estimatedCapture: undefined, observation: undefined,
+    ...(fact.provided ? { provided: fact.provided } : {}),
+    width: fact.width, height: fact.height, original: proxy, key: digestBytes(Buffer.from(fact.digest + ':proxy-v1:' + identity)),
+    cache: renditionCacheFor(book.cache), ...(problem ? { problem } : {}) };
+}
+
 /**
  * A photo as the book renders it. Its pixels are always a file on this Mac, whatever the photo's provider (ADR 0011):
  * - the original, read where it is, or a private copy of it (an export);
  * - what was last read of an original that cannot be read now;
  * - a proxy from the proxy store, with the original's size and capture data from `assets-meta.json`, for an original
- *   that is not here.
- * Without any of them, only the fact is returned, so the book still lays out.
+ *   that is not here, or whose provider is not reachable now.
+ * Without any of them, only the fact is returned, so the book still lays out. A photo whose provider reports facts is
+ * loaded by `loadProvidedPhoto` instead.
  */
 async function loadPhoto(book: Pick<OpenProject, 'photoIndex' | 'cache'>, source: SourceEntry, { status, stored }: ResolvedSource, facts: AssetFacts, writable: boolean):
   Promise<{ photo?: ProjectPhoto; standIn?: true; fact?: AssetFact } | undefined> {
   // Only the editable metadata reaches templates; unknown keys of the entry stay in photos.json (ADR 0010).
-  const { title, caption, credit, altText } = book.photoIndex[source.id];
+  const entry = book.photoIndex[source.id];
   const cache = renditionCacheFor(book.cache);
   if (stored) {
     const details = await photoDetails(stored.snapshot, null);
@@ -317,7 +424,7 @@ async function loadPhoto(book: Pick<OpenProject, 'photoIndex' | 'cache'>, source
     const capture = remembered ? Object.fromEntries(captureFields.flatMap((field) => remembered[field] ? [[field, remembered[field]]] : [])) : {};
     const estimate = details.captured || remembered?.captured ? undefined : stored.modified ?? details.estimatedCapture;
     if (present && writable) facts.note(source.id, stored.observation, details, status.digest ?? stored.digest);
-    return { photo: { title, caption, credit, altText, ...details, ...capture, estimatedCapture: estimate, observation: stored.direct && status.state === 'available' ? stored.observation : details.observation,
+    return { photo: { ...photoMetadata(entry), ...details, ...capture, estimatedCapture: estimate, observation: stored.direct && status.state === 'available' ? stored.observation : details.observation,
       width: stored.width!, height: stored.height!, original: stored.snapshot,
       key: stored.direct ? status.problem ? digestBytes(Buffer.from(stored.key + ':stale')) : stored.key! : digestBytes(Buffer.from(stored.digest + ':rendition-3')),
       cache, ...(status.problem ? { problem: status.problem } : {}) } };
@@ -325,23 +432,14 @@ async function loadPhoto(book: Pick<OpenProject, 'photoIndex' | 'cache'>, source
   const fact = facts.get(source.id);
   if (!fact) return undefined;
   // A sync proxy stored by digest stands in on the canvas for an original that is missing here (a linked photo not
-  // yet located, an owned photo not yet downloaded) or not approved on this Mac. It is read from the proxy store
-  // only, never from the original's path, so an unapproved location stays unread (ADR 0005, ADR 0010).
-  const proxy = status.state === 'missing' || status.state === 'unapproved' ? await (await proxyStore())?.path(fact.digest) : undefined;
-  const details = proxy ? await photoDetails(proxy, null).catch(() => undefined) : undefined;
-  if (!proxy || !details) return { fact };
-  // The proxy's own size and capture data never reach layout: the original's do, from assets-meta.json, so
-  // aspect ratios, crop limits and resolution checks match the real photo.
-  const { captured: _captured, location: _location, camera: _camera, ...rendition } = details;
-  const capture = Object.fromEntries(captureFields.flatMap((field) => fact[field] ? [[field, fact[field]]] : []));
-  // A proxy is never changed in place: `put` replaces it by a rename, which gives it another inode. So it carries no
-  // observation (looking a proxy up touches its times for LRU pruning, which must not count as a change), and its
-  // renditions are keyed by inode and size only, so they survive reopening.
-  const identity = details.observation.split(':').slice(0, 2).join(':');
-  return { standIn: true, photo: { title, caption, credit, altText, ...rendition, ...capture, estimatedCapture: undefined, observation: undefined,
-    width: fact.width, height: fact.height, original: proxy, key: digestBytes(Buffer.from(fact.digest + ':proxy-v1:' + identity)),
-    cache, problem: status.problem ?? 'Original unavailable' } };
+  // yet located, an owned photo not yet downloaded), not approved on this Mac, or whose provider is not reachable. It
+  // is read from the proxy store only, never from the original's path, so an unapproved location stays unread (ADR
+  // 0005, ADR 0010, ADR 0011).
+  if (!standInStates.has(status.state)) return { fact };
+  const photo = await proxyPhoto(book, source.id, fact, status.problem ?? 'Original unavailable');
+  return photo ? { standIn: true, photo } : { fact };
 }
+const standInStates = new Set<SourceStatus['state']>(['missing', 'unapproved', 'offline', 'needs-sign-in']);
 
 function projectJson(value: unknown) {
   return JSON.stringify(value, null, 2) + '\n';
@@ -352,21 +450,22 @@ export async function updateProject(book: OpenProject, files: ProjectFiles, relo
   if (book.readOnly) throw new Error('Use New Project to make an editable copy of the sample.');
   // `bookId` is the book's lineage (ADR 0010): an ordinary save, an undo or a redo never changes it, even when the files
   // handed in come from an older snapshot or a caller that does not know the field.
-  let project = parseDocument(projectSchema, { ...files.project, ...(book.project.bookId ? { bookId: book.project.bookId } : {}) }, 'project.json');
   const photoIndex = parseDocument(photoIndexSchema, files.photoIndex, 'photos.json');
+  // The format follows the photo index too: a book that holds a photo without a file is written as format 4.
+  let project = withBookFormat(parseDocument(projectSchema, { ...files.project, ...(book.project.bookId ? { bookId: book.project.bookId } : {}) }, 'project.json'), photoIndex);
   const unchanged = projectJson(book.project) === projectJson(project);
   // A legacy book gets its `bookId` with the first save that writes something, so it adds no undo step of its own and
   // no write when nothing changed.
   // Parsed again, so the field takes its place in the schema's key order like one read from disk.
-  if (!project.bookId && !unchanged) project = parseDocument(projectSchema, { ...project, bookId: randomUUID() }, 'project.json');
+  if (!project.bookId && !unchanged) project = withBookFormat(parseDocument(projectSchema, { ...project, bookId: randomUUID() }, 'project.json'), photoIndex);
   const projectSource = projectJson(project);
   const indexSource = projectJson(photoIndex);
   const projectChanged = !unchanged || project.bookId !== book.project.bookId;
   const indexChanged = projectJson(book.photoIndex) !== indexSource;
   if (!projectChanged && !indexChanged) return book;
   const [projectFile, photoFile] = await Promise.all([readProjectManifest(book.folder, 'project.json'), readProjectManifest(book.folder, 'photos.json')]);
-  const currentProject = parseDocument(projectSchema, parseJson(projectFile, 'project.json'), 'project.json');
   const currentIndex = parseDocument(photoIndexSchema, parseJson(photoFile, 'photos.json'), 'photos.json');
+  const currentProject = withBookFormat(parseDocument(projectSchema, parseJson(projectFile, 'project.json'), 'project.json'), currentIndex);
   if (projectJson(currentProject) !== projectJson(book.project) || projectJson(currentIndex) !== projectJson(book.photoIndex)) {
     throw new Error('The project changed on disk. Reload before making more edits.');
   }
@@ -387,12 +486,12 @@ export async function updateProject(book: OpenProject, files: ProjectFiles, relo
 /** The open book with other project/index data, without touching disk. Commands only reference registered sources,
  * so loaded photo, text and file contents stay valid; photo metadata follows the new index. */
 export function withProjectFiles(book: OpenProject, files: ProjectFiles): OpenProject {
-  const project = parseDocument(projectSchema, files.project, 'project.json');
   const photoIndex = parseDocument(photoIndexSchema, files.photoIndex, 'photos.json');
+  const project = withBookFormat(parseDocument(projectSchema, files.project, 'project.json'), photoIndex);
   const photos = new Map([...book.photos].flatMap(([id, photo]) => {
     if (!photoIndex[id]) return [];
-    const { title, caption, credit, altText } = photoIndex[id];
-    return [[id, { ...photo, title, caption, credit, altText }] as const];
+    const { title: _title, caption: _caption, credit: _credit, altText: _altText, ...rest } = photo;
+    return [[id, { ...rest, ...photoMetadata(photoIndex[id], photo.provided) }] as const];
   }));
   return { ...book, project, photoIndex, photos };
 }
@@ -455,7 +554,11 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
   // whether the source is linked or copied; a copy or link asked for explicitly may add the other kind of source.
   type Held = { kind: 'photo' | 'markdown' | 'file'; id: string; path: string; linked: boolean };
   const held: Held[] = [
-    ...sourceEntries({ project, photoIndex }).filter(({ kind }) => kind === 'photo').map(({ id, linked, path }) => ({ kind: 'photo' as const, id, linked, path: linked ? path : join(book.folder, path) })),
+    // Only a photo that is a file can be held by path or bytes; one from another provider is imported through it.
+    ...sourceEntries({ project, photoIndex }).filter(({ kind }) => kind === 'photo').flatMap((entry) => {
+      const file = fileSourceOf(entry);
+      return file ? [{ kind: 'photo' as const, id: entry.id, linked: file.linked, path: file.linked ? file.path : join(book.folder, file.path) }] : [];
+    }),
     ...Object.entries(project.texts).map(([id, ref]) => ({ kind: 'markdown' as const, id, linked: sourceLinked(ref), path: sourceLinked(ref) ? sourcePath(ref) : join(book.folder, sourcePath(ref)) })),
     ...Object.entries(project.files).map(([id, ref]) => ({ kind: 'file' as const, id, linked: sourceLinked(ref), path: sourceLinked(ref) ? sourcePath(ref) : join(book.folder, sourcePath(ref)) })),
   ];
@@ -537,6 +640,10 @@ export function projectSummary(book: OpenProject, id: string): ProjectSummary {
     photoRevisions: Object.fromEntries([...book.photos].map(([id, photo]) => [id, photo.key])),
     photoDates: Object.fromEntries([...Object.entries(book.unavailablePhotos ?? {}), ...book.photos].flatMap(([id, photo]) => { const date = photoDate(photo); return date ? [[id, date]] : []; })),
     photoSizes: Object.fromEntries([...Object.entries(book.unavailablePhotos ?? {}), ...book.photos].map(([photo, { width, height }]) => [photo, { width, height }])),
+    ...(() => {
+      const provided = Object.fromEntries([...Object.entries(book.unavailablePhotos ?? {}), ...book.photos].flatMap(([photo, { provided }]) => provided ? [[photo, provided]] : []));
+      return Object.keys(provided).length ? { photoProvided: provided } : {};
+    })(),
     texts: book.texts, sources: book.sources, ...(book.templateHash ? { templateHash: book.templateHash } : {}),
   };
 }

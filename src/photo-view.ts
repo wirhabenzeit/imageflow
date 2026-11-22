@@ -1,3 +1,4 @@
+import { photoName, photoTitle } from './source-locations';
 import type { ProjectSummary } from './desktop';
 
 export type PhotoView = { sort: 'capture' | 'name' | 'import'; group: 'none' | 'day' | 'gap'; gapMinutes: number; showTime: boolean };
@@ -48,7 +49,7 @@ export function orderedPhotos(summary: ProjectSummary, view: PhotoView = default
       if (left !== undefined || right !== undefined) return left === undefined ? 1 : right === undefined ? -1 : left - right;
       return 0; // Import order is the stable fallback for undated photos.
     }
-    const name = (id: string) => summary.photoIndex[id].title || summary.photoIndex[id].path.split('/').pop() || id;
+    const name = (id: string) => photoTitle(summary, id) || summary.photoIndex[id].path?.split('/').pop() || photoName(summary, id);
     return name(a).localeCompare(name(b), undefined, { numeric: true, sensitivity: 'base' });
   });
 }

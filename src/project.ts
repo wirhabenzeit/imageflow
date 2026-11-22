@@ -4,6 +4,7 @@ import type { SourceStatus } from './source-locations';
 import type { Dimensions } from './spread';
 import { captureFields } from './photo-metadata';
 import type { CaptureMetadata } from './photo-metadata';
+import { namesFile, readLocator } from './source-locator';
 
 export const identifier = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/, 'Use letters, digits, underscores, or hyphens.')
   .refine((id) => !Object.hasOwn(Object.prototype, id), 'This identifier is reserved.');
@@ -51,8 +52,10 @@ const box = object({
 
 // The book formats this app reads and writes (`project.json` → `schemaVersion`). A book saved by a newer app with a
 // higher number is refused with a request to update ImageFlow, and is left as it is. Format 2 adds page states (ADR
-// 0009), and format 3 adds saved exterior covers. A book is written in the lowest format that holds all its data.
-export const bookFormatVersion = 3;
+// 0009), format 3 adds saved exterior covers, and format 4 adds photos that are not files (ADR 0011): a `photos.json`
+// entry without a `path`, read through a source provider. A book is written in the lowest format that holds all its
+// data, so the format follows `photos.json` as well as `project.json`.
+export const bookFormatVersion = 4;
 export const newerBookMessage = (version: number) => 'This book was saved by a newer version of ImageFlow (book format ' +
   version + '; this version reads formats up to ' + bookFormatVersion + '). Update ImageFlow to open it. The book was not changed.';
 // Release gates (ADR 0009). Format 2 is defined before this version can handle what it stores, so a book that uses
@@ -76,7 +79,7 @@ export function unsupportedBookMessage(value: unknown): string | undefined {
   if (Array.isArray(spreads) && spreads.some((spread) => gated(spread as GatedSpread | null))) return pagesUnsupportedMessage;
   return undefined;
 }
-const schemaVersion = z.literal([1, 2, bookFormatVersion], {
+const schemaVersion = z.literal([1, 2, 3, bookFormatVersion], {
   error: ({ input }) => typeof input === 'number' && Number.isInteger(input) && input > bookFormatVersion ? newerBookMessage(input) : undefined,
 });
 
@@ -112,11 +115,23 @@ export const spreadSchema = object({
   })).optional(),
 }).refine(({ pages, split }) => !split || !!(pages?.left || pages?.right), { message: 'A spread shown as pages needs the state of at least one page.', path: ['split'] });
 
-// The lowest book format that holds a project.
-export function bookFormatOf(project: { cover?: unknown; spreads: readonly { pages?: unknown; split?: unknown; displaced?: unknown }[] }): 1 | 2 | 3 {
+export type BookFormat = 1 | 2 | 3 | 4;
+/**
+ * The lowest book format that holds a project and, when given, its photo index. `projectSchema` sees `project.json`
+ * alone and gives its lower bound; whatever writes a book passes the photo index too (`withBookFormat`), so a book
+ * holding a photo that is not a file is format 4 and refused by every build that cannot read such an entry.
+ */
+export function bookFormatOf(project: { cover?: unknown; spreads: readonly { pages?: unknown; split?: unknown; displaced?: unknown }[] },
+  photoIndex?: Readonly<Record<string, Readonly<Record<string, unknown>>>>): BookFormat {
+  if (photoIndex && Object.values(photoIndex).some((entry) => !namesFile(entry))) return 4;
   if (project.cover !== undefined) return 3;
   return project.spreads.some(({ pages, split, displaced }) => pages !== undefined || split !== undefined || displaced !== undefined) ? 2 : 1;
 }
+/** A project with the format that holds it together with its photo index: what a save writes. */
+export const withBookFormat = <P extends Project>(project: P, photoIndex: PhotoIndex): P => {
+  const schemaVersion = bookFormatOf(project, photoIndex);
+  return project.schemaVersion === schemaVersion ? project : { ...project, schemaVersion };
+};
 const coverState = object(layoutState);
 
 export const projectSchema = guarded(object({
@@ -143,7 +158,9 @@ export const projectSchema = guarded(object({
 }).transform((project) => ({ ...project, schemaVersion: bookFormatOf(project) })));
 
 export const photoIndexSchema = guarded(z.record(identifier, object({
-  path: z.string(),
+  // A file, relative to the book or, `linked`, absolute. An entry without one names a photo that is not a file (book
+  // format 4, ADR 0011) in the fields of its provider's locator, which this schema keeps as unknown keys.
+  path: z.string().optional(),
   linked: z.boolean().optional(),
   caption: z.string().optional(),
   title: z.string().optional(),
@@ -152,7 +169,7 @@ export const photoIndexSchema = guarded(z.record(identifier, object({
   // Capture time, location and camera are read from the photo file and cannot be written here.
   ...Object.fromEntries(captureFields.map((field) => [field, z.custom<never>(() => false,
     { message: field + ' is read from the photo file and is read-only. Remove it from photos.json.' }).optional()])),
-})));
+}).refine((entry) => !!readLocator(entry), { message: 'This photo has no path and names no source this version of ImageFlow can read. If a newer version of ImageFlow saved it, update ImageFlow to open it.', path: ['path'] })));
 
 export type Project = z.infer<typeof projectSchema>;
 export type SpreadState = Project['spreads'][number];

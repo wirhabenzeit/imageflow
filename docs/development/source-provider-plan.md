@@ -2,10 +2,11 @@
 
 Plan for the provider contract of [ADR 0011](../decisions/0011-lightroom-classic.md#source-providers): today's file behaviour moves behind a `SourceProvider` interface as two providers, `package` and `linked`, with no visible change, before any Lightroom code exists.
 
-It has two steps:
+It has three steps:
 
 1. **This document, the contract types and a paper check.** The inventory below, the two halves of the contract ([`src/source-locator.ts`](../../src/source-locator.ts), [`desktop/source-provider.ts`](../../desktop/source-provider.ts)) and sketched providers that are type-checked against it ([`tests/source-provider-fit.ts`](../../tests/source-provider-fit.ts)): `package` and `linked`, which are real since step 2, Lightroom Classic and Immich.
 2. **The refactor,** one pull request of several commits ([below](#the-refactor)), with the existing tests as the safety net. Done.
+3. **Compatibility and host support for photos without a file** ([below](#photos-without-a-file)), built against a provider that keeps its photos in memory and exists only in tests. Done.
 
 The inventory names functions rather than lines; it describes the code at commit `768a283`.
 
@@ -163,3 +164,28 @@ Left for the Lightroom provider, because only a provider without a file can show
 One difference in behaviour: a linked photo that is there but cannot be decoded is reloaded once more shortly after the book opens. The watch cannot tell it from a file that came back, and reports it once.
 
 The safety net was [`tests/linked-sources.test.ts`](../../tests/linked-sources.test.ts) (41 tests on resolving, approvals, relinking, collection, facts and the proxy stand-in), `tests/revisions.test.ts`, `tests/sync.test.ts`, `tests/project-session.test.ts`, the compatibility books, and `scripts/smoke-linked-sources.mjs` end to end.
+
+
+## Photos without a file
+
+The host side of a provider that reports facts, with no Lightroom code. Every path is unit-tested against `MemoryProvider` in [`tests/provided-photos.test.ts`](../../tests/provided-photos.test.ts), which registers its locator kind and provider the way a real one will (`registerLocatorKind`, `registerProvider`).
+
+### Compatibility (ships a release before any such book exists)
+
+- **`assets-meta.json` keeps unknown fields.** Facts and the file are parsed loose (`src/asset-facts.ts`) and written back with what this version does not know. Noting a file photo again keeps a fact's unknown keys while its digest is the same. A file of another `version` reads as empty and is never written over (`writeAssetFacts` in [`desktop/asset-facts.ts`](../../desktop/asset-facts.ts)).
+- **Book format 4.** `bookFormatOf(project, photoIndex)` returns 4 when an entry has no `path`; `withBookFormat` applies it wherever a book is saved (`updateProject`, sync pull and clone, `ensureBookId`), and `persistProjectManifests` refuses a save whose `project.json` is below the format its `photos.json` needs. Older builds then refuse such a book with the existing "update ImageFlow" message.
+- **`photoIndexSchema` accepts an entry without `path`** when a registered locator kind reads it. In this build only tests register one, so a real book with such an entry is refused.
+
+### Host support
+
+- **Locators and entries.** `LocatorKind`s and providers are registries. A photo's `SourceEntry` carries its `locator` and a `name` (from `LocatorKind.name`) instead of `path` and `linked`; `sourceFile` and `fileSourceOf` give the file of a text, a file or a file photo, and every file action (Show in Finder, Quick Look, drag out, collect, relink) goes through them.
+- **Loading** ([`desktop/project.ts`](../../desktop/project.ts)). `observePhotos` asks each provider once for all its photos, handing back the stored revisions. A file result goes to `SourceStore.resolve` as before, with the state already observed. A facts result goes to `refreshProvided` ([`desktop/provided-photos.ts`](../../desktop/provided-photos.ts)): the fact is recorded with `revisions`, `provided` and `extra`, and a preview is asked for only when there is no proxy or the content revision moved. The preview is stripped of its APP1 and COM segments (PNG: text, time and EXIF chunks), hashed and stored in `ProxyStore` under that digest. `loadProvidedPhoto` draws the photo from fact and proxy without a problem, with `previewOnly` on its status.
+- **Changes** (`providedChanges`, `DocumentSession.providedChanged`). A provider's `watch` report is observed again; a moved revision invalidates the render inputs, a moved content revision re-renders the preview, and only a new digest (or a change of availability) reloads the book. A new preview with another aspect ratio of a placed photo raises a notice and a `source-reshaped` warning for the session.
+- **Input revision.** `ProjectInputIndex` hashes the stored `revision` token of a photo without a file (from the session's facts, else the file).
+- **Titles.** `photoMetadata`: the override where `photos.json` has the key, else the provided value. The summary carries `photoProvided`; the Inspector shows a provided value as the placeholder and offers Revert, which removes the key. `set_photo_metadata` with `null` already removed the key, which now means inherit.
+- **States and menus.** `SourceStatus` gains `offline`, `needs-sign-in`, `repairs` (from `provider.repairs`) and `previewOnly`. The proxy stands in for `offline` and `needs-sign-in` too. Assets shows Offline and Sign in needed; the menus offer Locate and Locate Folder only where the provider does, and Retry otherwise.
+- **Export.** A photo without a file is drawn from its proxy in the export load too, nothing is materialized, and `printProblem` reports it as `source-unavailable`, so the page is marked ORIGINAL UNAVAILABLE and the PDF is a proof.
+
+The ADR's `lightroom` object on a fact is the generic `revisions` (`revision` = `lrRevision`, `contentRevision` = the develop hash) and `extra` here.
+
+Still left for the Lightroom provider: the plugin and its loopback bridge, import, materialization into the source cache recorded against a revision (and with it full-resolution export and Copy into Book of such photos), and Launch Lightroom as a repair action.
