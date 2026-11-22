@@ -11,6 +11,7 @@ export const desktop = join(root, '.build', 'desktop');
 const platform = '@esbuild/' + process.platform + '-' + process.arch;
 export const esbuildBinary = join(root, 'node_modules', platform, 'bin', 'esbuild');
 export const sample = join(root, 'sample');
+export const lightroomPlugin = join(root, 'resources', 'ImageFlow.lrplugin');
 const platformTag = process.platform + '-' + process.arch;
 const photoDependencies = [
   'sharp', 'semver', 'detect-libc', '@img/colour', '@img/sharp-' + platformTag, '@img/sharp-libvips-' + platformTag,
@@ -48,6 +49,8 @@ export async function stageDesktop({ packaged = false, dev = false, destination 
     cp(join(root, 'docs'), join(destination, 'docs'), { recursive: true }),
     cp(join(root, 'skills'), join(destination, 'skills'), { recursive: true }),
     cp(join(root, 'resources', 'extension-icon.png'), join(destination, 'extension-icon.png')),
+    // The Lightroom Classic plugin (ADR 0011): beside the app in development, Contents/Resources in a package.
+    packaged ? Promise.resolve() : cp(lightroomPlugin, join(destination, 'ImageFlow.lrplugin'), { recursive: true }),
     buildMcp(join(destination, 'mcp-bridge.cjs')),
     buildMacHeader(destination),
     build(mainBuild(destination, updateTest)),

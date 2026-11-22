@@ -35,6 +35,25 @@ Linked files refresh after external saves, so a photo you re-export from Lightro
 - **Import…** adds photos, Markdown and parameter files, and you can drop files from Finder onto the list. In the bottom panel's **Assets** tab, which lists only parameter files, it adds only those. Files other than photos and Markdown import only when a file parameter of the template accepts their type, such as `.gpx`; other files are skipped. New files follow **Copy Assets into Book**. A file the book already holds, linked or copied, found by its path or by its contents, is not added again; the status bar says how many were already in the book. **Edit → Undo** removes what an import added.
 - Removing a parameter file that is still assigned asks first and names where it is used. **Remove** clears those assignments and takes the file out of the book in one step; **Undo** restores the file and every assignment. Copied files stay in the package for Undo, and removing a link never touches the original.
 
+## Photos from Lightroom Classic
+
+ImageFlow can lay out photos straight from a Lightroom Classic catalog without exporting them first. It shows a 1400-pixel preview that Lightroom renders, and lays the photo out at its full size after Lightroom's crop, so resolution checks stay right. When you edit a photo in Lightroom, its preview in ImageFlow refreshes within a few seconds; a change of title, caption or rating updates what the book shows without rendering again.
+
+**Install the plugin once.** In **Settings → General → Lightroom**, choose **Install Plugin**. ImageFlow copies its plugin into Lightroom's Modules folder (`~/Library/Application Support/Adobe/Lightroom/Modules`). Quit and reopen Lightroom Classic if it is running. If **File → Plug-in Manager** in Lightroom lists ImageFlow as disabled, enable it there. Settings says when a newer plugin comes with an ImageFlow update; choose **Update Plugin** and reopen Lightroom.
+
+**Add photos**, either way:
+
+- In Lightroom, select photos and choose **File → Plug-in Extras → Send to ImageFlow** (also in **Library → Plug-in Extras**). They go into the book in front in ImageFlow; if no book is open, ImageFlow asks for one.
+- In ImageFlow, choose **File → Import from Lightroom Classic…**. It adds the photos selected in Lightroom now.
+
+Videos are left out. A photo the book holds already is not added again, and **Edit → Undo** removes what an import added. A Lightroom photo takes its title, caption and credit (Lightroom's copyright, else its creator) from Lightroom; whatever you type in the Inspector wins, and **Revert** goes back to Lightroom's. ImageFlow never writes into the catalog.
+
+**When Lightroom is not running**, or another catalog is open, the photos show as **Offline** and are drawn from their last preview. Choose **Open Lightroom Classic** in the asset's menu or at the bottom of **Book → Assets…**; the photos come back once the plugin connects. A photo removed from the catalog shows as missing.
+
+**Export.** In this version a PDF export uses the previews of Lightroom photos, marks those pages ORIGINAL UNAVAILABLE and asks you to confirm a proof. Full-resolution renders from Lightroom at export time, and **Copy into Book** for these photos, follow in a later version. Until then, export the photos from Lightroom to files and import those for print.
+
+The plugin and ImageFlow talk only on this Mac: ImageFlow listens on the loopback address with a key that only your user account can read, and nothing else on the network reaches it.
+
 ## Save a copy
 
 **File → Duplicate…** creates a copy. **Include all files**, checked by default, copies linked files into it for portability. Uncheck it to preserve links. Missing originals are reported.

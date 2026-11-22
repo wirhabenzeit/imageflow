@@ -37,8 +37,8 @@ export type SourceStatus = SourceEntry & { state: SourceState; problem?: string;
   /** The repairs to offer while the source is unavailable; Retry is always offered. */
   repairs?: SourceRepair[];
   /**
-   * Only the provider's preview of this photo is on this Mac (ADR 0011): it is laid out and drawn from it, and printed
-   * only as a proof until full-resolution export exists for its provider.
+   * An export prints only the provider's preview of this photo (ADR 0011): its provider could not produce the
+   * full-resolution original when the export asked for it, so the page is a proof. Set only in an export's load.
    */
   previewOnly?: boolean;
   /** The photo's aspect ratio changed in its source after it was placed: a crop may frame another part of it. */
