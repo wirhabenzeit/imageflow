@@ -1,80 +1,15 @@
-// The provider contract checked on paper against four providers (ADR 0011, Source providers): `package` and `linked`,
-// which move today's file behaviour behind it, Lightroom Classic and Immich. Type-checked with the app (`tsc --noEmit`), never
-// run and never bundled. Each provider's own API is only declared here, in the shape its real one has, so that the
-// mapping onto the contract is real code. The real providers replace these sketches one by one.
+// The provider contract checked on paper against the providers that do not exist yet (ADR 0011, Source providers):
+// Lightroom Classic and Immich. Type-checked with the app (`tsc --noEmit`), never run and never bundled. Each
+// provider's own API is only declared here, in the shape its real one has, so that the mapping onto the contract is
+// real code. The file providers were sketched here too and are real now (desktop/providers/files.ts); a real provider
+// replaces its sketch.
 import { linkedLocator, packageLocator } from '../src/source-locator';
+import { linkedProvider, packageProvider } from '../desktop/providers/files';
 import type { LinkedLocator, Locator, LocatorKind, PackageLocator } from '../src/source-locator';
 import type { Materialized, MaterializeOptions, Observed, ProvidedFacts, Revisions, SourceProvider, SourceRef, Unavailable } from '../desktop/source-provider';
 
 const unavailable = (state: Unavailable, problem: string): Observed => ({ state, problem });
 const iso = (ms: number) => new Date(ms).toISOString();
-
-// --- package and linked: files, read in place -------------------------------------------------------------------
-// Declared from desktop/source-store.ts and desktop/source-access.ts as they are today. Both providers read a file
-// the same way; these helpers are also what texts and files keep using.
-type FileLocator = PackageLocator | LinkedLocator;
-declare const files: {
-  /** The package branch of `originalPath`: inside `photos/`, also after symlinks are resolved. Throws an errno error. */
-  inPackage(book: string, path: string): Promise<string>;
-  /** The linked branch of `originalPath`: approved, absolute, its own realpath, outside the book. Throws SourceAccessError too. */
-  approved(book: string, id: string, path: string): Promise<string>;
-  /** `stat` with `fileStamp`: `ino:size:mtimeNs:ctimeNs`. */
-  stat(path: string): Promise<{ stamp: string; size: number; mtimeMs: number; file: boolean }>;
-  clone(from: string, to: string): Promise<void>;
-  /** The state an error of the above stands for (the catch block of `SourceStore.resolve`). */
-  failure(error: unknown, locator: FileLocator): { state: Unavailable; problem: string };
-  /** The linked-folder poll and directory watches of `DocumentSession.watchLinkedSources`. */
-  watchFiles(paths: string[], changed: (path: string) => void): () => void;
-};
-type FileObserved = Observed & { file?: string };
-async function observeFile(locator: FileLocator, original: () => Promise<string>, limit?: number): Promise<FileObserved> {
-  try {
-    const file = await original();
-    const info = await files.stat(file);
-    if (!info.file || (limit && info.size > limit)) return unavailable('unreadable', 'Original unavailable: Expected a regular file' + (limit ? ' up to 50 MB.' : '.'));
-    // One token: a file has no cheaper sign that only its metadata changed.
-    return { state: 'available', revisions: { revision: info.stamp }, modified: iso(info.mtimeMs), file };
-  } catch (error) { return files.failure(error, locator); }
-}
-// An export reads every photo from a private copy. The same check as today's 'Source changed while being read': the
-// path still resolves to the same file with the same stamp after the copy.
-async function* cloneFiles<L extends FileLocator>(refs: readonly SourceRef<L>[], observe: (ref: SourceRef<L>) => Promise<FileObserved>,
-  { staging, signal }: MaterializeOptions): AsyncGenerator<Materialized> {
-  for (const ref of refs) {
-    if (signal.aborted) return;
-    const before = await observe(ref);
-    if (before.state !== 'available') { yield { id: ref.id, state: before.state, problem: before.problem }; continue; }
-    const file = staging + '/' + ref.id;
-    // A file that goes missing or unreadable between the two is this photo's failure, not the export's.
-    const failed = await files.clone(before.file!, file).then(() => undefined, (error) => files.failure(error, ref.locator));
-    const after = failed ?? await observe(ref);
-    yield after.state === 'available' ? { id: ref.id, file, before: before.revisions, after: after.revisions } : { id: ref.id, state: after.state, problem: after.problem };
-  }
-}
-const fileRepairs = (state: Unavailable) => state === 'offline' || state === 'needs-sign-in' ? [] : ['locate', 'locate-folder'] as const;
-
-// The book package: the host's own storage. It needs no approval, has no size limit and is never offline.
-const observeOwned = (book: string) => ({ locator }: SourceRef<PackageLocator>) => observeFile(locator, () => files.inPackage(book, locator.path));
-export const packageProvider: SourceProvider<PackageLocator> = {
-  provider: 'package',
-  observe: (book, refs) => Promise.all(refs.map(observeOwned(book))),
-  // No `preview`: the host derives it from the file.
-  materialize: (book, refs, options) => cloneFiles(refs, observeOwned(book), options),
-  // The book folder is the host's, and its own watcher covers `photos/`.
-  watch: () => () => {},
-  repairs: fileRepairs,
-};
-
-// A file somewhere else on this Mac: approved per path, limited in size, and watched where it is.
-const observeLinked = (book: string) => ({ id, locator }: SourceRef<LinkedLocator>) => observeFile(locator, () => files.approved(book, id, locator.path), 50 * 1024 * 1024);
-export const linked: SourceProvider<LinkedLocator> = {
-  provider: 'linked',
-  observe: (book, refs) => Promise.all(refs.map(observeLinked(book))),
-  materialize: (book, refs, options) => cloneFiles(refs, observeLinked(book), options),
-  watch: (_book, refs, changed) => files.watchFiles(refs.map(({ locator }) => locator.path),
-    (path) => changed(refs.filter(({ locator }) => locator.path === path).map(({ id }) => id))),
-  repairs: fileRepairs,
-};
 
 // --- Lightroom Classic: a catalog behind the companion plugin --------------------------------------------------------
 type LightroomLocator = { provider: 'lightroom'; catalog: string; uuid: string; name?: string };
@@ -248,5 +183,5 @@ export const immichProvider: SourceProvider<ImmichLocator> = {
 
 // Every provider is held to the same contract, whatever its locator.
 type Fits<L extends Locator> = { kind: LocatorKind<L>; provider: SourceProvider<L> };
-export const fits = [{ kind: packageLocator, provider: packageProvider } satisfies Fits<PackageLocator>, { kind: linkedLocator, provider: linked } satisfies Fits<LinkedLocator>,
+export const fits = [{ kind: packageLocator, provider: packageProvider } satisfies Fits<PackageLocator>, { kind: linkedLocator, provider: linkedProvider } satisfies Fits<LinkedLocator>,
   { kind: lightroomLocator, provider: lightroom } satisfies Fits<LightroomLocator>, { kind: immichLocator, provider: immichProvider } satisfies Fits<ImmichLocator>];
