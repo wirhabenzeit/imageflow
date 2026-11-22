@@ -1,107 +1,17 @@
-// The provider contract checked on paper against the providers that do not exist yet (ADR 0011, Source providers):
-// Lightroom Classic and Immich. Type-checked with the app (`tsc --noEmit`), never run and never bundled. Each
-// provider's own API is only declared here, in the shape its real one has, so that the mapping onto the contract is
-// real code. The file providers were sketched here too and are real now (desktop/providers/files.ts); a real provider
-// replaces its sketch.
-import { linkedLocator, packageLocator } from '../src/source-locator';
+// The provider contract checked on paper against a provider that does not exist yet (ADR 0011, Source providers):
+// Immich. Type-checked with the app (`tsc --noEmit`), never run and never bundled. Its API is only declared here, in
+// the shape its real one has, so that the mapping onto the contract is real code. The file providers and Lightroom
+// Classic were sketched here too and are real now (desktop/providers/files.ts, desktop/providers/lightroom.ts); a real
+// provider replaces its sketch.
+import { lightroomLocator, linkedLocator, packageLocator } from '../src/source-locator';
 import { linkedProvider, packageProvider } from '../desktop/providers/files';
-import type { LinkedLocator, Locator, LocatorKind, PackageLocator } from '../src/source-locator';
-import type { Materialized, MaterializeOptions, Observed, ProvidedFacts, Revisions, SourceProvider, SourceRef, Unavailable } from '../desktop/source-provider';
+import { lightroomProvider } from '../desktop/providers/lightroom';
+import type { LightroomPort } from '../desktop/providers/lightroom';
+import type { LightroomLocator, LinkedLocator, Locator, LocatorKind, PackageLocator } from '../src/source-locator';
+import type { Materialized, MaterializeOptions, Observed, Revisions, SourceProvider, SourceRef, Unavailable } from '../desktop/source-provider';
 
 const unavailable = (state: Unavailable, problem: string): Observed => ({ state, problem });
-const iso = (ms: number) => new Date(ms).toISOString();
-
-// --- Lightroom Classic: a catalog behind the companion plugin --------------------------------------------------------
-type LightroomLocator = { provider: 'lightroom'; catalog: string; uuid: string; name?: string };
-export const lightroomLocator: LocatorKind<LightroomLocator> = {
-  provider: 'lightroom',
-  fields: ['lightroom'],
-  read: (entry) => {
-    const value = entry.lightroom as Partial<LightroomLocator> | undefined;
-    return typeof value?.catalog === 'string' && typeof value.uuid === 'string' ? { provider: 'lightroom', catalog: value.catalog, uuid: value.uuid, ...(value.name ? { name: value.name } : {}) } : undefined;
-  },
-  write: ({ provider: _provider, ...lightroom }) => ({ lightroom }),
-  // The catalog identity is portable (the catalog's path is not, and stays in local settings); the name is a hint.
-  portable: ({ catalog, uuid }) => ({ lightroom: { catalog, uuid } }),
-  shared: (locator) => locator,
-  adopt: (shared) => shared,
-  key: ({ catalog, uuid }) => catalog + ':' + uuid,
-  name: ({ name }) => name,
-};
-// Declared from the plugin bridge of ADR 0011, section 5, and the SDK calls its spike measured.
-type LightroomRaw = { uuid: string; lastEditTime: number; editCount: number; croppedDimensions: { width: number; height: number }; dateTimeOriginal?: string;
-  gps?: { latitude: number; longitude: number }; cameraMake?: string; cameraModel?: string; title?: string; caption?: string; copyright?: string };
-declare const plugin: {
-  /** Undefined while the plugin is not connected. */
-  catalog(): string | undefined;
-  /** One `batchGetRawMetadata` and `getFormattedMetadata`; a UUID the catalog does not hold is left out. */
-  metadata(uuids: string[]): Promise<Map<string, LightroomRaw>>;
-  /** The hash of `getDevelopSettings()`, one SDK call per photo. */
-  developHash(uuid: string): Promise<string>;
-  /** One `LrExportSession` of a few photos: the revision is read before and after each render. */
-  render(uuids: string[], size: 1400 | 'full', folder: string): Promise<{ uuid: string; file: string; before: LightroomRaw; after: LightroomRaw }[]>;
-  onRevisions(uuids: string[], changed: (uuids: string[]) => void): () => void;
-  onConnection(changed: () => void): () => void;
-};
-const lrRevision = (raw: LightroomRaw) => [raw.uuid, raw.lastEditTime, raw.editCount, raw.croppedDimensions.width + 'x' + raw.croppedDimensions.height].join(':');
-const lightroomFacts = (raw: LightroomRaw): ProvidedFacts => ({
-  ...raw.croppedDimensions,
-  ...(raw.dateTimeOriginal ? { captured: { dateTime: raw.dateTimeOriginal, offset: null } } : {}),
-  ...(raw.gps ? { location: raw.gps } : {}),
-  ...(raw.cameraMake || raw.cameraModel ? { camera: { make: raw.cameraMake, model: raw.cameraModel } } : {}),
-  provided: { title: raw.title, caption: raw.caption, credit: raw.copyright },
-});
-// The develop hash costs an SDK call, so it is read only for a photo whose revision moved: this is what `known` is for.
-async function lightroomRevisions(raw: LightroomRaw, known?: Revisions): Promise<Revisions> {
-  const revision = lrRevision(raw);
-  return { revision, contentRevision: known?.revision === revision && known.contentRevision ? known.contentRevision : await plugin.developHash(raw.uuid) };
-}
-const lightroomUnreachable = (locator: LightroomLocator): { state: Unavailable; problem: string } | undefined => {
-  const open = plugin.catalog();
-  return !open ? { state: 'offline', problem: 'Lightroom Classic is not running' } : open !== locator.catalog ? { state: 'offline', problem: 'Another Lightroom catalog is open' } : undefined;
-};
-const gone = { state: 'missing', problem: 'No longer in the Lightroom catalog' } as const;
-// One session renders several photos in parallel but cannot be cancelled, so sessions are small and cancelling takes
-// effect between them. Previews and full-resolution renders share this.
-async function* renderInLightroom(refs: readonly SourceRef<LightroomLocator>[], size: 1400 | 'full', { staging, signal }: MaterializeOptions): AsyncGenerator<Materialized> {
-  for (let i = 0; i < refs.length && !signal.aborted; i += 5) {
-    const batch = refs.slice(i, i + 5);
-    // Each photo is checked by itself: one of another catalog does not stop the others of its session.
-    const down = new Map(batch.map(({ id, locator }) => [id, lightroomUnreachable(locator)]));
-    const reachable = batch.filter(({ id }) => !down.get(id));
-    // A session that fails as a whole (the plugin disconnected) fails its photos, not the photos of other sessions.
-    const renders = reachable.length ? await plugin.render(reachable.map(({ locator }) => locator.uuid), size, staging).catch(() => undefined) : [];
-    for (const { id, locator, known } of batch) {
-      const unreachable = down.get(id) ?? (renders ? undefined : lightroomUnreachable(locator) ?? { state: 'offline' as const, problem: 'Lightroom Classic stopped responding' });
-      const render = renders?.find(({ uuid }) => uuid === locator.uuid);
-      if (unreachable || !render) { yield { id, ...(unreachable ?? gone) }; continue; }
-      // Print keys on `revision` alone, so the develop hash is read for previews only, and once when nothing moved.
-      const before = size === 'full' ? { revision: lrRevision(render.before) } : await lightroomRevisions(render.before, known);
-      yield { id, file: render.file, before, after: size === 'full' ? { revision: lrRevision(render.after) } : await lightroomRevisions(render.after, before) };
-    }
-  }
-}
-export const lightroom: SourceProvider<LightroomLocator> = {
-  provider: 'lightroom',
-  async observe(_book, refs) {
-    // Only photos of the open catalog are asked for: a UUID means nothing in another one.
-    const open = refs.filter(({ locator }) => !lightroomUnreachable(locator));
-    const raws = open.length ? await plugin.metadata(open.map(({ locator }) => locator.uuid)) : new Map<string, LightroomRaw>();
-    return Promise.all(refs.map(async ({ locator, known }): Promise<Observed> => {
-      const raw = raws.get(locator.uuid);
-      return lightroomUnreachable(locator) ?? (raw ? { state: 'available', revisions: await lightroomRevisions(raw, known), facts: lightroomFacts(raw) } : gone);
-    }));
-  },
-  preview: (_book, refs, options) => renderInLightroom(refs, 1400, options),
-  materialize: (_book, refs, options) => renderInLightroom(refs, 'full', options),
-  watch(_book, refs, changed) {
-    const ids = (uuids: string[]) => refs.filter(({ locator }) => uuids.includes(locator.uuid)).map(({ id }) => id);
-    const stops = [plugin.onRevisions(refs.map(({ locator }) => locator.uuid), (uuids) => changed(ids(uuids))),
-      plugin.onConnection(() => changed(refs.map(({ id }) => id)))];
-    return () => stops.forEach((stop) => stop());
-  },
-  repairs: (state) => state === 'offline' ? ['launch'] : [],
-};
+declare const bridge: LightroomPort;
 
 // --- Immich: a server with originals and previews (on paper only; its API is declared from memory, not verified) -----
 type ImmichLocator = { provider: 'immich'; server: string; asset: string; name?: string };
@@ -184,4 +94,4 @@ export const immichProvider: SourceProvider<ImmichLocator> = {
 // Every provider is held to the same contract, whatever its locator.
 type Fits<L extends Locator> = { kind: LocatorKind<L>; provider: SourceProvider<L> };
 export const fits = [{ kind: packageLocator, provider: packageProvider } satisfies Fits<PackageLocator>, { kind: linkedLocator, provider: linkedProvider } satisfies Fits<LinkedLocator>,
-  { kind: lightroomLocator, provider: lightroom } satisfies Fits<LightroomLocator>, { kind: immichLocator, provider: immichProvider } satisfies Fits<ImmichLocator>];
+  { kind: lightroomLocator, provider: lightroomProvider(bridge) } satisfies Fits<LightroomLocator>, { kind: immichLocator, provider: immichProvider } satisfies Fits<ImmichLocator>];

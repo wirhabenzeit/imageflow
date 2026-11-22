@@ -80,6 +80,10 @@ import { configureRenditionCache, pruneRenditions } from './rendition-cache';
 import { configureProxyStore, proxyStore } from './proxy-store';
 import { decodes, readTemplatePreview } from './template-preview-file';
 import { previewTypes } from '../src/template-preview';
+import { LightroomBridge } from './lightroom/bridge';
+import { launchLightroom } from './lightroom/launch';
+import { lightroomProvider } from './providers/lightroom';
+import { registerProvider } from './providers';
 
 const presentationWindows = new PresentationWindows({
   hidden: () => hidden,
@@ -111,6 +115,9 @@ const quitReplies = new Map<string, { sender: number; resolve: (allowed: boolean
 let quitReady = false;
 let quitCleanup: Promise<void> | undefined;
 let connectionSettingsQueue = Promise.resolve();
+// The loopback bridge to the ImageFlow plugin in Lightroom Classic (ADR 0011). Its file is in this profile's folder, so
+// a run with another profile (the smoke tests) never writes into the one the plugin reads.
+let lightroom: LightroomBridge | undefined;
 let cache: string;
 let settings: SettingsStore;
 let recents: RecentDocuments;
@@ -1421,6 +1428,10 @@ void app.whenReady().then(async () => {
   configurePersistence(join(app.getPath('userData'), 'persistence'));
   // Sync proxies of photos whose originals are not on this Mac (ADR 0010); kept with the other caches, never in books.
   void configureProxyStore(join(app.getPath('userData'), 'Cache', 'proxies')).catch((error) => console.warn('ImageFlow could not open the sync proxy cache', error));
+  // Photos of a Lightroom Classic catalog are read through the plugin; until it connects they are offline.
+  lightroom = new LightroomBridge({ file: join(app.getPath('userData'), 'lightroom-bridge.json'), version: app.getVersion() });
+  registerProvider(lightroomProvider(lightroom));
+  void lightroom.start().catch((error) => console.warn('ImageFlow could not start the Lightroom bridge:', errorMessage(error)));
   nativeTheme.themeSource = settings.value.appearance;
   const checkFeed = () => checkUpdateFeed({ baseURL: updateTestConfiguration?.baseURL ?? updateBaseURL,
     channel: settings.value.updateChannel, platform: process.platform + '-' + process.arch, installed: app.getVersion(),
@@ -1564,6 +1575,8 @@ void app.whenReady().then(async () => {
     quitCleanup ??= (async () => {
       await connectionSettingsQueue;
       await disableMcp();
+      // The plugin sees the bridge file go and waits for the next run of ImageFlow.
+      await lightroom?.stop().catch(() => {});
       await Promise.allSettled([...opening.values()]);
       await Promise.allSettled([...closing]);
       await Promise.all([settings.settled(), recents.settled()]);
@@ -1814,6 +1827,13 @@ void app.whenReady().then(async () => {
     let next = document.book;
     let message: string | undefined;
     if (request.action === 'retry') return { summary: activate(await document.reload()) };
+    if (request.action === 'launch') {
+      // Offered only where the photo's provider offers it (`SourceProvider.repairs`). Once the plugin connects, the
+      // provider's watch reports the photos and the book observes them again: nothing waits here.
+      if (!chosen.some(({ key }) => document.book.sources?.[key]?.repairs?.includes('launch'))) throw new Error('These assets cannot be brought back by opening an app.');
+      await launchLightroom();
+      return { summary: document.summary, message: lightroom?.connection ? undefined : 'Opening Lightroom Classic. Its photos come back once the ImageFlow plugin connects.' };
+    }
     // Photos without a file are materialized on the way; one whose source cannot produce it stays as it was.
     const unproduced: string[] = [];
     const collect = (chosenKeys?: readonly string[]) => document.copying(owner, (options) =>
