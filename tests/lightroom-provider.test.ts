@@ -244,7 +244,8 @@ test('a book with Lightroom photos loads through the provider and the plugin, sh
   assert.equal(photo.title, 'Harbour');
   assert.equal(photo.problem, undefined);
   assert.equal(loaded.photos.get('lr2')!.height, 6000);
-  assert.equal(loaded.sources!['photo:lr1'].previewOnly, true);
+  // Only an export load marks a photo it could not get the original of; the editor shows the preview without it.
+  assert.equal(loaded.sources!['photo:lr1'].previewOnly, undefined);
   assert.equal(plugin.jobs.filter(({ type }) => type === 'render').length, 1, 'both previews in one session');
   // A change in Lightroom refreshes the preview through the host's change path.
   plugin.edit(uuid(1), { develop: { Exposure2012: 1 }, color: '#00ff00' });

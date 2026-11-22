@@ -67,7 +67,8 @@ test('new Lightroom photos get an ID and an entry without a title, and load with
   const facts = await readAssetFacts(f.folder);
   assert.ok(await f.proxies.path(facts[imported[0]].digest));
   assert.equal(book.photos.get(imported[0])!.title, 'Harbour');
-  assert.equal(book.sources!['photo:' + imported[1]].previewOnly, true);
+  // Only an export load marks a photo it could not get the original of; the editor shows the preview without it.
+  assert.equal(book.sources!['photo:' + imported[1]].previewOnly, undefined);
   assert.equal(f.plugin.jobs.filter(({ type }) => type === 'render').length, 1);
 });
 
