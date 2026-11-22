@@ -98,7 +98,18 @@ try {
       const { projects } = (await call('list_projects', {})).data;
       const { project, revision } = projects.find((item) => item.folder === book);
       await open(0);
-      await input().fill('Typed beside the agent');
+      await input().fill('Typed beside');
+      // Neither save pauses the editor: no recovery panel, not even for a frame while the agent's revision renders (F-042).
+      await w.evaluate(() => {
+        const seen = window.__inlinePaused = { recovery: false, status: [], exportDisabled: false };
+        new MutationObserver(() => {
+          if (document.querySelector('.inline-text-recovery')) seen.recovery = true;
+          // One status line for the whole save, and a toolbar that stays as it was.
+          const status = document.querySelector('.status')?.textContent ?? '';
+          if (status && seen.status.at(-1) !== status) seen.status.push(status);
+          if (document.querySelector('.export-button')?.disabled) seen.exportDisabled = true;
+        }).observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
+      });
       const other = initial.spreads[1].id;
       const same = await call('apply_project_changes', { project, expectedRevision: revision, idempotencyKey: 'inline-same', label: 'Agent heading',
         operations: [{ op: 'set_parameter', scope: 'spread', spread: firstId, key: 'heading', value: 'Agent heading' }] });
@@ -109,8 +120,15 @@ try {
       assert.equal(beside.data.committed, true);
       const project1 = JSON.parse(await readFile(projectFile, 'utf8'));
       assert.equal(project1.spreads[1].boxes.hero?.photo, undefined, 'the agent cleared the other spread');
+      // Typing goes on while the agent's revision renders.
+      await input().press('End');
+      await input().pressSequentially(' the agent');
       assert.equal(await input().inputValue().catch(() => input().innerText()), 'Typed beside the agent', 'the typing is kept');
       await w.locator(ready).waitFor();
+      const seen = await w.evaluate(() => window.__inlinePaused);
+      assert.equal(seen.recovery, false, 'the editor never paused for the agent save');
+      assert.ok(!seen.status.some((text) => text.startsWith('Updating the book')), 'one status line for the agent save: ' + JSON.stringify(seen.status));
+      assert.equal(seen.exportDisabled, false, 'Export stays enabled through the agent save');
       await done();
       assert.equal(await saved(), 'Typed beside the agent', 'the typing saves after the agent change');
       assert.equal(JSON.parse(await readFile(projectFile, 'utf8')).spreads[1].boxes.hero?.photo, undefined, 'and keeps the agent change');
