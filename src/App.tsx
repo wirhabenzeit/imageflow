@@ -47,7 +47,7 @@ import { ElementEditorDialog } from './ElementEditor';
 import { documentEditorFor, editorOwnedDocument, editorTargetGone } from './editor-session';
 import { anchoredTarget, clickWithin, elementRect, hiddenOccurrence, inlinePlacement, presentationFor } from './inline-editors';
 import type { OpenEditor } from './inline-editors';
-import { HeldPicker, LayoutFamilyPicker } from './LayoutFamilyPicker';
+import { FamilyChoice, HeldPicker, LayoutFamilyPicker } from './LayoutFamilyPicker';
 import { InlineTextEditor } from './InlineTextEditor';
 import { minimumText, textEditorOwner, textExtent, textFits } from './inline-text';
 import { PhotoContent, TextContent } from './BoxContent';
@@ -2083,12 +2083,15 @@ export function App() {
         open={openInspectorOwner}
         openTarget={openInspectorTarget} place={placeInspector} chooseLayout={chooseInspectorLayout}
         holdPreviews={!render && !!lastReady} targetsStale={targetsStale}
-        familyPicker={template && layoutFamily && <HeldPicker
+        familyPicker={template && layoutFamily && (template.layoutFamilies?.[layoutFamily]?.picker?.choice
+          ? <FamilyChoice template={template} spread={spread} page={selectedPage} family={layoutFamily} readOnly={!writable || !!previewNotice}
+            chooseLayout={chooseInspectorLayout} />
+          : <HeldPicker
           id={JSON.stringify([summary.handle, spread.id, selectedPage, layoutFamily, summary.templateHash, template.format, summary.network])}>
           {(showing) => <LayoutFamilyPicker
             project={summary.id} template={template} spread={spread} page={selectedPage} chooseLayout={chooseInspectorLayout} params={summary.project.params} family={layoutFamily}
             readOnly={!writable} blocked={previewNotice || undefined} onShowing={showing} />}
-        </HeldPicker>}
+        </HeldPicker>)}
         edit={editFromPanel} highlight={setHighlight} select={selectFromPanel} />),
     [summary, spread, selectedSide, selectedPage, sequence, index, writable, selectedSource, template, render, lastReady, usage, focusBox, panelTargets, targetsStale, layoutFamily, previewNotice, quickSource, openInspectorOwner, openInspectorTarget, placeInspector, chooseInspectorLayout, editFromPanel, selectFromPanel]);
 

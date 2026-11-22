@@ -20,7 +20,7 @@ How an agent edits an ImageFlow book through the MCP server. The template API to
 - To find the parameter a request means, read each parameter's description with its unit, range and options. Give new parameters a description when their meaning or direction is not obvious from the label.
 - To start or extend a template, read the [package](package.md) topic's example table, fetch the closest example with `includeExamples` and copy its layout.
 - For an empty book, inspect `template.openingSpreads` and insert suitable layouts with `insert_spread` or facing page pairs with `insert_page_pair`. `openingSpreads` describes new-book defaults and is not applied again automatically.
-- Use a layout family when layouts are variants of one design (`template.layoutFamilies`; `family` and `variant` on each layout). Pickers should choose by variant tags, not hard-coded IDs. Switch variants with `switch_layout` and the layout ID of the variant ([Layout families](layout-families.md)).
+- Use a layout family when layouts are variants of one design (`template.layoutFamilies`; `family` and `variant` on each layout). Give a family a `choice` picker, which the app draws, unless it needs a component for more than one tag; pickers choose by variant tags, not hard-coded IDs. Switch variants with `switch_layout` and the layout ID of the variant ([Layout families](layout-families.md)).
 
 ## Verifying
 

@@ -376,12 +376,18 @@ export type LayoutPickerProps = {
   find: (tags: VariantTags) => string | undefined;
   document: Values; format: ResolvedFormat; readOnly: boolean; commit: () => void; cancel: () => void;
 };
+// A family's picker is the app's own segmented choice by one variant tag (`choice`), or the template's `component`.
+const variantChoice = z.object({
+  tag: z.string().min(1),
+  options: z.record(z.string(), z.string().min(1)).refine((options) => Object.keys(options).length >= 2, 'A choice offers at least two options.'),
+}).strict();
 const layoutFamily = z.object({
   label: z.string().min(1),
   picker: z.object({
     label: z.string().min(1).optional(),
-    component: z.custom<(props: LayoutPickerProps) => ReactNode>((value) => typeof value === 'function', 'Expected a picker component.'),
-  }).optional(),
+    component: z.custom<(props: LayoutPickerProps) => ReactNode>((value) => typeof value === 'function', 'Expected a picker component.').optional(),
+    choice: variantChoice.optional(),
+  }).refine((picker) => !!picker.component !== !!picker.choice, 'A picker has either a choice or a component.').optional(),
 });
 // A document editor owns some document parameters. Nodes marked only with those parameters open it, with the context
 // of the spread they are on. Its parameters get no control in the template controls.
@@ -690,7 +696,9 @@ export type TemplateDeclaration = {
   id: string; version: string; label?: string; description?: string; preview?: string; contract: 1; requires?: string[]; network?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
   parameters?: Parameters;
   controls?: ControlItem[];
-  layoutFamilies?: Record<string, { label: string; picker?: { label?: string; component: (props: LayoutPickerProps) => ReactNode } }>;
+  layoutFamilies?: Record<string, { label: string; picker?: { label?: string } & (
+    { choice: { tag: string; options: Record<string, string> }; component?: undefined } |
+    { component: (props: LayoutPickerProps) => ReactNode; choice?: undefined }) }>;
   spreads: Record<string, DeclaredSpread> | ((tools: { spread: typeof spreadBuilder; page: typeof pageBuilder }) => Record<string, DeclaredSpread>);
   openingSpreads?: import('./editing').OpeningSpreadInput[];
   coverFormats?: Record<string, CoverFormat>;
@@ -723,7 +731,7 @@ export function templateInfo(template: Template): TemplateInfo {
       [id, { ...(label ? { label } : {}), parameters, presentation }])) } : {}),
     ...(template.network?.length ? { network: [...new Set(template.network)] } : {}),
     layoutFamilies: Object.fromEntries(Object.entries(template.layoutFamilies ?? {}).map(([id, { label, picker }]) => [id, {
-      label, ...(picker ? { picker: { ...(picker.label ? { label: picker.label } : {}) } } : {}),
+      label, ...(picker ? { picker: { ...(picker.label ? { label: picker.label } : {}), ...(picker.choice ? { choice: picker.choice } : {}) } } : {}),
     }])),
     // Functions (render, editor components) stay in the render frame; the editor gets plain declarations.
     spreads: Object.fromEntries(Object.entries(template.spreads).map(([id, { render: _render, anchors: _anchors, credits: _credits, elements, ...info }]) => [id, {

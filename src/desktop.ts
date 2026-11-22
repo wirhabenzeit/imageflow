@@ -250,7 +250,7 @@ export type TemplateInfo = {
   controls?: ControlItem[];
   // Families of layouts, by ID. `picker` is set when the family supplies its own picker (the component stays in the
   // render frame).
-  layoutFamilies?: Record<string, { label: string; picker?: { label?: string } }>;
+  layoutFamilies?: Record<string, { label: string; picker?: { label?: string; choice?: { tag: string; options: Record<string, string> } } }>;
   // The spreads a new book from this template starts with; empty when it starts without spreads.
   openingSpreads?: import('./editing').OpeningSpreadInput[];
   // Editors of document parameters, by ID, with the parameters each owns (the components stay in the render frame).

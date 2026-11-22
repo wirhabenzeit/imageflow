@@ -1630,7 +1630,7 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
   const spread = scopeSpread(sheet, page);
   const family = template.layoutFamilies && Object.hasOwn(template.layoutFamilies, familyId) ? template.layoutFamilies[familyId] : undefined;
   const picker = family?.picker;
-  if (!spread || !family || !picker) throw new Error('This layout family has no picker.');
+  if (!spread || !family || !picker?.component) throw new Error('This layout family has no picker component.');
   const ids = familyLayouts(template.spreads, familyId);
   const variants = ids.map((id) => ({ id, label: template.spreads[id].label, variant: { ...template.spreads[id].variant } }));
   let document = resolveParams(template.parameters, book.project.params);
@@ -1697,7 +1697,7 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
       post({ type: 'editor-ready' });
       return () => { update = undefined; };
     }, []);
-    return React.createElement(picker!.component, {
+    return React.createElement(picker!.component!, {
       variants, current: draft, saved, choose, find, document, format, readOnly: disabled, commit, cancel,
     });
   }

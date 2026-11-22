@@ -58,7 +58,7 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, … })
 | `box-records` | `box.photos`. |
 | `editor-controls` | `controls` on spreads, boxes and elements. |
 | `editor-native-controls` | `Control` and `importFile` in element editors, and the element's other parameters in the editor dialog. |
-| `layout-families` | `layoutFamilies`, `family` and `variant` on layouts, and a family's own layout picker. |
+| `layout-families` | `layoutFamilies`, `family` and `variant` on layouts, and a family's picker: a built-in choice or a component. |
 | `editor-spread-parameters` | `spread` on an element editor: layout parameters edited together with the element's, with `setSpread` and `<Control scope="spread">`. |
 | `opening-spreads` | `openingSpreads`, the spreads a new book starts with. |
 | `page-layouts` | `page()` declarations, `<Page>`, page-local geometry, side-aware contexts and independent facing pages ([Page layouts](page-layouts.md)). |

@@ -6,6 +6,7 @@ import { scopeSpread } from './project';
 import type { PageSide, SpreadState, Values } from './project';
 import { familyLayouts } from './layouts';
 import { useEditorFrame } from './editor-frame';
+import { Choice } from './choice';
 
 // A family keeps one frame while choices save. Its context follows the book without resetting height or focus.
 export function LayoutFamilyPicker({ project, template, spread, params, family, readOnly, blocked, page, chooseLayout, onShowing }: {
@@ -63,6 +64,29 @@ export function LayoutFamilyPicker({ project, template, spread, params, family, 
     <iframe ref={frame} className="element-editor-frame" inert={disabled} title={title} src={source} style={{ height }} />
     {stale && <p className="error-text" role="alert">Layouts changed. Reopen the picker.</p>}
     {error && !stale && <p className="error-text" role="alert">{error}</p>}
+  </div>;
+}
+
+// A family whose picker is a `choice`: the app's own segmented control, drawn at once, with no frame or template code.
+export function FamilyChoice({ template, spread, family, page, readOnly, chooseLayout }: {
+  template: TemplateInfo; spread: SpreadState; family: string; page?: PageSide; readOnly: boolean; chooseLayout: (definition: string) => void;
+}) {
+  const declared = template.layoutFamilies?.[family];
+  const choice = declared?.picker?.choice;
+  const selected = scopeSpread(spread, page);
+  const current = spread.split && !page ? '' : selected?.definition ?? '';
+  if (!choice) return null;
+  const variants = familyLayouts(template.spreads, family);
+  const title = declared.picker?.label ?? declared.label;
+  // In the order the choice names them; the template check makes sure every variant has exactly one option.
+  const options = Object.entries(choice.options).flatMap(([value, label]) => {
+    const id = variants.find((variant) => String(template.spreads[variant].variant?.[choice.tag]) === value);
+    return id ? [{ value: id, label }] : [];
+  });
+  return <div className="field layout-family-field" role="region" aria-label={title}>
+    <span className="field-name">{title}</span>
+    <Choice label={title} hideLabel value={current} options={options} disabled={readOnly}
+      onChange={(next) => { if (next !== current) chooseLayout(next); }} />
   </div>;
 }
 
