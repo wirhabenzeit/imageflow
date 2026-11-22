@@ -35,6 +35,7 @@ import type { BookGeometry, CanvasLayout, Command, ImportRequest, Issue, Project
 import { PanelDivider, useCanvasLayout, usePanels, useSectionOpen } from './panels';
 import { PanelSection } from './PanelSection';
 import { Icon } from './Icon';
+import { ActionMenu } from './ActionMenu';
 import { BookFrame } from './BookFrame';
 import type { CropPreview } from './BookFrame';
 import { AgentStatus } from './AgentStatus';
@@ -1977,6 +1978,29 @@ export function App() {
   const undoCommand = commandState('undo', toolbarState), redoCommand = commandState('redo', toolbarState);
   const pdfCommand = commandState('export', toolbarState);
   const pdfLabel = pdfCommand.label;
+  // The export menu's other PDF shows its view first, and exports once that has rendered and checked.
+  const pendingExport = useRef<{ surface: 'content' | 'cover'; arrived: boolean; at: number }>(undefined);
+  function exportSurface(surface: 'content' | 'cover') {
+    pendingExport.current = { surface, arrived: false, at: Date.now() };
+    if ((surface === 'cover') !== coverActive) setBookView(surface);
+    else exportPending();
+  }
+  const exportPending = useEffectEvent(() => {
+    const pending = pendingExport.current;
+    if (!pending) return;
+    // A view that cannot export (its check failed, say) does not export much later, out of the blue.
+    if (Date.now() - pending.at > 30_000) { pendingExport.current = undefined; return; }
+    if ((pending.surface === 'cover') !== coverActive) {
+      // Left the view before it could export: the request lapses.
+      if (pending.arrived) pendingExport.current = undefined;
+      return;
+    }
+    pending.arrived = true;
+    if (!pdfCommand.enabled) return;
+    pendingExport.current = undefined;
+    act('export');
+  });
+  useEffect(() => exportPending(), [coverActive, pdfCommand.enabled]);
 
   const format = formatOf(template);
   // The Book check and export report a saved format the template no longer includes.
@@ -2081,13 +2105,18 @@ export function App() {
       <div className="toolbar-actions">
         <button className="toolbar-icon" aria-label="Presentation" title="Presentation (⇧W)" disabled={!summary || !!editing || !!cropping} onClick={() => act('presentation')}><Icon name="play" /></button>
         <div className="export-area">
-          {/* One button in one place: exporting changes its label and makes it cancel, so the toolbar never moves. The
-              stages show in the status bar. */}
-          <button className="export-button" data-exporting={exporting || undefined} disabled={!exporting && !pdfCommand.enabled}
-            title={exporting ? 'Cancel export' : pdfLabel + ' (⌘E)'} aria-label={exporting ? 'Exporting, cancel export' : undefined}
+          {/* One icon in one place: it exports what the book view shows, and cancels while exporting, so the toolbar never
+              moves. The stages show in the status bar. The menu beside it exports the other PDF of a book with a cover. */}
+          <button className="toolbar-icon export-button" data-exporting={exporting || undefined} disabled={!exporting && !pdfCommand.enabled}
+            title={exporting ? 'Cancel export' : pdfLabel + ' (⌘E)'} aria-label={exporting ? 'Exporting, cancel export' : pdfLabel}
             onClick={() => { if (exporting) void api?.cancelExport(); else act('export'); }}>
-            {exporting ? <span className="status-spinner" aria-hidden="true" /> : <Icon name="export" />}<span>{exporting ? 'Exporting…' : pdfLabel}</span>
+            {exporting ? <span className="status-spinner" aria-hidden="true" /> : <Icon name="export" />}
           </button>
+          {coverGeometry && <ActionMenu className="export-menu" disabled={exporting || !summary || !!busy}
+            label={<><Icon name="chevron" /><span className="visually-hidden">Export options</span></>}>
+            <button onClick={() => exportSurface('content')}>Export Content PDF…</button>
+            <button onClick={() => exportSurface('cover')}>Export Cover PDF…</button>
+          </ActionMenu>}
         </div>
         <button className="toolbar-icon" aria-label="Toggle Inspector" aria-pressed={!panels.rightHidden} title="Toggle Inspector (⌥⌘I)" disabled={!summary} onClick={() => togglePanel('right')}><Icon name="sidebarRight" /></button>
       </div>

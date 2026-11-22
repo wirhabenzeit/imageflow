@@ -8,7 +8,7 @@ import electron from 'electron';
 import { PDFDocument } from 'pdf-lib';
 import { _electron } from 'playwright-core';
 import { copySample } from '../desktop/sample-book.mjs';
-import { closeApp, testBook, undoBook } from './ui-actions.mjs';
+import { closeApp, popupAction, testBook, undoBook } from './ui-actions.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'cover-'));
@@ -104,7 +104,13 @@ try {
         return { response: 1 };
       };
     }, filePath);
-    await window.getByRole('button', { name, exact: true }).click();
+    // A name clicks the export icon, which exports the shown view; a function exports another way, such as the menu.
+    if (typeof name === 'function') await name(); else await window.getByRole('button', { name, exact: true }).click();
+    await window.waitForFunction(() => document.querySelector('.status-bar .status')?.textContent.includes('PDF saved.'));
+    // The status may still say so from the export before: this one has saved once its file is there.
+    for (let wait = Date.now(); !await readFile(filePath).then(() => true, () => false); await new Promise((resolve) => setTimeout(resolve, 100))) {
+      if (Date.now() - wait > 60000) throw new Error('No PDF was saved at ' + filePath);
+    }
     await window.waitForFunction(() => document.querySelector('.status-bar .status')?.textContent.includes('PDF saved.'));
     assert.equal((await app.evaluate(() => globalThis.coverExportDetails)).some((detail) => /the format allows 0 MB/.test(detail)), expectLegacyLimit);
     const pdf = await PDFDocument.load(await readFile(filePath));
@@ -155,7 +161,10 @@ try {
   await window.locator(coverReady + '[data-width-mm="624.5"]').waitFor();
   await window.getByRole('radio', { name: 'Content', exact: true }).click();
   await exportPdf('Export Content PDF…', 36, points(293), points(296), points(290), points(290));
-  await window.getByRole('radio', { name: 'Cover', exact: true }).click();
+  // The menu beside the export icon exports the other PDF: it shows the cover, then exports it once checked.
+  await exportPdf(() => popupAction(app, window, window.locator('.export-menu .action-menu-trigger'), 'Export Cover PDF…'),
+    1, points(624.5), points(316), points(604.5), points(296));
+  assert.equal(await window.getByRole('radio', { name: 'Cover', exact: true }).isChecked(), true, 'the cover is shown while it exports');
 
   const blurb = await commit([{ op: 'select_format', format: 'blurbJacket' },
     ...Array.from({ length: 7 }, () => ({ op: 'insert_spread', after: 'spread-14', definition: 'panorama' })),
