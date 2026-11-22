@@ -830,7 +830,7 @@ async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spre
   // the previous frame, when they blinked. The presentation's first frame starts on the spread on screen, and an empty
   // book is never told a spread: neither waits.
   let told = !replacement || !spreads.length;
-  const untold = setTimeout(() => { told = true; draw(); }, 2000);
+  const untold = told ? undefined : setTimeout(() => { told = true; draw(); }, 2000);
   function syncPictures() {
     for (const [frame, sheet] of sources) {
       const originals = sheet.querySelectorAll<HTMLElement>('.if-rendered-image');

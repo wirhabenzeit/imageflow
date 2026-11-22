@@ -166,7 +166,10 @@ try {
     await page.keyboard.press('Enter');
     await proof.locator('.if-presentation:not(.overview) .if-present-crop:visible img[data-src][src*="/p39/"]').waitFor();
     await proof.locator('.if-present-crop:visible img[data-src]').evaluate(image => image.decode());
-    assert.equal(await proof.locator('.if-present-crop:visible img[data-src]').evaluate(image => image.naturalWidth), 1800, 'Leaving overview restores original photo quality');
+    // Full quality for the screen again: the rendition the spread asks for, never wider than the 1800 px original.
+    assert.equal(await proof.locator('.if-present-crop:visible img[data-src]').evaluate(image => image.naturalWidth),
+      Math.min(1800, Number((await proof.locator('.if-present-crop:visible img[data-src]').getAttribute('src')).split('/').pop())),
+      'Leaving overview restores full photo quality');
     const closed = page.waitForEvent('close');
     await page.keyboard.press('Escape').catch((error) => { if (!page.isClosed()) throw error; });
     await closed;
