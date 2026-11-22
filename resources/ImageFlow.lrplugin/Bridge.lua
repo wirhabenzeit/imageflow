@@ -145,9 +145,11 @@ local function watchLoop(generation)
       local catalog = LrApplication.activeCatalog()
       if cacheVersion ~= state.watchVersion then
         cache, cacheVersion = {}, state.watchVersion
-        local still = {}
-        for _, uuid in ipairs(state.watch) do still[uuid] = last[uuid] end
-        last, pending = still, {}
+        -- A change still waiting out its one poll stays pending: `last` already holds its new revision, so
+        -- dropping it here would lose the change for good.
+        local still, waiting = {}, {}
+        for _, uuid in ipairs(state.watch) do still[uuid] = last[uuid]; waiting[uuid] = pending[uuid] end
+        last, pending = still, waiting
       end
       local photos, uuidOf = {}, {}
       for _, uuid in ipairs(state.watch) do
@@ -171,6 +173,10 @@ local function watchLoop(generation)
           if not seen[uuid] and revision ~= false then last[uuid] = false; cache[uuid] = nil; changed[#changed + 1] = uuid end
         end
         if #changed > 0 then post('/lightroom/changes', { uuids = changed }, 10) end
+      else
+        -- A cached LrPhoto of a photo that left the catalog can make the batch call throw; look every photo up again
+        -- on the next poll instead of failing on the stale one forever.
+        cache = {}
       end
     end
     -- While a render runs, other tasks wait their turn anyway; poll less often.
