@@ -500,6 +500,8 @@ export const templateSchema = z.preprocess(withSpans, z.object({
   // Shown in the template library and the New Book picker; the ID is shown without a label.
   label: z.string().trim().min(1).max(80).optional(),
   description: z.string().trim().min(1).max(300).optional(),
+  // The template this one was forked from, such as the starter, at the version it was copied (API-003).
+  basedOn: z.strictObject({ id: identifier, version: z.string().min(1) }).optional(),
   // An image inside the template folder that the New Book picker shows instead of a render of the opening spread.
   preview: z.string().refine((path) => previewPath(path) !== undefined,
     'Use a PNG, JPEG or WebP file inside the template folder, such as ./preview.jpg, without .. or a leading dot.').optional(),
@@ -693,7 +695,7 @@ type DeclaredCover = Omit<CoverLayout, 'parameters' | 'boxes' | 'elements'> & {
 const spreadBuilder = <T,>(definition: T) => definition;
 const pageBuilder = <T extends object>(definition: T) => ({ ...definition, span: 'page' as const });
 export type TemplateDeclaration = {
-  id: string; version: string; label?: string; description?: string; preview?: string; contract: 1; requires?: string[]; network?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
+  id: string; version: string; label?: string; description?: string; basedOn?: { id: string; version: string }; preview?: string; contract: 1; requires?: string[]; network?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
   parameters?: Parameters;
   controls?: ControlItem[];
   layoutFamilies?: Record<string, { label: string; picker?: { label?: string } & (
@@ -725,6 +727,7 @@ export function templateInfo(template: Template): TemplateInfo {
       .map(([id, { render: _render, ...info }]) => [id, info])) } : {}),
     id: template.id, version: template.version, ...(template.label ? { label: template.label } : {}),
     ...(template.description ? { description: template.description } : {}),
+    ...(template.basedOn ? { basedOn: { ...template.basedOn } } : {}),
     ...(template.preview ? { preview: previewPath(template.preview)! } : {}),
     parameters: template.parameters, ...(template.controls ? { controls: template.controls } : {}), openingSpreads: template.openingSpreads ?? [],
     ...(template.editors ? { editors: Object.fromEntries(Object.entries(template.editors).map(([id, { label, parameters, presentation }]) =>

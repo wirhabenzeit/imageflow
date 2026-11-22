@@ -6,7 +6,7 @@ import { identifier } from './project';
 import type { RenderStatus, TemplateInfo } from './desktop';
 
 export const maxPreviewEdge = 1600;
-export const previewTargets = 'Use {spread} for a spread, {spread, side} for one page, {page} with a positive page number and expectedRevision, {cover: true} for a cover, {spread, box} or {cover: true, box} for a close-up (also accepts element), or {spreads: [...]} for a contact sheet.';
+export const previewTargets = 'Use {spread} for a spread, {spread, side} for one page, {page} with a positive page number and expectedRevision, {cover: true} for a cover, {spread, box} or {cover: true, box} for a close-up (also accepts element), {spreads: [...]} for a contact sheet, or {spread, picker: true} for a layout family\'s picker.';
 const owner = identifier.refine((id) => id.length <= 256);
 const paddingMm = z.number().min(0).max(20).default(2).describe('Margin around the box or element, in millimetres.');
 // `spread` validates the spread target. Draft checks also accept `$alias` batch references, resolved before rendering.
@@ -25,6 +25,11 @@ export const makePreviewRequestSchema = (spread: z.ZodType<string, string>) => {
         .describe('The exterior cover. Name a box or element for a close-up.'),
       z.strictObject({ spread: spreadId, page: z.enum(['left', 'right']).optional().describe('Facing page of a split sheet.'), box: owner.describe('Box ID.'), paddingMm }).describe('A close-up of one box.'),
       z.strictObject({ spread: spreadId, page: z.enum(['left', 'right']).optional().describe('Facing page of a split sheet.'), element: owner.describe('Element ID.'), paddingMm }).describe('A close-up of one element.'),
+      z.strictObject({ spread: spreadId, page: z.enum(['left', 'right']).optional().describe('Facing page of a split sheet.'), picker: z.literal(true),
+        family: owner.optional().describe('Layout family; by default the shown layout\'s.'),
+        current: owner.optional().describe('Variant to show as chosen; by default the saved layout.'),
+        choose: z.string().min(1).max(200).optional().describe('Click the picker control with this label and report the variant chosen.') })
+        .describe('A layout family\'s picker, as the settings show it. Nothing is saved.'),
       z.strictObject({ spreads: z.array(spreadId).min(1).max(12).describe('Up to 12 spreads, in order.'),
         columns: z.int().min(1).max(4).default(3).describe('Spreads per row.') })
         .describe('A labelled contact sheet of several spreads.'),
@@ -62,10 +67,16 @@ export type ContactSheetMetadata = {
   // Pixel positions address each image inside the contact sheet. Physical sizes belong to its cells, not the collage.
   cells: (PagePreviewMetadata & { x: number; y: number; label: string })[];
 };
+// A layout family's picker, drawn as the settings show it (API-008). `chosen` is the variant a `choose` click picked.
+export type PickerPreviewMetadata = {
+  kind: 'picker'; width: number; height: number; spread: string; page?: 'left' | 'right'; family: string; picker: 'choice' | 'component';
+  variants: { id: string; label: string; variant: Record<string, string | number | boolean> }[];
+  current: string; chosen?: string; notices?: string[];
+};
 export type CoverPreviewMetadata = Omit<PagePreviewMetadata, 'spread' | 'side' | 'page'> & {
   cover: true; interiorPages: number; previewPages?: number;
 };
-export type PreviewMetadata = PagePreviewMetadata | ContactSheetMetadata | CoverPreviewMetadata;
+export type PreviewMetadata = PagePreviewMetadata | ContactSheetMetadata | CoverPreviewMetadata | PickerPreviewMetadata;
 
 type PreviewErrorCode = 'invalid-preview-request' | 'preview-target-not-found' |
   'cover-unavailable' | 'render-failed' | 'render-timeout' | 'preview-capture-failed';
@@ -98,7 +109,7 @@ export function parsePreviewRequest(value: unknown) {
 }
 
 export function artworkTarget(spreads: Pick<SpreadState, 'id'>[], sequence: ReturnType<typeof pageSequence>,
-  target: Exclude<ReturnType<typeof parsePreviewRequest>['target'], { spreads: string[] } | { cover: true }>): { index: number; side: PrintSide; page: UnitPages; spread: string } {
+  target: Exclude<ReturnType<typeof parsePreviewRequest>['target'], { spreads: string[] } | { cover: true } | { picker: true }>): { index: number; side: PrintSide; page: UnitPages; spread: string } {
   if ('page' in target && !('spread' in target)) {
     const index = sequence.spreads.findIndex(({ page }) => pageNumbers(page).includes(target.page));
     if (index < 0) throw new PreviewError('preview-target-not-found', 'Page ' + target.page + ' does not exist in this book.');

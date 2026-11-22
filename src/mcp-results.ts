@@ -48,9 +48,11 @@ export const checksSchema = z.looseObject({
 export const templateIdentitySchema = z.looseObject({
   saved: z.looseObject({ id: z.string(), version: z.string(), hash: z.string().optional() }).nullable()
     .describe('Template identity saved in project.json when the book was made or its template last updated.'),
-  current: z.looseObject({ id: z.string().nullable(), version: z.string().nullable(), hash: z.string().nullable() })
+  current: z.looseObject({ id: z.string().nullable(), version: z.string().nullable(), hash: z.string().nullable(),
+    basedOn: z.looseObject({ id: z.string(), version: z.string() }).optional() })
     .describe('Identity declared by the template files now, and the library hash of those files.'),
-  matchesSavedHash: z.boolean().nullable().describe('Whether the template files are unchanged since the saved hash; null when either hash is unknown.'),
+  matchesSavedHash: z.boolean().nullable().describe('Whether the template files are unchanged since the book was made; null when either hash is unknown.'),
+  note: z.string().optional().describe('What a mismatch means.'),
 });
 
 const pageImage = {
@@ -81,6 +83,13 @@ export const imageSchema = z.union([
     cells: z.array(z.looseObject({ ...pageImage, x: z.number(), y: z.number(), label: z.string() })),
     ...imageFlags,
   }),
+  z.looseObject({
+    kind: z.literal('picker'), width: z.number(), height: z.number(), spread: z.string(), page: z.enum(['left', 'right']).optional(),
+    family: z.string(), picker: z.enum(['choice', 'component']),
+    variants: z.array(z.looseObject({ id: z.string(), label: z.string(), variant: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])) })),
+    current: z.string().describe('The variant shown as chosen.'), chosen: z.string().optional().describe('The variant the choose click picked.'),
+    notices: z.array(z.string()).optional(), ...imageFlags,
+  }),
 ]).describe('Metadata of the returned image.');
 
 const state = z.enum(['ready', 'error']);
@@ -92,6 +101,9 @@ const commandFields = {
   references: z.record(z.string(), z.string()).optional().describe('Spread IDs created for $alias batch references.'),
   reflow: z.boolean().optional().describe('Whether text flow may have moved on other spreads.'),
 };
+
+const revisionMoved = z.looseObject({ expectedRevision: z.string(), revision: z.string() }).optional()
+  .describe('The book changed after expectedRevision; planned at revision instead.');
 
 const checkpointFields = {
   checkpointId: z.string().nullable().optional().describe('The book history checkpoint of this commit, or null when nothing changed.'),
@@ -133,13 +145,13 @@ export const mcpOutputSchemas = {
     template: z.looseObject({}).optional().describe('Parsed template declarations: the active format, every format in full (printFormats), parameters, layouts with their boxes and elements, layout families and opening spreads.'),
     templateIdentity: templateIdentitySchema,
     sources: z.record(z.string(), z.looseObject({ text: z.string(), sha256: z.string(), truncated: z.boolean() })).describe('Requested includeSource files.'),
-    templateFiles: z.array(z.string()).describe('Files under template/. Generated folders are listed once, ending in /.'),
-    topics: z.array(z.looseObject({ id: z.string(), title: z.string(), summary: z.string(), bytes: z.number() }))
+    templateFiles: z.array(z.string()).optional().describe('Files under template/. Generated folders are listed once, ending in /. Like template, topics and capabilities, left out when only docs, examples or sources were requested.'),
+    topics: z.array(z.looseObject({ id: z.string(), title: z.string(), summary: z.string(), bytes: z.number() })).optional()
       .describe('Table of contents of the template API reference. Request topics with docs.'),
     docs: z.record(z.string(), z.string()).optional().describe('Requested reference topics as Markdown, by topic ID.'),
     examples: z.array(z.looseObject({ name: z.string(), description: z.string(), source: z.string().optional() }))
       .describe('Shipped example templates. Requested ones include their source.'),
-    capabilities: z.looseObject({}),
+    capabilities: z.looseObject({}).optional(),
   }),
   inspect_book: z.looseObject({
     project: z.string(), ...reportFields,
@@ -155,11 +167,12 @@ export const mcpOutputSchemas = {
     draft: z.looseObject({ applied: z.boolean(), committed: z.literal(false), ...commandFields }).optional()
       .describe('Present when the check rendered unsaved draft operations.'),
     fixtures: z.looseObject({}).optional().describe('Fixture coverage matrix and findings, present when fixtures were requested.'),
+    revisionMoved, notice: z.string().optional(),
   }),
   apply_project_changes: z.looseObject({
     state, revision,
     committed: z.union([z.boolean(), z.literal('pending')]).describe('Whether the batch was saved. A failed check before planning returns false with diagnostics.'),
-    dryRun: z.boolean().optional(), ...commandFields,
+    dryRun: z.boolean().optional(), ...commandFields, revisionMoved,
     replayed: z.literal(true).optional().describe('This idempotencyKey was already applied; this is the original result.'),
     ...checkpointFields,
     diagnostics: z.array(diagnosticSchema).optional(), checks: checksSchema.optional(),
@@ -188,6 +201,13 @@ export const mcpOutputSchemas = {
   }),
   list_templates: z.looseObject({
     templates: z.array(libraryEntry),
+  }),
+  read_library_template: z.looseObject({
+    template: libraryVersion,
+    files: z.array(z.looseObject({ path: z.string(), files: z.number().optional().describe('Files in a generated folder, listed once.'),
+      status: z.enum(['same', 'changed', 'library-only', 'book-only']).optional() })).optional(),
+    changelog: z.string().optional().describe('The file that lists changes per version.'),
+    path: z.string().optional(), text: z.string().optional(), truncated: z.boolean().optional(), sha256: z.string().optional(),
   }),
   save_template_to_library: z.looseObject({
     status: z.enum(['saved', 'replaced', 'unchanged', 'conflict']).describe('conflict: nothing was saved; see reason and current.'),

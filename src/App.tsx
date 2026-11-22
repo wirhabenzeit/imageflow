@@ -1718,17 +1718,19 @@ export function App() {
     return () => clearTimeout(timer);
   }, [cropping?.settling]);
 
-  // Moving a placed photo: press an unselected photo and drag it onto another photo box, on this spread or another.
-  // The two swap; onto an empty box it moves. Its crops were made for the old frame and stay behind.
-  const pendingMove = useRef<{ page?: PageSide; spread: string; box: string; photo: string; x: number; y: number }>(undefined);
+  // Moving placed content: press an unselected photo, or a story box with its own text, and drag it onto another box
+  // of the same kind, on this spread or another. The two swap; onto an empty box it moves. A photo's crops were made
+  // for the old frame and stay behind. Only the dragged box's text assignment moves, as swap_content does: other boxes
+  // the same text continues through keep it, and the text then flows through its boxes in their new order.
+  const pendingMove = useRef<{ page?: PageSide; spread: string; box: string; kind: 'photo' | 'text'; source: string; x: number; y: number }>(undefined);
   const moved = useRef(false);
-  const [moving, setMoving] = useState<{ photo: string; x: number; y: number }>();
+  const [moving, setMoving] = useState<{ kind: 'photo' | 'text'; source: string; x: number; y: number }>();
   const moveDrag = useEffectEvent((event: PointerEvent) => {
     const start = pendingMove.current;
     if (!start || readyId.current !== summary?.id) return;
     if (!moving && Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6) return;
-    setMoving({ photo: start.photo, x: event.clientX, y: event.clientY });
-    const { box } = locate(event, [photoMime]);
+    setMoving({ kind: start.kind, source: start.source, x: event.clientX, y: event.clientY });
+    const { box } = locate(event, [start.kind === 'photo' ? photoMime : textMime]);
     setDropTarget(box && !(box.spread === start.spread && box.page === start.page && box.id === start.box) ? box.spread + ':' + (box.page ? box.page + ':' : '') + box.id : undefined);
     // Near the top or bottom of the canvas, scroll it so another spread can be reached.
     const bounds = canvas.current?.getBoundingClientRect();
@@ -1746,16 +1748,17 @@ export function App() {
     // The click that follows this pointerup is part of the move.
     moved.current = true;
     setTimeout(() => { moved.current = false; });
-    const { box } = locate(event, [photoMime]);
-    if (!box || box.type !== 'photo' || !summary || (box.spread === start.spread && box.page === start.page && box.id === start.box)) return;
+    const { box } = locate(event, [start.kind === 'photo' ? photoMime : textMime]);
+    if (!box || box.type !== (start.kind === 'photo' ? 'photo' : 'markdown') || !summary ||
+        (box.spread === start.spread && box.page === start.page && box.id === start.box)) return;
     const target = { spread: box.spread, box: box.id, page: box.page };
     const label = template?.spreads[scopeSpread(spreads.find(({ id }) => id === target.spread), target.page)?.definition ?? '']?.boxes[target.box]?.label ?? target.box;
     let swapped: string | undefined;
     editCanvas(({ project }) => {
       const from = editableSpread(project.spreads.find(({ id }) => id === start.spread), start.page);
       const to = editableSpread(project.spreads.find(({ id }) => id === target.spread), target.page);
-      if (from?.boxes[start.box]?.photo === start.photo && to) swapped = swapContent(from, start.box, to, target.box);
-    }, () => sourceTitle(summary, 'photo', start.photo) + (swapped ? ' and ' + sourceTitle(summary, 'photo', swapped) + ' swapped' :
+      if (from?.boxes[start.box]?.[start.kind] === start.source && to) swapped = swapContent(from, start.box, to, target.box);
+    }, () => sourceTitle(summary, start.kind, start.source) + (swapped ? ' and ' + sourceTitle(summary, start.kind, swapped) + ' swapped' :
       ' moved to ' + label));
     select(target.spread, false, target.page);
     setFocusBox({ box: target.box, at: Date.now() });
@@ -2086,6 +2089,11 @@ export function App() {
     if (live) { reveal(live.spread); openTarget(live, true); }
   });
   const placeInspector = useLiveCallback((from: KeptItem, to: ContentTarget) => { if (spread) place(spread.id, from, to); });
+  // Selecting the source shows its details, caption included, in the Inspector; the Assets panel opens on it.
+  const showInspectorSource = useLiveCallback((source: SourceRef, action: 'preview' | 'assets') => {
+    if (action === 'preview') setQuick(source);
+    else { choose(source); showPanel('bottom'); }
+  });
   const targetsKey = JSON.stringify(inspectorTargets(geometry?.targets ?? [], spread?.id, selectedPage));
   const panelTargets: InspectorTarget[] = useMemo(() => JSON.parse(targetsKey), [targetsKey]);
   const targetsStale = !!spread && shownLayouts.current[spread.id] !== layoutOf(spread);
@@ -2099,7 +2107,7 @@ export function App() {
         usage={usage} quickLook={quickSource} focus={focusBox}
         targets={panelTargets}
         open={openInspectorOwner}
-        openTarget={openInspectorTarget} place={placeInspector} chooseLayout={chooseInspectorLayout}
+        openTarget={openInspectorTarget} place={placeInspector} chooseLayout={chooseInspectorLayout} showSource={showInspectorSource}
         holdPreviews={!render && !!lastReady} targetsStale={targetsStale}
         familyPicker={template && layoutFamily && (template.layoutFamilies?.[layoutFamily]?.picker?.choice
           ? <FamilyChoice template={template} spread={spread} page={selectedPage} family={layoutFamily} readOnly={!writable}
@@ -2111,7 +2119,7 @@ export function App() {
             readOnly={!writable} blocked={previewNotice || undefined} onShowing={showing} />}
         </HeldPicker>)}
         edit={editFromPanel} highlight={setHighlight} select={selectFromPanel} />),
-    [summary, spread, selectedSide, selectedPage, sequence, index, writable, selectedSource, template, render, lastReady, usage, focusBox, panelTargets, targetsStale, layoutFamily, previewNotice, quickSource, openInspectorOwner, openInspectorTarget, placeInspector, chooseInspectorLayout, editFromPanel, selectFromPanel]);
+    [summary, spread, selectedSide, selectedPage, sequence, index, writable, selectedSource, template, render, lastReady, usage, focusBox, panelTargets, targetsStale, layoutFamily, previewNotice, quickSource, openInspectorOwner, openInspectorTarget, placeInspector, chooseInspectorLayout, showInspectorSource, editFromPanel, selectFromPanel]);
 
   const nativeDocumentTitle = navigator.platform.includes('Mac');
   return <ProjectFilesContext.Provider value={projectFiles}><div className={(nativeDocumentTitle ? 'studio mac-studio' : 'studio') + (busyCursor ? ' is-busy' : '')}>
@@ -2305,11 +2313,14 @@ export function App() {
                 if (source) setQuick(source);
               }}
               onPointerDown={(event) => {
-                // Pressing an unselected photo may start moving it to another box (the selected one pans instead).
+                // Pressing an unselected photo may start moving it to another box (the selected one pans instead), and so
+                // may pressing a story box that holds its own text, unless an editor is open (its pointer selects text).
                 if (event.button !== 0 || !writable || busy) return;
                 const { top } = locate(event);
-                const photo = top?.type === 'photo' && scopeSpread(spreads.find(({ id }) => id === top.spread), top.page)?.boxes[top.id]?.photo;
-                pendingMove.current = photo ? { spread: top.spread, box: top.id, page: top.page, photo, x: event.clientX, y: event.clientY } : undefined;
+                const state = top && (top.type === 'photo' || top.type === 'markdown') ? scopeSpread(spreads.find(({ id }) => id === top.spread), top.page)?.boxes[top.id] : undefined;
+                const kind = top?.type === 'photo' ? 'photo' as const : 'text' as const;
+                const source = kind === 'photo' ? state?.photo : !editing && !elementEditor ? state?.text : undefined;
+                pendingMove.current = top && source ? { spread: top.spread, box: top.id, page: top.page, kind, source, x: event.clientX, y: event.clientY } : undefined;
               }}
               >
               <div className="canvas-artwork-clip">
@@ -2343,8 +2354,10 @@ export function App() {
               {activeBox && <div data-canvas-spread={activeBox.spread} className="box-highlight" aria-hidden="true" style={{
                 left: activeBox.x, top: activeBox.y, width: activeBox.width, height: activeBox.height,
               }} />}
-              {moving && summary?.photos[moving.photo] && <img className="photo-move-ghost" src={summary.photos[moving.photo]} alt=""
+              {moving?.kind === 'photo' && summary?.photos[moving.source] && <img className="photo-move-ghost" src={summary.photos[moving.source]} alt=""
                 style={{ left: moving.x, top: moving.y }} />}
+              {moving?.kind === 'text' && summary && <span className="text-move-ghost" style={{ left: moving.x, top: moving.y }}>
+                <span className="content-kind" aria-hidden="true">Aa</span>{sourceTitle(summary, 'text', moving.source)}</span>}
               {cropping && cropFrame && cropPhoto && summary && <CropEditor key={cropping.spread + ':' + cropping.box}
                 frame={cropFrame} photo={summary.photoSizes[cropPhoto]} src={renderOrigin + '/render/' + summary.id + '/photo/' + cropPhoto}
                 placement={cropPlacement} settling={!!cropping.settling}

@@ -8,7 +8,7 @@ import { checkedOutput } from './mcp-output-check';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import sharp from 'sharp';
-import { AuthoringError, createAuthoringService } from '../desktop/authoring-service';
+import { AuthoringError, compactRender, createAuthoringService } from '../desktop/authoring-service';
 import { checkProject } from '../desktop/check';
 import { importIntoProject, loadProject } from '../desktop/project';
 import { ProjectSession } from '../desktop/project-session';
@@ -94,10 +94,30 @@ test('context and summary distinguish saved library provenance from the current 
   const editedHash = await templateHash(join(folder, 'template'));
   assert.notEqual(editedHash, hash);
   for (const tool of ['get_authoring_context', 'inspect_book']) {
-    assert.deepEqual((await call(tool)).templateIdentity, {
+    const { note, ...identity } = (await call(tool)).templateIdentity as { note?: string };
+    assert.deepEqual(identity, {
       saved, current: { id: null, version: '1', hash: editedHash }, matchesSavedHash: false,
     });
+    // A mismatch says what it means and that nothing updates the saved hash (API-004).
+    assert.match(note ?? '', /renders and exports its own copy, and nothing updates saved\.hash/);
   }
+});
+
+test('a fork names the template it was copied from and opens in a book made from that template (API-003)', async (t) => {
+  const { folder, hooks, call, session } = await fixture(t);
+  const hash = await templateHash(join(folder, 'template'));
+  await writeFile(join(folder, 'project.json'), JSON.stringify({ ...project, template: { ...project.template, hash: '0'.repeat(64) } }));
+  const forked = { ...status, template: { ...status.template, id: 'field-book', basedOn: { id: 'test', version: '1' } } };
+  hooks.check = (book, request, signal, index) => checkProject(book, hooks.cache, request, async () => ({ status: forked }), signal, index);
+  const identity = (await call('get_authoring_context')).templateIdentity as Record<string, any>;
+  assert.deepEqual(identity.current, { id: 'field-book', version: '1', hash, basedOn: { id: 'test', version: '1' } });
+  assert.equal(identity.matchesSavedHash, false);
+  assert.doesNotMatch(identity.note, /give it an id of its own/);
+  // The same edits without basedOn suggest it.
+  session.inputs.invalidate('template/index.tsx');
+  hooks.check = (book, request, signal, index) => checkProject(book, hooks.cache, request,
+    async () => ({ status: { ...status, template: { ...status.template, id: 'test' } } }), signal, index);
+  assert.match(((await call('get_authoring_context')).templateIdentity as { note: string }).note, /give it an id of its own and name the original as basedOn/);
 });
 
 test('books without saved provenance do not claim an unchanged library template', async (t) => {
@@ -223,7 +243,7 @@ for (const tool of ['get_authoring_context', 'inspect_book']) {
     test(tool + ' preserves diagnostics for malformed ' + name, async (t) => {
       const { folder, call } = await fixture(t);
       await writeFile(join(folder, name), '{ invalid JSON');
-      const result = await call(tool, tool === 'get_authoring_context' ? { includeSource: ['template/index.tsx'] } : {});
+      const result = await call(tool, tool === 'get_authoring_context' ? { includeSource: ['template/index.tsx'], includeTemplate: true } : {});
       const diagnostics = result.diagnostics as AuthoringDiagnostic[];
       assert.ok(diagnostics.some((diagnostic) => diagnostic.message.includes('invalid JSON') && diagnostic.location?.path === name));
       assert.match(String(result.revision), /^[a-f0-9]{64}$/);
@@ -257,7 +277,7 @@ for (const tool of ['get_authoring_context', 'inspect_book']) {
     const { folder, call } = await fixture(t);
     const broken = 'export default );';
     await writeFile(join(folder, 'template/index.tsx'), broken);
-    const result = await call(tool, tool === 'get_authoring_context' ? { includeSource: ['template/index.tsx'] } : { view: 'spreads' });
+    const result = await call(tool, tool === 'get_authoring_context' ? { includeSource: ['template/index.tsx'], includeTemplate: true } : { view: 'spreads' });
     assert.ok((result.diagnostics as AuthoringDiagnostic[]).some(({ code }) => code === 'template-compile-error'));
     assert.equal(result.template, undefined);
     assert.deepEqual(result.templateIdentity, {
@@ -276,25 +296,45 @@ for (const tool of ['get_authoring_context', 'inspect_book']) {
     }
   });
 
-  test(tool + ' rejects files changed after checking and before inspection', async (t) => {
+  test(tool + ' rejects files that keep changing after checking and before inspection', async (t) => {
     const { folder, hooks, call } = await fixture(t);
     const check = hooks.check;
+    let checks = 0;
     hooks.check = async (...args) => {
       const report = await check(...args);
-      await rm(join(folder, 'photos.json'));
+      checks++;
+      if (checks % 2) await rm(join(folder, 'photos.json'));
+      else await writeFile(join(folder, 'photos.json'), '{}');
       return report;
     };
-    await assert.rejects(call(tool), (error) => error instanceof AuthoringError && error.code === 'SOURCE_CHANGED');
+    await assert.rejects(call(tool), (error) => error instanceof AuthoringError && error.code === 'SOURCE_CHANGED' &&
+      (error.details as { attempts?: number }).attempts === 4);
   });
 
-  test(tool + ' rejects a different unavailable input after checking', async (t) => {
+  test(tool + ' retries a file changed once after checking and reports the inputs as they are now', async (t) => {
+    const { folder, hooks, call } = await fixture(t);
+    const check = hooks.check;
+    let checks = 0;
+    hooks.check = async (...args) => {
+      const report = await check(...args);
+      if (!checks++) await rm(join(folder, 'photos.json'));
+      return report;
+    };
+    const result = await call(tool);
+    assert.ok(checks >= 2);
+    assert.ok((result.diagnostics as AuthoringDiagnostic[]).some((diagnostic) => diagnostic.location?.path === 'photos.json'));
+  });
+
+  test(tool + ' rejects unavailable inputs that keep changing after checking', async (t) => {
     const { folder, hooks, call } = await fixture(t);
     await rm(join(folder, 'project.json'));
     const check = hooks.check;
+    let checks = 0;
     hooks.check = async (...args) => {
       const report = await check(...args);
-      await writeFile(join(folder, 'project.json'), JSON.stringify(project));
-      await rm(join(folder, 'photos.json'));
+      const [missing, restored] = checks++ % 2 ? ['project.json', 'photos.json'] : ['photos.json', 'project.json'];
+      await writeFile(join(folder, restored), restored === 'project.json' ? JSON.stringify(project) : '{}');
+      await rm(join(folder, missing));
       return report;
     };
     await assert.rejects(call(tool), (error) => error instanceof AuthoringError && error.code === 'SOURCE_CHANGED');
@@ -320,7 +360,7 @@ test('a template directory outside the project cannot expose its source or filen
   await writeFile(join(outside, 'index.tsx'), 'PRIVATE_SOURCE_MUST_STAY_OUTSIDE');
   await writeFile(join(outside, 'PRIVATE_FILENAME_MUST_STAY_OUTSIDE.tsx'), 'private');
   await symlink(outside, join(folder, 'template'));
-  const result = await call('get_authoring_context', { includeSource: ['template/index.tsx'] });
+  const result = await call('get_authoring_context', { includeSource: ['template/index.tsx'], includeTemplate: true });
   assert.equal(result.revision, null);
   assert.deepEqual(result.sources, {});
   assert.deepEqual(result.templateFiles, []);
@@ -358,8 +398,9 @@ test('context rejects a reverted source edit even when a missing manifest preven
 test('context rejects a changed readable manifest while another manifest remains unavailable', async (t) => {
   const { folder, docs, hooks, call } = await fixture(t);
   await rm(join(folder, 'photos.json'));
+  let edits = 0;
   Object.defineProperty(hooks, 'docs', { get: () => {
-    writeFileSync(join(folder, 'project.json'), JSON.stringify({ ...project, title: 'Changed during inspection' }));
+    writeFileSync(join(folder, 'project.json'), JSON.stringify({ ...project, title: 'Changed during inspection ' + ++edits }));
     return docs;
   } });
   await assert.rejects(call('get_authoring_context'), (error) => error instanceof AuthoringError && error.code === 'SOURCE_CHANGED');
@@ -394,10 +435,25 @@ test('cached checks cannot satisfy a conflicting expected revision', async (t) =
   const checks = countChecks(hooks);
   await call('inspect_book');
   session.book.readOnly = false;
+  session.save = async () => assert.fail('A conflicting revision must not save.');
   await assert.rejects(call('apply_project_changes', { expectedRevision: '0'.repeat(64), idempotencyKey: 'conflict',
-    label: 'Change title', dryRun: true, operations: [{ op: 'set_title', title: 'Changed' }] }),
+    label: 'Change title', operations: [{ op: 'set_title', title: 'Changed' }] }),
   (error) => error instanceof AuthoringError && error.code === 'REVISION_CONFLICT');
   assert.equal(checks(), 1);
+});
+
+test('a dry run against a revision that has since changed is planned at the current revision', async (t) => {
+  const { call, session } = await fixture(t);
+  session.book.readOnly = false;
+  session.save = async () => assert.fail('A dry run must not save.');
+  const current = (await session.inputs.capture()).revision;
+  const result = await call('apply_project_changes', { expectedRevision: '0'.repeat(64), idempotencyKey: 'moved',
+    label: 'Change title', dryRun: true, operations: [{ op: 'set_title', title: 'Changed' }] });
+  assert.equal(result.committed, false);
+  assert.equal(result.revision, current);
+  assert.deepEqual(result.revisionMoved, { expectedRevision: '0'.repeat(64), revision: current });
+  assert.match(result.notice as string, /planned at the current revision/);
+  assert.equal(session.receipts.size, 0);
 });
 
 test('metadata changes and watcher invalidation prevent stale check reuse', async (t) => {
@@ -491,7 +547,7 @@ test('a delayed watcher event gets one fresh attempt and preserves compiler diag
   assert.ok((result.diagnostics as AuthoringDiagnostic[]).some(({ code, location }) => code === 'template-compile-error' && location?.line === 1));
 });
 
-test('continued watcher churn is rejected after two full attempts', async (t) => {
+test('continued watcher churn is rejected after four calls of two full attempts, naming what changed', async (t) => {
   const { hooks, call, session } = await fixture(t);
   const check = hooks.check;
   let attempts = 0;
@@ -501,8 +557,24 @@ test('continued watcher churn is rejected after two full attempts', async (t) =>
     session.inputs.invalidate('template/index.tsx');
     return result;
   };
-  await assert.rejects(call('check_book'), (error) => error instanceof AuthoringError && error.code === 'SOURCE_CHANGED');
-  assert.equal(attempts, 2);
+  await assert.rejects(call('check_book'), (error) => error instanceof AuthoringError && error.code === 'SOURCE_CHANGED' &&
+    /template\/index\.tsx/.test(error.message) && (error.details as { changedInputs?: string[] }).changedInputs?.[0] === 'template/index.tsx');
+  assert.equal(attempts, 8);
+});
+
+test('a check that saw the book change while the user edits is repeated once the book is quiet', async (t) => {
+  const { hooks, call, session } = await fixture(t);
+  const check = hooks.check;
+  let attempts = 0;
+  hooks.check = async (...args) => {
+    const result = await check(...args);
+    // The app saves project.json a few times in a row, as while the user drags photos (API-007).
+    if (++attempts <= 3) session.inputs.invalidate('project.json');
+    return result;
+  };
+  const result = await call('check_book');
+  assert.equal(result.state, 'ready');
+  assert.equal(attempts, 4);
 });
 
 test('a watcher retry preserves the requested revision and preview target', async (t) => {
@@ -632,7 +704,8 @@ for (const operation of ['apply_project_changes', 'import_sources']) {
       : { kind: 'markdown', paths: ['inbox/note.md'] };
     await assert.rejects(call(operation, { ...args, expectedRevision, idempotencyKey: 'unstable-preparation' }),
       (error) => error instanceof AuthoringError && error.code === 'SOURCE_CHANGED');
-    assert.equal(checks(), 2);
+    // Each of the four attempts checks twice: once before the reload and once after it.
+    assert.equal(checks(), 8);
     assert.equal(writes, 0);
     assert.equal(session.receipts.size, 0);
     assert.equal(session.book.project.title, 'Context book');
@@ -681,12 +754,33 @@ test('context reports the installed template API and returns shipped examples on
     { name: 'b-grid', description: 'A grid.', source: '// A grid.\nexport default {};\n' },
   ]);
   const one = await call('get_authoring_context', { includeExamples: ['b-grid'] });
-  assert.deepEqual(one.examples, [
+  assert.deepEqual(one.examples, [{ name: 'b-grid', description: 'A grid.', source: '// A grid.\nexport default {};\n' }]);
+  const listed = await call('get_authoring_context', { includeExamples: ['b-grid'], includeTemplate: true });
+  assert.deepEqual(listed.examples, [
     { name: 'a-minimal', description: 'The smallest template.' },
     { name: 'b-grid', description: 'A grid.', source: '// A grid.\nexport default {};\n' },
   ]);
   await assert.rejects(call('get_authoring_context', { includeExamples: ['missing'] }),
     (error) => error instanceof AuthoringError && error.code === 'EXAMPLE_NOT_FOUND' && error.message.includes('a-minimal, b-grid'));
+});
+
+test('a call for topics, examples or sources returns just those unless includeTemplate is true (API-001)', async (t) => {
+  const { call, hooks } = await fixture(t);
+  hooks.docs = resolve('docs');
+  const full = await call('get_authoring_context');
+  const requested = await call('get_authoring_context', { docs: ['authoring-workflow'] });
+  for (const field of ['template', 'templateFiles', 'topics', 'capabilities']) {
+    assert.ok(field in full, field + ' is in the full context');
+    assert.equal(field in requested, false, field + ' is left out of a call for topics');
+  }
+  assert.deepEqual(requested.examples, []);
+  assert.equal(requested.revision, full.revision);
+  assert.deepEqual(requested.templateIdentity, full.templateIdentity);
+  const docs = JSON.stringify(requested.docs).length;
+  assert.ok(JSON.stringify(requested).length < docs + 2_000, 'a call for one topic adds little beyond the topic');
+  const both = await call('get_authoring_context', { docs: ['authoring-workflow'], includeTemplate: true });
+  assert.deepEqual(both.template, full.template);
+  assert.deepEqual(both.topics, full.topics);
 });
 
 test('context lists reference topics and returns only the requested ones', async (t) => {
@@ -761,6 +855,26 @@ test('checks omit repeated template declarations unless requested and retain the
   const full = await call('check_book', { includeTemplate: true });
   assert.deepEqual((full.render as Record<string, unknown>).template, status.template);
   assert.deepEqual((await call('get_authoring_context')).template, status.template);
+});
+
+test('check replies count the book-wide render lists and list only the addressed spreads unless included (API-005)', () => {
+  const render: Extract<RenderStatus, { state: 'ready' }> = { ...status,
+    units: [{ side: 'left', spread: 'one', where: 'Page 1' }, { side: 'right', spread: 'two', where: 'Page 2' }],
+    errors: [{ message: 'Repeated in diagnostics' }],
+    flow: { 'one:body': { part: 1, parts: 2 }, 'two:body': { part: 2, parts: 2 }, 'two:left:body': { part: 1, parts: 1 } },
+    anchors: [{ id: 'a', spread: 'one', page: 1, side: 'left' }, { id: 'b', spread: 'two', page: 2, side: 'right' }] };
+  const overview = compactRender(render, {}, {});
+  assert.deepEqual(overview.counts, { units: 2, flow: 3, anchors: 2 });
+  assert.equal('units' in overview || 'flow' in overview || 'anchors' in overview || 'errors' in overview || 'template' in overview, false);
+  const previewed = compactRender(render, { image: { spread: 'two' } }, {});
+  assert.deepEqual(previewed.units, [render.units[1]]);
+  assert.deepEqual(previewed.flow, { 'two:body': render.flow['two:body'], 'two:left:body': render.flow['two:left:body'] });
+  assert.deepEqual(previewed.anchors, [render.anchors[1]]);
+  const drafted = compactRender(render, { draft: { affectedSpreads: ['one'] } }, { inspect: { spread: '$new' } });
+  assert.deepEqual(drafted.units, [render.units[0]]);
+  const included = compactRender(render, { image: { spread: 'two' } }, { include: ['anchors'] });
+  assert.deepEqual(included.anchors, render.anchors);
+  assert.deepEqual(included.units, [render.units[1]]);
 });
 
 test('inspection reports a split sheet\'s merge layout as restoreDefinition and lists sources by kind (F-017)', async (t) => {

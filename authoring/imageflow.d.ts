@@ -831,7 +831,7 @@ export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issu
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
   'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'page-layouts' | 'editor-context' | 'document-editors' |
   'editor-network' | 'rendered-images' | 'rendered-vectors' | 'font-coverage' | 'book-credits' | 'inline-editors' | 'inline-text' | 'list-parameters' | 'template-preview' | 'photo-render' |
-  'formatted-text' | 'app-controls' | 'text-metadata' | 'text-composition' | 'physical-covers';
+  'formatted-text' | 'app-controls' | 'text-metadata' | 'text-composition' | 'template-lineage' | 'physical-covers';
 /** All features this app provides, including the contract-1 baseline and any later extensions. */
 export const capabilities: readonly Capability[];
 
@@ -854,6 +854,7 @@ export type TemplateDeclaration = {
   version: string;
   label?: string;
   description?: string;
+  basedOn?: { id: string; version: string };
   preview?: string;
   contract: 1;
   /** Optional extensions beyond the contract-1 baseline. Older lists of baseline features remain accepted. */
@@ -922,6 +923,12 @@ type TemplateBase<D extends Parameters, L extends string = string, C extends str
   label?: string;
   /** One or two sentences for the template library, up to 300 characters. */
   description?: string;
+  /**
+   * The template this one was copied from, at the version copied, such as `{ id: 'imageflow-starter', version:
+   * '0.11.1' }`. A fork names it so it can take an `id` of its own: a book made from that template opens with it,
+   * and agents and the library can tell the fork from an unchanged copy. Included in the contract-1 baseline.
+   */
+  basedOn?: { id: string; version: string };
   /**
    * A PNG, JPEG or WebP image inside the template folder, such as `'./preview.jpg'`, that New Book shows instead of a
    * render of the opening spread. It is cropped to fill a tile with the default format's aspect ratio, so match that

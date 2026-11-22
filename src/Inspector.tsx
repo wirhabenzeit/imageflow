@@ -83,8 +83,10 @@ function LayoutGrid({ summary, spread, template, page, choices, allowed, current
         (item?.span === 'page' || !spread.split);
       const unavailable = !blank && !allowed.has(id);
       const description = unavailable ? 'Available on the ' + item?.sides?.join(' or ') + ' page' : consequence(blank ? undefined : id);
+      // Names longer than a page tile are cut off, so the full name, and a family's variant, show on hover (UI-001).
+      const full = family && template.spreads[id].label !== name(id) ? name(id) + ' · ' + template.spreads[id].label : name(id);
       return <button key={id} type="button" role="radio" disabled={pending || unavailable} aria-checked={checked} aria-label={name(id)}
-        aria-description={description || undefined}
+        aria-description={description || undefined} title={full}
         draggable={!pending && !unavailable} onDragStart={(event) => event.dataTransfer.setData(layoutMime, id)}
         className={'layout-option' + (family ? ' layout-family' : '') + (blank ? ' layout-blank' : '') + (unavailable ? ' layout-unavailable' : '')}
         style={rect ? { left: rect.x - 4, top: rect.y - 4, width: rect.width + 8, height: rect.height + 25 }
@@ -174,7 +176,7 @@ function settingsOnPage(targets: readonly Pick<InspectorTarget, 'owner' | 'edits
 }
 
 export function Inspector({ summary, spread, source, template, render, usage, edit, highlight,
-  select, quickLook, focus, targets = [], open, openTarget, place, familyPicker, writable, page, chooseLayout, holdPreviews, targetsStale }: {
+  select, quickLook, focus, targets = [], open, openTarget, place, familyPicker, writable, page, chooseLayout, holdPreviews, targetsStale, showSource }: {
   summary: ProjectSummary; writable: boolean; spread: SpreadState; page?: PageSide; source?: SourceRef; template?: TemplateInfo; render?: RenderStatus; usage: SourceUsage;
   edit: (change: Edit, notice?: string | (() => string)) => void;
   highlight: (id?: string) => void; select: (spread: string) => void;
@@ -189,6 +191,8 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
   holdPreviews?: boolean;
   // The book view still shows this spread with another layout, so `targets` are that layout's (beta finding F-035).
   targetsStale?: boolean;
+  // Shows a placed photo or text in Quick Look, or selects it in Assets, where its caption and other details are edited.
+  showSource?: (source: SourceRef, action: 'preview' | 'assets') => void;
 }) {
   const items = useRef(new Map<string, HTMLElement>());
   const heldSettings = useRef<{ key: string; section: ReactNode }>(undefined);
@@ -326,7 +330,18 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
               <button type="button" className={'content-item' + (flash === id ? ' flash' : '')} aria-label={'Edit ' + label}
                 ref={(element) => { if (element) items.current.set(id, element); else items.current.delete(id); }}
                 onMouseEnter={() => highlight(id)} onMouseLeave={() => highlight()} onFocus={() => highlight(id)} onBlur={() => highlight()}
-                onClick={() => open({ type: kind, id })}>
+                onClick={() => open({ type: kind, id })}
+                onContextMenu={async (event) => {
+                  // Like the canvas's menu for a box: the placed photo or text, in Quick Look or in Assets (UI-003).
+                  const box = spread.boxes[id];
+                  const placed: SourceRef | undefined = kind === 'photo' && box?.photo ? { kind: 'photo', id: box.photo }
+                    : kind === 'markdown' && box?.text ? { kind: 'text', id: box.text } : undefined;
+                  if (!placed || !showSource) return;
+                  event.preventDefault();
+                  const result = await window.imageflow?.showContextMenu(['asset-preview', 'box-show-assets'], assetMenuState(false));
+                  if (result?.command === 'asset-preview') showSource(placed, 'preview');
+                  else if (result?.command === 'box-show-assets') showSource(placed, 'assets');
+                }}>
                 {photo && summary.photos[photo]
                   ? <img className="content-thumb" src={summary.photos[photo]} alt="" />
                   : <span className="content-thumb content-kind" aria-hidden="true">{kind === 'photo' ? 'Photo' : kind === 'markdown' ? 'Text' : 'Item'}</span>}

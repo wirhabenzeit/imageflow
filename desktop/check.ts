@@ -174,7 +174,7 @@ export async function checkProject(
         result.diagnostics = failure.declarationIssues.map(({ path, message }) => ({
           code: path === 'id' ? 'template-id-mismatch' : 'template-declaration-invalid', stage: 'template' as const, severity: 'error' as const,
           message: (path ? path + ': ' : '') + message, location: { path: 'template/index.tsx', ...(path ? { declaration: path } : {}) },
-          suggestion: path === 'id' ? 'Use the template ID that project.json names, or open the book with its own template.'
+          suggestion: path === 'id' ? 'Use the template ID that project.json names, or, for a fork with an ID of its own, name that template as basedOn: { id, version }.'
             : 'Change the declaration at ' + (path || 'the template root') + ' in the default export of template/index.tsx so it satisfies the template API.',
         }));
       } else {

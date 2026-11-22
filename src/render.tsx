@@ -49,7 +49,8 @@ import { readEdit } from './editing';
 import { artworkTarget, parsePreviewRequest, PreviewError } from './preview';
 import { previewAspectMismatch, trimAspect } from './template-preview';
 import type { PreviewFileReport } from './template-preview';
-import type { CoverPreviewMetadata, PreviewMetadata, PagePreviewMetadata } from './preview';
+import type { CoverPreviewMetadata, PreviewMetadata, PagePreviewMetadata, PickerPreviewMetadata } from './preview';
+import { Choice } from './choice';
 import { inspectionSchema } from './inspection';
 import type { ElementInspection, ElementMeasurement } from './inspection';
 import { contactSheetLayout, fixtureBannerHeight } from './authoring-artwork';
@@ -749,7 +750,7 @@ class LayoutBoundary extends React.Component<{ spread: string; failures: Map<str
 }
 
 // Both PDF pages and artwork captures start from a fully flowed sheet and use the same bleed offsets.
-function sheetCrop(format: ResolvedFormat, side: PrintSide, bounds: PreviewMetadata['bounds']) {
+function sheetCrop(format: ResolvedFormat, side: PrintSide, bounds: 'trim' | 'bleed') {
   const { trim, bleed, spreadWidth, height } = format;
   if (side === 'spread') {
     if (bounds === 'bleed') return { x: 0, y: 0, widthMm: spreadWidth, heightMm: height };
@@ -1080,6 +1081,7 @@ function paintSentinel(sentinel: Sentinel, top: number) {
 function renderArtwork(root: HTMLElement, sheets: HTMLElement[], spreads: SpreadState[], sequence: ReturnType<typeof pageSequence>,
   format: ResolvedFormat, artwork: ReturnType<typeof parsePreviewRequest>, fixture?: FixtureMarking) {
   if ('cover' in artwork.target) throw new PreviewError('invalid-preview-request', 'Use the cover renderer for an exterior cover preview.');
+  if ('picker' in artwork.target) throw new PreviewError('invalid-preview-request', 'Use the picker renderer for a layout family\'s picker.');
   const { bounds, maxEdge, guides, labels } = artwork;
   const overlays = { ...(guides ? { guides: true as const } : {}), ...(labels ? { labels: true as const } : {}) };
   const annotated = new Set<number>();
@@ -1725,6 +1727,111 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
   flushSync(() => react.render(React.createElement(Host)));
 }
 
+// The width of the Inspector's settings column, where a family's picker is shown.
+const pickerWidth = 260;
+type PickerTarget = Extract<ReturnType<typeof parsePreviewRequest>['target'], { picker: true }>;
+
+/**
+ * Draws a layout family's picker for check_book, as the settings show it, and optionally clicks the control named by
+ * `choose` to report the variant the picker would switch to (API-008). It runs the template's own picker component, or
+ * the app's choice for a `choice` picker, and saves nothing: `choose` only records the choice.
+ */
+async function renderPickerArtwork(book: RenderProject, template: Template, target: PickerTarget, width: number) {
+  const sheet = book.project.spreads.find(({ id }) => id === target.spread);
+  if (!sheet) throw new PreviewError('preview-target-not-found', 'Spread ' + target.spread + ' does not exist in this book.');
+  if (target.page && !sheet.split) throw new PreviewError('preview-target-not-found', 'Spread ' + target.spread + ' is not shown as two pages; omit page.');
+  const spread = scopeSpread(sheet, target.page);
+  const shown = sheet.split && !target.page ? undefined : spread?.definition;
+  const familyId = target.family ?? (shown ? template.spreads[shown]?.family : undefined);
+  const families = Object.keys(template.layoutFamilies ?? {});
+  if (!familyId || !template.layoutFamilies || !Object.hasOwn(template.layoutFamilies, familyId)) {
+    throw new PreviewError('preview-target-not-found', (target.family ? 'The template has no layout family ' + target.family + '.'
+      : 'Spread ' + target.spread + (target.page ? ' (' + target.page + ' page)' : '') + ' does not show a layout of a family; name one with family.') +
+      (families.length ? ' Families: ' + families.join(', ') + '.' : ' The template declares no layout families.'));
+  }
+  const family = template.layoutFamilies[familyId];
+  const ids = familyLayouts(template.spreads, familyId);
+  if (!family.picker) throw new PreviewError('preview-target-not-found', 'The layout family ' + familyId + ' has no picker: the sidebar shows each of its layouts.');
+  if (target.current !== undefined && !ids.includes(target.current)) {
+    throw new PreviewError('preview-target-not-found', target.current + ' is not a layout of ' + family.label + '. Its layouts: ' + ids.join(', ') + '.');
+  }
+  const variants = ids.map((id) => ({ id, label: template.spreads[id].label, variant: { ...template.spreads[id].variant } }));
+  const saved = target.current ?? (shown && ids.includes(shown) ? shown : ids[0]);
+  const notices: string[] = [];
+  let draft = saved;
+  let refresh: (() => void) | undefined;
+  const choose = (id: string) => {
+    if (typeof id !== 'string' || !ids.includes(id)) {
+      notices.push('The picker chose ' + String(id) + ', which is not a layout of ' + family.label + '. It can choose ' + ids.join(', ') + '.');
+      return;
+    }
+    draft = id;
+    refresh?.();
+  };
+  const find = (tags: VariantTags) => {
+    const wanted = Object.entries(tags ?? {});
+    return variants.find(({ variant }) => wanted.every(([key, value]) => Object.hasOwn(variant, key) && variant[key] === value))?.id;
+  };
+  const document = resolveParams(template.parameters, book.project.params);
+  const format = resolveFormat(template.format);
+  const frame = window.document.createElement('div');
+  frame.className = 'if-editor if-layout-settings if-picker-preview';
+  Object.assign(frame.style, { position: 'fixed', left: '0', top: '0', zIndex: '2147483646', boxSizing: 'border-box',
+    width: width + 'px', padding: '8px', background: '#f5f5f5', colorScheme: 'only light' });
+  window.document.body.append(frame);
+  const failures: unknown[] = [];
+  function Host() {
+    const [, update] = React.useReducer((value: number) => value + 1, 0);
+    React.useEffect(() => { refresh = update; return () => { refresh = undefined; }; }, []);
+    const choice = family.picker!.choice;
+    if (choice) {
+      const options = ids.map((id) => ({ value: id, label: choice.options[String(template.spreads[id].variant?.[choice.tag])] ?? id }));
+      return React.createElement(Choice<string>, { label: family.picker!.label ?? family.label, hideLabel: true, value: draft, options, onChange: choose });
+    }
+    return React.createElement(family.picker!.component!, {
+      variants, current: draft, saved, choose, find, document, format, readOnly: false, commit: () => {}, cancel: () => {},
+    });
+  }
+  const react = createRoot(frame, { onUncaughtError: (error) => failures.push(error), onCaughtError: (error) => failures.push(error) });
+  flushSync(() => react.render(React.createElement(Host)));
+  const failed = () => {
+    if (!failures.length) return;
+    const error = failures[0];
+    throw new PreviewError('render-failed', 'The picker of ' + family.label + ' failed: ' + (error instanceof Error ? error.message : String(error)));
+  };
+  failed();
+  let chosen: string | undefined;
+  if (target.choose !== undefined) {
+    const name = (node: Element) => (node.getAttribute('aria-label') ?? node.getAttribute('title') ?? (node as HTMLElement).innerText ?? node.textContent ?? '').trim();
+    const controls = [...frame.querySelectorAll('button, [role="radio"], [role="option"], [role="tab"], [role="button"], [role="checkbox"], [role="switch"], input, label')];
+    const wanted = target.choose.trim().toLowerCase();
+    const control = controls.find((node) => name(node).toLowerCase() === wanted);
+    if (!control) {
+      const names = [...new Set(controls.map(name).filter(Boolean))];
+      throw new PreviewError('preview-target-not-found', 'The picker has no control labelled ' + target.choose + '.' +
+        (names.length ? ' Its controls: ' + names.join(', ') + '.' : ''));
+    }
+    if ((control as HTMLButtonElement).disabled || control.getAttribute('aria-disabled') === 'true') {
+      notices.push('The control ' + target.choose + ' is disabled, so clicking it changes nothing.');
+    } else {
+      const before = draft;
+      flushSync(() => (control as HTMLElement).click());
+      failed();
+      chosen = draft;
+      if (draft === before && !notices.length) notices.push('Clicking ' + target.choose + ' kept ' + draft + '.');
+    }
+  }
+  // Let the picker settle, such as a layout effect that measures itself, before measuring and capturing it.
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  failed();
+  const height = Math.max(1, Math.ceil(frame.getBoundingClientRect().height));
+  frame.style.height = height + 'px';
+  const metadata: PickerPreviewMetadata = { kind: 'picker', width, height, spread: sheet.id, ...(target.page ? { page: target.page } : {}),
+    family: familyId, picker: family.picker.choice ? 'choice' : 'component', variants, current: saved,
+    ...(chosen !== undefined ? { chosen } : {}), ...(notices.length ? { notices } : {}) };
+  return { frame, metadata };
+}
+
 function coverArtworkPreview(root: HTMLElement, sheet: HTMLElement, cover: Exclude<CoverResolution, { status: 'unavailable' }>,
   artwork: ReturnType<typeof parsePreviewRequest>, query: URLSearchParams) {
   const { target, bounds, guides, labels, maxEdge } = artwork;
@@ -1986,7 +2093,8 @@ export async function startRender(root: HTMLElement) {
     const template = chooseFormat(declared.data, book.project.format);
     // Known before the ID check, so a failed load still reports the declared ID (the template library reads it).
     info = templateInfo(template);
-    if (template.id !== book.project.template.id) {
+    // A fork may take an ID of its own and name the template the book was made from as `basedOn` (API-003).
+    if (template.id !== book.project.template.id && template.basedOn?.id !== book.project.template.id) {
       throw new DeclarationError('The template ID does not match project.json.', [{ path: 'id',
         message: 'The template declares ID ' + template.id + ', but project.json uses ' + book.project.template.id + '.' }]);
     }
@@ -2407,7 +2515,14 @@ export async function startRender(root: HTMLElement) {
       // Wait for photos near the viewport so replacements show their artwork as soon as they swap in.
       await Promise.allSettled(load().map((img) => img.decode()));
     }
-    else if (artwork) {
+    else if (artwork && 'picker' in artwork.target) {
+      if (book.fixture) throw new PreviewError('invalid-preview-request', 'Fixture artwork is only available as a labelled contact sheet.');
+      const { frame, metadata } = await renderPickerArtwork(book, template, artwork.target, Math.min(artwork.maxEdge, pickerWidth));
+      const sentinel = parseSentinel(query.get('sentinel'));
+      frame.dataset.previewArtwork = query.get('sentinel') ?? '';
+      if (sentinel) paintSentinel(sentinel, metadata.height);
+      window.imageflowPreview = { state: 'ready', metadata };
+    } else if (artwork) {
       const { frame, metadata } = renderArtwork(root, sheets, spreads, sequence, format, artwork, book.fixture);
       const sentinel = parseSentinel(query.get('sentinel'));
       frame.dataset.previewArtwork = query.get('sentinel') ?? '';

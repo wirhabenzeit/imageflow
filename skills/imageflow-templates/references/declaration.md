@@ -12,6 +12,8 @@ export default defineTemplate({
   // Shown in the template library and the New Book picker.
   label: 'Senja journal',
   description: 'Full-bleed photos with a field-notes text column.',
+  // Optional, for a fork: the template it was copied from, at the version copied (see Template library).
+  basedOn: { id: 'imageflow-starter', version: '0.13.1' },
   // Optional: what New Book shows for the template. Without it, a render of the first opening spread.
   preview: './preview.jpg',
   contract: 1,

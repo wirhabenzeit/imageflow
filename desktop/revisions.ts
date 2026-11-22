@@ -288,12 +288,16 @@ export class ProjectInputIndex {
   private readonly state: IndexState = { entries: new Map(), generation: 0, closed: false,
     metrics: { captures: 0, filesHashed: 0, bytesHashed: 0, cacheHits: 0, photoFilesHashed: 0, photoBytesHashed: 0 } };
   private pending: Promise<unknown> = Promise.resolve();
+  // Recent watcher events, newest last, so a check that gave up can say what kept changing (API-007).
+  private changes: { at: number; path?: string }[] = [];
   constructor(readonly folder: string) {}
 
   get metrics(): InputIndexMetrics { return { ...this.state.metrics }; }
 
   invalidate(path?: string) {
     if (this.state.closed || (path !== undefined && !isProjectInputPath(path))) return;
+    this.changes.push({ at: Date.now(), path: path === undefined ? undefined : portable(path) });
+    if (this.changes.length > 64) this.changes.splice(0, this.changes.length - 64);
     this.state.generation++;
     for (const name of this.state.entries.keys()) {
       if (path === undefined || name === path || name.startsWith(path + sep)) this.state.entries.delete(name);
@@ -312,6 +316,28 @@ export class ProjectInputIndex {
     });
     this.pending = task.catch(() => {});
     return task;
+  }
+
+  /** Input paths the watcher reported changed since `time`, at most `limit`. An unnamed change is the project folder. */
+  changedSince(time: number, limit = 8) {
+    const paths = [...new Set(this.changes.filter(({ at }) => at >= time).map(({ path }) => path ?? '(project folder)'))];
+    return paths.slice(-limit);
+  }
+
+  /** Waits until no input has changed for `quietMs`, at most `maxMs`. */
+  async settle(quietMs: number, maxMs: number, signal?: AbortSignal) {
+    const deadline = Date.now() + maxMs;
+    for (;;) {
+      signal?.throwIfAborted();
+      const last = this.changes.at(-1)?.at ?? 0;
+      const wait = Math.min(last + quietMs - Date.now(), deadline - Date.now());
+      if (wait <= 0) return;
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(); }, wait);
+        const abort = () => { clearTimeout(timer); reject(signal!.reason); };
+        signal?.addEventListener('abort', abort, { once: true });
+      });
+    }
   }
 
   close() {

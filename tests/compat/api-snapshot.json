@@ -1395,7 +1395,8 @@
       "formatted-text",
       "app-controls",
       "text-metadata",
-      "text-composition"
+      "text-composition",
+      "template-lineage"
     ],
     "capabilities": [
       "anchors",
@@ -1431,6 +1432,7 @@
       "app-controls",
       "text-metadata",
       "text-composition",
+      "template-lineage",
       "physical-covers"
     ],
     "declarations": {
@@ -1509,7 +1511,8 @@
         "VariantTags": "export type VariantTags = Record<string, string | number | boolean>;",
         "LayoutVariant": "export type LayoutVariant = { id: string; label: string; variant: VariantTags; };",
         "LayoutPickerProps": "export type LayoutPickerProps = { variants: readonly LayoutVariant[]; current: string; saved: string; choose(id: string): void; find(tags: VariantTags): string | undefined; document: Values; format: ResolvedFormat; readOnly: boolean; commit(): void; cancel(): void; };",
-        "LayoutFamily": "export type LayoutFamily = { label: string; picker?: { label?: string; component(props: LayoutPickerProps): ImageFlowNode; }; };",
+        "VariantChoice": "export type VariantChoice = { tag: string; options: Record<string, string>; };",
+        "LayoutFamily": "export type LayoutFamily = { label: string; picker?: { label?: string; } & ({ choice: VariantChoice; component?: never; } | { component(props: LayoutPickerProps): ImageFlowNode; choice?: never; }); };",
         "Exact": "type Exact<T, Allowed> = { [X in Exclude<keyof T, keyof Allowed>]: never; };",
         "ParametersChecked": "type ParametersChecked<P> = { [K in keyof P]: Exact<P[K], Extract<Parameter, { type: P[K] extends { type: infer T; } ? T : never; }>>; };",
         "OwnParametersChecked": "type OwnParametersChecked<T> = T extends { parameters: infer P; } ? { parameters: ParametersChecked<P>; } : unknown;",
@@ -1553,21 +1556,21 @@
         "RenderContext": "export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> = { params: ValuesOf<S>; document: ParameterValues<D>; boxes: { [K in keyof S['boxes']]: BoxContext<S['boxes'][K]>; }; elements: { [K in keyof S['elements']]: { params: ValuesOf<S['elements'][K]>; }; }; page: { left?: number; right?: number; number?: number; }; side?: 'left' | 'right' | 'page'; format: ResolvedFormat; formatId: string; spread: string; layout: string; mode: 'edit' | 'export'; view: RenderView; edit(...paths: EditPath<S, D>[]): EditMarker; book: BookContext; geometry: BoundGeometry; PhotoBox<I extends BoxIds<S, 'photo'>>(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: I; children?: (photo: PhotoRender, box: PhotoBoxState<I, ValuesOf<S['boxes'][I]>>) => ImageFlowNode; }): ImageFlowElement; MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: BoxIds<S, 'markdown'>; columns?: Columns; rects?: readonly Rect[]; alignHeads?: boolean; }): ImageFlowElement; Element(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: keyof S['elements'] & string; children?: ImageFlowNode; }): ImageFlowElement; Text(props: TextProps<TextPath<S, D>>): ImageFlowElement; };",
         "UntypedRenderContext": "export type UntypedRenderContext = { params: Values; document: Values; boxes: Record<string, { params: Values; photo?: Photo | null; text?: FlowPosition | null; }>; elements: Record<string, { params: Values; }>; page: { left?: number; right?: number; number?: number; }; side?: 'left' | 'right' | 'page'; format: ResolvedFormat; formatId: string; spread: string; layout: string; mode: 'edit' | 'export'; view: RenderView; edit(...paths: string[]): EditMarker; book: BookContext; geometry: BoundGeometry; PhotoBox: typeof PhotoBox; MarkdownBox: typeof MarkdownBox; Element: typeof Element; Text(props: TextProps): ImageFlowElement; };",
         "AnchorContext": "export type AnchorContext<P = Values, D = Values, B = Record<string, { params: Values; photo?: Photo | null; text?: FlowPosition | null; }>> = { params: P; document: D; boxes: B; spread: string; side?: 'left' | 'right'; book: { readonly texts: readonly BookText[]; }; };",
-        "FirstStatement #118": "declare const typedDocument: unique symbol;",
-        "FirstStatement #119": "declare const typedFamily: unique symbol;",
-        "FirstStatement #120": "declare const typedCompositions: unique symbol;",
+        "FirstStatement #119": "declare const typedDocument: unique symbol;",
+        "FirstStatement #120": "declare const typedFamily: unique symbol;",
+        "FirstStatement #121": "declare const typedCompositions: unique symbol;",
         "BoxCompositions": "type BoxCompositions<B> = { [K in keyof B]: B[K] extends { composition: infer C extends string; } ? C : never; }[keyof B];",
         "SpreadDefinition": "export type SpreadDefinition<D extends Parameters = Parameters, F extends string = string, C extends string = never> = SpreadDeclaration & { render(context: UntypedRenderContext): ImageFlowNode; anchors?(context: AnchorContext): readonly AnchorDeclaration[]; credits?(context: CreditContext): readonly CreditDeclaration[]; readonly [typedDocument]?: D; readonly [typedFamily]?: F; readonly [typedCompositions]?: C; };",
-        "Capability": "export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' | 'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' | 'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'page-layouts' | 'editor-context' | 'document-editors' | 'editor-network' | 'rendered-images' | 'rendered-vectors' | 'font-coverage' | 'book-credits' | 'inline-editors' | 'inline-text' | 'list-parameters' | 'template-preview' | 'photo-render' | 'formatted-text' | 'app-controls' | 'text-metadata' | 'text-composition' | 'physical-covers';",
-        "FirstStatement #124": "export const capabilities: readonly Capability[];",
+        "Capability": "export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' | 'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' | 'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'page-layouts' | 'editor-context' | 'document-editors' | 'editor-network' | 'rendered-images' | 'rendered-vectors' | 'font-coverage' | 'book-credits' | 'inline-editors' | 'inline-text' | 'list-parameters' | 'template-preview' | 'photo-render' | 'formatted-text' | 'app-controls' | 'text-metadata' | 'text-composition' | 'template-lineage' | 'physical-covers';",
+        "FirstStatement #125": "export const capabilities: readonly Capability[];",
         "CoverRenderContext": "export type CoverRenderContext = Pick<UntypedRenderContext, 'params' | 'document' | 'boxes' | 'elements' | 'formatId' | 'layout' | 'mode' | 'view' | 'PhotoBox' | 'Text' | 'Element'> & { cover: ResolvedCover; interiorPages: number; };",
         "CoverLayout": "export type CoverLayout = { label: string; formats?: string[]; parameters?: Parameters; controls?: Controls; boxes?: Record<string, { type: 'photo'; label: string; parameters?: Parameters; controls?: Controls; }>; elements?: Record<string, { label: string; parameters?: Parameters; controls?: Controls; }>; render: (context: CoverRenderContext) => ImageFlowNode; };",
-        "TemplateDeclaration": "export type TemplateDeclaration = { id: string; version: string; label?: string; description?: string; preview?: string; contract: 1; requires?: readonly Capability[]; network?: readonly string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string; parameters?: Parameters; controls?: Controls; layoutFamilies?: Record<string, LayoutFamily>; spreads: Record<string, SpreadDefinition>; openingSpreads?: readonly OpeningSpread[]; coverFormats?: Record<string, CoverFormat>; coverLayouts?: Record<string, CoverLayout>; editors?: Record<string, DocumentEditor>; compositions?: Record<string, (text: TextComposition) => ImageFlowNode>; };",
+        "TemplateDeclaration": "export type TemplateDeclaration = { id: string; version: string; label?: string; description?: string; basedOn?: { id: string; version: string; }; preview?: string; contract: 1; requires?: readonly Capability[]; network?: readonly string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string; parameters?: Parameters; controls?: Controls; layoutFamilies?: Record<string, LayoutFamily>; spreads: Record<string, SpreadDefinition>; openingSpreads?: readonly OpeningSpread[]; coverFormats?: Record<string, CoverFormat>; coverLayouts?: Record<string, CoverLayout>; editors?: Record<string, DocumentEditor>; compositions?: Record<string, (text: TextComposition) => ImageFlowNode>; };",
         "OpeningPage": "export type OpeningPage<L extends string = string> = { layout?: L; params?: Values; };",
         "OpeningSpread": "export type OpeningSpread<L extends string = string> = { layout: L; params?: Values; } | { pages: { left?: OpeningPage<L>; right?: OpeningPage<L>; }; };",
         "SpreadBuilder": "export type SpreadBuilder<D extends Parameters, IsPage extends boolean = false> = <const P extends Parameters = {}, const B extends Record<string, BoxDeclaration> = {}, const E extends Record<string, ElementDeclaration> = {}, const F extends string = never>(definition: { label: string; span?: IsPage extends true ? never : Span; sides?: readonly ('left' | 'right')[]; parameters?: P & ParametersChecked<P>; controls?: Controls<keyof P & string>; boxes?: B & BoxesChecked<B>; elements?: E & ElementsChecked<E, D, P>; render(context: RenderContext<{ label: string; parameters: P; boxes: B; elements: E; }, D> & (IsPage extends true ? { side: 'left' | 'right' | 'page'; } : {})): ImageFlowNode; anchors?(context: AnchorContext<ParameterValues<P>, ParameterValues<D>, { [K in keyof B]: BoxContext<B[K]>; }>): readonly AnchorDeclaration[]; credits?(context: CreditContext<ParameterValues<P>, ParameterValues<D>, { [K in keyof E]: { params: ValuesOf<E[K]>; }; }, { [K in keyof B]: B[K] extends { type: 'photo'; } ? { params: ValuesOf<B[K]>; photo: Photo | null; } : { params: ValuesOf<B[K]>; }; }>): readonly CreditDeclaration[]; family?: F; variant?: VariantTags; }) => SpreadDefinition<D, F, BoxCompositions<B>>;",
         "TemplateTools": "export type TemplateTools<D extends Parameters> = { spread: SpreadBuilder<D>; page: SpreadBuilder<D, true>; };",
-        "TemplateBase": "type TemplateBase<D extends Parameters, L extends string = string, C extends string = string> = { id: string; version: string; label?: string; description?: string; preview?: string; contract: 1; requires?: readonly Capability[]; network?: readonly string[]; parameters?: D & ParametersChecked<D>; controls?: Controls<keyof D & string>; layoutFamilies?: { [K in L]: LayoutFamily; }; editors?: Record<string, DocumentEditor<D, any>>; compositions?: { [K in C]: (text: TextComposition<D>) => ImageFlowNode; }; coverFormats?: Record<string, CoverFormat>; coverLayouts?: Record<string, CoverLayout>; };",
+        "TemplateBase": "type TemplateBase<D extends Parameters, L extends string = string, C extends string = string> = { id: string; version: string; label?: string; description?: string; basedOn?: { id: string; version: string; }; preview?: string; contract: 1; requires?: readonly Capability[]; network?: readonly string[]; parameters?: D & ParametersChecked<D>; controls?: Controls<keyof D & string>; layoutFamilies?: { [K in L]: LayoutFamily; }; editors?: Record<string, DocumentEditor<D, any>>; compositions?: { [K in C]: (text: TextComposition<D>) => ImageFlowNode; }; coverFormats?: Record<string, CoverFormat>; coverLayouts?: Record<string, CoverLayout>; };",
         "Opening": "type Opening<L extends string> = { openingSpreads?: readonly OpeningSpread<L>[]; };",
         "OpeningLayouts": "type OpeningLayouts<S, L extends string> = { [K in Exclude<L, keyof S>]: SpreadDefinition<any>; };",
         "FormatChoice": "type FormatChoice<F extends string> = { format: PrintFormat; formats?: never; defaultFormat?: never; } | { formats: { [K in F]: PrintFormat; }; defaultFormat?: NoInfer<F>; format?: never; };",
@@ -1596,18 +1599,18 @@
         "TextComposition": "export type TextComposition<D extends Parameters = Parameters> = { readonly blocks: readonly TextBlock[]; readonly meta: Readonly<TextMeta>; readonly document: Readonly<ParameterValues<D>>; };",
         "MarkdownBox": "export function MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: string; columns?: Columns; rects?: readonly Rect[]; alignHeads?: boolean; }): ImageFlowElement;",
         "Element": "export function Element(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: string; children?: ImageFlowNode; }): ImageFlowElement;",
-        "FirstStatement #161": "export const box: { photo<const P extends Parameters = {}>(label: string, parameters?: P & ParametersChecked<P>, options?: { controls?: Controls<keyof P & string>; }): { type: 'photo'; label: string; parameters: P; controls?: Controls<keyof P & string>; }; markdown<const P extends Parameters = {}, const C extends string = never>(label: string, options?: { flowOrder?: number; composition?: C; parameters?: P & ParametersChecked<P>; controls?: Controls<keyof P & string>; }): { type: 'markdown'; label: string; parameters: P; flowOrder?: number; controls?: Controls<keyof P & string>; } & ([ C ] extends [ never ] ? { composition?: undefined; } : { composition: C; }); photos<const K extends string, const P extends Parameters = {}>(ids: readonly K[], label: (id: K, index: number) => string, parameters?: P & ParametersChecked<P>): { [Id in K]: { type: 'photo'; label: string; parameters: P; }; }; };",
+        "FirstStatement #162": "export const box: { photo<const P extends Parameters = {}>(label: string, parameters?: P & ParametersChecked<P>, options?: { controls?: Controls<keyof P & string>; }): { type: 'photo'; label: string; parameters: P; controls?: Controls<keyof P & string>; }; markdown<const P extends Parameters = {}, const C extends string = never>(label: string, options?: { flowOrder?: number; composition?: C; parameters?: P & ParametersChecked<P>; controls?: Controls<keyof P & string>; }): { type: 'markdown'; label: string; parameters: P; flowOrder?: number; controls?: Controls<keyof P & string>; } & ([ C ] extends [ never ] ? { composition?: undefined; } : { composition: C; }); photos<const K extends string, const P extends Parameters = {}>(ids: readonly K[], label: (id: K, index: number) => string, parameters?: P & ParametersChecked<P>): { [Id in K]: { type: 'photo'; label: string; parameters: P; }; }; };",
         "Rect": "export type Rect = { x: number; y: number; width: number; height: number; };",
         "Area": "export type Area = 'trim' | 'safe' | 'bleed';",
         "DesignCanvas": "export type DesignCanvas = { left(x: number, y: number, width: number, height: number): Rect; right(x: number, y: number, width: number, height: number): Rect; page(x: number, y: number, width: number, height: number): Rect; width(value: number): number; height(value: number): number; scaleX: number; scaleY: number; length(value: number, unit: 'mm' | 'pt' | 'px', axis: 'x' | 'y' | 'min' | 'max'): string; };",
-        "FirstStatement #165": "export const geometry: { page(format: ResolvedFormat, side: 'left' | 'right', area?: Area): Rect; page(format: ResolvedFormat, area?: Area): Rect; spread(format: ResolvedFormat, area?: Area): Rect; inset(rect: Rect, by: number | { top?: number; right?: number; bottom?: number; left?: number; }): Rect; grid(rect: Rect, options: { columns: number; rows?: number; gap?: number; columnGap?: number; rowGap?: number; }): Rect[]; design(format: ResolvedFormat, canvas: { width: number; height: number; }): DesignCanvas; css(rect: Rect): CSSProperties; };",
+        "FirstStatement #166": "export const geometry: { page(format: ResolvedFormat, side: 'left' | 'right', area?: Area): Rect; page(format: ResolvedFormat, area?: Area): Rect; spread(format: ResolvedFormat, area?: Area): Rect; inset(rect: Rect, by: number | { top?: number; right?: number; bottom?: number; left?: number; }): Rect; grid(rect: Rect, options: { columns: number; rows?: number; gap?: number; columnGap?: number; rowGap?: number; }): Rect[]; design(format: ResolvedFormat, canvas: { width: number; height: number; }): DesignCanvas; css(rect: Rect): CSSProperties; };",
         "TemplateIssue": "export type TemplateIssue = { code: string; message: string; severity?: 'error' | 'warning'; box?: string; element?: string; parameter?: string; file?: string; details?: Record<string, string | number>; suggestion?: string; };",
         "issue": "export function issue(found: TemplateIssue): Required<IssueMarker>;",
         "asset": "export function asset(path: string): string;",
         "file": "export function file(id: string): { name: string; extension: string; text: string; } | undefined;",
         "BundledFont": "export type BundledFont = { family: string; weight: number | [ number, number ]; style: 'normal' | 'italic'; };",
         "FontQuery": "export type FontQuery = { family: string | readonly string[]; weight?: number; style?: 'normal' | 'italic'; };",
-        "FirstStatement #172": "export const fonts: { list(): BundledFont[]; missing(text: string, font: FontQuery): string[]; settable(text: string, font: FontQuery): string; };",
+        "FirstStatement #173": "export const fonts: { list(): BundledFont[]; missing(text: string, font: FontQuery): string[]; settable(text: string, font: FontQuery): string; };",
         "RenderTarget": "export type RenderTarget = { width: number; height: number; pixelRatio: number; mode: 'preview' | 'check' | 'export'; signal: AbortSignal; };",
         "RenderedImageProps": "export type RenderedImageProps = { draw: (target: RenderTarget) => Promise<Blob | HTMLCanvasElement | OffscreenCanvas | SVGSVGElement | string>; output?: 'vector' | 'raster'; inputs: unknown; label?: string; alt?: string; className?: string; style?: CSSProperties; layoutPreview?: 'stand-in' | 'draw'; standIn?: ImageFlowNode; };",
         "RenderedImage": "export function RenderedImage(props: RenderedImageProps): ImageFlowElement;",
@@ -1617,7 +1620,7 @@
         "ChoiceProps": "export type ChoiceProps<V extends ChoiceValue = ChoiceValue> = { label: string; value: V | undefined; options: readonly ChoiceOption<V>[]; onChange(value: V): void; disabled?: boolean; hideLabel?: boolean; };",
         "Choice": "export function Choice<V extends ChoiceValue>(props: ChoiceProps<V>): ImageFlowElement;",
         "plainText": "export function plainText(value: string): string;",
-        "ExportDeclaration #182": "export {};"
+        "ExportDeclaration #183": "export {};"
       },
       "jsx-runtime.d.ts": {
         "ImportDeclaration #0": "import type { CSSProperties, ImageFlowElement, ImageFlowNode } from './imageflow';",
@@ -1828,6 +1831,9 @@
               "minLength": 1,
               "maxLength": 512
             }
+          },
+          "includeTemplate": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -2087,6 +2093,22 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "basedOn": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "version"
+                    ],
+                    "additionalProperties": {}
                   }
                 },
                 "required": [
@@ -2105,6 +2127,9 @@
                     "type": "null"
                   }
                 ]
+              },
+              "note": {
+                "type": "string"
               }
             },
             "required": [
@@ -2216,10 +2241,7 @@
           "checks",
           "templateIdentity",
           "sources",
-          "templateFiles",
-          "topics",
-          "examples",
-          "capabilities"
+          "examples"
         ],
         "additionalProperties": {}
       }
@@ -2568,6 +2590,22 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "basedOn": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "version"
+                    ],
+                    "additionalProperties": {}
                   }
                 },
                 "required": [
@@ -2586,6 +2624,9 @@
                     "type": "null"
                   }
                 ]
+              },
+              "note": {
+                "type": "string"
               }
             },
             "required": [
@@ -2647,6 +2688,18 @@
           },
           "includeTemplate": {
             "type": "boolean"
+          },
+          "include": {
+            "maxItems": 3,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "units",
+                "flow",
+                "anchors"
+              ]
+            }
           },
           "expectedRevision": {
             "type": "string",
@@ -2762,6 +2815,41 @@
                     "required": [
                       "spread",
                       "element"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "spread": {
+                        "$ref": "#/$defs/__schema0"
+                      },
+                      "page": {
+                        "type": "string",
+                        "enum": [
+                          "left",
+                          "right"
+                        ]
+                      },
+                      "picker": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "family": {
+                        "$ref": "#/$defs/__schema3"
+                      },
+                      "current": {
+                        "$ref": "#/$defs/__schema3"
+                      },
+                      "choose": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      }
+                    },
+                    "required": [
+                      "spread",
+                      "picker"
                     ],
                     "additionalProperties": false
                   },
@@ -4409,6 +4497,113 @@
                   "mimeType"
                 ],
                 "additionalProperties": {}
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "picker"
+                  },
+                  "width": {
+                    "type": "number"
+                  },
+                  "height": {
+                    "type": "number"
+                  },
+                  "spread": {
+                    "type": "string"
+                  },
+                  "page": {
+                    "type": "string",
+                    "enum": [
+                      "left",
+                      "right"
+                    ]
+                  },
+                  "family": {
+                    "type": "string"
+                  },
+                  "picker": {
+                    "type": "string",
+                    "enum": [
+                      "choice",
+                      "component"
+                    ]
+                  },
+                  "variants": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "variant": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "label",
+                        "variant"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "current": {
+                    "type": "string"
+                  },
+                  "chosen": {
+                    "type": "string"
+                  },
+                  "notices": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "mimeType": {
+                    "$ref": "#/$defs/__schema11"
+                  },
+                  "draft": {
+                    "$ref": "#/$defs/__schema12"
+                  },
+                  "fixture": {
+                    "$ref": "#/$defs/__schema13"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "width",
+                  "height",
+                  "spread",
+                  "family",
+                  "picker",
+                  "variants",
+                  "current",
+                  "mimeType"
+                ],
+                "additionalProperties": {}
               }
             ]
           },
@@ -4488,6 +4683,25 @@
             "type": "object",
             "properties": {},
             "additionalProperties": {}
+          },
+          "revisionMoved": {
+            "type": "object",
+            "properties": {
+              "expectedRevision": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "expectedRevision",
+              "revision"
+            ],
+            "additionalProperties": {}
+          },
+          "notice": {
+            "type": "string"
           }
         },
         "required": [
@@ -5627,6 +5841,22 @@
           "reflow": {
             "type": "boolean"
           },
+          "revisionMoved": {
+            "type": "object",
+            "properties": {
+              "expectedRevision": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "expectedRevision",
+              "revision"
+            ],
+            "additionalProperties": {}
+          },
           "replayed": {
             "type": "boolean",
             "const": true
@@ -6151,6 +6381,111 @@
         },
         "required": [
           "templates"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "read_library_template": {
+      "readOnly": true,
+      "input": {
+        "type": "object",
+        "properties": {
+          "template": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "template"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "template": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "hash": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "built-in",
+                  "imported"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "version",
+              "hash",
+              "source"
+            ],
+            "additionalProperties": {}
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "files": {
+                  "type": "number"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "same",
+                    "changed",
+                    "library-only",
+                    "book-only"
+                  ]
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "changelog": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "sha256": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "template"
         ],
         "additionalProperties": {}
       }

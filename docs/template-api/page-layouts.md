@@ -38,7 +38,7 @@ export default defineTemplate({
 
 ## Declaring and rendering a page
 
-`page()` sets `span: 'page'` and types the layout's parameters, boxes, elements, edit paths and document parameters like `spread()`. Page and spread layouts share the `spreads` record, so every layout ID must be unique. A page can declare the same parameters, controls, boxes, elements, anchors, credits, family and variant tags as a spread. Optional `sides: ['left']` or `sides: ['right']` restricts a facing page's placement; omit it to allow both sides.
+A page layout's `label` names its tile in the sidebar, which shows about 10 characters at a usual width; see [Layout families](layout-families.md) for naming short labels. `page()` sets `span: 'page'` and types the layout's parameters, boxes, elements, edit paths and document parameters like `spread()`. Page and spread layouts share the `spreads` record, so every layout ID must be unique. A page can declare the same parameters, controls, boxes, elements, anchors, credits, family and variant tags as a spread. Optional `sides: ['left']` or `sides: ['right']` restricts a facing page's placement; omit it to allow both sides.
 
 Page coordinates start at that page's left trim edge. `ctx.geometry.page(area?)` returns its trim, safe or bleed rectangle; `ctx.geometry.design(canvas).page(x, y, width, height)` scales a design into those local coordinates. `ctx.geometry.spread()` and requests for the facing page's geometry throw. Use `ctx.side` (`'left'`, `'right'`, or `'page'` without facing pages) to mirror artwork when needed. `<Page>` exposes the same value as `data-side` and supplies the side's outside/binding safe and bleed variables.
 

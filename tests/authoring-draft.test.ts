@@ -153,7 +153,7 @@ test('a draft renders an inserted layout by batch reference without saving or re
   assert.deepEqual((inspected.items as { id: string }[]).map(({ id }) => id), ['one']);
 });
 
-test('invalid drafts fail as request errors and stale drafts are not applied', async (t) => {
+test('invalid drafts fail as request errors and stale drafts follow the current revision', async (t) => {
   const { renders, call, revision } = await fixture(t);
   const expectedRevision = await revision();
   await assert.rejects(call('check_book', { expectedRevision, draft: { operations: [{ op: 'remove_spread', spread: 'missing' }] } }),
@@ -161,13 +161,24 @@ test('invalid drafts fail as request errors and stale drafts are not applied', a
   await assert.rejects(call('check_book', {
     expectedRevision, draft: { operations: [{ op: 'set_title', title: 'Draft title' }] }, preview: { target: { spread: '$nothing' } },
   }), { code: 'REFERENCE_NOT_FOUND' });
-  const rendered = renders.length;
+  // A draft saves nothing: one planned at a revision the app has since changed is rendered at the current revision,
+  // and the reply says so (API-007).
   const stale = await call('check_book', {
     expectedRevision: 'f'.repeat(64), draft: { operations: [{ op: 'set_title', title: 'Draft title' }] },
+  }) as AuthoringCheckResult & { revisionMoved?: unknown; notice?: string };
+  assert.equal(stale.state, 'ready');
+  assert.equal(stale.draft?.applied, true);
+  assert.equal(stale.revision, expectedRevision);
+  assert.deepEqual(stale.revisionMoved, { expectedRevision: 'f'.repeat(64), revision: expectedRevision });
+  assert.match(stale.notice ?? '', /pass revision as expectedRevision/);
+  // A page-number preview may show another spread at the current revision, so it still requires the exact one.
+  const rendered = renders.length;
+  const paged = await call('check_book', {
+    expectedRevision: 'f'.repeat(64), draft: { operations: [{ op: 'set_title', title: 'Draft title' }] }, preview: { target: { page: 1 } },
   }) as AuthoringCheckResult;
-  assert.equal(stale.state, 'error');
-  assert.deepEqual(stale.draft, { applied: false, committed: false });
-  assert.equal(stale.diagnostics[0].code, 'revision-conflict');
+  assert.equal(paged.state, 'error');
+  assert.deepEqual(paged.draft, { applied: false, committed: false });
+  assert.equal(paged.diagnostics[0].code, 'revision-conflict');
   assert.equal(renders.length, rendered);
 });
 
@@ -232,4 +243,20 @@ test('a draft can repair a saved book whose layout fails to render, and the repa
   await session.undo('undo');
   assert.equal(await heading(), 'Hello');
   assert.equal((await call('check_book') as AuthoringCheckResult).state, 'error');
+});
+
+test('a draft reports the book\'s page sequence as a warning, and the saved book as an error (API-006)', async (t) => {
+  const { call, revision, hooks } = await fixture(t);
+  const original = hooks.check;
+  hooks.check = async (...args) => {
+    const result = await original(...args);
+    result.diagnostics.push({ code: 'page-sequence', stage: 'render', severity: 'error', message: 'Page count is 58.' });
+    return result;
+  };
+  const saved = await call('check_book') as AuthoringCheckResult;
+  assert.equal(saved.diagnostics.find(({ code }) => code === 'page-sequence')?.severity, 'error');
+  const drafted = await call('check_book', { expectedRevision: await revision(), draft: { operations: [{ op: 'set_title', title: 'Draft title' }] } }) as AuthoringCheckResult;
+  const finding = drafted.diagnostics.find(({ code }) => code === 'page-sequence');
+  assert.equal(finding?.severity, 'warning');
+  assert.match(finding?.message ?? '', /^Page count is 58\. A draft reports this as a warning/);
 });

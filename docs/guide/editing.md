@@ -38,11 +38,13 @@ These flows can be tested in the editor now. Page-level MCP mutation commands ar
 - **Check resolution:** the crop toolbar compares print resolution with the template's minimum and target.
 - **Replace or remove:** use **More photo actions** for **Replace photo…**, **Remove photo** and **Crop values…**. Empty boxes offer **Choose photo…**.
 
-Escape, **Done** or a click elsewhere deselects the photo. Select a photo in the Sources strip to edit its title, caption, credit and alt text in the Inspector.
+Escape, **Done** or a click elsewhere deselects the photo. Select a photo in the Sources strip to edit its title, caption, credit and alt text in the Inspector. To get there from a placed photo, right-click it on the page, or its row under **On this page** (or **On this spread**) in the Inspector, and choose **Show in Assets**; **Quick Look** is in the same menu. Texts offer both too.
 
 ## Text
 
 Drop a Markdown file onto a text box, or click the box to assign or import a source. Assign the same source to several boxes to continue its text through the book.
+
+Drag a text box that holds a text onto another text box to swap the two texts, or onto an empty text box to move it there. Only the dragged box's assignment moves: other boxes the text continues through keep it. Undo reverts the swap in one step.
 
 **New Text** in the Texts strip creates a source inside the book. A source's pencil button opens a Markdown editor with a live preview. Changes save after a short pause. Linked sources offer a choice to edit the original or copy it into the book first.
 
