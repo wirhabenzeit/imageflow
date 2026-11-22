@@ -58,6 +58,8 @@ import { Field, ProjectFilesContext } from './Fields';
 import { editorChanges, unknownControl } from './editor-changes';
 import { pictureTimeoutMs } from './render-budget';
 import { pendingNetwork, pictureFailureSuggestion } from './network-access';
+import { proofLayout, proofPhotoPixels, proofPixelRatio, proofSheet } from './proof-sheet';
+import { isUnavailableSource } from './source-diagnostics';
 import './render.css';
 
 const post = (data: unknown) => window.parent.postMessage(data, editorURL.slice(0, -1));
@@ -969,6 +971,91 @@ function makePrintPages(root: HTMLElement, sheets: HTMLElement[], sequence: Retu
     for (const side of sequence.spreads[index].sides) {
       pages.append(croppedSheet(sheet, sheetCrop(format, side, 'bleed')));
     }
+  }
+  root.hidden = true;
+  document.body.append(pages);
+}
+
+// The design proof (proof-sheet): each spread once, cropped to its trim and scaled alike, `perPage` to an A4 sheet,
+// with its pages, layout and problems under it.
+type ProofOptions = { perPage: number; title: string; date: string };
+function proofUnit(format: ResolvedFormat, span: string): PrintSide {
+  return !format.facingPages ? 'page' : span === 'left' || span === 'right' ? span : 'spread';
+}
+function proofLayoutFor(format: ResolvedFormat, perPage: number) {
+  const unit = { width: format.trim.width * (format.facingPages ? 2 : 1), height: format.trim.height };
+  return { unit, layout: proofLayout(unit, perPage) };
+}
+// Photos load once laid out, each as wide as it shows on the proof sheet, in the presentation's rendition sizes.
+function loadProofPhotos(root: HTMLElement, scale: number) {
+  for (const image of root.querySelectorAll<HTMLImageElement>('img[data-src]')) {
+    image.src = presentationPhotoSource(image.dataset.src!, proofPhotoPixels(image.getBoundingClientRect().width * 25.4 / 96, scale), false);
+  }
+}
+function makeProofPages(root: HTMLElement, sheets: HTMLElement[], sequence: ReturnType<typeof pageSequence>, format: ResolvedFormat,
+  spreads: SpreadState[], where: string[], errors: Issue[], options: ProofOptions) {
+  const { unit, layout } = proofLayoutFor(format, options.perPage);
+  const { margin, header, label, gapX, gapY } = proofSheet;
+  const style = document.createElement('style');
+  style.textContent = '@page { size: ' + cssMM(layout.page.width) + ' ' + cssMM(layout.page.height) + '; margin: 0; }';
+  document.head.append(style);
+  document.title = options.title + ' – Proof';
+  const perPage = layout.columns * layout.rows;
+  const count = Math.ceil(sheets.length / perPage);
+  const element = (tag: string, className: string, text?: string) => {
+    const node = document.createElement(tag);
+    node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+  const pages = document.createDocumentFragment();
+  for (let p = 0; p < count; p++) {
+    const page = element('section', 'if-proof-page');
+    page.style.width = cssMM(layout.page.width);
+    page.style.height = cssMM(layout.page.height);
+    page.style.padding = cssMM(margin);
+    const head = element('header', 'if-proof-header');
+    head.style.height = cssMM(header);
+    head.append(element('span', 'if-proof-title', options.title), element('span', 'if-proof-meta',
+      'Proof' + (options.date ? ' · ' + options.date : '') + ' · ' + (p + 1) + ' / ' + count));
+    const grid = element('div', 'if-proof-grid');
+    grid.style.gridTemplateColumns = 'repeat(' + layout.columns + ', ' + cssMM(layout.cell.width) + ')';
+    grid.style.gridAutoRows = cssMM(layout.cell.height);
+    grid.style.columnGap = cssMM(gapX);
+    grid.style.rowGap = cssMM(gapY);
+    for (let i = p * perPage; i < Math.min(sheets.length, (p + 1) * perPage); i++) {
+      const side = proofUnit(format, sequence.spreads[i].span);
+      const crop = sheetCrop(format, side, 'trim');
+      const cell = element('figure', 'if-proof-cell');
+      const art = element('div', 'if-proof-art');
+      art.style.width = cssMM(unit.width * layout.scale);
+      art.style.height = cssMM(unit.height * layout.scale);
+      const frame = element('div', 'if-proof-frame');
+      frame.style.width = cssMM(crop.widthMm * layout.scale);
+      frame.style.height = cssMM(crop.heightMm * layout.scale);
+      // A single page keeps its place in the spread: the opening right page on the right.
+      if (side === 'right') frame.style.marginLeft = cssMM((unit.width - crop.widthMm) * layout.scale);
+      else if (side === 'page') frame.style.marginInline = 'auto';
+      const copy = croppedSheet(sheets[i], crop);
+      copy.className = 'if-proof-crop';
+      copy.style.transform = 'scale(' + layout.scale + ')';
+      (copy.firstElementChild as HTMLElement).style.top = cssMM(-crop.y);
+      frame.append(copy);
+      if (side === 'spread') frame.append(element('div', 'if-proof-fold'));
+      art.append(frame);
+      const caption = element('figcaption', 'if-proof-label');
+      caption.style.height = cssMM(label);
+      caption.append(element('span', 'if-proof-where', where[i]));
+      const own = errors.filter((issue) => issue.spread === spreads[i].id);
+      const missing = own.filter(isUnavailableSource).length;
+      const problems = own.length - missing;
+      if (missing || problems) caption.append(element('span', 'if-proof-problem',
+        [missing ? 'Original unavailable' : '', problems ? problems + (problems === 1 ? ' problem' : ' problems') : ''].filter(Boolean).join(' · ')));
+      cell.append(art, caption);
+      grid.append(cell);
+    }
+    page.append(head, grid);
+    pages.append(page);
   }
   root.hidden = true;
   document.body.append(pages);
@@ -2124,6 +2211,9 @@ export async function startRender(root: HTMLElement) {
       return;
     }
     const present = query.get('view') === 'present';
+    const proof: ProofOptions | undefined = book.mode === 'export' && query.get('view') === 'proof'
+      ? { perPage: Math.max(1, Math.min(24, Number(query.get('per')) || 1)), title: query.get('title') ?? '', date: query.get('date') ?? '' } : undefined;
+    const proofScale = proof && proofLayoutFor(format, proof.perPage).layout.scale;
     const edit = book.mode === 'edit' && !present;
     const check = !edit && query.get('view') === 'check';
     const artwork = !edit && query.get('view') === 'artwork' ? parsePreviewRequest(JSON.parse(query.get('request') ?? 'null')) : undefined;
@@ -2142,9 +2232,11 @@ export async function startRender(root: HTMLElement) {
       if (edit && view !== 'book') {
         for (const photo of Object.values(book.photos)) photo.src = photo.src.replace(/\/photo\/([\w-]+)$/, '/thumb/$1');
       }
-      if (present) for (const photo of Object.values(book.photos)) photo.src = photo.src.replace('/photo/', '/proof-photo/');
+      if (present || proof) for (const photo of Object.values(book.photos)) photo.src = photo.src.replace('/photo/', '/proof-photo/');
       if (edit) book.view = frameView(view);
-      configureRenderedImages(present ? { mode: 'preview', pixelRatio: window.devicePixelRatio || 1, concurrency: 3, timeoutMs: pictureTimeoutMs.preview,
+      // The proof draws pictures at the editor's pixel ratios, so the pictures it drew already serve (proof-sheet).
+      configureRenderedImages(proofScale ? { mode: 'preview', pixelRatio: proofPixelRatio(proofScale), concurrency: 3,
+        timeoutMs: pictureTimeoutMs.preview, previewCache: location.pathname + '/picture/' } : present ? { mode: 'preview', pixelRatio: window.devicePixelRatio || 1, concurrency: 3, timeoutMs: pictureTimeoutMs.preview,
         activeSpreads: new Set([startOf(book)]),
         // The editor's cached pictures: a map drawn in the book view shows in the presentation at once (vector
         // pictures are shared across pixel ratios).
@@ -2185,7 +2277,7 @@ export async function startRender(root: HTMLElement) {
     const react = createRoot(root, { onUncaughtError: (error) => { renderError = error; } });
     flushSync(() => react.render(visible.map(({ spread, i }) => {
       const view = <SpreadView book={book} spread={spread} template={template} format={format} positions={positions}
-        page={sequence.spreads[i].page} index={index} renderPhotos lazyPhotos={lazy || present} />;
+        page={sequence.spreads[i].page} index={index} renderPhotos lazyPhotos={lazy || present || !!proof} />;
       return <div className="if-spread-container" data-span={sequence.spreads[i].span} data-spread={spread.id} data-layout={spread.definition} key={spread.id}>
         {edit ? view : <LayoutBoundary spread={spread.id} failures={layoutFailures}>{view}</LayoutBoundary>}
       </div>;
@@ -2208,11 +2300,12 @@ export async function startRender(root: HTMLElement) {
       inlineTextFrame(root, node, field.param, String(readEdit(book.project, spread, field)), post, editorURL.slice(0, -1));
       return;
     }
+    if (proofScale) loadProofPhotos(root, proofScale);
     // A check or export is final only once every asynchronous picture is drawn or has failed; the editor shows
     // them as they arrive.
     const pictureFailures = present || lazy || (edit && view !== 'book') ? [] : await settleRenderedImages();
     // A replacement frame shows unchanged pictures from the cache at once, not a placeholder that redraws them.
-    if ((edit && (view === 'thumbs' || view === 'book')) || present) await settleRestoredImages();
+    if ((edit && (view === 'thumbs' || view === 'book')) || present || proof) await settleRestoredImages();
     step('pictures');
     // Presentation waits for the visible crop's photos below. SVG photos elsewhere in the book use detached
     // decode proxies that Chromium may never resolve while the candidate frame is hidden.
@@ -2529,6 +2622,9 @@ export async function startRender(root: HTMLElement) {
       if (sentinel) paintSentinel(sentinel, metadata.height);
       await settle(decodable(frame));
       window.imageflowPreview = { state: 'ready', metadata };
+    } else if (proof) {
+      makeProofPages(root, sheets, sequence, format, spreads, where, errors, proof);
+      await Promise.allSettled([...document.querySelectorAll<HTMLElement>('.if-proof-page')].flatMap((page) => decodable(page)).map((img) => img.decode()));
     } else if (!check) {
       makePrintPages(root, sheets, sequence, format);
       await Promise.allSettled([...document.querySelectorAll<HTMLElement>('.if-print-page')].flatMap((page) => decodable(page)).map((img) => img.decode()));

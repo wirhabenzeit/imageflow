@@ -775,9 +775,18 @@ export function App() {
     enqueue(async () => {
       // The toolbar's Export stays enabled while an agent saves beside an editor: it exports the agent's revision
       // once that has rendered (F-042).
-      if (command === 'export') { await agentSettled(); if (current.current) await bookReady(current.current.id); }
+      if (command === 'export' || command === 'export-proof') { await agentSettled(); if (current.current) await bookReady(current.current.id); }
       if (!api || agentLocked.current) return;
       const before = current.current;
+      if (command === 'export-proof') {
+        if (!before || readyId.current !== before.id) return;
+        setBusy('Preparing proof…');
+        setExporting(true);
+        const result = await api.exportBook(before.id, 'proof');
+        if ('error' in result) throw new Error(result.error);
+        if (result.value) setNotice('Proof saved.');
+        return;
+      }
       if (command === 'export') {
         if (!before || readyId.current !== before.id || (coverActive && (coverGeometry?.status !== 'ready' ||
           !coverDefinition || currentCoverStatus?.state !== 'ready' || (sequence?.issues.length ?? 0) > 0))) return;

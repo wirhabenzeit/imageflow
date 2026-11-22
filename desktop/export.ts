@@ -49,7 +49,8 @@ function preflightPage(page: PDFDict, resources: PDFDict | undefined, fontNames:
   return [...errors];
 }
 
-export async function printBook(url: string, fontNames: string[], signal: AbortSignal, progress: (message: string) => void, surface?: 'cover') {
+// A hidden window that renders the book at `url` and the status it reports once every picture is drawn or failed.
+async function renderOffscreen<T>(url: string, signal: AbortSignal, use: (window: BrowserWindow, status: RenderStatus) => Promise<T>) {
   signal.throwIfAborted();
   const window = new BrowserWindow({
     show: false,
@@ -60,7 +61,6 @@ export async function printBook(url: string, fontNames: string[], signal: AbortS
   window.webContents.on('will-navigate', (event) => event.preventDefault());
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   try {
-    progress(surface === 'cover' ? 'Rendering cover and preparing photos…' : 'Rendering spreads and preparing photos…');
     try {
       await window.loadURL(url);
     } catch (error) {
@@ -82,6 +82,32 @@ export async function printBook(url: string, fontNames: string[], signal: AbortS
         check();
       })
     `);
+    return await use(window, status);
+  } finally {
+    signal.removeEventListener('abort', destroy);
+    destroy();
+  }
+}
+
+/**
+ * A design proof (src/proof-sheet): the render view lays the spreads out on A4 sheets itself, so this only prints them.
+ * No print-format preflight: the proof is for reading, and its photos are screen renditions by design.
+ */
+export async function printProof(url: string, signal: AbortSignal, progress: (message: string) => void) {
+  progress('Laying out proof…');
+  return renderOffscreen(url, signal, async (window, status) => {
+    if (status.state === 'error') throw new Error(status.message);
+    if (!status.units.length) throw new Error('The book has no spreads yet. Add a spread before exporting.');
+    progress('Printing proof…');
+    const bytes = await window.webContents.printToPDF({ preferCSSPageSize: true, printBackground: true,
+      margins: { top: 0, bottom: 0, left: 0, right: 0 } });
+    return { bytes: new Uint8Array(bytes), warnings: status.warnings satisfies Issue[], errors: status.errors satisfies Issue[] };
+  });
+}
+
+export async function printBook(url: string, fontNames: string[], signal: AbortSignal, progress: (message: string) => void, surface?: 'cover') {
+  progress(surface === 'cover' ? 'Rendering cover and preparing photos…' : 'Rendering spreads and preparing photos…');
+  return renderOffscreen(url, signal, async (window, status) => {
     if (status.state === 'error') throw new Error(status.message);
     const format = parseDocument(formatSchema, status.template.format, 'Print format');
     const resolved = resolveFormat(format);
@@ -131,10 +157,7 @@ export async function printBook(url: string, fontNames: string[], signal: AbortS
     }
     // A usable PDF can be saved after the user reviews these findings. Rendering failures still abort above.
     return { bytes, warnings: status.warnings satisfies Issue[], errors };
-  } finally {
-    signal.removeEventListener('abort', destroy);
-    destroy();
-  }
+  });
 }
 
 export async function savePdf(path: string, bytes: Uint8Array, signal: AbortSignal) {
