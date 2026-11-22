@@ -198,6 +198,8 @@ export class SourceStore {
     const digest = stored?.digest ?? this.saved[source.key]?.digest;
     return { status: { ...source, state, problem, cached: !!stored, ...(digest ? { digest } : {}) }, stored };
   }
+  /** The revision a source had when it was last read; what its provider's watch compares the source with. */
+  observed(key: string) { return this.saved[key]?.observation; }
   private digests = Promise.resolve();
   /** Told when a background digest of a photo read in place is known (assets-meta.json records it, ADR 0010). */
   onDigest?: (key: string, observation: string, digest: string) => void;

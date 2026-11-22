@@ -113,59 +113,67 @@ export const packageProvider: SourceProvider<PackageLocator> = {
 const pollInterval = 1500;
 const retryInterval = 10_000;
 
+/** A linked file to watch: `known` is the revision last observed, left out for a file that was unavailable then. */
+export type WatchedFile = { id: string; source: FileSource; known?: string };
+/**
+ * Watches linked files where they are, photos, texts and files alike, and calls `changed` with the IDs of those whose
+ * stamp differs from the last one seen, or that can be read again. A file that changed since `known` is reported at
+ * once. Returns a function that stops watching.
+ */
+export function watchLinkedFiles(folder: string, files: readonly WatchedFile[], changed: (ids: string[]) => void): () => void {
+  if (!files.length) return () => {};
+  const stamps = new Map(files.flatMap(({ id, known }) => known ? [[id, known] as const] : []));
+  const unavailable = new Set(files.filter(({ known }) => !known).map(({ id }) => id));
+  const retryAt = new Map<string, number>();
+  // Parent-directory watches survive a file being replaced atomically, which a watch on the file would not.
+  const watchers = new Map<string, FSWatcher>();
+  let stopped = false;
+  let scanning = false;
+  let again = false;
+  const scan = async () => {
+    if (stopped) return;
+    // A change reported while the files are being looked at is looked at afterwards.
+    if (scanning) { again = true; return; }
+    scanning = true;
+    try {
+      const moved: string[] = [];
+      for (const { id, source } of files) {
+        const stamp = await stat(source.path, { bigint: true }).then(fileStamp, () => '');
+        const previous = stamps.get(id);
+        stamps.set(id, stamp);
+        if (previous !== undefined && previous !== stamp) { moved.push(id); continue; }
+        if (!unavailable.has(id) || moved.length || Date.now() <= (retryAt.get(id) ?? 0)) continue;
+        retryAt.set(id, Date.now() + retryInterval);
+        if ((await observeFile(folder, source)).state === 'available') { unavailable.delete(id); moved.push(id); }
+      }
+      if (stopped) return;
+      for (const directory of new Set(files.map(({ source }) => dirname(source.path)))) {
+        if (watchers.has(directory)) continue;
+        try {
+          const watcher = watchDirectory(directory, (_event, name) => {
+            if (!name || files.some(({ source }) => source.path === join(directory, String(name)))) void scan();
+          });
+          watcher.on('error', () => { watcher.close(); watchers.delete(directory); });
+          watchers.set(directory, watcher);
+        } catch { /* Looking again retries a location that is not there, such as a drive that is not connected. */ }
+      }
+      if (moved.length) changed(moved);
+    } finally {
+      scanning = false;
+      if (again) { again = false; void scan(); }
+    }
+  };
+  const timer = setInterval(() => void scan(), pollInterval);
+  timer.unref();
+  void scan();
+  return () => { stopped = true; clearInterval(timer); for (const watcher of watchers.values()) watcher.close(); watchers.clear(); };
+}
+
 /** A file elsewhere on this Mac: approved per path, limited in size and watched where it is. */
 export const linkedProvider: SourceProvider<LinkedLocator> = {
   provider: 'linked',
   observe: observePhotos,
   materialize: clonePhotos,
-  watch(folder, refs, changed) {
-    if (!refs.length) return () => {};
-    // The stamp each file had when the host last observed it; unknown for one that was unavailable then.
-    const stamps = new Map(refs.flatMap(({ id, known }) => known ? [[id, known.revision] as const] : []));
-    const unavailable = new Set(refs.filter(({ known }) => !known).map(({ id }) => id));
-    const retryAt = new Map<string, number>();
-    // Parent-directory watches survive a file being replaced atomically, which a watch on the file would not.
-    const watchers = new Map<string, FSWatcher>();
-    let stopped = false;
-    let scanning = false;
-    let again = false;
-    const scan = async () => {
-      if (stopped) return;
-      // A change reported while the files are being looked at is looked at afterwards.
-      if (scanning) { again = true; return; }
-      scanning = true;
-      try {
-        const moved: string[] = [];
-        for (const ref of refs) {
-          const stamp = await stat(ref.locator.path, { bigint: true }).then(fileStamp, () => '');
-          const previous = stamps.get(ref.id);
-          stamps.set(ref.id, stamp);
-          if (previous !== undefined && previous !== stamp) { moved.push(ref.id); continue; }
-          if (!unavailable.has(ref.id) || moved.length || Date.now() <= (retryAt.get(ref.id) ?? 0)) continue;
-          retryAt.set(ref.id, Date.now() + retryInterval);
-          if ((await observeFile(folder, photoSource(ref))).state === 'available') { unavailable.delete(ref.id); moved.push(ref.id); }
-        }
-        if (stopped) return;
-        for (const directory of new Set(refs.map(({ locator }) => dirname(locator.path)))) {
-          if (watchers.has(directory)) continue;
-          try {
-            const watcher = watchDirectory(directory, (_event, name) => {
-              if (!name || refs.some(({ locator }) => locator.path === join(directory, String(name)))) void scan();
-            });
-            watcher.on('error', () => { watcher.close(); watchers.delete(directory); });
-            watchers.set(directory, watcher);
-          } catch { /* Looking again retries a location that is not there, such as a drive that is not connected. */ }
-        }
-        if (moved.length) changed(moved);
-      } finally {
-        scanning = false;
-        if (again) { again = false; void scan(); }
-      }
-    };
-    const timer = setInterval(() => void scan(), pollInterval);
-    timer.unref();
-    void scan();
-    return () => { stopped = true; clearInterval(timer); for (const watcher of watchers.values()) watcher.close(); watchers.clear(); };
-  },
+  watch: (folder, refs, changed) => watchLinkedFiles(folder, refs.map((ref) => ({ id: ref.id, source: photoSource(ref), known: ref.known?.revision })), changed),
   repairs: fileRepairs,
 };

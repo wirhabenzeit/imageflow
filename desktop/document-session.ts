@@ -3,6 +3,10 @@ import { agentFootprint } from '../src/agent-footprint';
 import type { AgentFootprint } from '../src/agent-footprint';
 import { SourceStore } from './source-store';
 import { sourceEntries } from '../src/source-locations';
+import type { SourceEntry } from '../src/source-locations';
+import { locatorOf } from '../src/source-locator';
+import { providerOf } from './providers';
+import { watchLinkedFiles } from './providers/files';
 import { app, dialog, shell } from 'electron';
 import type { BrowserWindow } from 'electron';
 import { randomUUID } from 'node:crypto';
@@ -118,12 +122,11 @@ export class DocumentSession {
   private checkJob?: AbortController;
   private checkJobs = new Set<AbortController>();
   private watcher?: FSWatcher;
-  private linkedTimer?: ReturnType<typeof setInterval>;
-  private linkedScanRunning = false;
+  private linkedWatch?: { signature: string; stop: () => void };
+  private linkedGeneration = 0;
   private linkedReloadPending = false;
-  private linkedRetryAt = new Map<string, number>();
-  private linkedStamp = new Map<string, string>();
-  private linkedWatchers = new Map<string, FSWatcher>();
+  private linkedReloading = false;
+  private linkedRetry?: ReturnType<typeof setTimeout>;
   private reloadTimer?: ReturnType<typeof setTimeout>;
   private observedChanges = new Set<string>();
   private importedWrites = new ImportReceipts();
@@ -533,10 +536,10 @@ export class DocumentSession {
     this.closing = true;
     for (const viewer of this.viewers) if (!viewer.isDestroyed()) viewer.close();
     this.stopWatch();
-    clearInterval(this.linkedTimer);
+    clearTimeout(this.linkedRetry);
     clearTimeout(this.syncTimer);
-    for (const watcher of this.linkedWatchers.values()) watcher.close();
-    this.linkedWatchers.clear();
+    this.linkedWatch?.stop();
+    this.linkedWatch = undefined;
     this.exportJob?.abort();
     for (const job of this.checkJobs) job.abort();
     for (const reply of this.agentLeases.values()) reply(false);
@@ -594,62 +597,54 @@ export class DocumentSession {
     return summary;
   }
 
-  /** Parent-directory watches survive atomic replacement; reconciliation also covers reconnects and missed events. */
+  /**
+   * Photos are watched by their providers and linked texts and files where they are (ADR 0011). A change invalidates
+   * the inputs and reloads the book, once nothing else is running.
+   */
   private watchLinkedSources(book: OpenProject) {
-    const linked = sourceEntries(book).filter((source) => source.linked && book.sources?.[source.key]?.state !== 'unapproved');
-    const desired = new Set(linked.map((source) => dirname(source.path)));
-    for (const [path, watcher] of this.linkedWatchers) if (!desired.has(path)) { watcher.close(); this.linkedWatchers.delete(path); }
-    const changed = () => { this.projectSession.inputs.invalidate(); void scan(); };
-    const scan = async () => {
-      if (this.closing || this.linkedScanRunning) return;
-      this.linkedScanRunning = true;
-      try {
-        const current = sourceEntries(this.book).filter((source) => source.linked && this.book.sources?.[source.key]?.state !== 'unapproved');
-        let dirty = false;
-        for (const source of current) {
-          const value = await fingerprint(source.path);
-          const previous = this.linkedStamp.get(source.key);
-          this.linkedStamp.set(source.key, value);
-          if (previous !== undefined && previous !== value) dirty = true;
-          if (!dirty && this.book.sources?.[source.key]?.state !== 'available' && Date.now() > (this.linkedRetryAt.get(source.key) ?? 0)) {
-            this.linkedRetryAt.set(source.key, Date.now() + 10_000);
-            const store = await SourceStore.forBook(this.book.folder, this.cache);
-            const probe = await store.resolve(this.book.folder, source);
-            if (probe.status.state === 'available') { await store.settled(); dirty = true; }
-          }
-        }
-        if (this.closing) return;
-        for (const path of new Set(current.map((source) => dirname(source.path)))) {
-          if (this.linkedWatchers.has(path)) continue;
-          try {
-            const watcher = watch(path, (_event, name) => {
-              if (!name || sourceEntries(this.book).some((source) => source.linked && source.path === join(path, String(name)))) changed();
-            });
-            watcher.on('error', () => { watcher.close(); this.linkedWatchers.delete(path); this.projectSession.inputs.invalidate(); });
-            this.linkedWatchers.set(path, watcher);
-          } catch { /* Polling retries unavailable locations when their drive reconnects. */ }
-        }
-        if (dirty) { this.projectSession.inputs.invalidate(); this.linkedReloadPending = true; }
-        if (this.linkedReloadPending && !this.busy) {
-          // A pending refresh is consumed after a save/export; it must not invent additional source changes.
-          await new Promise((resolve) => setTimeout(resolve, 220));
-          if (!this.closing && !this.busy) {
-            this.linkedReloadPending = false;
-            await this.run(async () => {
-              this.notify({ building: true });
-              try { this.notify({ value: await this.reload() }); }
-              catch (error) { this.notify({ error: error instanceof Error ? error.message : String(error) }); throw error; }
-            });
-          }
-        }
-      } finally { this.linkedScanRunning = false; }
-    };
-    if (linked.length && !this.linkedTimer) {
-      this.linkedTimer = setInterval(() => { void scan().catch((error) => this.notify({ error: String(error) })); }, 1500);
-      this.linkedTimer.unref();
-    }
-    if (!linked.length && this.linkedTimer) { clearInterval(this.linkedTimer); this.linkedTimer = undefined; this.linkedStamp.clear(); }
-    void scan().catch((error) => this.notify({ error: String(error) }));
+    const generation = ++this.linkedGeneration;
+    void (async () => {
+      const watched = sourceEntries(book).filter((source) => (source.kind === 'photo' || source.linked) && book.sources?.[source.key]?.state !== 'unapproved');
+      const store = watched.some(({ linked }) => linked) ? await SourceStore.forBook(book.folder, this.cache) : undefined;
+      // What was last read of each source, so a change between that and the watch starting is seen too.
+      const known = (source: SourceEntry) => book.sources?.[source.key]?.state === 'available' ? store?.observed(source.key) : undefined;
+      const photos = watched.filter(({ kind }) => kind === 'photo').map((source) => ({ id: source.id, locator: locatorOf(book.photoIndex[source.id]), revision: known(source) }));
+      const files = watched.filter(({ kind }) => kind !== 'photo').map((source) => ({ id: source.key, source, known: known(source) }));
+      const signature = JSON.stringify([photos, files]);
+      if (this.closing || generation !== this.linkedGeneration || signature === this.linkedWatch?.signature) return;
+      this.linkedWatch?.stop();
+      const changed = () => {
+        this.projectSession.inputs.invalidate();
+        this.linkedReloadPending = true;
+        void this.reloadLinked();
+      };
+      const stops = [watchLinkedFiles(book.folder, files, changed),
+        ...[...new Set(photos.map(({ locator }) => locator.provider))].map((provider) => {
+          const refs = photos.filter(({ locator }) => locator.provider === provider).map(({ id, locator, revision }) => ({ id, locator, ...(revision ? { known: { revision } } : {}) }));
+          return providerOf(refs[0].locator).watch(book.folder, refs, changed);
+        })];
+      this.linkedWatch = { signature, stop: () => stops.forEach((stop) => stop()) };
+    })().catch((error) => this.notify({ error: String(error) }));
+  }
+  // A pending refresh is consumed after a save/export; it must not invent additional source changes.
+  private async reloadLinked() {
+    clearTimeout(this.linkedRetry);
+    if (this.closing || !this.linkedReloadPending) return;
+    const later = () => { this.linkedRetry = setTimeout(() => void this.reloadLinked(), 1500); this.linkedRetry.unref(); };
+    if (this.busy || this.linkedReloading) return later();
+    this.linkedReloading = true;
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 220));
+      if (this.closing) return;
+      if (this.busy) return later();
+      this.linkedReloadPending = false;
+      await this.run(async () => {
+        this.notify({ building: true });
+        try { this.notify({ value: await this.reload() }); }
+        catch (error) { this.notify({ error: error instanceof Error ? error.message : String(error) }); throw error; }
+      });
+    } catch (error) { this.notify({ error: String(error) }); }
+    finally { this.linkedReloading = false; }
   }
 
   stopWatch() {
