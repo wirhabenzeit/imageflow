@@ -1986,7 +1986,8 @@ export async function startRender(root: HTMLElement) {
     const template = chooseFormat(declared.data, book.project.format);
     // Known before the ID check, so a failed load still reports the declared ID (the template library reads it).
     info = templateInfo(template);
-    if (template.id !== book.project.template.id) {
+    // A fork may take an ID of its own and name the template the book was made from as `basedOn` (API-003).
+    if (template.id !== book.project.template.id && template.basedOn?.id !== book.project.template.id) {
       throw new DeclarationError('The template ID does not match project.json.', [{ path: 'id',
         message: 'The template declares ID ' + template.id + ', but project.json uses ' + book.project.template.id + '.' }]);
     }

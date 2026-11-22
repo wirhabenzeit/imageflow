@@ -244,3 +244,19 @@ test('a draft can repair a saved book whose layout fails to render, and the repa
   assert.equal(await heading(), 'Hello');
   assert.equal((await call('check_book') as AuthoringCheckResult).state, 'error');
 });
+
+test('a draft reports the book\'s page sequence as a warning, and the saved book as an error (API-006)', async (t) => {
+  const { call, revision, hooks } = await fixture(t);
+  const original = hooks.check;
+  hooks.check = async (...args) => {
+    const result = await original(...args);
+    result.diagnostics.push({ code: 'page-sequence', stage: 'render', severity: 'error', message: 'Page count is 58.' });
+    return result;
+  };
+  const saved = await call('check_book') as AuthoringCheckResult;
+  assert.equal(saved.diagnostics.find(({ code }) => code === 'page-sequence')?.severity, 'error');
+  const drafted = await call('check_book', { expectedRevision: await revision(), draft: { operations: [{ op: 'set_title', title: 'Draft title' }] } }) as AuthoringCheckResult;
+  const finding = drafted.diagnostics.find(({ code }) => code === 'page-sequence');
+  assert.equal(finding?.severity, 'warning');
+  assert.match(finding?.message ?? '', /^Page count is 58\. A draft reports this as a warning/);
+});

@@ -243,6 +243,8 @@ export type CoverLayoutInfo = Pick<SpreadDefinition, 'label' | 'parameters' | 'c
 export type TemplateInfo = {
   // The template's identity and its library metadata; `id` is absent in summaries from apps that predate it.
   id?: string; label?: string; description?: string;
+  // The template it was forked from (`basedOn` in defineTemplate).
+  basedOn?: { id: string; version: string };
   // The template's own preview image, relative to the template folder (`preview` in defineTemplate).
   preview?: string;
   version: string; parameters: Parameters; spreads: Record<string, SpreadDefinition>;

@@ -48,9 +48,11 @@ export const checksSchema = z.looseObject({
 export const templateIdentitySchema = z.looseObject({
   saved: z.looseObject({ id: z.string(), version: z.string(), hash: z.string().optional() }).nullable()
     .describe('Template identity saved in project.json when the book was made or its template last updated.'),
-  current: z.looseObject({ id: z.string().nullable(), version: z.string().nullable(), hash: z.string().nullable() })
+  current: z.looseObject({ id: z.string().nullable(), version: z.string().nullable(), hash: z.string().nullable(),
+    basedOn: z.looseObject({ id: z.string(), version: z.string() }).optional() })
     .describe('Identity declared by the template files now, and the library hash of those files.'),
-  matchesSavedHash: z.boolean().nullable().describe('Whether the template files are unchanged since the saved hash; null when either hash is unknown.'),
+  matchesSavedHash: z.boolean().nullable().describe('Whether the template files are unchanged since the book was made; null when either hash is unknown.'),
+  note: z.string().optional().describe('What a mismatch means.'),
 });
 
 const pageImage = {

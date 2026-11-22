@@ -94,10 +94,30 @@ test('context and summary distinguish saved library provenance from the current 
   const editedHash = await templateHash(join(folder, 'template'));
   assert.notEqual(editedHash, hash);
   for (const tool of ['get_authoring_context', 'inspect_book']) {
-    assert.deepEqual((await call(tool)).templateIdentity, {
+    const { note, ...identity } = (await call(tool)).templateIdentity as { note?: string };
+    assert.deepEqual(identity, {
       saved, current: { id: null, version: '1', hash: editedHash }, matchesSavedHash: false,
     });
+    // A mismatch says what it means and that nothing updates the saved hash (API-004).
+    assert.match(note ?? '', /renders and exports its own copy, and nothing updates saved\.hash/);
   }
+});
+
+test('a fork names the template it was copied from and opens in a book made from that template (API-003)', async (t) => {
+  const { folder, hooks, call, session } = await fixture(t);
+  const hash = await templateHash(join(folder, 'template'));
+  await writeFile(join(folder, 'project.json'), JSON.stringify({ ...project, template: { ...project.template, hash: '0'.repeat(64) } }));
+  const forked = { ...status, template: { ...status.template, id: 'field-book', basedOn: { id: 'test', version: '1' } } };
+  hooks.check = (book, request, signal, index) => checkProject(book, hooks.cache, request, async () => ({ status: forked }), signal, index);
+  const identity = (await call('get_authoring_context')).templateIdentity as Record<string, any>;
+  assert.deepEqual(identity.current, { id: 'field-book', version: '1', hash, basedOn: { id: 'test', version: '1' } });
+  assert.equal(identity.matchesSavedHash, false);
+  assert.doesNotMatch(identity.note, /give it an id of its own/);
+  // The same edits without basedOn suggest it.
+  session.inputs.invalidate('template/index.tsx');
+  hooks.check = (book, request, signal, index) => checkProject(book, hooks.cache, request,
+    async () => ({ status: { ...status, template: { ...status.template, id: 'test' } } }), signal, index);
+  assert.match(((await call('get_authoring_context')).templateIdentity as { note: string }).note, /give it an id of its own and name the original as basedOn/);
 });
 
 test('books without saved provenance do not claim an unchanged library template', async (t) => {

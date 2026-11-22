@@ -60,6 +60,8 @@ export const contract1Capabilities = [
   // `compositions`: named functions that compose a text from its blocks, adding, replacing or wrapping them; a
   // Markdown box names one with `composition`. `data-keep-next` marks elements that stay with the next one (#230).
   'text-composition',
+  // `basedOn`: the template a fork was copied from, so it can take an ID of its own in a book made from that one.
+  'template-lineage',
 ] as const;
 // All supported features, including the baseline names accepted in older templates' `requires` lists. Until the
 // first public release the baseline stays open and new features join it (ADR 0008); after it, additive extensions

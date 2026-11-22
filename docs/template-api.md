@@ -73,7 +73,7 @@ How an agent edits an ImageFlow book through the MCP server. The template API to
 
 ### Revisions
 
-Every result carries the input `revision`. Pass it as `expectedRevision` to commands, page-number previews and drafts. A `REVISION_CONFLICT` means the book changed: inspect or check again before editing. Commands need a unique `idempotencyKey`, so a retry of the same request after a lost reply returns the original result instead of applying the batch twice, also after ImageFlow restarts. After reopening a book, `list_book_checkpoints` with the key confirms whether a batch was committed and lists what changed since.
+Every result carries the input `revision`. Pass it as `expectedRevision` to commands, page-number previews and drafts. A `REVISION_CONFLICT` means the book changed: inspect or check again before editing. Template files are inputs too, so editing `template/` also changes the revision: after a template edit, take the new `revision` from `check_book` before the next `apply_project_changes`, or it is rejected once. While the user edits the book in ImageFlow, reads and checks whose inputs change are repeated for you until the book is quiet; a `SOURCE_CHANGED` error means it kept changing, and names what changed. A dry run or draft against a revision that has since changed is planned at the current one and says so in `revisionMoved` and `notice`; a commit always needs the exact revision. Commands need a unique `idempotencyKey`, so a retry of the same request after a lost reply returns the original result instead of applying the batch twice, also after ImageFlow restarts. After reopening a book, `list_book_checkpoints` with the key confirms whether a batch was committed and lists what changed since.
 
 ## Project commands and preview targets
 
@@ -230,6 +230,7 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, … })
 | `formatted-text` | `markdown: 'inline'` on string parameters: bold, italic and strikethrough, shown by `ctx.Text` and `<FormattedText>` ([Formatted text](#formatted-text-formatted-text)). |
 | `app-controls` | `<Choice>`: ImageFlow's own segmented choice for element editors and layout-family pickers ([App controls](#app-controls)). |
 | `text-metadata` | `text.meta` on Markdown boxes: the fields of the source's YAML header, the same on every box of the chain ([Text metadata](#text-metadata)); every placed text in `ctx.book.texts` ([Texts](#texts)); and `boxes` in `anchors`. |
+| `template-lineage` | `basedOn`: the template a fork was copied from, so a fork can take an ID of its own ([Forks and starter updates](#forks-and-starter-updates)). |
 | `text-composition` | `compositions`: named functions that compose a text from its blocks, adding, replacing or wrapping them; a Markdown box names one with `composition` ([Composing a text](#composing-a-text)). |
 
 
@@ -253,6 +254,8 @@ export default defineTemplate({
   // Shown in the template library and the New Book picker.
   label: 'Senja journal',
   description: 'Full-bleed photos with a field-notes text column.',
+  // Optional, for a fork: the template it was copied from, at the version copied (see Template library).
+  basedOn: { id: 'imageflow-starter', version: '0.13.1' },
   // Optional: what New Book shows for the template. Without it, a render of the first opening spread.
   preview: './preview.jpg',
   contract: 1,
@@ -712,6 +715,14 @@ A template may offer formats of both kinds side by side. The layout picker, new 
 ## Template library
 
 New books are made from the templates in the library: the built-in starter and the templates imported with **Templates → Manage Templates… → Import…**. Import loads the template like a book would and refuses one that fails to load. Before a template that bundles npm packages or declares `network` sites enters the library, the import lists the packages with their versions and licences and the sites its editors connect to, and **Templates → Manage Templates…** keeps showing them ([Dependencies](#dependencies), [Element editors](#element-editors)). The library keeps one entry per `id`, compared by `version` as dot-separated numbers: a newer version replaces the entry, while an older version, or the same version with other files, asks first. So bump `version` when you change a template you have shared. `label` (up to 80 characters) and `description` (up to 300) are what the library shows; without a label it shows the ID. A book copies its template when it is created, and `project.json` records the source's hash as `template.hash`; the library is never read while a book renders.
+
+### Forks and starter updates
+
+A book's template is its own copy. An app update never changes it, even when the library holds a newer version of the template it came from; `project.json` records that template's `id`, `version` and `hash` as provenance, and nothing updates them later. So once you change a book's template, it is a fork.
+
+Give a fork an `id` of its own and start its `version` again, and name the template it was copied from, at the version copied, as `basedOn: { id: 'imageflow-starter', version: '0.11.1' }`. A book made from that template opens with the fork, because its ID check also accepts `basedOn.id`, and a fork saved to the library is a separate entry beside the original. Agents see `basedOn` in `templateIdentity`, so they can tell a fork from an unchanged copy, and an older `version` of the same ID from a newer template. Included in the contract-1 baseline (`template-lineage`).
+
+To bring changes from a newer starter into a fork, compare the two rather than replacing the fork's `template/` folder, which would discard its changes. The starter's `CHANGELOG.md` lists what each version changed. Agents read a library template's files with `read_library_template`, and with `project` it lists which files differ from the book's `template/`. Port what you want by hand, check the book, and raise `basedOn.version` to the version you compared with.
 
 ### Template previews
 

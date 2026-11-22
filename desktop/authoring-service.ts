@@ -366,6 +366,10 @@ export function createAuthoringService(hooks: Hooks) {
       result.checks.typescript = base.checks.typescript;
       result.diagnostics.unshift(...base.diagnostics.filter(({ code }) => code.startsWith('typescript-')));
     }
+    // A draft is often one inserted page pair, tried out: the page count that breaks is the expected result, so the
+    // book's page sequence is reported as a warning there (API-006). The saved book's check still reports an error.
+    result.diagnostics = result.diagnostics.map((diagnostic) => diagnostic.code === 'page-sequence' && diagnostic.severity === 'error'
+      ? { ...diagnostic, severity: 'warning' as const, message: diagnostic.message + ' A draft reports this as a warning; saving the change makes it an error.' } : diagnostic);
     return result;
   };
   // Renders layouts with synthetic content in fixture books, one per format, from the declarations of the saved
@@ -704,10 +708,16 @@ export function createAuthoringService(hooks: Hooks) {
       signal.throwIfAborted();
       if (hashes[0].status === 'rejected') unavailable(hashes[0].reason, 'template');
       const currentHash = hashes[0].status === 'fulfilled' ? hashes[0].value : null;
+      const matchesSavedHash = project?.template.hash && currentHash ? project.template.hash === currentHash : null;
       const templateIdentity = {
         saved: project?.template ?? null,
-        current: { id: template?.id ?? null, version: template?.version ?? null, hash: currentHash },
-        matchesSavedHash: project?.template.hash && currentHash ? project.template.hash === currentHash : null,
+        current: { id: template?.id ?? null, version: template?.version ?? null, hash: currentHash,
+          ...(template?.basedOn ? { basedOn: template.basedOn } : {}) },
+        matchesSavedHash,
+        // What a mismatch means, which agents asked for (API-004), and how a fork tells itself apart (API-003).
+        ...(matchesSavedHash === false ? { note: 'The template files differ from the library template this book was made from (saved). ' +
+          'That is expected once template/ has been edited: the book renders and exports its own copy, and nothing updates saved.hash, which records where the template came from.' +
+          (template?.id === project?.template.id && !template?.basedOn ? ' If the template is now a fork, give it an id of its own and name the original as basedOn: { id, version }, so it is not mistaken for an outdated copy.' : '') } : {}),
       };
       let result: Record<string, unknown>;
       let verifySources: (() => Promise<void>) | undefined;

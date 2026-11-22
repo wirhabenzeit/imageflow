@@ -230,3 +230,15 @@ test('control cycles are attributed independently on pages sharing a layout', ()
   ]);
   assert.deepEqual(placed, [{ ...warning, spread: 'pair', page: 'right' }]);
 });
+
+test('a fork declares the template it was copied from, and the editor receives it (API-003)', () => {
+  const declared = (basedOn: unknown) => templateSchema.safeParse({
+    id: 'field-book', version: '2', basedOn, contract: 1, format, spreads: { main: { label: 'Main', render: () => null } },
+  });
+  const ok = declared({ id: 'imageflow-starter', version: '0.11.1' });
+  assert.ok(ok.success, JSON.stringify(ok.error?.issues));
+  assert.deepEqual(templateInfo(chooseFormat(ok.data!)).basedOn, { id: 'imageflow-starter', version: '0.11.1' });
+  assert.equal(declared({ id: 'imageflow-starter' }).success, false);
+  assert.equal(declared({ id: 'Not an ID!', version: '1' }).success, false);
+  assert.equal(declared({ id: 'imageflow-starter', version: '1', hash: 'x' }).success, false);
+});
