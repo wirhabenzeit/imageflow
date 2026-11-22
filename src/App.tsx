@@ -784,7 +784,12 @@ export function App() {
         setExporting(true);
         const result = await api.exportBook(before.id, 'proof');
         if ('error' in result) throw new Error(result.error);
-        if (result.value) setNotice('Proof saved.');
+        if (!result.value) return;
+        // A proof saves whatever it finds: the notice says how much is missing or wrong in it, as Export PDF does.
+        const { errors, warnings } = result.value;
+        const counted = (n: number, word: string) => n ? n + ' ' + word + (n === 1 ? '' : 's') : '';
+        const found = [counted(errors.length, 'error'), counted(warnings.length, 'warning')].filter(Boolean).join(', ');
+        setNotice('Proof saved.' + (found ? ' ' + found + ' in Book check; problem spreads are marked in the proof.' : ''));
         return;
       }
       if (command === 'export') {
@@ -1983,6 +1988,7 @@ export function App() {
   const canExport = (canvasReady || agentRendering) && !busy && (coverActive
     ? coverGeometry?.status === 'ready' && !!coverDefinition && !sequence?.issues.length && currentCoverStatus?.state === 'ready'
     : spreads.length > 0);
+  const canProof = (canvasReady || agentRendering) && !busy && spreads.length > 0;
   let activeEditor: ActiveBookEditor | undefined;
   if (editing) {
     const field = editTarget?.edits.join(', ') || editing.held?.target.edits.join(', ') || editing.owner?.id;
@@ -1997,7 +2003,7 @@ export function App() {
     'move-spread-up': !coverActive && canMoveUp, 'move-spread-down': !coverActive && canMoveDown, 'delete-spread': !coverActive && canDelete && spreadFocused },
     editing: controlFocused || !!editing || !!cropping || !!elementEditor || !!quick, textEditing,
     writable, busy: !!busy || exporting || !!reload || !!agentWorking, history: summary?.history,
-    canExport, canSwapPages: !coverActive && !!spread && !!template && hasFacingPages(template.format) && sequence?.spreads[index]?.span === 'spread' && canSwapPages(spread, template.spreads),
+    canExport, canProof, canSwapPages: !coverActive && !!spread && !!template && hasFacingPages(template.format) && sequence?.spreads[index]?.span === 'spread' && canSwapPages(spread, template.spreads),
     sidebar: !panels.leftHidden, inspector: !panels.rightHidden, sources: !panels.bottomHidden, guides: showGuides, layout, zoom, selectedSpread: spreadId, photoView: photoView.value, selectionCount: selectedSpreads.length,
     saving, activeEditor, view: coverGeometry ? (coverActive ? 'cover' : 'content') : undefined, coverBoxIds,
     pageLabels: Object.fromEntries(spreads.map(({ id }, i) => [id, pageLabels[i]])) };

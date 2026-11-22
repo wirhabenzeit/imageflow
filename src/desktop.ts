@@ -82,7 +82,9 @@ export type ActiveBookEditor = { label: string; spread?: string; page?: PageSide
 // (an import, a reload after files changed, a drag), which ends by itself.
 export type AgentLeaseReply = boolean | ActiveBookEditor | { busy: string };
 export type BookMenuState = { document: boolean; enabled: Record<SpreadCommand, boolean>; editing: boolean; textEditing: boolean;
-  writable: boolean; busy: boolean; history?: HistoryState; canExport: boolean; canSwapPages?: boolean; activeEditor?: ActiveBookEditor;
+  writable: boolean; busy: boolean; history?: HistoryState; canExport: boolean;
+  // The design proof leaves the cover out: it needs only a rendered book with spreads, in either view.
+  canProof?: boolean; canSwapPages?: boolean; activeEditor?: ActiveBookEditor;
   sidebar?: boolean; inspector?: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout; zoom?: number; photoView?: PhotoView;
   selectionCount?: number; selectedSpread?: string; saving?: boolean; importMode?: ImportMode; pageLabels?: Record<string, string>;
   view?: 'content' | 'cover'; coverBoxIds?: string[] };

@@ -51,9 +51,10 @@ test('proof photos and pictures use sizes the editor and presentation already ma
   assert.equal(proofPixelRatio(2), 2);
 });
 
-test('Export Proof is available exactly when the book can be exported', () => {
-  const book = { ...emptyMenuState, document: true, writable: true, canExport: true };
+test('Export Proof needs a rendered book with spreads, not an exportable cover', () => {
+  const book = { ...emptyMenuState, document: true, writable: true, canProof: true };
   assert.equal(commandState('export-proof', book).enabled, true);
-  assert.equal(commandState('export-proof', { ...book, canExport: false }).enabled, false);
+  assert.equal(commandState('export-proof', { ...book, view: 'cover', canExport: false }).enabled, true, 'a cover that cannot export');
+  assert.equal(commandState('export-proof', { ...book, canProof: false }).enabled, false);
   assert.equal(commandState('export-proof', { ...book, busy: true }).enabled, false);
 });

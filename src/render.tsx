@@ -2232,11 +2232,20 @@ export async function startRender(root: HTMLElement) {
       if (edit && view !== 'book') {
         for (const photo of Object.values(book.photos)) photo.src = photo.src.replace(/\/photo\/([\w-]+)$/, '/thumb/$1');
       }
-      if (present || proof) for (const photo of Object.values(book.photos)) photo.src = photo.src.replace('/photo/', '/proof-photo/');
+      if (present) for (const photo of Object.values(book.photos)) photo.src = photo.src.replace('/photo/', '/proof-photo/');
+      // The proof's photos are never print sized: a photo box asks for the size it shows on the sheet (exportSource,
+      // loadProofPhotos), and template code that uses a photo's src as it is gets one as wide as a whole spread there.
+      if (proofScale) {
+        book.proofScale = proofScale;
+        const widest = format.trim.width * (format.facingPages ? 2 : 1);
+        for (const photo of Object.values(book.photos)) {
+          photo.src = presentationPhotoSource(photo.src.replace('/photo/', '/proof-photo/'), proofPhotoPixels(widest, proofScale), false);
+        }
+      }
       if (edit) book.view = frameView(view);
       // The proof draws pictures at the editor's pixel ratios, so the pictures it drew already serve (proof-sheet).
       configureRenderedImages(proofScale ? { mode: 'preview', pixelRatio: proofPixelRatio(proofScale), concurrency: 3,
-        timeoutMs: pictureTimeoutMs.preview, previewCache: location.pathname + '/picture/' } : present ? { mode: 'preview', pixelRatio: window.devicePixelRatio || 1, concurrency: 3, timeoutMs: pictureTimeoutMs.preview,
+        timeoutMs: pictureTimeoutMs.preview, previewCache: location.pathname + '/picture/', wallClock: true } : present ? { mode: 'preview', pixelRatio: window.devicePixelRatio || 1, concurrency: 3, timeoutMs: pictureTimeoutMs.preview,
         activeSpreads: new Set([startOf(book)]),
         // The editor's cached pictures: a map drawn in the book view shows in the presentation at once (vector
         // pictures are shared across pixel ratios).

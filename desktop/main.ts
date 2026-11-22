@@ -1232,7 +1232,7 @@ function updateMenus() {
   const inBook = !!document && owner === document.window;
   const state: BookMenuState = { ...emptyMenuState, ...document?.menuState, document: !!document && !document.closing,
     sidebar: document?.sidebar, inspector: document?.inspector, sources: document?.sources, guides: document?.guides, layout: document?.layout };
-  if (!inBook) { state.editing = true; state.canExport = false; }
+  if (!inBook) { state.editing = true; state.canExport = false; state.canProof = false; }
   const menu = Menu.getApplicationMenu();
   for (const id of Object.keys(commandRegistry) as RegisteredCommand[]) {
     const item = menu?.getMenuItemById(id);

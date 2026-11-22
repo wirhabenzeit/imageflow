@@ -965,7 +965,7 @@ export class DocumentSession {
    * print PDF prepares every original; it has none of the print checks and nothing in it is for print.
    */
   private async runProof(owner: BrowserWindow, job: AbortController) {
-    const book = this.book;
+    const opened = this.book;
     const { response } = await dialog.showMessageBox(owner, { type: 'question', message: 'Export Proof',
       detail: 'A quick PDF of the spreads for reading and sharing, on A4 sheets. It uses screen-sized photos and is not for print.\n\nSpreads per sheet:',
       buttons: [...proofDensities.map((n) => n + (n === 1 ? ' Spread' : ' Spreads')), 'Cancel'],
@@ -973,12 +973,20 @@ export class DocumentSession {
     const perPage = proofDensities[response];
     if (!isProofDensity(perPage) || owner.isDestroyed() || job.signal.aborted) return null;
     DocumentSession.proofDensity = perPage;
-    const name = bookName(book.folder).normalize('NFC');
+    const name = bookName(opened.folder).normalize('NFC');
     const fileName = name.replace(/[^\p{L}\p{M}\p{N} _-]/gu, '-').slice(0, 80) + ' - Proof.pdf';
     const { canceled, filePath } = await dialog.showSaveDialog(owner, {
       title: 'Export Proof', defaultPath: join(app.getPath('documents'), fileName), filters: [{ name: 'PDF', extensions: ['pdf'] }],
     });
     if (canceled || !filePath || owner.isDestroyed() || job.signal.aborted) return null;
+    // The book as it is now: an agent's save or a reload may have come in while the dialogs were open. It must not
+    // change again until the proof is saved, or the proof would show a revision that no longer exists.
+    const book = this.book;
+    const before = await this.projectSession.inputs.capture();
+    const moved = async () => {
+      const after = await this.projectSession.inputs.capture({ signal: job.signal });
+      return this.book !== book || before.revision !== after.revision || before.observation !== after.observation;
+    };
     const id = randomUUID();
     this.renders.set(id, { book: this.marked(book), mode: 'export', network: () => this.originsFor(book), pictures: this.previewPictures });
     const progress = (stage: string) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage); };
@@ -986,6 +994,7 @@ export class DocumentSession {
       const query = new URLSearchParams({ view: 'proof', per: String(perPage), title: book.project.title || name,
         date: new Date().toLocaleDateString(app.getLocale(), { dateStyle: 'medium' }) });
       const { bytes, warnings, errors } = await printProof(renderOrigin + '/render/' + id + '?' + query, job.signal, progress);
+      if (await moved()) throw new Error('The book changed while the proof was made. No proof was saved; export it again.');
       progress('Saving PDF…');
       await savePdf(filePath, bytes, job.signal);
       return { warnings, errors };
