@@ -2089,6 +2089,11 @@ export function App() {
     if (live) { reveal(live.spread); openTarget(live, true); }
   });
   const placeInspector = useLiveCallback((from: KeptItem, to: ContentTarget) => { if (spread) place(spread.id, from, to); });
+  // Selecting the source shows its details, caption included, in the Inspector; the Assets panel opens on it.
+  const showInspectorSource = useLiveCallback((source: SourceRef, action: 'preview' | 'assets') => {
+    if (action === 'preview') setQuick(source);
+    else { choose(source); showPanel('bottom'); }
+  });
   const targetsKey = JSON.stringify(inspectorTargets(geometry?.targets ?? [], spread?.id, selectedPage));
   const panelTargets: InspectorTarget[] = useMemo(() => JSON.parse(targetsKey), [targetsKey]);
   const targetsStale = !!spread && shownLayouts.current[spread.id] !== layoutOf(spread);
@@ -2102,7 +2107,7 @@ export function App() {
         usage={usage} quickLook={quickSource} focus={focusBox}
         targets={panelTargets}
         open={openInspectorOwner}
-        openTarget={openInspectorTarget} place={placeInspector} chooseLayout={chooseInspectorLayout}
+        openTarget={openInspectorTarget} place={placeInspector} chooseLayout={chooseInspectorLayout} showSource={showInspectorSource}
         holdPreviews={!render && !!lastReady} targetsStale={targetsStale}
         familyPicker={template && layoutFamily && (template.layoutFamilies?.[layoutFamily]?.picker?.choice
           ? <FamilyChoice template={template} spread={spread} page={selectedPage} family={layoutFamily} readOnly={!writable}
@@ -2114,7 +2119,7 @@ export function App() {
             readOnly={!writable} blocked={previewNotice || undefined} onShowing={showing} />}
         </HeldPicker>)}
         edit={editFromPanel} highlight={setHighlight} select={selectFromPanel} />),
-    [summary, spread, selectedSide, selectedPage, sequence, index, writable, selectedSource, template, render, lastReady, usage, focusBox, panelTargets, targetsStale, layoutFamily, previewNotice, quickSource, openInspectorOwner, openInspectorTarget, placeInspector, chooseInspectorLayout, editFromPanel, selectFromPanel]);
+    [summary, spread, selectedSide, selectedPage, sequence, index, writable, selectedSource, template, render, lastReady, usage, focusBox, panelTargets, targetsStale, layoutFamily, previewNotice, quickSource, openInspectorOwner, openInspectorTarget, placeInspector, chooseInspectorLayout, showInspectorSource, editFromPanel, selectFromPanel]);
 
   const nativeDocumentTitle = navigator.platform.includes('Mac');
   return <ProjectFilesContext.Provider value={projectFiles}><div className={(nativeDocumentTitle ? 'studio mac-studio' : 'studio') + (busyCursor ? ' is-busy' : '')}>
