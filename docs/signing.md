@@ -28,6 +28,8 @@ The script accepts `--arch arm64` or `--arch x64` after `node scripts/package-ma
 
 Create a **Developer ID Application** certificate through the Apple Developer account or Xcode, and install it in the login keychain with its matching private key. `security find-identity -v -p codesigning` lists the usable identities. An Apple Development or Apple Distribution identity is not sufficient for direct distribution.
 
+A certificate copied from another Mac, such as from a `.p12` export, may show as "not trusted" and `security find-identity -v -p codesigning` lists no valid identity. A `.p12` carries the certificate and key but not the intermediate certificate that issued it, which is missing from this Mac's keychain. Install it from [apple.com/certificateauthority](https://www.apple.com/certificateauthority/): **Developer ID - G2** for a Developer ID Application certificate, or **Worldwide Developer Relations - G3** for Apple Development and Apple Distribution. Each certificate names its issuer in its *Authority Information Access* field. Passing the identity's SHA-1 hash from `security find-identity` as `codesign --sign` also works when the name has characters such as "ö" that `codesign` does not match.
+
 For local releases with saved notarytool credentials, set `APPLE_NOTARY_PROFILE` to the profile name and `APPLE_SIGNING_IDENTITY` to the installed Developer ID Application identity.
 
 For API key authentication, create an App Store Connect **team API key** with notarization access. Keep its downloaded `.p8` file, Key ID and Issuer ID together. A release build reads:
