@@ -527,9 +527,12 @@ function layoutBook(root: HTMLElement, initialSheets: { spread: string; sheet: H
     const before = reported;
     sheets = next;
     laidOut = '';
+    // Measured at rest: a slide still running from an earlier order offsets its sheets by where they came from. A busy
+    // frame handles two orders at once, and reported a sheet that slid up where it had been, past the end of the shorter
+    // book, so the editor scrolled to blank space below the last spread until the replacement showed.
+    animations.forEach((animation) => animation.cancel());
     fit(true);
     const offsets = reorderOffsets(before, reported);
-    animations.forEach((animation) => animation.cancel());
     animations = matchMedia('(prefers-reduced-motion: reduce)').matches ? [] : offsets.flatMap((offset) => {
       const slot = sheets.find((item) => item.spread === offset.spread)?.sheet.parentElement;
       return slot ? [animateReorder(slot, offset)] : [];
