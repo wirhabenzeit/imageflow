@@ -8,7 +8,7 @@ import electron from 'electron';
 import { PDFDocument } from 'pdf-lib';
 import { _electron } from 'playwright-core';
 import { copySample } from '../desktop/sample-book.mjs';
-import { closeApp, testBook, undoBook } from './ui-actions.mjs';
+import { closeApp, popupAction, testBook, undoBook } from './ui-actions.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'cover-'));
@@ -58,7 +58,7 @@ try {
   const picker = window.getByLabel('Cover layout', { exact: true });
   await picker.selectOption('wrapPhoto');
   const heading = window.getByRole('textbox', { name: 'Cover title', exact: true });
-  await window.frameLocator(coverReady + ' iframe').locator('[data-box="hero"]').waitFor();
+  await window.frameLocator(coverReady + ' iframe[data-ready]').locator('[data-box="hero"]').waitFor();
   await window.evaluate(() => {
     const sheet = document.querySelector('.cover-preview-sheet');
     const transitions = [];
@@ -73,7 +73,7 @@ try {
   });
   await heading.fill('A physical cover');
   await heading.press('Tab');
-  const artwork = window.frameLocator(coverReady + ' iframe').locator('[data-edit="title"]');
+  const artwork = window.frameLocator(coverReady + ' iframe[data-ready]').locator('[data-edit="title"]');
   await artwork.filter({ hasText: 'A physical cover' }).waitFor();
   const transitions = await window.evaluate(() => window.coverTransitions());
   assert.ok(transitions.length > 0 && transitions.every(Boolean), 'A ready cover stays visible while the replacement loads.');
@@ -88,7 +88,7 @@ try {
   const photo = Object.keys(photos)[0];
   await window.getByRole('combobox', { name: 'Choose photo for Cover photo' }).selectOption(photo);
   await window.getByRole('combobox', { name: 'Replace photo in Cover photo' }).waitFor();
-  await window.frameLocator(coverReady + ' iframe').locator('[data-box="hero"] img').waitFor();
+  await window.frameLocator(coverReady + ' iframe[data-ready]').locator('[data-box="hero"] img').waitFor();
   assert.equal((await readProject()).cover.boxes.hero.photo, photo);
   await window.getByRole('button', { name: 'Guides', exact: true }).click();
   assert.equal(await window.locator('.cover-guides .gutter-guide').count(), 2);
@@ -104,7 +104,13 @@ try {
         return { response: 1 };
       };
     }, filePath);
-    await window.getByRole('button', { name, exact: true }).click();
+    // A name clicks the export icon, which exports the shown view; a function exports another way, such as the menu.
+    if (typeof name === 'function') await name(); else await window.getByRole('button', { name, exact: true }).click();
+    await window.waitForFunction(() => document.querySelector('.status-bar .status')?.textContent.includes('PDF saved.'));
+    // The status may still say so from the export before: this one has saved once its file is there.
+    for (let wait = Date.now(); !await readFile(filePath).then(() => true, () => false); await new Promise((resolve) => setTimeout(resolve, 100))) {
+      if (Date.now() - wait > 60000) throw new Error('No PDF was saved at ' + filePath);
+    }
     await window.waitForFunction(() => document.querySelector('.status-bar .status')?.textContent.includes('PDF saved.'));
     assert.equal((await app.evaluate(() => globalThis.coverExportDetails)).some((detail) => /the format allows 0 MB/.test(detail)), expectLegacyLimit);
     const pdf = await PDFDocument.load(await readFile(filePath));
@@ -155,7 +161,10 @@ try {
   await window.locator(coverReady + '[data-width-mm="624.5"]').waitFor();
   await window.getByRole('radio', { name: 'Content', exact: true }).click();
   await exportPdf('Export Content PDF…', 36, points(293), points(296), points(290), points(290));
-  await window.getByRole('radio', { name: 'Cover', exact: true }).click();
+  // The menu beside the export icon exports the other PDF: it shows the cover, then exports it once checked.
+  await exportPdf(() => popupAction(app, window, window.locator('.export-menu .action-menu-trigger'), 'Export Cover PDF…'),
+    1, points(624.5), points(316), points(604.5), points(296));
+  assert.equal(await window.getByRole('radio', { name: 'Cover', exact: true }).isChecked(), true, 'the cover is shown while it exports');
 
   const blurb = await commit([{ op: 'select_format', format: 'blurbJacket' },
     ...Array.from({ length: 7 }, () => ({ op: 'insert_spread', after: 'spread-14', definition: 'panorama' })),
@@ -168,7 +177,7 @@ try {
   assert.equal(at50.interiorPages, 50);
   assert.equal(at50.artwork.boxes.hero.crops.wrapPhoto.zoom, 1.25);
   assert.equal(points(at50.geometry.regions.backFlap.width), 284);
-  await window.frameLocator(coverReady + ' iframe').locator('[data-edit="frontFlapText"]').filter({ hasText: 'Front flap proof' }).waitFor();
+  await window.frameLocator(coverReady + ' iframe[data-ready]').locator('[data-edit="frontFlapText"]').filter({ hasText: 'Front flap proof' }).waitFor();
   await commit(operations, 'blurb-52');
   const at52 = await getCover();
   assert.equal(at52.interiorPages, 52);
@@ -186,7 +195,7 @@ try {
   assert.ok((await sources()).find(({ id }) => id === photo).usage.every(({ cover }) => !cover));
   await undoBook(window);
   await window.getByRole('radio', { name: 'Cover', exact: true }).click();
-  await window.frameLocator(coverReady + ' iframe').locator('[data-edit="title"]').filter({ hasText: 'A physical cover' }).waitFor();
+  await window.frameLocator(coverReady + ' iframe[data-ready]').locator('[data-edit="title"]').filter({ hasText: 'A physical cover' }).waitFor();
 
   const calendar = join(work, 'Calendar.imageflow');
   await copySample(join(root, 'sample/calendar'), calendar);

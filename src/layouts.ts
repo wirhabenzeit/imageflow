@@ -24,7 +24,9 @@ export type Layouts = Record<string, Layout>;
 export type VariantTags = Record<string, string | number | boolean>;
 // Layouts that are variants of one design, such as a 2×2 and a 3×3 photo grid. A family may supply a picker, which
 // chooses one of its variants; the choice is an ordinary layout switch.
-export type LayoutFamilies = Record<string, { label: string; picker?: { label?: string } }>;
+// A built-in picker: one segmented choice between the family's variants by one tag, `options` naming each tag value.
+export type VariantChoice = { tag: string; options: Record<string, string> };
+export type LayoutFamilies = Record<string, { label: string; picker?: { label?: string; choice?: VariantChoice } }>;
 
 const own = <T,>(record: Record<string, T>, key: string) => Object.hasOwn(record, key) ? record[key] : undefined;
 const typeName = (param: Parameter) => param.type === 'enum' ? 'an enum' : param.type === 'integer' ? 'an integer' : 'a ' + param.type;
@@ -145,7 +147,7 @@ export function familyProblems(layouts: Layouts, families: LayoutFamilies = {}) 
       problems.push({ path: ['spreads', id, 'variant'], message: 'Layout ' + id + ' has variant tags but no family. Tags describe a variant within its family; add family, or remove variant.' });
     }
   }
-  for (const [family, { label }] of Object.entries(families)) {
+  for (const [family, { label, picker }] of Object.entries(families)) {
     const ids = familyLayouts(layouts, family);
     if (ids.length < 2) {
       problems.push({ path: ['layoutFamilies', family], message: 'Family ' + family + ' (' + label + ') has ' + (ids.length ? 'only layout ' + ids[0] : 'no layouts') +
@@ -173,6 +175,34 @@ export function familyProblems(layouts: Layouts, families: LayoutFamilies = {}) 
         problems.push({ path: ['spreads', id, 'variant'], message: 'Layouts ' + first + ' and ' + id + ' of family ' + family +
           ' have the same variant tags, so a picker cannot tell them apart. Give each variant its own tags.' });
       } else seen.set(key, id);
+    }
+    // A built-in choice tells the variants apart by one tag, and names every value they have.
+    const choice = picker?.choice;
+    if (choice && ids.length >= 2) {
+      const named = new Map<string, string>();
+      for (const id of ids) {
+        const value = layouts[id].variant?.[choice.tag];
+        if (value === undefined) {
+          problems.push({ path: ['spreads', id, 'variant'], message: 'Layout ' + id + ' of family ' + family + ' has no tag ' + choice.tag +
+            ', which the family\'s picker chooses by. Give it ' + choice.tag + ': ' + Object.keys(choice.options).map((key) => JSON.stringify(key)).join(' or ') + '.' });
+          continue;
+        }
+        const key = String(value);
+        if (!Object.hasOwn(choice.options, key)) {
+          problems.push({ path: ['layoutFamilies', family, 'picker', 'choice', 'options'], message: 'Family ' + family + '\'s choice names no option for ' +
+            choice.tag + ': ' + JSON.stringify(key) + ' (layout ' + id + '). Add ' + JSON.stringify(key) + ' to options.' });
+        }
+        const first = named.get(key);
+        if (first) {
+          problems.push({ path: ['spreads', id, 'variant'], message: 'Layouts ' + first + ' and ' + id + ' of family ' + family + ' have the same ' +
+            choice.tag + ' (' + JSON.stringify(key) + '), so the family\'s choice cannot tell them apart. Use a component picker for more than one tag.' });
+        } else named.set(key, id);
+      }
+      // Among the values found: a variant without the tag must not match an option named "undefined".
+      for (const key of Object.keys(choice.options)) if (!named.has(key)) {
+        problems.push({ path: ['layoutFamilies', family, 'picker', 'choice', 'options', key], message: 'Family ' + family + '\'s choice offers ' +
+          JSON.stringify(key) + ', but no layout of the family has ' + choice.tag + ': ' + JSON.stringify(key) + '.' });
+      }
     }
   }
   return problems;

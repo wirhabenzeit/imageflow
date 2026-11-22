@@ -35,6 +35,7 @@ import type { BookGeometry, CanvasLayout, Command, ImportRequest, Issue, Project
 import { PanelDivider, useCanvasLayout, usePanels, useSectionOpen } from './panels';
 import { PanelSection } from './PanelSection';
 import { Icon } from './Icon';
+import { ActionMenu } from './ActionMenu';
 import { BookFrame } from './BookFrame';
 import type { CropPreview } from './BookFrame';
 import { AgentStatus } from './AgentStatus';
@@ -46,7 +47,7 @@ import { ElementEditorDialog } from './ElementEditor';
 import { documentEditorFor, editorOwnedDocument, editorTargetGone } from './editor-session';
 import { anchoredTarget, clickWithin, elementRect, hiddenOccurrence, inlinePlacement, presentationFor } from './inline-editors';
 import type { OpenEditor } from './inline-editors';
-import { HeldPicker, LayoutFamilyPicker } from './LayoutFamilyPicker';
+import { FamilyChoice, HeldPicker, LayoutFamilyPicker } from './LayoutFamilyPicker';
 import { InlineTextEditor } from './InlineTextEditor';
 import { minimumText, textEditorOwner, textExtent, textFits } from './inline-text';
 import { PhotoContent, TextContent } from './BoxContent';
@@ -200,7 +201,12 @@ export function App() {
     // and the effect below takes the snapshot when it arrives.
     if (revision) shownRevision.current = revision;
     if (revision === summary?.id && template) adoptCanvasLabels();
+    if (revision === summary?.id && summary) shownLayouts.current = Object.fromEntries(summary.project.spreads.map((item) => [item.id, layoutOf(item)]));
   }
+  // The layouts of the spreads as the book view shows them, so the Inspector knows when its targets are another
+  // layout's (F-035): right after a layout change, until the change has rendered.
+  const shownLayouts = useRef<Record<string, string>>({});
+  const layoutOf = (item: SpreadState) => JSON.stringify([item.definition, item.pages?.left?.definition, item.pages?.right?.definition]);
   const shownRevision = useRef<string>(undefined);
   const adoptCanvasLabels = () => setCanvasLabels(Object.fromEntries(spreads.map(({ id }, i) => [id, pagesLabel(i) + ' · ' + label(i)])));
   // A book's first frame usually shows before its template loads. Without this, its labels would keep following the
@@ -375,6 +381,9 @@ export function App() {
   // An agent's save is running: 'beside' an open editor whose layout it leaves alone, which stays usable, or with the
   // book to itself ('exclusive'), when the workspace is inert until it finishes.
   const [agentWorking, setAgentWorking] = useState<false | 'beside' | 'exclusive'>(false);
+  // The revision an agent's save produced, which the book view renders next. Until it shows, the window says the agent
+  // is updating the book, in one status line, and the toolbar stays as it was (F-042).
+  const [agentRevision, setAgentRevision] = useState<string>();
   // Edits, imports and history steps made while an agent saves wait for it, then apply to the revision it saved.
   const agentWaiters = useRef<(() => void)[]>([]);
   const agentSettled = () => agentLocked.current && !quitLock.current
@@ -428,7 +437,10 @@ export function App() {
   // A change is saved, or saved and not yet shown: on a long book with maps, rendering it again takes a second or two.
   // A reload after the book's files changed, such as a template edit, renders the whole book again and redraws its maps.
   const reloadingFiles = !!summary && (reload === 'loading' || reload === 'rendering');
-  const showingChange = saving || reloadingFiles || (!!summary && !render && !!lastReady && !reload);
+  const agentRendering = !!summary && agentRevision === summary.id && render?.state !== 'ready' && render?.state !== 'error' && !reload;
+  const agentActive = !!agentWorking || agentRendering;
+  // The agent's revision renders behind the book on show, which stays usable: no progress cursor over it.
+  const showingChange = saving || reloadingFiles || (!!summary && !render && !!lastReady && !reload && !agentRendering);
   const updating = useDelayed(showingChange, 250);
   // A shorter wait for the cursor, which says that something is happening without asking for attention.
   const busyCursor = useDelayed(showingChange, 100);
@@ -492,6 +504,7 @@ export function App() {
     reloadFailed.current = false;
     candidateId.current = undefined;
     readyId.current = undefined;
+    settleReadyWaiters();
     holdInlineEditor();
     clearCanvasEditors();
     setRender(undefined);
@@ -510,6 +523,8 @@ export function App() {
   }
 
   function adopt(next: ProjectSummary, reset = false, selected?: string) {
+    // Another book, or the book opened again, does not export a PDF asked for before.
+    if (reset) pendingExport.current = undefined;
     if (!reset) {
       preserveViewAnchor();
       if (current.current?.project.format !== next.project.format) revealedThumb.current = '';
@@ -518,6 +533,7 @@ export function App() {
     current.current = next;
     candidateId.current = next.id;
     readyId.current = undefined;
+    settleReadyWaiters(next.id);
     if (reset) {
       inputGeneration.current++;
       reloading.current = false;
@@ -643,7 +659,9 @@ export function App() {
       const result = await persist(() => api.importFiles(before.id, request));
       if ('error' in result) throw new Error(result.error);
       if (!result.value || current.current !== before) return;
-      if (result.value.imported.length) adopt(result.value.summary);
+      // `imported` also names sources the book held already (F-044). An import that added nothing returns the book as
+      // it is: adopting it again would wait for a render that never comes, with "Updating the book…" (F-046).
+      if (result.value.imported.length && result.value.summary.id !== before.id) adopt(result.value.summary);
       // Imports into the library select the first new source; imports onto a box keep the spread selected.
       if (!request.target && result.value.imported.length) {
         const [first] = result.value.imported;
@@ -673,7 +691,7 @@ export function App() {
         if ('error' in result) throw new Error(result.error);
         if (!result.value || current.current !== before) return resolve(undefined);
         setNotice(importFeedback(result.value.imported.length, result.value.counts));
-        adopt(result.value.summary);
+        if (result.value.summary.id !== before.id) adopt(result.value.summary);
         const [id] = result.value.imported;
         resolve(id ? { id, project: result.value.summary.id } : undefined);
       } catch (error) {
@@ -755,6 +773,9 @@ export function App() {
       return;
     }
     enqueue(async () => {
+      // The toolbar's Export stays enabled while an agent saves beside an editor: it exports the agent's revision
+      // once that has rendered (F-042).
+      if (command === 'export') { await agentSettled(); if (current.current) await bookReady(current.current.id); }
       if (!api || agentLocked.current) return;
       const before = current.current;
       if (command === 'export') {
@@ -805,10 +826,15 @@ export function App() {
     else if ('error' in change) {
       if (!reloading.current) beginReload();
       failReload(change.error);
+    } else if (!reloading.current && change.value.id === current.current?.id) {
+      // The revision on show already: adopting it again would wait for a render that never comes (F-046), say after an
+      // import from the Assets window that added nothing while the book changed during its dialog.
+      return;
     } else if (!reloading.current && agentLocked.current && !quitLock.current) {
       // An agent's save is a new revision like the editor's own saves, not a reload after the book's files changed:
       // an editor it leaves alone stays open and usable, with its caret, selection and typing (F-042).
       adopt(change.value);
+      setAgentRevision(change.value.id);
       setError('');
     } else {
       if (!reloading.current) beginReload();
@@ -828,8 +854,8 @@ export function App() {
     if (editing || elementEditor || cropping || typing) {
       const open = (editing || elementEditor || cropping ? activeEditor : undefined) ?? (typing ? { label: typing } : undefined);
       // A save that leaves the open editor's spread (or page) and the book's settings alone goes through, and the
-      // editor stays open: it pauses while the new revision renders, as for any change to the book, and resumes if
-      // its own values did not change (#231). A crop gesture and a focused field are not kept through a new
+      // editor stays open and usable while the new revision renders, since its own values did not change (#231,
+      // F-042: keepInline). A crop gesture and a focused field are not kept through a new
       // revision, so they still keep the book to themselves.
       // Focus inside the open editor (its text field, its dialog) belongs to it; only a field focused without one blocks.
       if (!open || cropping || (typing && !editing && !elementEditor) || !leavesEditorAlone(footprint, open)) return open ?? false;
@@ -950,6 +976,17 @@ export function App() {
     });
   }
 
+  // Resolves once the book view has rendered revision `id`, or it failed or was replaced.
+  const readyWaiters = useRef<{ id: string; resolve: () => void }[]>([]);
+  function bookReady(id: string) {
+    if (readyId.current === id || candidateId.current !== id) return Promise.resolve();
+    return new Promise<void>((resolve) => readyWaiters.current.push({ id, resolve }));
+  }
+  function settleReadyWaiters(keep?: string) {
+    const settled = readyWaiters.current.filter(({ id }) => id !== keep);
+    readyWaiters.current = readyWaiters.current.filter(({ id }) => id === keep);
+    for (const { resolve } of settled) resolve();
+  }
   // The book frame renders every spread, so its status doubles as the book check.
   const acceptCandidate = (id: string) => candidateId.current === id;
   function bookStatus(status: RenderStatus, id: string) {
@@ -965,7 +1002,9 @@ export function App() {
       setTemplate(status.template);
       void decideNetwork(status.template);
       setCropping((previous) => previous?.settling && previous.settling !== id ? undefined : previous);
+      settleReadyWaiters();
     } else {
+      settleReadyWaiters();
       candidateId.current = undefined;
       readyId.current = undefined;
       if (reloading.current) failReload(status.message);
@@ -1012,6 +1051,14 @@ export function App() {
     for (const { spread } of list as Issue[]) if (spread) spreadIssues.set(spread, level);
   }
 
+  // The spreads on screen, or within `margin` of it, and the selected one: a view's replacement frame waits for the
+  // cached pictures of these before it shows, and restores the others after (renderer `settleRestoredImages`). The
+  // thumbnails take none: a screen of them is many spreads, which held the replacement back as long as all of them.
+  function nearSpreads(shown: BookGeometry | undefined, top: number, bottom: number, margin = bottom - top) {
+    if (!shown) return undefined;
+    const near = shown.sheets.filter(({ y, height }) => y < bottom + margin && y + height > top - margin).map(({ spread }) => spread);
+    return spreadId && !near.includes(spreadId) ? [...near, spreadId] : near;
+  }
   // Scrolls the book vertically so a spread is fully visible. Waits for the next layout if the spread is new.
   function reveal(id: string, instant = false) {
     const sheet = geometry?.sheets.find(({ spread }) => spread === id);
@@ -1040,7 +1087,8 @@ export function App() {
     const range = viewport();
     if (!range) return undefined;
     // Artwork stays laid out at Fit. The frame loads pictures for the visible area in its own coordinates.
-    return { top: range.top / zoom, bottom: range.bottom / zoom, left: range.left / zoom, right: range.right / zoom, columns };
+    const top = range.top / zoom, bottom = range.bottom / zoom;
+    return { top, bottom, left: range.left / zoom, right: range.right / zoom, columns, spreads: nearSpreads(fittedGeometry, top, bottom) };
   }
   // Tells a view's current and pending frames which area is on screen, so they load the pictures near it.
   function postViewport(host: HTMLElement | null, view: 'book' | 'thumbs', range: ReturnType<typeof viewport>) {
@@ -1055,7 +1103,7 @@ export function App() {
     if (!view) return undefined;
     // The placed thumbnail list has no padding, so the scroll position is already in the frame's coordinates.
     const top = view.scrollTop;
-    return { top, bottom: top + view.clientHeight, left: 0, right: view.clientWidth, columns: 0 };
+    return { top, bottom: top + view.clientHeight, left: 0, right: view.clientWidth, columns: 0, spreads: nearSpreads(thumbs, top, top + view.clientHeight, 0) };
   }
   function measureThumbnails() { postViewport(thumbList.current, 'thumbs', thumbnailViewport()); }
   useEffect(() => {
@@ -1302,7 +1350,8 @@ export function App() {
     }
   }
   function changeFormat(format: string) {
-    if (!canChangeBook || !template || !Object.hasOwn(template.formats, format)) return;
+    // Like the other book settings, the format may change during an agent's save beside the editor: the edit waits for it.
+    if (!(settingsWritable && !busy && !exporting) || !template || !Object.hasOwn(template.formats, format)) return;
     if (!template.coverFormats || !Object.hasOwn(template.coverFormats, format)) setBookView('content');
     edit(({ project }) => { project.format = format; }, 'Format changed to ' + template.formats[format]);
   }
@@ -1452,7 +1501,13 @@ export function App() {
   const editSpread = editing && spreads.find(({ id }) => id === editing.spread);
   const liveInline = summary && template && editSpread && editTarget &&
     { project: summary.project, spread: editSpread, template, target: editTarget };
-  const resumeInline = !!(canvasReady && editing?.held && liveInline && inlineValues(liveInline) === inlineValues(editing.held));
+  // The held editor's own values, as the saved book has them now, are the ones it opened with.
+  const heldCurrent = !!(editing?.held && liveInline && inlineValues(liveInline) === inlineValues(editing.held));
+  const resumeInline = canvasReady && heldCurrent;
+  // A new revision that leaves the edited field alone, such as an agent's save on another spread, renders without
+  // pausing the editor: its caret, selection and typing stay (F-042). A reload after the book's files changed, or a
+  // failed render, still pauses it, as does any change to its own values.
+  const keepInline = heldCurrent && !reload && render?.state !== 'error';
   const inline = resumeInline ? liveInline : editing?.held ?? liveInline;
   const textInline = !!(editing?.text && !editing.panel && inline);
   // Text the template edits on the page, opened in the panel only because it is too small on screen at this zoom
@@ -1503,7 +1558,7 @@ export function App() {
   }
 
   function editInline(change: Edit, notice?: string) {
-    if (!liveInline || (editing?.held && !resumeInline)) return;
+    if (!liveInline || (editing?.held && !resumeInline && !keepInline)) return;
     edit((files) => {
       const active = files.project.spreads.find(({ id }) => id === liveInline.spread.id);
       if (editableSpread(active, liveInline.target.page)?.definition === scopeSpread(liveInline.spread, liveInline.target.page)?.definition) change(files);
@@ -1909,10 +1964,11 @@ export function App() {
   const issue = previewError || error;
   // Agent activity shows in the status bar, not over the page (F-042).
   const previewNotice = previewError ? (geometry ? 'Showing the last successful preview' : 'Book preview unavailable') : '';
-  const blockedInline = editing?.held && !resumeInline && (canvasReady
+  const blockedInline = editing?.held && !resumeInline && !keepInline && (canvasReady
     ? 'This field changed while you were editing. Close it and open the field again to continue.'
     : 'Editing is paused while the preview is out of date.');
-  const canExport = canvasReady && !busy && (coverActive
+  // The agent's revision exports once it has rendered (the export waits for it).
+  const canExport = (canvasReady || agentRendering) && !busy && (coverActive
     ? coverGeometry?.status === 'ready' && !!coverDefinition && !sequence?.issues.length && currentCoverStatus?.state === 'ready'
     : spreads.length > 0);
   let activeEditor: ActiveBookEditor | undefined;
@@ -1935,9 +1991,48 @@ export function App() {
     pageLabels: Object.fromEntries(spreads.map(({ id }, i) => [id, pageLabels[i]])) };
   const menuKey = JSON.stringify(menuState);
   useEffect(() => { void api?.setBookMenuState(menuState); }, [api, menuKey]);
-  const undoCommand = commandState('undo', menuState), redoCommand = commandState('redo', menuState);
-  const pdfCommand = commandState('export', menuState);
+  // An agent's save beside an open editor leaves the toolbar as it was: Undo, Redo, Export and Book settings wait for
+  // it (agentSettled), so they need not grey out and back with every save (F-042). The menus still refuse meanwhile.
+  const quietAgent = agentWorking === 'beside' || agentRendering;
+  const settingsWritable = writable || (quietAgent && agentWorking !== 'exclusive' && !!summary && !reload);
+  const toolbarState: BookMenuState = quietAgent ? { ...menuState, writable: settingsWritable, busy: !!busy || exporting || !!reload } : menuState;
+  const undoCommand = commandState('undo', toolbarState), redoCommand = commandState('redo', toolbarState);
+  const pdfCommand = commandState('export', toolbarState);
   const pdfLabel = pdfCommand.label;
+  // The export menu's other PDF shows its view first, and exports once that has rendered and checked.
+  const pendingExport = useRef<{ surface: 'content' | 'cover'; arrived: boolean; at: number }>(undefined);
+  function exportSurface(surface: 'content' | 'cover') {
+    if ((surface === 'cover') === coverActive) {
+      // The view on show exports now, or says why it cannot; nothing waits to export it later.
+      pendingExport.current = undefined;
+      act('export');
+      return;
+    }
+    pendingExport.current = { surface, arrived: false, at: Date.now() };
+    setBookView(surface);
+  }
+  const exportPending = useEffectEvent(() => {
+    const pending = pendingExport.current;
+    if (!pending) return;
+    // A view that cannot export (its check failed, say) does not export much later, out of the blue.
+    if (Date.now() - pending.at > 30_000) { pendingExport.current = undefined; return; }
+    if ((pending.surface === 'cover') !== coverActive) {
+      // Left the view before it could export: the request lapses.
+      if (pending.arrived) pendingExport.current = undefined;
+      return;
+    }
+    pending.arrived = true;
+    if (!pdfCommand.enabled) {
+      // The view has rendered, and cannot export (its check failed, say): the request lapses, so the export does not
+      // start later, out of the blue, once something else makes it possible.
+      const settled = coverActive ? !!currentCoverStatus : render?.state === 'ready' || render?.state === 'error';
+      if (settled && !busy && !exporting) pendingExport.current = undefined;
+      return;
+    }
+    pendingExport.current = undefined;
+    act('export');
+  });
+  useEffect(() => exportPending(), [coverActive, pdfCommand.enabled, currentCoverStatus, render?.state]);
 
   const format = formatOf(template);
   // The Book check and export report a saved format the template no longer includes.
@@ -1993,6 +2088,7 @@ export function App() {
   const placeInspector = useLiveCallback((from: KeptItem, to: ContentTarget) => { if (spread) place(spread.id, from, to); });
   const targetsKey = JSON.stringify(inspectorTargets(geometry?.targets ?? [], spread?.id, selectedPage));
   const panelTargets: InspectorTarget[] = useMemo(() => JSON.parse(targetsKey), [targetsKey]);
+  const targetsStale = !!spread && shownLayouts.current[spread.id] !== layoutOf(spread);
   const sourcesPanel = useMemo(() => (summary && <Sources view={sourcesView} summary={summary} tab={sourceTab} setTab={setSourceTab}
           selected={selectedSource ? { [selectedSource.kind]: selectedSource.id } : {}} choose={chooseSource}
           failure={setError} changed={adoptSource} usage={usage} writable={writable} busy={!!busy} importSources={importSources} quickLook={setQuick}
@@ -2004,15 +2100,18 @@ export function App() {
         targets={panelTargets}
         open={openInspectorOwner}
         openTarget={openInspectorTarget} place={placeInspector} chooseLayout={chooseInspectorLayout}
-        holdPreviews={!render && !!lastReady}
-        familyPicker={template && layoutFamily && <HeldPicker
+        holdPreviews={!render && !!lastReady} targetsStale={targetsStale}
+        familyPicker={template && layoutFamily && (template.layoutFamilies?.[layoutFamily]?.picker?.choice
+          ? <FamilyChoice template={template} spread={spread} page={selectedPage} family={layoutFamily} readOnly={!writable}
+            blocked={previewNotice || undefined} chooseLayout={chooseInspectorLayout} />
+          : <HeldPicker
           id={JSON.stringify([summary.handle, spread.id, selectedPage, layoutFamily, summary.templateHash, template.format, summary.network])}>
           {(showing) => <LayoutFamilyPicker
             project={summary.id} template={template} spread={spread} page={selectedPage} chooseLayout={chooseInspectorLayout} params={summary.project.params} family={layoutFamily}
             readOnly={!writable} blocked={previewNotice || undefined} onShowing={showing} />}
-        </HeldPicker>}
+        </HeldPicker>)}
         edit={editFromPanel} highlight={setHighlight} select={selectFromPanel} />),
-    [summary, spread, selectedSide, selectedPage, sequence, index, writable, selectedSource, template, render, lastReady, usage, focusBox, panelTargets, layoutFamily, previewNotice, quickSource, openInspectorOwner, openInspectorTarget, placeInspector, chooseInspectorLayout, editFromPanel, selectFromPanel]);
+    [summary, spread, selectedSide, selectedPage, sequence, index, writable, selectedSource, template, render, lastReady, usage, focusBox, panelTargets, targetsStale, layoutFamily, previewNotice, quickSource, openInspectorOwner, openInspectorTarget, placeInspector, chooseInspectorLayout, editFromPanel, selectFromPanel]);
 
   const nativeDocumentTitle = navigator.platform.includes('Mac');
   return <ProjectFilesContext.Provider value={projectFiles}><div className={(nativeDocumentTitle ? 'studio mac-studio' : 'studio') + (busyCursor ? ' is-busy' : '')}>
@@ -2042,13 +2141,18 @@ export function App() {
       <div className="toolbar-actions">
         <button className="toolbar-icon" aria-label="Presentation" title="Presentation (⇧W)" disabled={!summary || !!editing || !!cropping} onClick={() => act('presentation')}><Icon name="play" /></button>
         <div className="export-area">
-          {/* One button in one place: exporting changes its label and makes it cancel, so the toolbar never moves. The
-              stages show in the status bar. */}
-          <button className="export-button" data-exporting={exporting || undefined} disabled={!exporting && !pdfCommand.enabled}
-            title={exporting ? 'Cancel export' : pdfLabel + ' (⌘E)'} aria-label={exporting ? 'Exporting, cancel export' : undefined}
+          {/* One icon in one place: it exports what the book view shows, and cancels while exporting, so the toolbar never
+              moves. The stages show in the status bar. The menu beside it exports the other PDF of a book with a cover. */}
+          <button className="toolbar-icon export-button" data-exporting={exporting || undefined} disabled={!exporting && !pdfCommand.enabled}
+            title={exporting ? 'Cancel export' : pdfLabel + ' (⌘E)'} aria-label={exporting ? 'Exporting, cancel export' : pdfLabel}
             onClick={() => { if (exporting) void api?.cancelExport(); else act('export'); }}>
-            {exporting ? <span className="status-spinner" aria-hidden="true" /> : <Icon name="export" />}<span>{exporting ? 'Exporting…' : pdfLabel}</span>
+            {exporting ? <span className="status-spinner" aria-hidden="true" /> : <Icon name="export" />}
           </button>
+          {coverGeometry && <ActionMenu className="export-menu" disabled={exporting || !summary || !!busy}
+            label={<><Icon name="chevron" /><span className="visually-hidden">Export options</span></>}>
+            <button onClick={() => exportSurface('content')}>Export Content PDF…</button>
+            <button onClick={() => exportSurface('cover')}>Export Cover PDF…</button>
+          </ActionMenu>}
         </div>
         <button className="toolbar-icon" aria-label="Toggle Inspector" aria-pressed={!panels.rightHidden} title="Toggle Inspector (⌥⌘I)" disabled={!summary} onClick={() => togglePanel('right')}><Icon name="sidebarRight" /></button>
       </div>
@@ -2066,7 +2170,7 @@ export function App() {
           <p className="muted" title={summary?.folder}>{summary ? (sequence ? sequence.count + ' pages · ' + spreads.length + ' spreads' : 'Loading book…') : ''}</p>
         </div>
         {summary && template && <PanelSection id="project.settings" title="Book settings" state={bookSettings} className="document-settings template-controls">
-          <fieldset disabled={!writable}>
+          <fieldset disabled={!settingsWritable}>
             {(Object.keys(template.formats).length > 1 || missingFormat) && <label className="field">Format
               <select value={missingFormat ? summary.project.format : template.formatId} onChange={(event) => {
                 changeFormat(event.target.value);
@@ -2142,10 +2246,10 @@ export function App() {
       <div className="workspace-center">
         <div ref={canvasWrap} className="canvas-wrap">
           {summary && !coverActive && <div className="canvas-zoom-controls" role="toolbar" aria-label="Book zoom">
-            <button type="button" aria-label="Zoom book out" title="Zoom out (⌘−)" disabled={!canvasReady || zoom <= .3}
+            <button type="button" aria-label="Zoom book out" title="Zoom out (⌘−)" disabled={!(canvasReady || agentRendering) || zoom <= .3}
               onClick={() => setZoom((value) => value / 1.2)}><Icon name="minus" /></button>
             <span className="canvas-zoom-value" title={zoom > 1 ? 'Zoom relative to Fit. Hold Space and drag to pan.' : 'Zoom relative to the fitted view'}>{zoom === 1 ? 'Fit' : Math.round(zoom * 100) + '%'}</span>
-            <button type="button" aria-label="Zoom book in" title="Zoom in (⌘+)" disabled={!canvasReady || zoom >= 3}
+            <button type="button" aria-label="Zoom book in" title="Zoom in (⌘+)" disabled={!(canvasReady || agentRendering) || zoom >= 3}
               onClick={() => setZoom((value) => value * 1.2)}><Icon name="plus" /></button>
             {zoom !== 1 && <button type="button" className="canvas-return-fit" onClick={() => setZoom(1)} title="Restore the fitted view and reading position">Return to Fit</button>}
           </div>}
@@ -2350,8 +2454,8 @@ export function App() {
       close={() => setQuick(undefined)} jump={(id) => select(id)} />}
     {photoView.dialog}
     <footer className="status-bar">
-      <span title={issue || busy || notice || undefined} className={issue ? 'status status-error' : busy || updating || agentWorking ? 'status status-busy' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
-        {!issue && (busy || updating || agentWorking) && <span className="status-spinner" aria-hidden="true" />}{issue || busy || (agentWorking ? agentText : notice || (updating ? updatingText : ''))}
+      <span title={issue || busy || notice || undefined} className={issue ? 'status status-error' : busy || updating || agentActive ? 'status status-busy' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
+        {!issue && (busy || updating || agentActive) && <span className="status-spinner" aria-hidden="true" />}{issue || busy || (agentActive ? agentText : notice || (updating ? updatingText : ''))}
       </span>
       {exporting && <button type="button" className="status-cancel" onClick={() => void api?.cancelExport()}>Cancel</button>}
       {summary && <SyncStatus api={api} notice={setNotice} />}

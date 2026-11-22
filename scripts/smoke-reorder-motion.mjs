@@ -100,5 +100,30 @@ try {
   assert.equal(await page.locator('.spread-thumb').count(), thumbsBefore + 1);
   await move('Undo Book Edit');
   assert.equal(await page.locator('.spread-thumb').count(), thumbsBefore);
+  // A busy frame handles two provisional orders at once. It must report where its sheets rest, not where a slide still
+  // running from the first one shows them: else a spread that moved up after a deletion was reported past the end of
+  // the shorter book, and the editor scrolled to blank space below the last spread until the replacement showed.
+  await page.locator('.spread-thumb').nth(1).click();
+  await ready();
+  await page.evaluate(() => {
+    window.provisionalGeometry = [];
+    window.addEventListener('message', (event) => {
+      if (event.data?.type === 'geometry' && event.data.motion !== undefined && event.data.sheets.length > 4) window.provisionalGeometry.push(event.data);
+    });
+  });
+  const busy = await page.context().newCDPSession(page.frames().find((frame) => frame.url().includes('view=book')));
+  await busy.send('Emulation.setCPUThrottlingRate', { rate: 20 });
+  const beforeDelete = await page.locator('.book-frame-book[data-current]').getAttribute('data-revision');
+  await menuAction(app, 'Delete Spread');
+  await page.waitForFunction(before => document.querySelector('.book-frame-book[data-current]')?.getAttribute('data-revision') !== before, beforeDelete);
+  // The slowed frame may be gone already, replaced by the edited book's.
+  await busy.send('Emulation.setCPUThrottlingRate', { rate: 1 }).catch(() => {});
+  await ready();
+  const reports = await page.evaluate(() => window.provisionalGeometry);
+  assert.ok(reports.length, 'the deletion showed at once');
+  for (const report of reports) {
+    for (const sheet of report.sheets) assert.ok(sheet.y + sheet.height <= report.height + 1, 'a provisional sheet lies within the book: ' + JSON.stringify({ sheet: sheet.spread, y: sheet.y, height: report.height }));
+  }
+  await move('Undo Book Edit');
   console.log('Canvas reorder, synchronized replacement, Undo/Redo, rapid moves, Reduce Motion and immediate structural edits passed.');
 } finally { await closeApp(app); }

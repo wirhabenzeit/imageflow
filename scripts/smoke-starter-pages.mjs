@@ -153,8 +153,10 @@ try {
   assert.ok(gridSheet, 'The sample shows the page-grid family');
   const gridSide = ['left', 'right'].find(side => initial.template.spreads[gridSheet.pages[side]?.definition]?.family === 'pageGrid');
   await selectSide(gridSheet.id, gridSide);
-  const picker = inspector.frameLocator('iframe.element-editor-frame');
+  // The starter's families use a built-in choice: the app's own control, drawn at once, with no template frame.
+  const picker = inspector.getByRole('region', { name: 'Grid size', exact: true });
   await picker.getByRole('radio', { name: '3 × 3', exact: true }).waitFor();
+  assert.equal(await picker.locator('iframe').count(), 0, 'A choice picker needs no frame');
   const variant = gridSheet.pages[gridSide].definition === 'gridPage9' ? '2 × 2' : '3 × 3';
   await pickLayout(w, picker.getByRole('radio', { name: variant, exact: true }));
   const changedGrid = (await readBook()).spreads.find(sheet => sheet.id === gridSheet.id);

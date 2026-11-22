@@ -8,7 +8,7 @@ import { bundlesFamily, familiesOf, missingCharacters, setTemplateFonts } from '
 import { parseSentinel, sentinelStrip, sentinelWidth } from './capture-sentinel';
 import type { Sentinel } from './capture-sentinel';
 import { impureMessage, impureSuggestion, installPurityGuards, unlocatedImpureSuggestion } from './purity';
-import { activateRenderedImageSpreads, configureRenderedImages, renderedImageNotes, renderedImageState, renderingImages, settleRenderedImages, settleRestoredImages, watchRenderedImages } from './rendered-image';
+import { activateAllRenderedImages, activateRenderedImageSpreads, configureRenderedImages, renderedImageNotes, renderedImageState, renderingImages, settleRenderedImages, settleRestoredImages, watchRenderedImages } from './rendered-image';
 import type { RenderedImageFailure } from './rendered-image';
 import type { ImportMode, SourceReference } from './source-locations';
 import React from 'react';
@@ -527,9 +527,12 @@ function layoutBook(root: HTMLElement, initialSheets: { spread: string; sheet: H
     const before = reported;
     sheets = next;
     laidOut = '';
+    // Measured at rest: a slide still running from an earlier order offsets its sheets by where they came from. A busy
+    // frame handles two orders at once, and reported a sheet that slid up where it had been, past the end of the shorter
+    // book, so the editor scrolled to blank space below the last spread until the replacement showed.
+    animations.forEach((animation) => animation.cancel());
     fit(true);
     const offsets = reorderOffsets(before, reported);
-    animations.forEach((animation) => animation.cancel());
     animations = matchMedia('(prefers-reduced-motion: reduce)').matches ? [] : offsets.flatMap((offset) => {
       const slot = sheets.find((item) => item.spread === offset.spread)?.sheet.parentElement;
       return slot ? [animateReorder(slot, offset)] : [];
@@ -801,7 +804,8 @@ function croppedSheet(sheet: HTMLElement, crop: ReturnType<typeof sheetCrop>, pi
 
 // Uses the same flowed sheets and crop geometry as proof/export. Only the current crop and its neighbours
 // are mounted at full size; overview crops reuse the final artwork rather than the editor decoration.
-async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spreads: SpreadState[], sequence: ReturnType<typeof pageSequence>, format: ResolvedFormat, start: string) {
+async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spreads: SpreadState[], sequence: ReturnType<typeof pageSequence>, format: ResolvedFormat, start: string,
+  replacement: boolean) {
   // Keep source layouts measured while their asynchronous pictures finish. display:none would resize those
   // pictures to zero and cancel them; the presentation copies receive their finished pixels below.
   const sourceWidth = root.getBoundingClientRect().width;
@@ -821,6 +825,12 @@ async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spre
   let drawRevision = 0;
   let firstPaint!: () => void;
   const painted = new Promise<void>((resolve) => { firstPaint = resolve; });
+  // A new revision's frame (`replacement`) starts at the spread the presentation started on, and is told the spread on
+  // screen once it has drawn. It is ready only with that spread's photos, so it does not load them after it replaced
+  // the previous frame, when they blinked. The presentation's first frame starts on the spread on screen, and an empty
+  // book is never told a spread: neither waits.
+  let told = !replacement || !spreads.length;
+  const untold = told ? undefined : setTimeout(() => { told = true; draw(); }, 2000);
   function syncPictures() {
     for (const [frame, sheet] of sources) {
       const originals = sheet.querySelectorAll<HTMLElement>('.if-rendered-image');
@@ -909,17 +919,26 @@ async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spre
         const loaded = () => { image.removeEventListener('load', loaded); image.removeEventListener('error', loaded); resolve(); };
         image.addEventListener('load', loaded, { once: true }); image.addEventListener('error', loaded, { once: true });
       }))).then(() => {
-        // Chromium can defer decode() indefinitely in a hidden candidate iframe. Loading the full original
-        // is enough to reveal it; readiness also follows the latest crop if fullscreen resized it meanwhile.
-        if (revision === drawRevision) firstPaint();
+        // Then decoded: the crop shows full originals, and one that has only loaded is drawn as empty paper until
+        // Chromium has decoded it, so the photos blinked once the frame replaced the previous one. The candidate frame
+        // is painted (opacity .01, not hidden), so decode() resolves; a short cap guards against one that does not.
+        // Readiness also follows the latest crop if fullscreen resized it meanwhile.
+        const shown = [...stage.querySelectorAll<HTMLImageElement>('img')].filter((image) => image.getAttribute('src') && image.closest<HTMLElement>('.if-present-crop')?.style.visibility !== 'hidden');
+        return Promise.race([Promise.allSettled(shown.map((image) => image.decode())), new Promise((resolve) => setTimeout(resolve, 3000))]);
+      }).then(() => {
+        if (revision === drawRevision && told) firstPaint();
       });
     }
   }
   window.addEventListener('message', (event) => {
     if (event.source !== parent || event.origin !== 'imageflow://editor' || event.data?.type !== 'present') return;
     const next = event.data as PresentationView;
-    if (!spreads.some(({ id }) => id === next.spread) || !['page', 'left', 'right', 'spread'].includes(next.side) || !['trim', 'bleed'].includes(next.bounds)) return;
-    state = next;
+    const valid = spreads.some(({ id }) => id === next.spread) && ['page', 'left', 'right', 'spread'].includes(next.side) && ['trim', 'bleed'].includes(next.bounds);
+    // A spread this revision removed keeps the one the frame shows, without waiting to be told another.
+    if (!valid && told) return;
+    if (valid) state = next;
+    told = true;
+    clearTimeout(untold);
     draw();
   });
   window.addEventListener('resize', draw);
@@ -1280,7 +1299,7 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
 
 // Loads the photos of spreads within a screen of the visible range and unloads those more than three screens
 // away, so memory and the work per edit follow what is on screen rather than the length of the book.
-type Viewport = { top: number; bottom: number; left: number; right: number };
+type Viewport = { top: number; bottom: number; left: number; right: number; spreads?: Set<string> };
 // Loads the photos of spreads within a screen's distance of the visible area, in both directions, and unloads those
 // far from it.
 function photoLoader(root: HTMLElement, visible: () => Viewport | undefined) {
@@ -1615,7 +1634,7 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
   const spread = scopeSpread(sheet, page);
   const family = template.layoutFamilies && Object.hasOwn(template.layoutFamilies, familyId) ? template.layoutFamilies[familyId] : undefined;
   const picker = family?.picker;
-  if (!spread || !family || !picker) throw new Error('This layout family has no picker.');
+  if (!spread || !family || !picker?.component) throw new Error('This layout family has no picker component.');
   const ids = familyLayouts(template.spreads, familyId);
   const variants = ids.map((id) => ({ id, label: template.spreads[id].label, variant: { ...template.spreads[id].variant } }));
   let document = resolveParams(template.parameters, book.project.params);
@@ -1682,7 +1701,7 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
       post({ type: 'editor-ready' });
       return () => { update = undefined; };
     }, []);
-    return React.createElement(picker!.component, {
+    return React.createElement(picker!.component!, {
       variants, current: draft, saved, choose, find, document, format, readOnly: disabled, commit, cancel,
     });
   }
@@ -1918,7 +1937,8 @@ export async function startRender(root: HTMLElement) {
   window.addEventListener('message', (event) => {
     if (event.origin !== editorURL.slice(0, -1) || event.data?.type !== 'viewport') return;
     const { top, bottom, left, right } = event.data;
-    onScreen = { top: Number(top), bottom: Number(bottom), left: Number(left ?? 0), right: Number(right ?? innerWidth) };
+    const near = Array.isArray(event.data.spreads) && event.data.spreads.every((id: unknown) => typeof id === 'string') ? new Set<string>(event.data.spreads) : undefined;
+    onScreen = { top: Number(top), bottom: Number(bottom), left: Number(left ?? 0), right: Number(right ?? innerWidth), spreads: near };
     const requested = { columns: Math.max(0, Math.min(8, Math.floor(Number(event.data.columns) || 0))) };
     if (requested.columns !== grid.columns) {
       grid = requested;
@@ -2022,6 +2042,10 @@ export async function startRender(root: HTMLElement) {
         // pictures are shared across pixel ratios).
         previewCache: location.pathname + '/picture/' } : edit ? { mode: 'preview', pixelRatio: view === 'book' ? Math.min(window.devicePixelRatio || 1, 2) : 0.5,
         concurrency: view === 'book' ? 2 : 1, timeoutMs: pictureTimeoutMs.preview,
+        // A replacement of the book view or the thumbnails draws the pictures of the spreads on screen first, which the
+        // editor names, and the others once it is ready (activateAllRenderedImages). Restoring every map of a long book
+        // from the cache, which parses each one's SVG again, held each edit back by a second.
+        activeSpreads: (view === 'book' || view === 'thumbs') && onScreen?.spreads ? new Set(onScreen.spreads) : undefined,
         previewCache: location.pathname + '/picture/' }
         : printPictures(check ? 'check' : artwork || inspect ? 'preview' : 'export', target));
       // The picture cache's scope for each template file, and the Inspector's layout previews, which show a stand-in
@@ -2370,7 +2394,7 @@ export async function startRender(root: HTMLElement) {
       setGrid = layoutBook(root, laidOut, view, format, grid);
     }
     step('layout');
-    if (present) await renderPresentation(root, sheets, spreads, sequence, format, presentationStart);
+    if (present) await renderPresentation(root, sheets, spreads, sequence, format, presentationStart, query.has('replacement'));
     else if (lazy) {
       const load = photoLoader(root, () => onScreen);
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -2397,6 +2421,8 @@ export async function startRender(root: HTMLElement) {
       flow: Object.fromEntries(Object.entries(positions).map(([key, { meta: _meta, ...position }]) => [key, position])), anchors: index.anchors,
       ...(inspection ? { inspection } : {}),
     });
+    // Then the pictures of the other spreads, out of sight (activeSpreads above).
+    if (lazy) setTimeout(activateAllRenderedImages, 0);
     // The editor's book view does not wait for its pictures. It reports them to the live Book check as they start,
     // finish or fail, so a map that failed on the page is never missing from the check.
     if (edit && view === 'book' && window.parent !== window) {

@@ -97,7 +97,14 @@ function LayoutGrid({ summary, spread, template, page, choices, allowed, current
     })}
     <BookFrame project={preview.project} view="layouts" hold={hold}
       query={'spread=' + encodeURIComponent(spread.id) + (page ? '&page=' + page : '')}
-      title="Layout previews" onGeometry={setGeometry} />
+      title="Layout previews" onGeometry={(next) => {
+        setGeometry(next);
+        // Each preview is a sheet of its layout (`spread` is the layout's ID), drawn with this spread's content.
+        for (const { spread: definition } of next?.sheets ?? []) {
+          if (Object.hasOwn(template.spreads, definition)) editedOnPage.set(layoutKey(summary.templateHash, definition),
+            [...settingsOnPage(next!.targets.filter((target) => target.spread === definition), template.spreads[definition])]);
+        }
+      }} />
   </div>;
 }
 
@@ -154,8 +161,20 @@ function contentState(summary: ProjectSummary, spread: SpreadState, id: string, 
 // page does not already edit, content kept for other layouts, and a list of its boxes and elements. Boxes and
 // elements are edited where they are on the page; the list opens the same editors, also for empty, hidden or
 // overlapping ones, and from the keyboard.
+// The settings each layout's page edits itself, by template and layout (see `claimed` below): as the book view last
+// showed the layout, or as the Layout section's previews draw it, so a layout change shows the right settings at once.
+const editedOnPage = new Map<string, string[]>();
+const layoutKey = (templateHash: string | undefined, definition: string) => JSON.stringify([templateHash ?? '', definition]);
+// The spread or page settings a layout's page edits: by a marked node (other than one inside an element with its own
+// editor, which opens that editor instead), or by an element editor that declares them.
+function settingsOnPage(targets: readonly Pick<InspectorTarget, 'owner' | 'edits'>[], definition: TemplateInfo['spreads'][string] | undefined) {
+  return new Set<string>([...targets.filter(({ owner }) => !(owner?.type === 'element' && definition?.elements[owner.id]?.editor))
+    .flatMap(({ edits }) => edits.filter((path) => !path.includes('.'))),
+  ...Object.values(definition?.elements ?? {}).flatMap(({ editor }) => editor?.spread ?? [])]);
+}
+
 export function Inspector({ summary, spread, source, template, render, usage, edit, highlight,
-  select, quickLook, focus, targets = [], open, openTarget, place, familyPicker, writable, page, chooseLayout, holdPreviews }: {
+  select, quickLook, focus, targets = [], open, openTarget, place, familyPicker, writable, page, chooseLayout, holdPreviews, targetsStale }: {
   summary: ProjectSummary; writable: boolean; spread: SpreadState; page?: PageSide; source?: SourceRef; template?: TemplateInfo; render?: RenderStatus; usage: SourceUsage;
   edit: (change: Edit, notice?: string | (() => string)) => void;
   highlight: (id?: string) => void; select: (spread: string) => void;
@@ -168,8 +187,11 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
   // While the book view renders a change, the layout previews wait: they share its render process, and the book
   // view is what the user is looking at. The previews shown so far stay until then.
   holdPreviews?: boolean;
+  // The book view still shows this spread with another layout, so `targets` are that layout's (beta finding F-035).
+  targetsStale?: boolean;
 }) {
   const items = useRef(new Map<string, HTMLElement>());
+  const heldSettings = useRef<{ key: string; section: ReactNode }>(undefined);
   const [flash, setFlash] = useState<string>();
   const [keptOpen, setKeptOpen] = useState(false);
   const [replacedOpen, setReplacedOpen] = useState(false);
@@ -212,9 +234,17 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
   // settings marked on it stay here.
   // Spread parameters edited elsewhere: by a marked node on the page (other than one inside an element with its own
   // editor, which opens that editor instead), or by an element editor that declares them.
-  const claimed = new Set([...targets.filter(({ owner }) => !(owner?.type === 'element' && definition?.elements[owner.id]?.editor))
-    .flatMap(({ edits }) => edits.filter((path) => !path.includes('.'))),
-  ...Object.values(definition?.elements ?? {}).flatMap(({ editor }) => editor?.spread ?? [])]);
+  const measured = settingsOnPage(targets, definition);
+  // Which settings the page edits is known only once the book view shows the layout. Right after a layout change it
+  // still shows the previous one, whose fields hid or showed the wrong settings until the change had rendered: the
+  // section went blank for a moment. The fields a layout was last seen to edit stand in meanwhile.
+  const shownKey = layoutKey(summary.templateHash, spread.definition);
+  if (!targetsStale && definition) editedOnPage.set(shownKey, [...measured]);
+  const remembered = targetsStale ? editedOnPage.get(shownKey) : undefined;
+  const claimed = remembered ? new Set(remembered) : measured;
+  // A layout not shown yet keeps this spread's section as it was, not editable, until the book view shows it.
+  const sectionKey = sheet.id + ':' + (selectedPage ?? '');
+  const held = targetsStale && !remembered && definition && heldSettings.current?.key === sectionKey ? heldSettings.current.section : undefined;
   // Marked nodes that are not a box or element, such as a ctx.Text heading, in reading order: listed with the
   // boxes and elements, so every editor on the page can be opened from the keyboard.
   const marked = template ? targets.filter((target) => !target.owner)
@@ -245,6 +275,14 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
         edit={edit} select={select} quickLook={quickLook} />
     </aside>;
   }
+  const fields = template && definition && settingIds.length > 0 ? <>
+    {/* Keyed by spread: a rejected or unsaved draft must not carry over to another spread's field. */}
+    <Fields key={spread.id + ':' + (selectedPage ?? '') + ':' + spread.definition} schema={definition.parameters} controls={definition.controls} exclude={[...claimed]}
+      values={spread.params} update={(id, value) => changeSpread((item) => { item.params[id] = value; }, definition.parameters[id].label + ' updated')} />
+  </> : null;
+  // A layout whose page settings are not known yet keeps this spread's fields as they were, not editable.
+  // A layout without settings holds nothing: no empty section meanwhile.
+  const settingsFields = held !== undefined ? held && <fieldset disabled>{held}</fieldset> : (heldSettings.current = { key: sectionKey, section: fields }).section;
   return <aside className="inspector" aria-label="Inspector">
     {header}
     <fieldset disabled={!writable}>
@@ -256,20 +294,19 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
             editorLayoutTarget(template.spreads, next, template.format, { index: summary.project.spreads.findIndex(({ id }) => id === item.id), count: summary.project.spreads.length }, page), template.spreads));
           }, () => consequence, true);
         })} />
-        {familyPicker}
       </PanelSection>}
-      {/* The selection's own settings: a sibling of Layout, so collapsing the layout choice leaves them in reach. */}
-      {template && definition && settingIds.length > 0 && <PanelSection id="inspector.settings" title={selectedPage ? 'Page settings' : 'Spread settings'}
-        summaryProps={{ onKeyDown: (event) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+      {/* The selection's own settings, the layout's variant first: a sibling of Layout, so collapsing the layout
+          choice leaves them in reach. */}
+      {template && definition && (familyPicker || settingsFields) && <PanelSection id="inspector.settings" title={selectedPage ? 'Page settings' : 'Spread settings'}
+        summaryProps={Object.keys(definition.parameters).length === 0 ? undefined : { onKeyDown: (event) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
           event.preventDefault(); event.currentTarget.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
         } }, onContextMenu: async (event) => {
           event.preventDefault();
           const result = await window.imageflow?.showContextMenu(['reset-defaults'], assetMenuState(false));
           if (result?.command === 'reset-defaults') changeSpread((item) => { for (const id of Object.keys(definition.parameters)) delete item.params[id]; }, (selectedPage ? 'Page' : 'Spread') + ' settings reset');
         } }}>
-        {/* Keyed by spread: a rejected or unsaved draft must not carry over to another spread's field. */}
-        <Fields key={spread.id + ':' + (selectedPage ?? '') + ':' + spread.definition} schema={definition.parameters} controls={definition.controls} exclude={[...claimed]}
-          values={spread.params} update={(id, value) => changeSpread((item) => { item.params[id] = value; }, definition.parameters[id].label + ' updated')} />
+        {familyPicker}
+        {settingsFields}
       </PanelSection>}
       {template && (contents.length > 0 || marked.length > 0) && <PanelSection id="inspector.contents" title={selectedPage ? 'On this page' : 'On this spread'}
         className="spread-contents">

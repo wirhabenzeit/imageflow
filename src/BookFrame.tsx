@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { renderOrigin, thumbsOrigin } from './desktop';
 import type { BookGeometry, BookView, RenderStatus } from './desktop';
 import type { PresentationView } from './presentation-model';
@@ -9,7 +9,9 @@ import type { PageSide } from './project';
 export type PictureStatus = { type: 'pictures'; pending: number; errors: Issue[] };
 
 type FrameState = { element?: HTMLIFrameElement; geometry?: BookGeometry; status?: RenderStatus; published?: boolean; pictures?: PictureStatus;
-  reorder?: 'preparing' | 'ready' | 'skipped'; offsets?: ReorderOffset[]; preparedAt?: number; hiding?: boolean; start?: number };
+  reorder?: 'preparing' | 'ready' | 'skipped'; offsets?: ReorderOffset[]; preparedAt?: number; hiding?: boolean; start?: number;
+  // The presentation view last sent to the frame (JSON).
+  presented?: string };
 
 // The occurrence an inline editor is drawn over, whose artwork the book view hides while it edits.
 // `page` names the page of a spread shown as pages (ADR 0009); without it, the spread's own layout.
@@ -17,6 +19,9 @@ export type InlineEditing = ({ spread: string; element: string } | { spread: str
 
 // The unsaved placement of a crop gesture on a photo box with a render callback.
 export type CropPreview = { spread: string; box: string; page?: PageSide; placement: { centerX: number; centerY: number; zoom: number } };
+
+const sameSheets = (a?: BookGeometry, b?: BookGeometry) => !!a && !!b && a.sheets.length === b.sheets.length &&
+  a.sheets.every((sheet, i) => ['x', 'y', 'width', 'height'].every((key) => sheet[key as 'x'] === b.sheets[i][key as 'x']));
 
 // Keep the displayed frame and its geometry until the latest candidate has finished rendering successfully.
 export function BookFrame({ busy = false, provisional, project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept, inlineEditing, onInlineEditing, presentation, cropPreview, onPrepared, onShown, release }: {
@@ -52,13 +57,25 @@ export function BookFrame({ busy = false, provisional, project, view, query = ''
 }) {
   // Thumbnails render from their own origin, in their own process, alongside the book view.
   const origin = view === 'thumbs' ? thumbsOrigin : renderOrigin;
-  const target = hold ? undefined : origin + '/render/' + project + '?view=' + view + (query && '&' + query);
+  // A presentation frame for a later revision replaces one on show, so it waits to be told the spread on screen
+  // (renderPresentation); the first one starts there. Decided once per revision, so the URL never changes under a frame.
+  const shownRef = useRef<string>(undefined);
+  const replacing = useMemo(() => view === 'present' && !!shownRef.current, [project, view]);
+  const target = hold ? undefined : origin + '/render/' + project + '?view=' + view + (query && '&' + query) + (replacing ? '&replacement' : '');
   const [shown, setShown] = useState<string>();
+  shownRef.current = shown;
+  // The frame shown before `shown`, kept beneath it for a moment. Without it, a tall book's replacement frame showed
+  // nothing at all for a moment while Chromium painted it (F-042).
+  const [retiring, setRetiring] = useState<string>();
+  // The presentation and the cover likewise flickered at each revision. The layout previews are kept too, where the new
+  // frame draws its previews in the same places: else the previous spread's previews would show between the new ones.
+  const keepsPrevious = (next: FrameState) => view === 'book' || view === 'thumbs' || view === 'present' || view === 'cover' ||
+    (view === 'layouts' && !!shown && sameSheets(latest.current.get(shown)?.geometry, next.geometry));
   const [frames, setFrames] = useState<Record<string, FrameState>>({});
   const latest = useRef(new Map<string, FrameState>());
   const refs = useRef(new Map<string, HTMLIFrameElement>());
   const projectOf = (id: string) => new URL(id).pathname.split('/').at(-1)!;
-  const ids = [shown, shown === target ? undefined : target].filter((id): id is string => id !== undefined);
+  const ids = [...new Set([retiring, shown, target].filter((id): id is string => id !== undefined))];
 
   function storeFrame(id: string, frame: FrameState) {
     latest.current = new Map(ids.map((key) => [key, key === id ? frame : latest.current.get(key) ?? {}]));
@@ -80,6 +97,7 @@ export function BookFrame({ busy = false, provisional, project, view, query = ''
     // A revision this view failed to render must not hold back the other view, which waits to show it together.
     if (frame.status?.state === 'error') onShown?.(project);
     if (frame.status?.state === 'ready') {
+      if (shown && shown !== id && frame.reorder !== 'ready' && keepsPrevious(frame)) setRetiring(shown);
       setShown(id);
       onGeometry?.(frame.geometry, frame.reorder !== 'skipped', frame.start, project);
       onShown?.(project);
@@ -137,6 +155,13 @@ export function BookFrame({ busy = false, provisional, project, view, query = ''
         (event.source as Window).postMessage({ type: 'inline-editing', key: latestKey.current, ...latestEditing.current }, origin);
       }
       frame.geometry = data;
+      // A new presentation frame starts at the spread the presentation started on. It is sent the one on screen now,
+      // before it is shown: its readiness waits for that crop's photos, which otherwise loaded only once it was shown
+      // and blinked out over the previous frame.
+      if (presentation && id !== shown && frame.presented !== JSON.stringify(presentation)) {
+        frame.presented = JSON.stringify(presentation);
+        (event.source as Window).postMessage({ type: 'present', ...presentation }, origin);
+      }
       // A provisional order slides the shown sheets into place, from `motion`, on the frame's clock.
       const motion = (data as { motion?: number }).motion;
       if (id === shown) onGeometry?.(data, motion !== undefined, motion, projectOf(id));
@@ -164,6 +189,23 @@ export function BookFrame({ busy = false, provisional, project, view, query = ''
     }
     storeFrame(id, frame);
   });
+  // Going back to the frame kept beneath (A → B → A within its moment, such as the layout previews of two spreads):
+  // it has loaded and reports nothing new, so it is shown again at once, or it would stay hidden behind B for good. It
+  // was on show a moment ago, so B is not kept beneath it: B goes, and A keeps its place in the page, since moving an
+  // iframe makes Chromium load it again.
+  useEffect(() => {
+    if (!target || target !== retiring || target === shown) return;
+    const frame = latest.current.get(target);
+    if (frame?.status?.state === 'ready' && frame.geometry) publish(target, frame);
+    setRetiring(undefined);
+  }, [target]);
+  // The frame itself cannot tell when the window shows its pixels (its animation frames run before), so the previous
+  // one stays for a fixed time. It is drawn over by the new frame wherever that has artwork.
+  useEffect(() => {
+    if (!retiring) return;
+    const timer = setTimeout(() => setRetiring((current) => current === retiring ? undefined : current), 600);
+    return () => clearTimeout(timer);
+  }, [retiring]);
   const latestEditing = useRef(inlineEditing);
   latestEditing.current = inlineEditing;
   const editingKey = JSON.stringify(inlineEditing ?? null);
@@ -232,17 +274,29 @@ export function BookFrame({ busy = false, provisional, project, view, query = ''
     refs.current.get(shown)?.contentWindow?.postMessage({ type: 'provisional', ...provisional }, origin);
   }, [provisionalKey, shown, target]);
   useLayoutEffect(() => {
-    if (presentation && shown) refs.current.get(shown)?.contentWindow?.postMessage({ type: 'present', ...presentation }, origin);
+    if (!presentation) return;
+    if (shown) refs.current.get(shown)?.contentWindow?.postMessage({ type: 'present', ...presentation }, origin);
+    // A candidate already drawing follows too, so it is ready on the spread shown when it is swapped in.
+    const candidate = target && target !== shown ? latest.current.get(target) : undefined;
+    if (candidate?.geometry && candidate.presented !== JSON.stringify(presentation)) {
+      candidate.presented = JSON.stringify(presentation);
+      refs.current.get(target!)?.contentWindow?.postMessage({ type: 'present', ...presentation }, origin);
+    }
   }, [presentation, shown]);
 
   return ids.map((id) => {
     const frame = frames[id];
+    const previous = id === retiring && id !== shown && id !== target;
+    // The frame kept beneath ends where the one on show does: a shorter book (a deleted spread, another format) must
+    // not show the previous revision's pages below its end.
+    const shownHeight = shown ? frames[shown]?.geometry?.height : undefined;
+    const height = previous && shownHeight !== undefined && frame?.geometry ? Math.min(frame.geometry.height, shownHeight) : frame?.geometry?.height;
     return <iframe key={id} title={title} tabIndex={-1}
-      className={'book-frame book-frame-' + view + (id === shown ? '' : ' book-frame-pending')}
+      className={'book-frame book-frame-' + view + (id === shown ? '' : ' book-frame-pending') + (previous ? ' book-frame-retiring' : '')}
       data-current={id === target || undefined} data-revision={projectOf(id)}
-      data-ready={frame?.status?.state === 'ready' && frame.published ? '' : undefined}
+      data-ready={frame?.status?.state === 'ready' && frame.published && !previous ? '' : undefined}
       aria-hidden={id !== shown || undefined}
-      style={{ height: frame?.geometry?.height }}
+      style={{ height }}
       ref={(element) => {
         if (!element) return;
         refs.current.set(id, element);
