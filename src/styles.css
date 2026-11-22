@@ -125,7 +125,7 @@ body { margin: 0; }
 /* Keep the candidate painted in Chromium so its first visible frame is ready when it is promoted. */
 .book-frame-pending { opacity: .01; }
 /* The previous revision, beneath the one just shown until that has painted. */
-.book-frame.book-frame-pending.book-frame-retiring { opacity: 1; }
+.book-frame.book-frame-pending.book-frame-retiring { opacity: 1; visibility: visible; }
 
 /* Canvas: the whole book in one scrolling column */
 .canvas-wrap { position: relative; min-height: 0; }
@@ -948,7 +948,9 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .presentation-cover-hidden { opacity: 0; pointer-events: none; }
 .presentation-cover-hidden .book-frame { pointer-events: none !important; }
 .presentation-cover-sheet { position: relative; max-height: 100%; }
-.presentation .book-frame-pending { visibility: hidden; }
+/* Painted, not hidden, like the book view's candidate: a hidden frame showed nothing for a moment once promoted, and may
+   not get its size (F-038). It must not take the overview's clicks meanwhile. */
+.presentation .book-frame-pending { pointer-events: none !important; }
 .presentation-idle, .presentation-idle * { cursor: none; }
 .presentation-indicator { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 6px 12px;
   border-radius: 20px; background: #000b; color: #eee; font-size: 12px; opacity: 0; transition: opacity .25s; pointer-events: none; }

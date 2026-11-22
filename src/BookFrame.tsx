@@ -9,7 +9,9 @@ import type { PageSide } from './project';
 export type PictureStatus = { type: 'pictures'; pending: number; errors: Issue[] };
 
 type FrameState = { element?: HTMLIFrameElement; geometry?: BookGeometry; status?: RenderStatus; published?: boolean; pictures?: PictureStatus;
-  reorder?: 'preparing' | 'ready' | 'skipped'; offsets?: ReorderOffset[]; preparedAt?: number; hiding?: boolean; start?: number };
+  reorder?: 'preparing' | 'ready' | 'skipped'; offsets?: ReorderOffset[]; preparedAt?: number; hiding?: boolean; start?: number;
+  // The presentation view last sent to the frame (JSON).
+  presented?: string };
 
 // The occurrence an inline editor is drawn over, whose artwork the book view hides while it edits.
 // `page` names the page of a spread shown as pages (ADR 0009); without it, the spread's own layout.
@@ -60,9 +62,9 @@ export function BookFrame({ busy = false, provisional, project, view, query = ''
   // The frame shown before `shown`, kept beneath it for a moment. Without it, a tall book's replacement frame showed
   // nothing at all for a moment while Chromium painted it (F-042).
   const [retiring, setRetiring] = useState<string>();
-  // The layout previews are kept too, where the new frame draws its previews in the same places: else the previous
-  // spread's previews would show between the new ones.
-  const keepsPrevious = (next: FrameState) => view === 'book' || view === 'thumbs' ||
+  // The presentation and the cover likewise flickered at each revision. The layout previews are kept too, where the new
+  // frame draws its previews in the same places: else the previous spread's previews would show between the new ones.
+  const keepsPrevious = (next: FrameState) => view === 'book' || view === 'thumbs' || view === 'present' || view === 'cover' ||
     (view === 'layouts' && !!shown && sameSheets(latest.current.get(shown)?.geometry, next.geometry));
   const [frames, setFrames] = useState<Record<string, FrameState>>({});
   const latest = useRef(new Map<string, FrameState>());
@@ -148,6 +150,13 @@ export function BookFrame({ busy = false, provisional, project, view, query = ''
         (event.source as Window).postMessage({ type: 'inline-editing', key: latestKey.current, ...latestEditing.current }, origin);
       }
       frame.geometry = data;
+      // A new presentation frame starts at the spread the presentation started on. It is sent the one on screen now,
+      // before it is shown: its readiness waits for that crop's photos, which otherwise loaded only once it was shown
+      // and blinked out over the previous frame.
+      if (presentation && id !== shown && frame.presented !== JSON.stringify(presentation)) {
+        frame.presented = JSON.stringify(presentation);
+        (event.source as Window).postMessage({ type: 'present', ...presentation }, origin);
+      }
       // A provisional order slides the shown sheets into place, from `motion`, on the frame's clock.
       const motion = (data as { motion?: number }).motion;
       if (id === shown) onGeometry?.(data, motion !== undefined, motion, projectOf(id));
@@ -250,7 +259,14 @@ export function BookFrame({ busy = false, provisional, project, view, query = ''
     refs.current.get(shown)?.contentWindow?.postMessage({ type: 'provisional', ...provisional }, origin);
   }, [provisionalKey, shown, target]);
   useLayoutEffect(() => {
-    if (presentation && shown) refs.current.get(shown)?.contentWindow?.postMessage({ type: 'present', ...presentation }, origin);
+    if (!presentation) return;
+    if (shown) refs.current.get(shown)?.contentWindow?.postMessage({ type: 'present', ...presentation }, origin);
+    // A candidate already drawing follows too, so it is ready on the spread shown when it is swapped in.
+    const candidate = target && target !== shown ? latest.current.get(target) : undefined;
+    if (candidate?.geometry && candidate.presented !== JSON.stringify(presentation)) {
+      candidate.presented = JSON.stringify(presentation);
+      refs.current.get(target!)?.contentWindow?.postMessage({ type: 'present', ...presentation }, origin);
+    }
   }, [presentation, shown]);
 
   return ids.map((id) => {

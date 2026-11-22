@@ -7,10 +7,12 @@ import { coverLayoutsFor } from './cover';
 
 export type PresentationUnit = { spread: string; side: PrintSide; pages: number[]; label: string };
 export type PresentationView = { spread: string; side: PrintSide; bounds: 'trim' | 'bleed'; overview: boolean };
-// Overview cells need screen-sized pictures, not camera originals. Keep the full source URL for normal view.
+// Screen-sized pictures, not camera originals: overview cells small ones, the spread on screen as wide as its box shows
+// them. Six decoded originals took hundreds of megabytes, twice over while a new revision replaced the previous one,
+// and Chromium dropped some again after decoding them, so they blinked at each revision. Widths step by 512 so a
+// rendition made once serves the next revision and nearby window sizes; the original is never enlarged.
 export function presentationPhotoSource(source: string, pixels: number, overview: boolean) {
-  if (!overview) return source;
-  const width = Math.max(128, Math.min(1024, Math.ceil(pixels / 128) * 128));
+  const width = overview ? Math.max(128, Math.min(1024, Math.ceil(pixels / 128) * 128)) : Math.max(512, Math.min(8192, Math.ceil(pixels / 512) * 512));
   return source.replace(/(\/proof-photo\/[\w-]+)(?:\/\d+)?$/, '$1/' + width);
 }
 // Keep reading order independent of PDF delivery: a spread stays together unless single pages were requested.

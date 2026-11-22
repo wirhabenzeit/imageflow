@@ -6,11 +6,13 @@ import { mm, printFormat } from '../src/format';
 import { chooseFormat, templateInfo, templateSchema } from '../src/template';
 import { newSpread } from '../src/editing';
 const base = { label: 'F', trim: { width: mm(100), height: mm(120) }, bleed: mm(3), safe: mm(5), pageCount: { min: 2, max: 100, step: 2 as const } };
-test('overview photo renditions are bounded and normal presentation uses originals', () => {
+test('presentation photo renditions are screen-sized and bounded', () => {
   const source = 'imageflow://render/render/id/proof-photo/photo';
   assert.equal(presentationPhotoSource(source, 350, true), source + '/384');
   assert.equal(presentationPhotoSource(source, 9000, true), source + '/1024');
-  assert.equal(presentationPhotoSource(source, 350, false), source);
+  assert.equal(presentationPhotoSource(source, 350, false), source + '/512');
+  assert.equal(presentationPhotoSource(source, 2600, false), source + '/3072');
+  assert.equal(presentationPhotoSource(source, 20000, false), source + '/8192');
 });
 const template = (format: ReturnType<typeof printFormat>) => templateInfo(chooseFormat(templateSchema.parse({ id: 't', version: '1', contract: 1, format,
   spreads: { full: { label: 'Full', span: 'spread', render: () => null }, cover: { label: 'Cover', span: 'right', render: () => null }, back: { label: 'Back', span: 'left', render: () => null }, page: { label: 'Page', span: 'page', render: () => null } } })));

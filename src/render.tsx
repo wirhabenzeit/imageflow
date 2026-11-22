@@ -821,6 +821,11 @@ async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spre
   let drawRevision = 0;
   let firstPaint!: () => void;
   const painted = new Promise<void>((resolve) => { firstPaint = resolve; });
+  // A new revision's frame starts at the spread the presentation started on, and is told the spread on screen once it
+  // has drawn. It is ready only with that spread's photos, so it does not load them after it replaced the previous
+  // frame, when they blinked. An empty book is never told a spread, so it does not wait long.
+  let told = !spreads.length;
+  const untold = setTimeout(() => { told = true; draw(); }, 2000);
   function syncPictures() {
     for (const [frame, sheet] of sources) {
       const originals = sheet.querySelectorAll<HTMLElement>('.if-rendered-image');
@@ -909,9 +914,14 @@ async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spre
         const loaded = () => { image.removeEventListener('load', loaded); image.removeEventListener('error', loaded); resolve(); };
         image.addEventListener('load', loaded, { once: true }); image.addEventListener('error', loaded, { once: true });
       }))).then(() => {
-        // Chromium can defer decode() indefinitely in a hidden candidate iframe. Loading the full original
-        // is enough to reveal it; readiness also follows the latest crop if fullscreen resized it meanwhile.
-        if (revision === drawRevision) firstPaint();
+        // Then decoded: the crop shows full originals, and one that has only loaded is drawn as empty paper until
+        // Chromium has decoded it, so the photos blinked once the frame replaced the previous one. The candidate frame
+        // is painted (opacity .01, not hidden), so decode() resolves; a short cap guards against one that does not.
+        // Readiness also follows the latest crop if fullscreen resized it meanwhile.
+        const shown = [...stage.querySelectorAll<HTMLImageElement>('img')].filter((image) => image.getAttribute('src') && image.closest<HTMLElement>('.if-present-crop')?.style.visibility !== 'hidden');
+        return Promise.race([Promise.allSettled(shown.map((image) => image.decode())), new Promise((resolve) => setTimeout(resolve, 3000))]);
+      }).then(() => {
+        if (revision === drawRevision && told) firstPaint();
       });
     }
   }
@@ -920,6 +930,8 @@ async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spre
     const next = event.data as PresentationView;
     if (!spreads.some(({ id }) => id === next.spread) || !['page', 'left', 'right', 'spread'].includes(next.side) || !['trim', 'bleed'].includes(next.bounds)) return;
     state = next;
+    told = true;
+    clearTimeout(untold);
     draw();
   });
   window.addEventListener('resize', draw);

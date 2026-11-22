@@ -58,7 +58,7 @@ try {
   const picker = window.getByLabel('Cover layout', { exact: true });
   await picker.selectOption('wrapPhoto');
   const heading = window.getByRole('textbox', { name: 'Cover title', exact: true });
-  await window.frameLocator(coverReady + ' iframe').locator('[data-box="hero"]').waitFor();
+  await window.frameLocator(coverReady + ' iframe[data-ready]').locator('[data-box="hero"]').waitFor();
   await window.evaluate(() => {
     const sheet = document.querySelector('.cover-preview-sheet');
     const transitions = [];
@@ -73,7 +73,7 @@ try {
   });
   await heading.fill('A physical cover');
   await heading.press('Tab');
-  const artwork = window.frameLocator(coverReady + ' iframe').locator('[data-edit="title"]');
+  const artwork = window.frameLocator(coverReady + ' iframe[data-ready]').locator('[data-edit="title"]');
   await artwork.filter({ hasText: 'A physical cover' }).waitFor();
   const transitions = await window.evaluate(() => window.coverTransitions());
   assert.ok(transitions.length > 0 && transitions.every(Boolean), 'A ready cover stays visible while the replacement loads.');
@@ -88,7 +88,7 @@ try {
   const photo = Object.keys(photos)[0];
   await window.getByRole('combobox', { name: 'Choose photo for Cover photo' }).selectOption(photo);
   await window.getByRole('combobox', { name: 'Replace photo in Cover photo' }).waitFor();
-  await window.frameLocator(coverReady + ' iframe').locator('[data-box="hero"] img').waitFor();
+  await window.frameLocator(coverReady + ' iframe[data-ready]').locator('[data-box="hero"] img').waitFor();
   assert.equal((await readProject()).cover.boxes.hero.photo, photo);
   await window.getByRole('button', { name: 'Guides', exact: true }).click();
   assert.equal(await window.locator('.cover-guides .gutter-guide').count(), 2);
@@ -177,7 +177,7 @@ try {
   assert.equal(at50.interiorPages, 50);
   assert.equal(at50.artwork.boxes.hero.crops.wrapPhoto.zoom, 1.25);
   assert.equal(points(at50.geometry.regions.backFlap.width), 284);
-  await window.frameLocator(coverReady + ' iframe').locator('[data-edit="frontFlapText"]').filter({ hasText: 'Front flap proof' }).waitFor();
+  await window.frameLocator(coverReady + ' iframe[data-ready]').locator('[data-edit="frontFlapText"]').filter({ hasText: 'Front flap proof' }).waitFor();
   await commit(operations, 'blurb-52');
   const at52 = await getCover();
   assert.equal(at52.interiorPages, 52);
@@ -195,7 +195,7 @@ try {
   assert.ok((await sources()).find(({ id }) => id === photo).usage.every(({ cover }) => !cover));
   await undoBook(window);
   await window.getByRole('radio', { name: 'Cover', exact: true }).click();
-  await window.frameLocator(coverReady + ' iframe').locator('[data-edit="title"]').filter({ hasText: 'A physical cover' }).waitFor();
+  await window.frameLocator(coverReady + ' iframe[data-ready]').locator('[data-edit="title"]').filter({ hasText: 'A physical cover' }).waitFor();
 
   const calendar = join(work, 'Calendar.imageflow');
   await copySample(join(root, 'sample/calendar'), calendar);
