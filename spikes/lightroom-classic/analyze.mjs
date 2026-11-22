@@ -47,5 +47,11 @@ for (const entry of entries) {
   if (entry.kind === 'loopback-auth') console.log(`- wrong token → status ${entry.status} (401 expected)`);
   if (entry.kind === 'probe-keys') console.log(`- Lightroom ${JSON.stringify(entry.lightroom)}; accepted keys: ${entry.working.join(', ')}; rejected: ${entry.rejected.length}`);
   if (entry.kind === 'identity') console.log(`- identity ${entry.file}: uuid ${entry.values.uuid}, croppedDimensions ${entry.croppedDimensionsType} ${JSON.stringify(entry.values.croppedDimensions)}, resolves by uuid: ${yes(entry.resolvesByUuid)}`);
+  if (entry.kind === 'batch-export') {
+    console.log(`- batch export ${entry.label}: ${entry.rendered} of ${entry.photos} photos in ${entry.seconds.toFixed(1)} s (${entry.perPhoto?.toFixed(2)} s each, ${(entry.totalBytes / 1e6).toFixed(0)} MB${entry.longEdge ? `, long edge ${entry.longEdge}` : ''}); longest gap for another task ${entry.maxTaskGap.toFixed(2)} s`);
+    if (entry.cancel) console.log(`  left the loop after ${entry.cancel.stoppedAfter}; files over the next 20 s: ${entry.cancel.filesOver20s.join(', ')}; session.cancel exists: ${yes(entry.cancel.hasCancelMethod)}`);
+    for (const r of entry.renditions) if (r.error || r.revisionChanged) console.log(`  ${r.file}: ${r.error ? `error ${r.error}` : 'revision changed during the batch'}`);
+  }
+  if (entry.kind === 'batch-export-edit') console.log(`- edit during batch: revision changed ${yes(entry.revisionChangedDuringBatch)}; batch render equals a fresh render ${yes(entry.sameImageAsRenderNow)} (yes = the batch picked up the edit)`);
   if (entry.kind === 'error') console.log(`- ERROR in ${entry.experiment}: ${entry.message}`);
 }

@@ -54,6 +54,17 @@ In a terminal: `node server.mjs`. In Lightroom run **7. Loopback HTTP tests**. I
 
 Select photos and run **4. Probe keys and identity**. It lists which candidate keys `batchGetRawMetadata` accepts (including the spelling of the orientation key and the type of `croppedDimensions`), the Lightroom version and the catalog path, and whether `findPhotoByUuid` finds each photo. Then **File → Export as Catalog** with the selected photos, open the exported catalog, select the same photos and run it again: compare the UUIDs. Also run it on a virtual copy and on a photo in a second catalog.
 
+### Q9: batch export for the final render [ADR section 4]
+
+Select about 20 photos (RAW, some cropped) and make one of them the active photo (click it last). Run **9. Benchmark batch export**. A dialog explains the first pass. When you click OK, it renders all of them in **one** `LrExportSession` at full size, with the active photo last. While that runs, switch to Develop and change the active photo's exposure. Then leave Lightroom alone until the final message. The experiment then:
+
+- re-renders the edited photo and compares image data, to see whether the batch rendered it with the settings from the start of the session or from the moment its turn came;
+- renders the same photos at print size (3508 px long edge, A4 at 300 DPI);
+- starts a third pass and leaves the rendition loop after 3 photos, then counts files for 20 s to see whether Lightroom keeps rendering (whether a batch can be cancelled from the plugin);
+- measures how long another plugin task can go without running (`maxTaskGap`).
+
+Note anything that felt slow in Lightroom during the passes.
+
 ### Q8: `croppedDimensions` against the real export [ADR 8]
 
 The render benchmark logs `fullMatchesCropped`. Include photos with Upright, a straightened crop, and Enhance → Super Resolution.
@@ -71,6 +82,7 @@ First run 2026-11-22, Lightroom Classic 16.0.1 (build 202611171809), macOS 27.2.
 - **Q4/Q7:** a 1400 px preview takes 0.5–1.0 s per RAW (about 1 s on the first render of a photo, 0.5 s once Lightroom has it cached), and a full-resolution JPEG (q 0.95, 17–22 MB) takes about 1.5 s. Previews really are 1400×933. Rendering does not change `editCount`. **Re-renders are not byte-identical:** each export writes a new `xmp:ModifyDate`/`xmp:MetadataDate` and a random `xmpMM:DocumentID`, even with `LR_embeddedMetadataOption = 'copyrightOnly'`. The image data (the file without its APPn/COM segments) is identical on every photo tested (4 of 4), so a hash of it is stable. The spike now logs `imageMd5` and `identicalPreviewImageData`.
 - **Q5:** 20 loopback POSTs: median 0.6 ms, max 3.7 ms. A 10 s long poll did not block another plugin task (19 of 20 expected ticks). A wrong token got 401, so `LrHttp` headers reach the server. A long poll during a large user export was not tested.
 - **Q6:** Accepted keys: `uuid, editCount, lastEditTime, croppedDimensions, dimensions, isCropped, orientation, rating, pickStatus, fileSize, fileFormat, isVirtualCopy, countVirtualCopies, width, height`. Rejected: `Orientation` (the key is lower-case `orientation`, values such as `"AB"`), `copyName`, `aspectRatioCache`. **`croppedDimensions` is a table `{ width, height }`, not a string.** `findPhotoByUuid` resolves every photo tested, a virtual copy included (a virtual copy has its own UUID). UUIDs across *Export as Catalog* were not tested.
+- **Q9 (batch export):** 20 RAWs in **one** `LrExportSession` at full size took 15.7 s, **0.78 s per photo**: Lightroom renders several at once, about twice as fast as one session per photo (1.5 s). Renditions come back roughly in order. The same 20 at print size (3508 px long edge) took 15.1 s: **a smaller target saves disk (105 MB instead of 381 MB), not time**, because the RAW processing dominates. **An edit made during the batch was not in its render:** the photo's revision changed between the start of the session and the end of its render, and its batch render differs from a fresh render. The before/after revision check catches this, so it is required, not optional. **A batch cannot be cancelled from the plugin:** `LrExportSession` has no `cancel`, and leaving the rendition loop after 3 photos did not stop Lightroom, which finished all 20 within about 6 s. While the full pass ran, another plugin task went up to 1.2 s without running. Lightroom felt responsive (reported by the user).
 - **Q8:** On 4 photos (one cropped to 6654×4436, three uncropped), `croppedDimensions` equals the real full-resolution size. Upright, straightened and Super Resolution photos were not tested.
 
 ## What each outcome changes in the ADR

@@ -15,6 +15,7 @@ return {
     { title = '6. Benchmark renders (first 3 selected photos)', file = 'BenchRender.lua', enabledWhen = 'photosSelected' },
     { title = '7. Loopback HTTP tests (needs server.mjs)', file = 'Loopback.lua' },
     { title = '8. Reveal log folder', file = 'Reveal.lua' },
+    { title = '9. Benchmark batch export (up to 20 selected photos)', file = 'BatchExport.lua', enabledWhen = 'photosSelected' },
   },
   VERSION = { major = 0, minor = 1, revision = 0 },
 }

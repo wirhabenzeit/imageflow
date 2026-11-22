@@ -474,6 +474,141 @@ function Spike.loopback()
 end
 
 --- Logs the mask and retouch structures of the selected photos (which mask types getDevelopSettings exposes).
+---------------------------------------------------------------------------------------------------
+-- 9. Batch export (ADR section 4): one LrExportSession over many photos, a print-sized pass,
+-- cancelling mid-batch, and an edit made while the batch renders.
+---------------------------------------------------------------------------------------------------
+
+local function revisions(catalog, photos)
+  local data = catalog:batchGetRawMetadata(photos, { 'uuid', 'editCount', 'lastEditTime' })
+  local result = {}
+  for _, photo in ipairs(photos) do
+    local row = data[photo] or {}
+    result[photo] = { uuid = row.uuid, revision = tostring(row.lastEditTime) .. ':' .. tostring(row.editCount) }
+  end
+  return result
+end
+
+local function emptyFolder(folder)
+  if LrFileUtils.exists(folder) then LrFileUtils.delete(folder) end
+  LrFileUtils.createAllDirectories(folder)
+  return folder
+end
+
+local function countFiles(folder)
+  local count = 0
+  for _ in LrFileUtils.files(folder) do count = count + 1 end
+  return count
+end
+
+--- A ticker task: the longest gap between 0.25 s sleeps shows how much the batch starves other plugin tasks.
+local function startTicker()
+  local ticker = { running = true, maxGap = 0, ticks = 0 }
+  LrTasks.startAsyncTask(function()
+    local last = now()
+    while ticker.running do
+      LrTasks.sleep(0.25)
+      local t = now()
+      if t - last > ticker.maxGap then ticker.maxGap = t - last end
+      last, ticker.ticks = t, ticker.ticks + 1
+    end
+  end)
+  return ticker
+end
+
+--- Renders `photos` in one session. Options: settings mode, longEdge (print size), stopAfter (cancel test).
+local function batchPass(catalog, photos, label, options)
+  local folder = emptyFolder(LrPathUtils.child(LrPathUtils.child(Spike.dir(), 'renders'), 'batch-' .. label))
+  local settings = exportSettings(folder, 'x', options.mode or 'full')
+  settings.LR_tokens = '{{image_name}}'
+  settings.LR_collisionHandling = 'rename'
+  if options.longEdge then
+    settings.LR_size_doConstrain = true
+    settings.LR_size_resizeType = 'longEdge'
+    settings.LR_size_maxWidth = options.longEdge
+    settings.LR_size_maxHeight = options.longEdge
+    settings.LR_size_doNotEnlarge = true
+  end
+  local before = revisions(catalog, photos)
+  local ticker = startTicker()
+  local started = now()
+  local session = LrExportSession({ photosToExport = photos, exportSettings = settings })
+  local results, index, stopped = {}, 0, false
+  for _, rendition in session:renditions() do
+    index = index + 1
+    local ok, pathOrMessage = rendition:waitForRender()
+    local photo = rendition.photo
+    local after = revisions(catalog, { photo })[photo]
+    local entry = { index = index, file = name(photo), uuid = before[photo] and before[photo].uuid, ok = ok, at = now() - started,
+      revisionBefore = before[photo] and before[photo].revision, revisionAfter = after.revision }
+    entry.revisionChanged = entry.revisionBefore ~= entry.revisionAfter
+    if ok and LrFileUtils.exists(pathOrMessage) then
+      local content = readAll(pathOrMessage)
+      entry.bytes = content and #content
+      entry.imageMd5 = content and hex(LrMD5.digest(imageData(content)))
+      entry.width, entry.height = pixelSize(pathOrMessage)
+      entry.path = pathOrMessage
+    else
+      entry.error = tostring(pathOrMessage)
+    end
+    results[#results + 1] = entry
+    if options.stopAfter and index >= options.stopAfter then
+      stopped = true
+      break
+    end
+  end
+  local loopSeconds = now() - started
+  local summary = { kind = 'batch-export', label = label, photos = #photos, rendered = #results, seconds = loopSeconds,
+    perPhoto = #results > 0 and loopSeconds / #results or nil, longEdge = options.longEdge, maxTaskGap = ticker.maxGap }
+  if stopped then
+    -- Does Lightroom keep rendering after the loop is left? Count files for 20 s.
+    local counts = {}
+    for i = 1, 10 do
+      LrTasks.sleep(2)
+      counts[i] = countFiles(folder)
+    end
+    summary.cancel = { stoppedAfter = options.stopAfter, filesAtStop = #results, filesOver20s = counts,
+      hasCancelMethod = type(session.cancel) == 'function' }
+  end
+  ticker.running = false
+  local bytes = 0
+  for _, entry in ipairs(results) do bytes = bytes + (entry.bytes or 0) end
+  summary.totalBytes = bytes
+  summary.renditions = results
+  Spike.log(summary)
+  return results
+end
+
+function Spike.batchExport()
+  local catalog = LrApplication.activeCatalog()
+  local selected = catalog:getTargetPhotos()
+  if #selected < 2 then error('Select at least 2 photos (about 20 is ideal).') end
+  -- The active photo goes last, so there is time to edit it while the batch runs.
+  local active = catalog:getTargetPhoto()
+  local photos = {}
+  for i = 1, math.min(#selected, 20) do
+    if selected[i] ~= active then photos[#photos + 1] = selected[i] end
+  end
+  photos[#photos + 1] = active
+  Spike.log({ kind = 'batch-export-start', photos = #photos, editTarget = name(active) })
+
+  LrDialogs.message('ImageFlow Spike: batch export',
+    'Pass 1 renders ' .. #photos .. ' photos at full size when you click OK.\n\nWhile it runs, switch to Develop and change the exposure of the active photo (' .. name(active) .. '), which renders last. Then leave Lightroom alone until the final message.', 'info')
+  local full = batchPass(catalog, photos, 'full', {})
+
+  -- Did the edited photo render with the old or the new settings? Render it again now and compare image data.
+  local last = full[#full]
+  if last and last.imageMd5 then
+    local again = batchPass(catalog, { active }, 'recheck', {})
+    Spike.log({ kind = 'batch-export-edit', file = last.file, revisionChangedDuringBatch = last.revisionChanged,
+      sameImageAsRenderNow = again[1] and again[1].imageMd5 == last.imageMd5 })
+  end
+
+  batchPass(catalog, photos, 'print-a4', { longEdge = 3508 }) -- A4 long edge at 300 DPI
+  batchPass(catalog, photos, 'cancel', { stopAfter = 3 })
+  LrDialogs.message('ImageFlow Spike', 'Batch export finished. See the log.', 'info')
+end
+
 function Spike.dumpDevelop()
   local _, photos = targets()
   for _, photo in ipairs(photos) do
