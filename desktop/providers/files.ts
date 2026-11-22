@@ -1,7 +1,7 @@
 import { constants, watch as watchDirectory } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { copyFile, realpath, stat } from 'node:fs/promises';
+import { copyFile, realpath, rm, stat } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { SourceEntry } from '../../src/source-locations';
 import { sourceFolder } from '../../src/source-locations';
@@ -77,10 +77,11 @@ export async function cloneFile(folder: string, source: FileSource, staging: str
   const before = await observeFile(folder, source);
   if (before.state !== 'available') return before;
   const file = join(staging, randomUUID() + '.tmp');
+  // A copy that is not handed over is removed here: the folder may be one that is kept, such as the source cache.
   try { await copyFile(before.file, file, constants.COPYFILE_FICLONE | constants.COPYFILE_EXCL); }
-  catch (error) { return fileFailure(error, source); }
+  catch (error) { await rm(file, { force: true }); return fileFailure(error, source); }
   const after = await observeFile(folder, source);
-  if (after.state !== 'available') return after;
+  if (after.state !== 'available') { await rm(file, { force: true }); return after; }
   // Another file at the path has another inode, so its stamp differs like that of the same file after a change.
   return { file, before: before.revisions, after: after.revisions };
 }
@@ -142,7 +143,7 @@ export function watchLinkedFiles(folder: string, files: readonly WatchedFile[], 
         const previous = stamps.get(id);
         stamps.set(id, stamp);
         if (previous !== undefined && previous !== stamp) { moved.push(id); continue; }
-        if (!unavailable.has(id) || moved.length || Date.now() <= (retryAt.get(id) ?? 0)) continue;
+        if (!unavailable.has(id) || Date.now() <= (retryAt.get(id) ?? 0)) continue;
         retryAt.set(id, Date.now() + retryInterval);
         if ((await observeFile(folder, source)).state === 'available') { unavailable.delete(id); moved.push(id); }
       }

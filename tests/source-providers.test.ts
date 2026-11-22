@@ -138,6 +138,8 @@ test('a materialized file is a private copy with the revision before and after, 
     assert.deepEqual(result.before, { revision: fileStamp(await stat(original, { bigint: true })) });
     assert.deepEqual(result.after, result.before);
   }
+  // The photo that failed left nothing in the folder.
+  assert.equal((await readdir(staging)).length, 2);
   // Nothing is produced once the host cancelled.
   const cancelled = new AbortController(); cancelled.abort();
   assert.deepEqual(await all(linkedProvider.materialize(f.folder, [linkedRef('a', first)], { staging, signal: cancelled.signal })), []);
@@ -171,6 +173,14 @@ test('linked files are watched where they are: a change, a replacement and a fil
   await writeFile(away, await readFile(kept));
   await next('away');
   assert.equal(reported.includes('kept'), false);
+  // A file that can be read again is reported with one that changed in the same look, not left for a later one.
+  const back = join(f.external, 'back.png');
+  await writeFile(back, await readFile(kept));
+  await approveSource(f.folder, { key: 'photo:back', kind: 'photo', path: back, linked: true });
+  const together = await new Promise<string[]>((done) => {
+    const stopBoth = linkedProvider.watch(f.folder, [linkedRef('first', kept, 'an-earlier-stamp'), linkedRef('back', back)], (ids) => { stopBoth(); done(ids); });
+  });
+  assert.deepEqual(together, ['first', 'back']);
   stop();
   const count = reported.length;
   await writeFile(kept, await readFile(edited));

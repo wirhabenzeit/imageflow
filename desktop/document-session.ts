@@ -638,11 +638,14 @@ export class DocumentSession {
       if (this.closing) return;
       if (this.busy) return later();
       this.linkedReloadPending = false;
-      await this.run(async () => {
-        this.notify({ building: true });
-        try { this.notify({ value: await this.reload() }); }
-        catch (error) { this.notify({ error: error instanceof Error ? error.message : String(error) }); throw error; }
-      });
+      let reported = false;
+      try {
+        await this.run(async () => {
+          this.notify({ building: true });
+          try { this.notify({ value: await this.reload() }); }
+          catch (error) { reported = true; this.notify({ error: error instanceof Error ? error.message : String(error) }); throw error; }
+        });
+      } catch (error) { if (!reported) this.notify({ error: String(error) }); }
     } catch (error) { this.notify({ error: String(error) }); }
     finally { this.linkedReloading = false; }
   }
