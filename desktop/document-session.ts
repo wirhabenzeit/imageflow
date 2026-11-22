@@ -43,6 +43,7 @@ import { AuthoringQueue } from './authoring-queue';
 import { authoringErrorResult } from './authoring-errors';
 import { ImportReceipts } from './import-receipts';
 import { renameSource, saveDocumentCopy } from './source-actions';
+import type { CopyOptions } from './source-actions';
 import { rebuildTemplateDependencies } from './dependency-install';
 import type { DependencyRebuild } from './dependency-install';
 import { AssetFacts } from './asset-facts';
@@ -471,7 +472,23 @@ export class DocumentSession {
     const busy = reply && typeof reply === 'object' && typeof (reply as { busy?: unknown }).busy === 'string' ? { busy: (reply as { busy: string }).busy.slice(0, 120) } : undefined;
     this.agentLeases.get(id)?.(reply === true || busy || (parseActiveEditor(reply) ?? false));
   }
-  cancelExport() { this.exportJob?.abort(); }
+  /** A Copy into Book or Duplicate that materializes photos without a file: Cancel stops it as it stops an export. */
+  copyJob?: AbortController;
+  cancelExport() { this.exportJob?.abort(); this.copyJob?.abort(); }
+  /**
+   * Runs a copy that may materialize photos (`collectSources`, `saveDocumentCopy`) with this session's cancel and the
+   * status bar's progress. Only one at a time: a second waits for nothing and is refused.
+   */
+  async copying<T>(owner: BrowserWindow, task: (options: CopyOptions) => Promise<T>) {
+    if (this.copyJob) throw new Error('Wait for the copy in progress to finish.');
+    const job = new AbortController();
+    this.copyJob = job;
+    // The window's own task clears its status when it ends; only what is still running is reported.
+    const progress = (stage: string) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage); };
+    try {
+      return await task({ signal: job.signal, progress: ({ done, total }) => { if (total && done < total) progress('Preparing originals: ' + done + ' of ' + total + '…'); } });
+    } finally { if (this.copyJob === job) this.copyJob = undefined; }
+  }
   cancelCheck() { this.checkJob?.abort(); }
   /** Where template packages are installed, outside every book; set by the app. */
   dependencyCache?: string;

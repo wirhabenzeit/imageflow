@@ -1,13 +1,15 @@
 import type { BookMenuState, ContextMenuItem, ProjectSummary } from './desktop';
 import { emptyMenuState } from './commands';
-import { sourceEntries, sourceFile } from './source-locations';
+import { sourceEntries, sourceFile, sourceProvider } from './source-locations';
 import type { SourceRepair } from './source-locations';
 import { assetPageLabels, assetUsage, usageLabel } from './asset-usage';
 import type { SourceUsage } from './editing';
 
 export function assetMenu(summary: ProjectSummary, keys: string[], place = false, knownUsage?: SourceUsage): ContextMenuItem[] {
   const chosen = sourceEntries(summary).filter(({ key }) => keys.includes(key));
-  const linked = chosen.filter((entry) => sourceFile(entry)?.linked).length;
+  // What Copy into Book takes into the package: a linked file, or a photo of another provider, which is materialized
+  // on the way (ADR 0011, §4.5).
+  const linked = chosen.filter((entry) => sourceProvider(entry) !== 'package').length;
   const missing = chosen.some(({ key }) => summary.sources?.[key]?.state !== 'available');
   // What each unavailable asset's provider offers (`SourceProvider.repairs`): a file is located, a photo of an app or a
   // server that is not reachable is not. Statuses from before repairs were reported offer what a file does.

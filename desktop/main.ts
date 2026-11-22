@@ -12,7 +12,7 @@ import { commandRegistry, commandState, emptyMenuState } from '../src/commands';
 import type { ContextMenuItem, ContextMenuResult } from '../src/desktop';
 import type { RegisteredCommand } from '../src/commands';
 import { bookName } from '../src/book-name';
-import { collectSources, relocateSource, relinkFolder, saveDocumentCopy, removeSources, renameSource } from './source-actions';
+import { collectSources, CopyCancelled, relocateSource, relinkFolder, saveDocumentCopy, removeSources, renameSource } from './source-actions';
 import { originalPath, within } from './source-store';
 // The file a source is: Show in Finder, Edit in Default App, Quick Look and dragging out need one, so a photo that is
 // not a file has none of them (ADR 0011).
@@ -21,7 +21,7 @@ async function sourceOriginal(folder: string, entry: SourceEntry) {
   if (!file) throw new Error(entry.name + ' is not a file on this Mac.');
   return originalPath(folder, file);
 }
-import { fileSourceOf, sourceEntries } from '../src/source-locations';
+import { fileSourceOf, sourceEntries, sourceProvider } from '../src/source-locations';
 import type { SourceEntry } from '../src/source-locations';
 import { assetPageLabels, assetUsage, usageLabel } from '../src/asset-usage';
 import { importFeedback } from '../src/import-feedback';
@@ -1814,7 +1814,13 @@ void app.whenReady().then(async () => {
     let next = document.book;
     let message: string | undefined;
     if (request.action === 'retry') return { summary: activate(await document.reload()) };
-    if (request.action === 'collect') next = await collectSources(document.book, keys);
+    // Photos without a file are materialized on the way; one whose source cannot produce it stays as it was.
+    const unproduced: string[] = [];
+    const collect = (chosenKeys?: readonly string[]) => document.copying(owner, (options) =>
+      collectSources(document.book, chosenKeys, { ...options, failed: (photo) => unproduced.push(photo.name) }));
+    const unproducedMessage = () => unproduced.length ? (unproduced.length === 1 ? unproduced[0] + ' could not be copied: its source could not produce the original.'
+      : unproduced.length + ' photos could not be copied: their source could not produce the originals (' + unproduced.join(', ') + ').') : undefined;
+    if (request.action === 'collect') { next = await collect(keys); message = unproducedMessage(); }
     else if (request.action === 'import') {
       // Photos, Markdown and files the template's file parameters accept; the Assets window supplies its own accept list.
       if (request.paths !== undefined && (!Array.isArray(request.paths) || request.paths.length > 1000 || !request.paths.every((path) => typeof path === 'string'))) throw new Error('Invalid import.');
@@ -1848,7 +1854,8 @@ void app.whenReady().then(async () => {
       }
     } else {
       if (!source) throw new Error('Choose a registered source.');
-      if (request.action === 'copy') next = await collectSources(document.book, chosen.filter((entry) => fileSourceOf(entry)?.linked).map(({ key }) => key));
+      // A linked file, or a photo without a file; one in the package is in the book already.
+      if (request.action === 'copy') { next = await collect(chosen.filter((entry) => sourceProvider(entry) !== 'package').map(({ key }) => key)); message = unproducedMessage(); }
       else if (request.action === 'locate' || request.action === 'replace') {
         // Locate is offered where the photo's provider offers it (`SourceProvider.repairs`); Replace is always a file.
         const status = document.book.sources?.[source.key];
@@ -1877,7 +1884,7 @@ void app.whenReady().then(async () => {
     if (includeAssets === undefined) {
       const answer = await dialog.showMessageBox(document.window, { type: 'question', message: 'Duplicate this book?',
         buttons: ['Duplicate', 'Cancel'], defaultId: 0, cancelId: 1, checkboxLabel: 'Include all files', checkboxChecked: true,
-        detail: sourceEntries(document.book).some((entry) => fileSourceOf(entry)?.linked) ? 'Unchecked: linked files keep their full paths.' : undefined });
+        detail: sourceEntries(document.book).some((entry) => sourceProvider(entry) !== 'package') ? 'Unchecked: linked files keep their full paths, and photos from other sources stay linked to them.' : undefined });
       if (answer.response !== 0) return null;
       includeAssets = answer.checkboxChecked;
     }
@@ -1885,7 +1892,9 @@ void app.whenReady().then(async () => {
     const choice = await dialog.showSaveDialog(document.window, { title: 'Duplicate Book', buttonLabel: 'Duplicate',
       defaultPath: join(app.getPath('documents'), bookName(document.book.folder) + ' Copy.imageflow'), filters: [{ name: 'ImageFlow Book', extensions: ['imageflow'] }] });
     if (choice.canceled || !choice.filePath) return null;
-    const folder = await saveDocumentCopy(document.book, choice.filePath, includeAssets);
+    let folder: string;
+    try { folder = await document.copying(document.window, (options) => saveDocumentCopy(document.book, choice.filePath!, includeAssets!, undefined, false, options)); }
+    catch (error) { if (error instanceof CopyCancelled) return null; throw error; }
     await openDocument(folder);
     return null;
   }));

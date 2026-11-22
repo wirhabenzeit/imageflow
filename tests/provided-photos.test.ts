@@ -16,6 +16,7 @@ import { captureProjectInputs } from '../desktop/revisions';
 import { registerProvider } from '../desktop/providers';
 import { providedChanges, refreshProvided, strippedPreview } from '../desktop/provided-photos';
 import { materializePhotos, placedPhotos } from '../desktop/materialized-photos';
+import { collectSources, saveDocumentCopy } from '../desktop/source-actions';
 import type { Materialized, MaterializeOptions, Observed, Revisions, SourceProvider, SourceRef, Unavailable } from '../desktop/source-provider';
 import { copySample } from '../desktop/sample-book.mjs';
 import { bookFormatOf, photoIndexSchema, projectSchema } from '../src/project';
@@ -657,4 +658,93 @@ test('the export guard follows the revision token of a materialized photo', asyn
   // Once the watch reports it, the render inputs move: "Sources changed during export".
   await changesOf(f, ['mem1']);
   assert.notEqual((await captureProjectInputs(f.folder)).revision, before.revision);
+});
+
+test('Copy into Book materializes a photo without a file and makes it an owned photo', async (t) => {
+  const f = await fixture(t);
+  await settle(f.book);
+  const progress: string[] = [];
+  const failed: string[] = [];
+  const copied = await collectSources(f.book, ['photo:mem1'], { progress: ({ done, total }) => progress.push(done + '/' + total), failed: (source) => failed.push(source.id) });
+  assert.deepEqual(failed, []);
+  assert.deepEqual(progress, ['0/1', '1/1']);
+  const entry = copied.photoIndex.mem1 as Record<string, unknown>;
+  assert.equal(entry.memory, undefined, 'the provider\'s fields are gone');
+  assert.match(entry.path as string, /^photos\/mem1-[0-9a-f]{8}\/IMG_0001\.jpg$/);
+  assert.equal(entry.title, 'Harbour at dawn', 'the provider\'s titles become the book\'s own');
+  assert.equal(entry.caption, 'From Lightroom-like metadata');
+  const stored = await (await storeOf(f)).materialization(photoEntry(f.book, 'mem1'), 'r1');
+  assert.equal(sha256(await readFile(join(f.folder, entry.path as string))), stored!.digest);
+  // It now loads as a file of the package, with no problem, and prints from its own bytes.
+  const status = copied.sources!['photo:mem1'];
+  assert.equal(status.state, 'available');
+  assert.equal((status as PhotoSourceEntry).locator.provider, 'package');
+  assert.equal(copied.photos.get('mem1')!.original, join(f.folder, entry.path as string));
+  assert.equal(copied.photos.get('mem1')!.width, 6000);
+  const { book: printed } = await exportLoad(f);
+  assert.equal(printProblem(printed.sources!['photo:mem1']), undefined);
+  // mem2 is still a photo without a file: the book stays format 4 until it is copied too.
+  assert.equal(copied.project.schemaVersion, 4);
+  const all = await collectSources(copied, ['photo:mem2']);
+  assert.ok(all.project.schemaVersion < 4, 'no entry without a path remains');
+  assert.equal(JSON.parse(await readFile(join(f.folder, 'project.json'), 'utf8')).schemaVersion, all.project.schemaVersion);
+  assert.equal((all.photoIndex.mem2 as Record<string, unknown>).title, 'My own title', 'an override stays');
+  // Facts follow the copied file once its digest is read, like any owned photo's.
+  await (await storeOf(f)).digested();
+  await settle(all);
+  const fact = (await readAssetFacts(f.folder)).mem1;
+  assert.equal(fact.digest, stored!.digest);
+  assert.equal(fact.revisions, undefined);
+});
+
+test('Copy into Book keeps the entry of a photo its provider cannot produce, and a cancelled copy changes nothing', async (t) => {
+  const f = await fixture(t);
+  f.provider.failOriginal.add('a2');
+  const failed: string[] = [];
+  const copied = await collectSources(f.book, ['photo:mem1', 'photo:mem2'], { failed: (source) => failed.push(source.id) });
+  assert.deepEqual(failed, ['mem2']);
+  assert.ok((copied.photoIndex.mem1 as Record<string, unknown>).path);
+  assert.deepEqual(copied.photoIndex.mem2, f.book.photoIndex.mem2);
+  assert.deepEqual(await leftovers(f), []);
+  // Cancelled: no entry changes and no file stays in the book.
+  f.provider.failOriginal.clear();
+  const job = new AbortController(); job.abort();
+  const photos = await readdir(join(f.folder, 'photos'), { recursive: true });
+  assert.equal(await collectSources(copied, ['photo:mem2'], { signal: job.signal }), copied);
+  assert.deepEqual(await readdir(join(f.folder, 'photos'), { recursive: true }), photos);
+  // An offline provider is refused like a missing file.
+  f.provider.online = false;
+  await assert.rejects(collectSources(copied, ['photo:mem2']), /Cannot include all assets/);
+});
+
+test('the Assets menu offers Copy into Book for a photo without a file', async (t) => {
+  const f = await fixture(t);
+  const menu = assetMenu(projectSummary(f.book, 'view'), ['photo:mem1', 'photo:mem2']);
+  const copy = menu.find((item) => (item as { command?: string }).command === 'asset-copy') as { enabled: boolean; label?: string };
+  assert.equal(copy.enabled, true);
+  assert.equal(copy.label, 'Copy 2 into Book');
+});
+
+test('Save a Copy with all files included copies photos without a file into the new book', async (t) => {
+  const f = await fixture(t);
+  await settle(f.book);
+  const destination = await saveDocumentCopy(f.book, join(f.root, 'Portable.imageflow'), true);
+  t.after(() => AssetFacts.release(destination));
+  const photos = JSON.parse(await readFile(join(destination, 'photos.json'), 'utf8'));
+  for (const id of ['mem1', 'mem2']) {
+    assert.equal(photos[id].memory, undefined);
+    assert.match(photos[id].path, new RegExp('^photos/' + id + '-'));
+    const stored = await (await storeOf(f)).materialization(photoEntry(f.book, id), 'r1');
+    assert.equal(sha256(await readFile(join(destination, photos[id].path))), stored!.digest);
+  }
+  assert.equal(photos.mem1.title, 'Harbour at dawn');
+  assert.ok(JSON.parse(await readFile(join(destination, 'project.json'), 'utf8')).schemaVersion < 4, 'the copy opens in older builds');
+  // The book itself is unchanged.
+  assert.deepEqual(JSON.parse(await readFile(join(f.folder, 'photos.json'), 'utf8')).mem1.memory, { asset: 'a1', name: 'IMG_0001.dng' });
+  // Without all files, the photos stay with their provider.
+  const linked = await saveDocumentCopy(f.book, join(f.root, 'Linked.imageflow'), false);
+  t.after(() => AssetFacts.release(linked));
+  assert.deepEqual(JSON.parse(await readFile(join(linked, 'photos.json'), 'utf8')).mem1.memory, { asset: 'a1', name: 'IMG_0001.dng' });
+  assert.equal(JSON.parse(await readFile(join(linked, 'project.json'), 'utf8')).schemaVersion, 4);
+  assert.equal(f.provider.materialized.length, 1, 'both originals were made in one call');
 });
