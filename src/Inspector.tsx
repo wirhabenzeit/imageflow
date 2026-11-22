@@ -281,7 +281,8 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
       values={spread.params} update={(id, value) => changeSpread((item) => { item.params[id] = value; }, definition.parameters[id].label + ' updated')} />
   </> : null;
   // A layout whose page settings are not known yet keeps this spread's fields as they were, not editable.
-  const settingsFields = held !== undefined ? <fieldset disabled>{held}</fieldset> : (heldSettings.current = { key: sectionKey, section: fields }).section;
+  // A layout without settings holds nothing: no empty section meanwhile.
+  const settingsFields = held !== undefined ? held && <fieldset disabled>{held}</fieldset> : (heldSettings.current = { key: sectionKey, section: fields }).section;
   return <aside className="inspector" aria-label="Inspector">
     {header}
     <fieldset disabled={!writable}>
@@ -297,7 +298,7 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
       {/* The selection's own settings, the layout's variant first: a sibling of Layout, so collapsing the layout
           choice leaves them in reach. */}
       {template && definition && (familyPicker || settingsFields) && <PanelSection id="inspector.settings" title={selectedPage ? 'Page settings' : 'Spread settings'}
-        summaryProps={{ onKeyDown: (event) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+        summaryProps={Object.keys(definition.parameters).length === 0 ? undefined : { onKeyDown: (event) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
           event.preventDefault(); event.currentTarget.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
         } }, onContextMenu: async (event) => {
           event.preventDefault();
