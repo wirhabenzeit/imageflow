@@ -189,6 +189,14 @@ export function BookFrame({ busy = false, provisional, project, view, query = ''
     }
     storeFrame(id, frame);
   });
+  // Going back to the frame kept beneath (A → B → A within its moment, such as the layout previews of two spreads):
+  // it has loaded and reports nothing new, so it is shown again at once, or it would stay hidden behind B for good.
+  useEffect(() => {
+    if (!target || target !== retiring || target === shown) return;
+    setRetiring(undefined);
+    const frame = latest.current.get(target);
+    if (frame?.status?.state === 'ready' && frame.geometry) publish(target, frame);
+  }, [target]);
   // The frame itself cannot tell when the window shows its pixels (its animation frames run before), so the previous
   // one stays for a fixed time. It is drawn over by the new frame wherever that has artwork.
   useEffect(() => {
@@ -277,12 +285,16 @@ export function BookFrame({ busy = false, provisional, project, view, query = ''
   return ids.map((id) => {
     const frame = frames[id];
     const previous = id === retiring && id !== shown && id !== target;
+    // The frame kept beneath ends where the one on show does: a shorter book (a deleted spread, another format) must
+    // not show the previous revision's pages below its end.
+    const shownHeight = shown ? frames[shown]?.geometry?.height : undefined;
+    const height = previous && shownHeight !== undefined && frame?.geometry ? Math.min(frame.geometry.height, shownHeight) : frame?.geometry?.height;
     return <iframe key={id} title={title} tabIndex={-1}
       className={'book-frame book-frame-' + view + (id === shown ? '' : ' book-frame-pending') + (previous ? ' book-frame-retiring' : '')}
       data-current={id === target || undefined} data-revision={projectOf(id)}
       data-ready={frame?.status?.state === 'ready' && frame.published && !previous ? '' : undefined}
       aria-hidden={id !== shown || undefined}
-      style={{ height: frame?.geometry?.height }}
+      style={{ height }}
       ref={(element) => {
         if (!element) return;
         refs.current.set(id, element);

@@ -83,6 +83,25 @@ try {
     await ready(spread);
     assert.equal(await draws(), 0, 'Switching to ' + spread + ' reuses the map picture without drawing');
   }
+  // Back to the spread before while its previews are still kept beneath (A → B → A within their moment): they show
+  // again at once, not hidden behind B's until the frame kept beneath is released and reloads.
+  await page.evaluate(() => {
+    window.__retired = false;
+    new MutationObserver(() => { if (document.querySelector('iframe.book-frame-layouts.book-frame-retiring')) window.__retired = true; })
+      .observe(document, { subtree: true, attributes: true, attributeFilter: ['class'], childList: true });
+  });
+  const shownPreviews = (spread, timeout = 10_000) => page.waitForFunction((spread) => {
+    const frame = document.querySelector('iframe.book-frame-layouts:not(.book-frame-pending)');
+    return frame && new URL(frame.src).searchParams.get('spread') === spread;
+  }, spread, { timeout });
+  await page.locator('.spread-thumb[data-spread="arriving"]').click();
+  await shownPreviews('arriving');
+  await page.locator('.spread-thumb[data-spread="settlements"]').click();
+  assert.equal(await page.evaluate(() => window.__retired), true, 'The previous previews were kept beneath');
+  await shownPreviews('settlements', 400);
+  await page.waitForTimeout(800);
+  await shownPreviews('settlements');
+  await ready('settlements');
   const manifest = join(book, 'project.json');
   const project = JSON.parse(await readFile(manifest, 'utf8'));
   const spread = project.spreads.find(({ id }) => id === 'settlements');
