@@ -16,7 +16,7 @@ import { markdownToHtml } from './markdown';
 import { excerpt, fileName, photosMime, photoMime, sourceList, textMime, words } from './source-items';
 import type { SourceKind, SourceRef, SourcesTab } from './source-items';
 import { SourceManager } from './SourceManager';
-import { sourceEntries } from './source-locations';
+import { photoSourceName, sourceEntries, sourceFile } from './source-locations';
 import { assetPageLabels, assetUsage } from './asset-usage';
 
 function pagesText(list: { pages: string; cover?: true }[] | undefined) {
@@ -141,7 +141,8 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
   function renderItem({ id, title }: typeof items[number]) {
     const placed = usage[tab][id];
     const sourceState = summary.sources?.[(tab === 'photo' ? 'photo:' : 'markdown:') + id];
-    const sourceLabel = sourceState?.state !== 'available' && sourceState?.problem ? (sourceState.cached ? 'Cached · Missing' : 'Unavailable') : sourceState?.linked ? 'Linked' : undefined;
+    const sourceLabel = sourceState?.state !== 'available' && sourceState?.problem ? (sourceState.cached ? sourceState.state === 'offline' ? 'Cached · Offline' : 'Cached · Missing' : sourceState.state === 'offline' ? 'Offline' : 'Unavailable')
+      : sourceState && sourceFile(sourceState)?.linked ? 'Linked' : undefined;
     const common = {
       'data-id': id, role: 'option', 'aria-selected': selection.selected.includes(id),
       tabIndex: visibleCurrent === id || (!visibleCurrent && id === items[0]?.id) ? 0 : -1,
@@ -252,7 +253,7 @@ export function QuickLook({ view, summary, source, usage, navigate, close, jump 
   const text = summary.texts[source.id];
   const date = photo && captureFact(photoDate(summary, source.id));
   const details = photo
-    ? [fileName(photo.path), date && date.label + ' ' + date.value, size && size.width + ' × ' + size.height + ' px', photo.caption, photo.credit && '© ' + photo.credit]
+    ? [photoSourceName(summary, source.id), date && date.label + ' ' + date.value, size && size.width + ' × ' + size.height + ' px', photo.caption, photo.credit && '© ' + photo.credit]
     : [fileName(item.path), text !== undefined && words(text) + ' words'];
 
   return <dialog ref={dialog} className={'quicklook quicklook-' + source.kind} aria-label={'Quick Look · ' + item.title}

@@ -2,7 +2,7 @@ import { textAssignments } from './text-assignments';
 import { layoutFootprint, shownLayoutStates, planLayoutChange, sheetLayoutLabel } from './layouts';
 import type { PresentationView } from './presentation-model';
 import { presentationPhotoSource } from './presentation-model';
-import { sourceFileName, sourcePath } from './source-locations';
+import { printProblem, sourceFileName, sourcePath } from './source-locations';
 import { renameIds } from './svg-ids';
 import { bundlesFamily, familiesOf, missingCharacters, setTemplateFonts } from './fonts';
 import { parseSentinel, sentinelStrip, sentinelWidth } from './capture-sentinel';
@@ -1850,9 +1850,9 @@ async function renderPhysicalCover(root: HTMLElement, book: RenderProject, templ
       if (!node) errors.push(issue('Draw ' + declared.label + ' exactly once.', 'cover-box-count', id));
       const box = state.boxes[id];
       const photo = box?.photo && book.photos[box.photo];
-      const available = box?.photo && book.sources?.['photo:' + box.photo];
-      if (available && available.state !== 'available' && available.cached) errors.push({
-        ...issue(available.problem + '. The cover preview uses a cached image.', 'source-unavailable', id), source: box.photo,
+      const unavailable = box?.photo ? printProblem(book.sources?.['photo:' + box.photo]) : undefined;
+      if (unavailable) errors.push({
+        ...issue(unavailable + '. The cover preview uses a cached image.', 'source-unavailable', id), source: box.photo,
       });
       if (box?.photo && !photo) errors.push({ ...issue(declared.label + ' uses an unavailable photo.', 'photo-missing', id), source: box.photo });
       else if (!box?.photo) warnings.push(issue(declared.label + ' is empty.', 'cover-box-empty', id));
@@ -2184,11 +2184,16 @@ export async function startRender(root: HTMLElement) {
         const assignment = spread.boxes[box];
         const id = declaration.type === 'photo' ? assignment?.photo : assignment?.text;
         const kind = declaration.type === 'photo' ? 'photo' : 'markdown';
-        const state = id && book.sources?.[kind + ':' + id];
-        if (state && state.state !== 'available' && state.cached) errors.push({
-          ...located(spread.id, state.problem + '. Showing a cached preview; the original is required for print.'),
-          code: 'source-unavailable', ...onPage(page), box, source: id || undefined, suggestion: 'Locate the original or retry after reconnecting its location.',
+        const state = id ? book.sources?.[kind + ':' + id] : undefined;
+        const unavailable = printProblem(state);
+        if (unavailable) errors.push({
+          ...located(spread.id, unavailable + '. Showing a cached preview; the original is required for print.'),
+          code: 'source-unavailable', ...onPage(page), box, source: id || undefined,
+          suggestion: state?.previewOnly ? 'Export a proof, or copy the photo into the book on a Mac that can read its original.'
+            : state?.state === 'offline' ? 'Retry after opening the photo’s source app or reconnecting its server.' : 'Locate the original or retry after reconnecting its location.',
         });
+        if (state?.reshaped) warnings.push({ ...located(spread.id, 'The photo changed its aspect ratio in its source after it was placed. Check how it is cropped.'),
+          code: 'source-reshaped', ...onPage(page), box, source: id || undefined });
       }
     }
     for (const [i, result] of decoded.entries()) {

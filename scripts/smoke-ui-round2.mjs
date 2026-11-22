@@ -140,7 +140,7 @@ try {
   const result = await page.evaluate(async () => (await window.imageflow.currentProject()).value);
   assert.equal(Object.keys(result.photoIndex).length, 2);
   assert.equal(Object.keys(result.project.texts).length, 1);
-  assert.equal(Object.values(result.sources).filter(({ linked }) => linked).length, 2);
+  assert.equal(Object.values(result.sources).filter((source) => (source.kind === 'photo' ? source.locator?.provider === 'linked' : source.linked)).length, 2);
   assert.match(await page.locator('.status').innerText(), /1 unreadable or invalid file skipped/);
   const emptyFolder = join(work, 'empty'); await mkdir(emptyFolder);
   await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }); }, emptyFolder);

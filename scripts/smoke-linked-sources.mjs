@@ -62,7 +62,7 @@ try {
   }
   await reload(page);
   summary = await current(page);
-  assert.equal(Object.values(summary.sources).filter((source) => source.linked).length, 3);
+  assert.equal(Object.values(summary.sources).filter((source) => (source.kind === 'photo' ? source.locator?.provider === 'linked' : source.linked)).length, 3);
   // Independent pages render their own boxes; the remembered spread state is inactive.
   const arrival = summary.project.spreads.find(({ id }) => id === 'arriving');
   const grid = summary.project.spreads.find(({ id }) => id === 'settlements');
@@ -129,7 +129,7 @@ try {
   // Remove all originals. The book stays editable and every source keeps a marked cached view.
   const photoBytes = await readFile(photo); const textBytes = await readFile(text); const fileBytes = await readFile(file);
   await Promise.all([photo, text, file].map((path) => rm(path)));
-  await waitForPage(page, async () => Object.values((await window.imageflow.currentProject()).value.sources).filter((source) => source.linked).every((source) => source.state === 'missing' && source.cached));
+  await waitForPage(page, async () => Object.values((await window.imageflow.currentProject()).value.sources).filter((source) => (source.kind === 'photo' ? source.locator?.provider === 'linked' : source.linked)).every((source) => source.state === 'missing' && source.cached));
   await ready(page);
   await menuAction(app, 'Assets…');
   const managerWindow = await assetWindow();
@@ -282,7 +282,7 @@ try {
   assert.ok(copy);
   await ready(copy);
   const portableState = await current(copy);
-  assert.ok(Object.values(portableState.sources).every((source) => !source.linked && source.state === 'available'));
+  assert.ok(Object.values(portableState.sources).every((source) => !(source.kind === 'photo' ? source.locator?.provider === 'linked' : source.linked) && source.state === 'available'));
   assert.deepEqual(portableState.project.spreads.find(({ id }) => id === 'arriving').pages.left.boxes.hero.crops, crop);
   assert.equal(portableState.project.spreads.find(({ id }) => id === 'arriving').pages.left.boxes.hero.photo, imported.photo);
   await rm(external, { recursive: true });

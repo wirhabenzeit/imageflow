@@ -17,7 +17,7 @@ import { AssetFacts, readAssetFacts } from '../desktop/asset-facts';
 import { configureProxyStore } from '../desktop/proxy-store';
 import { acquireProjectLock, readSaveLedger, recoverProjectSave } from '../desktop/persistence';
 import { ProjectSession } from '../desktop/project-session';
-import { sourceEntries } from '../src/source-locations';
+import { sourceEntries, sourceFile } from '../src/source-locations';
 import { copySample } from '../desktop/sample-book.mjs';
 import './persistence-root';
 
@@ -56,13 +56,13 @@ test('document default links all three source kinds while per-import copy remain
   const photo = await importIntoProject(f.book, { kind: 'photo' }, [f.photo]);
   const markdown = await importIntoProject(photo.book, { kind: 'markdown' }, [f.text]);
   const param = await importIntoProject(markdown.book, { kind: 'file', accept: ['.gpx'] }, [f.file]);
-  const linked = sourceEntries(param.book).filter((entry) => entry.linked);
+  const linked = sourceEntries(param.book).filter((entry) => !!sourceFile(entry)?.linked);
   assert.deepEqual(linked.map((entry) => entry.kind).sort(), ['file', 'markdown', 'photo']);
   const other = join(f.external, 'other.md');
   await writeFile(other, '# Copied exception');
   const copied = await importIntoProject(param.book, { kind: 'markdown', mode: 'copy' }, [other]);
-  assert.equal(sourceEntries(copied.book).find((entry) => entry.id === copied.imported[0])?.linked, false);
-  assert.equal(sourceEntries(copied.book).filter((entry) => entry.linked).length, 3);
+  assert.equal(sourceFile(sourceEntries(copied.book).find((entry) => entry.id === copied.imported[0])!)?.linked, false);
+  assert.equal(sourceEntries(copied.book).filter((entry) => !!sourceFile(entry)?.linked).length, 3);
 });
 
 test('a large linked import checks photos concurrently, keeps the chosen order and reports progress', async (t) => {
@@ -148,8 +148,8 @@ test('missing linked photos, Markdown and parameter files reopen with honest las
   for (const [kind, path] of [['photo', f.photo], ['markdown', f.text], ['file', f.file]] as const) {
     book = (await importIntoProject(book, { kind, mode: 'link', accept: ['.gpx'] }, [path])).book;
   }
-  const entries = sourceEntries(book).filter((entry) => entry.linked);
-  const originals = entries.map((entry) => entry.path);
+  const entries = sourceEntries(book).filter((entry) => !!sourceFile(entry)?.linked);
+  const originals = entries.map((entry) => sourceFile(entry)!.path);
   // A photo shown in the editor has a preview, which stands in for a missing original, as for the book's own photos.
   await photoFile(book.photos.get(entries.find((entry) => entry.kind === 'photo')!.id)!, 'preview');
   for (const path of originals) await rm(path);
@@ -175,11 +175,11 @@ test('collection and Save a Copy include every kind, preserve identities, and le
   await rm(f.external, { recursive: true });
   const portable = await loadProject(copy, f.cache);
   assert.deepEqual(sourceEntries(portable).map((entry) => entry.key), before.map((entry) => entry.key));
-  assert.ok(sourceEntries(portable).every((entry) => !entry.linked && portable.sources![entry.key].state === 'available'));
+  assert.ok(sourceEntries(portable).every((entry) => !sourceFile(entry)?.linked && portable.sources![entry.key].state === 'available'));
   await mkdir(f.external);
   await writeFile(f.photo, externalPhoto); await writeFile(f.text, '# Restored'); await writeFile(f.file, '<gpx/>');
   const collected = await collectSources(await loadProject(f.folder, f.cache));
-  assert.ok(sourceEntries(collected).every((entry) => !entry.linked));
+  assert.ok(sourceEntries(collected).every((entry) => !sourceFile(entry)?.linked));
   assert.deepEqual(await readFile(f.photo), externalPhoto);
   assert.equal(collected.project.importMode, 'copy');
 });
@@ -187,7 +187,7 @@ test('collection and Save a Copy include every kind, preserve identities, and le
 test('relinking repairs an ID across undo and batch matching refuses ambiguous candidates', async (t) => {
   const f = await fixture(t);
   let book = (await importIntoProject(f.book, { kind: 'markdown', mode: 'link' }, [f.text])).book;
-  const entry = sourceEntries(book).find((entry) => entry.linked)!;
+  const entry = sourceEntries(book).find((entry) => !!sourceFile(entry)?.linked)!;
   const session = new ProjectSession(book);
   t.after(() => session.close());
   const files = structuredClone({ project: book.project, photoIndex: book.photoIndex });
@@ -199,7 +199,7 @@ test('relinking repairs an ID across undo and batch matching refuses ambiguous c
   session.record(book, 'Relink', false);
   assert.equal(session.history.undo, 'Rename', 'Relinking does not consume an Undo step');
   const undone = await session.undo('undo');
-  assert.equal(sourceEntries(undone).find((item) => item.key === entry.key)!.path, moved);
+  assert.equal(sourceFile(sourceEntries(undone).find((item) => item.key === entry.key)!)!.path, moved);
   const candidates = join(f.root, 'candidates');
   await mkdir(join(candidates, 'a'), { recursive: true }); await mkdir(join(candidates, 'b'));
   await cp(moved, join(candidates, 'a', 'moved.md')); await cp(moved, join(candidates, 'b', 'moved.md'));
@@ -246,7 +246,7 @@ test('owned photos avoid persistent originals, allow large originals, and use pr
   const f = await fixture(t);
   await configureRenditionCache(f.cache, join(f.root, 'renditions'));
   const index = f.book.photoIndex.shore;
-  const actual = join(f.folder, index.path);
+  const actual = join(f.folder, index.path!);
   assert.ok((await loadProject(f.folder, f.cache)).photos.get('shore')!.original.startsWith(f.folder));
   const content = join(f.root, 'source-cache/content');
   assert.ok((await readdir(content)).every((name) => !/\.(jpg|jpeg|png|webp)$/.test(name)), 'Normal open does not duplicate owned photos');
@@ -281,7 +281,7 @@ test('stores share concurrent updates and bounded cleanup preserves open inputs 
   book = (await importIntoProject(book, { kind: 'photo', mode: 'link' }, [f.photo])).book;
   const one = await SourceStore.forBook(f.folder, f.cache);
   const two = await SourceStore.forBook(f.folder, f.cache);
-  const entries = sourceEntries(book).filter((entry) => entry.linked);
+  const entries = sourceEntries(book).filter((entry) => !!sourceFile(entry)?.linked);
   await writeFile(f.text, '# A concurrent new edition');
   await sharp({ create: { width: 70, height: 50, channels: 3, background: 'green' } }).png().toFile(f.photo);
   const updates = await Promise.all(entries.map(async (entry, i) => {
@@ -335,8 +335,8 @@ test('a saved copy may retain missing links explicitly and preserve the document
   const destination = await saveDocumentCopy(book, join(f.root, 'With Links.imageflow'), false);
   const copy = await loadProject(destination, f.cache);
   const entry = sourceEntries(copy).find((entry) => entry.id === added.imported[0])!;
-  assert.equal(entry.path, f.text);
-  assert.equal(entry.linked, true);
+  assert.equal(sourceFile(entry)!.path, f.text);
+  assert.equal(sourceFile(entry)!.linked, true);
   assert.equal(copy.project.importMode, 'link');
   assert.equal(copy.sources![entry.key].state, 'missing');
 });
@@ -402,7 +402,7 @@ test('mixed imports infer every file type and use the book policy, with an expli
   assert.equal(Object.keys(mixed.book.project.files).length, Object.keys(book.project.files).length);
   const copied = await importIntoProject(mixed.book, { mode: 'copy' }, [f.photo]);
   assert.equal(copied.book.photoIndex[copied.imported[0]].linked, undefined);
-  assert.match(copied.book.photoIndex[copied.imported[0]].path, /^photos\//);
+  assert.match(copied.book.photoIndex[copied.imported[0]].path!, /^photos\//);
   const skipped = await importIntoProject(copied.book, {}, [f.file]);
   assert.equal(skipped.book, copied.book);
   assert.deepEqual(skipped.counts, { photos: 0, texts: 0, files: 0, skipped: 1, failed: 0 });
@@ -798,7 +798,7 @@ async function secondMac(t: { after: (fn: () => Promise<void>) => void }, f: { r
   await configureRenditionCache(cache, join(f.root, 'mac-b', 'Cache', 'renditions'));
   const proxies = await configureProxyStore(join(f.root, 'mac-b', 'Cache', 'proxies'));
   t.after(async () => { configureProxyStore(undefined); });
-  const owned = join(f.folder, added.book.photoIndex.shore.path);
+  const owned = join(f.folder, added.book.photoIndex.shore.path!);
   await rm(owned);
   return { taken, linked, facts, cache, proxies, owned };
 }

@@ -3,9 +3,13 @@ import { agentFootprint } from '../src/agent-footprint';
 import type { AgentFootprint } from '../src/agent-footprint';
 import { SourceStore } from './source-store';
 import { sourceEntries } from '../src/source-locations';
-import type { SourceEntry } from '../src/source-locations';
-import { locatorOf } from '../src/source-locator';
+import type { FileSourceEntry, PhotoSourceEntry, SourceEntry } from '../src/source-locations';
+import { isFileLocator } from '../src/source-locator';
+import type { Locator } from '../src/source-locator';
 import { providerOf } from './providers';
+import { providedChanges } from './provided-photos';
+import type { Revisions, SourceProvider, SourceRef } from './source-provider';
+import { assetPageLabels, assetUsage } from '../src/asset-usage';
 import { watchLinkedFiles } from './providers/files';
 import { app, dialog, shell } from 'electron';
 import type { BrowserWindow } from 'electron';
@@ -240,7 +244,7 @@ export class DocumentSession {
 
   get book() { return this.projectSession.book; }
   get summary(): ProjectSummary {
-    return { ...projectSummary(this.book, this.active.id), handle: this.projectSession.handle, history: this.projectSession.history,
+    return { ...projectSummary(this.marked(this.book), this.active.id), handle: this.projectSession.handle, history: this.projectSession.history,
       network: [...this.networkOrigins], pageLabels: this.menuState?.pageLabels, coverBoxIds: this.menuState?.coverBoxIds };
   }
   notify(change: ProjectChange) {
@@ -584,7 +588,7 @@ export class DocumentSession {
       }
     }
     this.renderIds.add(id);
-    this.renders.set(id, { book, mode: 'edit', network: () => this.originsFor(book), pictures: this.previewPictures });
+    this.renders.set(id, { book: this.marked(book), mode: 'edit', network: () => this.originsFor(book), pictures: this.previewPictures });
     // A changed template gets the approvals for its own hash, if any, and the frames are rendered again with them.
     if (this.networkPrepared && book.templateHash !== this.network.hash) queueMicrotask(() => void this.updateNetwork().catch(() => {}));
     this.window.setTitle(bookName(book.folder));
@@ -598,19 +602,24 @@ export class DocumentSession {
   }
 
   /**
-   * Photos are watched by their providers and linked texts and files where they are (ADR 0011). A change invalidates
-   * the inputs and reloads the book, once nothing else is running.
+   * Photos are watched by their providers and linked texts and files where they are (ADR 0011). A change of a file
+   * invalidates the inputs and reloads the book, once nothing else is running. A change of a photo without a file is
+   * observed first (`providedChanges`): it reloads the book only when the photo's preview or availability changed.
    */
   private watchLinkedSources(book: OpenProject) {
     const generation = ++this.linkedGeneration;
     void (async () => {
-      const watched = sourceEntries(book).filter((source) => (source.kind === 'photo' || source.linked) && book.sources?.[source.key]?.state !== 'unapproved');
-      const store = watched.some(({ linked }) => linked) ? await SourceStore.forBook(book.folder, this.cache) : undefined;
+      const watched = sourceEntries(book).filter((source) => book.sources?.[source.key]?.state !== 'unapproved');
+      const photos = watched.filter((source): source is PhotoSourceEntry => source.kind === 'photo');
+      const linkedFiles = watched.filter((source): source is FileSourceEntry => source.kind !== 'photo' && source.linked);
+      const store = linkedFiles.length || photos.some(({ locator }) => locator.provider === 'linked') ? await SourceStore.forBook(book.folder, this.cache) : undefined;
+      const provided = photos.some(({ locator }) => !isFileLocator(locator)) ? await this.factsOf(book) : undefined;
       // What was last read of each source, so a change between that and the watch starting is seen too.
-      const known = (source: SourceEntry) => book.sources?.[source.key]?.state === 'available' ? store?.observed(source.key) : undefined;
-      const photos = watched.filter(({ kind }) => kind === 'photo').map((source) => ({ id: source.id, locator: locatorOf(book.photoIndex[source.id]), revision: known(source) }));
-      const files = watched.filter(({ kind }) => kind !== 'photo').map((source) => ({ id: source.key, source, known: known(source) }));
-      const signature = JSON.stringify([photos, files]);
+      const known = (source: SourceEntry): Revisions | undefined => source.kind === 'photo' && !isFileLocator(source.locator) ? provided?.get(source.id)?.revisions
+        : book.sources?.[source.key]?.state === 'available' && store?.observed(source.key) ? { revision: store.observed(source.key)! } : undefined;
+      const refs = photos.map(({ id, locator, ...source }) => ({ id, locator, known: known({ id, locator, ...source }) }));
+      const files = linkedFiles.map((source) => ({ id: source.key, source, known: known(source)?.revision }));
+      const signature = JSON.stringify([refs, files]);
       if (this.closing || generation !== this.linkedGeneration || signature === this.linkedWatch?.signature) return;
       this.linkedWatch?.stop();
       const changed = () => {
@@ -619,12 +628,46 @@ export class DocumentSession {
         void this.reloadLinked();
       };
       const stops = [watchLinkedFiles(book.folder, files, changed),
-        ...[...new Set(photos.map(({ locator }) => locator.provider))].map((provider) => {
-          const refs = photos.filter(({ locator }) => locator.provider === provider).map(({ id, locator, revision }) => ({ id, locator, ...(revision ? { known: { revision } } : {}) }));
-          return providerOf(refs[0].locator).watch(book.folder, refs, changed);
+        ...[...new Set(refs.map(({ locator }) => locator.provider))].map((name) => {
+          const own = refs.filter(({ locator }) => locator.provider === name).map(({ id, locator, known }) => ({ id, locator, ...(known ? { known } : {}) }));
+          const provider = providerOf(own[0].locator);
+          if (isFileLocator(own[0].locator) || !provided) return provider.watch(book.folder, own, changed);
+          return provider.watch(book.folder, own, (ids) => void this.providedChanged(provider, own.filter(({ id }) => ids.includes(id)), provided));
         })];
       this.linkedWatch = { signature, stop: () => stops.forEach((stop) => stop()) };
     })().catch((error) => this.notify({ error: String(error) }));
+  }
+  // The facts of the open book: the session's own, or a read-only set for a book this session only reads.
+  private factsOf(book: OpenProject) { return book.readOnly ? AssetFacts.readOnly(book.folder) : AssetFacts.forBook(book.folder); }
+  /** Photos without a file whose aspect ratio changed in their source while placed in this session (ADR 0011, §3.8). */
+  private reshaped = new Set<string>();
+  /**
+   * A book with the session's reshaped photos marked on their statuses, as every render and the summary see it: the
+   * mark lives in the session, not in what a load reads, so a reload or a check snapshot keeps the warning.
+   */
+  private marked(book: OpenProject): OpenProject {
+    if (!this.reshaped.size || !book.sources) return book;
+    return { ...book, sources: Object.fromEntries(Object.entries(book.sources).map(([key, status]) =>
+      [key, status.kind === 'photo' && this.reshaped.has(status.id) ? { ...status, reshaped: true } : status])) };
+  }
+  // A provider reported photos without a file as changed: their facts and previews are brought up to date, and the
+  // book reloads only for what it shows differently.
+  private async providedChanged(provider: SourceProvider<Locator>, refs: SourceRef<Locator>[], facts: AssetFacts) {
+    if (this.closing || !refs.length) return;
+    try {
+      const changes = await providedChanges(this.book.folder, provider, refs, facts, { staging: join(this.cache, 'provider-staging'),
+        available: (id) => this.book.sources?.['photo:' + id]?.state === 'available' });
+      if (this.closing) return;
+      if (changes.revised.length) this.projectSession.inputs.invalidate();
+      const usage = changes.reshaped.length ? assetUsage(this.book, assetPageLabels(this.summary)) : undefined;
+      const placed = changes.reshaped.filter((id) => usage?.photo[id]?.length);
+      if (placed.length) {
+        for (const id of placed) this.reshaped.add(id);
+        if (!this.window.isDestroyed()) this.window.webContents.send(channels.appNotice, (placed.length === 1 ? 'A placed photo changed its' : placed.length + ' placed photos changed their') +
+          ' aspect ratio in its source. Check how ' + (placed.length === 1 ? 'it is' : 'they are') + ' cropped.');
+      }
+      if (changes.reload.length) { this.linkedReloadPending = true; void this.reloadLinked(); }
+    } catch (error) { this.notify({ error: error instanceof Error ? error.message : String(error) }); }
   }
   // A pending refresh is consumed after a save/export; it must not invent additional source changes.
   private async reloadLinked() {
@@ -926,7 +969,7 @@ export class DocumentSession {
       });
       if (canceled || !filePath || owner.isDestroyed() || job.signal.aborted) return null;
       const id = randomUUID();
-      this.renders.set(id, { book, mode: 'export', network: () => this.originsFor(book) });
+      this.renders.set(id, { book: this.marked(book), mode: 'export', network: () => this.originsFor(book) });
       const progress = (stage: string) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage); };
       try {
         const fonts = bundledFontNames(book.assets.files);
@@ -970,7 +1013,7 @@ export class DocumentSession {
     try {
       return await checkProject(book, this.cache, request, async (snapshot, preview, signal, inspect, cover) => {
         const id = randomUUID();
-        this.renders.set(id, { book: snapshot, mode: 'export', network: () => this.originsFor(snapshot) });
+        this.renders.set(id, { book: this.marked(snapshot), mode: 'export', network: () => this.originsFor(snapshot) });
         try {
           const url = renderOrigin + '/render/' + id;
           if (snapshot.fixture?.coverPages !== undefined) return { status: await checkCoverRender(url, signal, arm) };

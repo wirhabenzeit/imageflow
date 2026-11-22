@@ -1,3 +1,4 @@
+import type { ProvidedMetadata } from './asset-facts';
 import type { PhotoView, PhotoViewCommand } from './photo-view';
 import type { PrintFormat, PrintSide, Span } from './format';
 import type { Parameters } from './parameters';
@@ -100,6 +101,9 @@ export type ProjectSummary = ProjectFiles & {
   photos: Record<string, string>;
   photoRevisions?: Record<string, string>;
   photoSizes: Record<string, { width: number; height: number }>;
+  // The title, caption, credit and alt text a photo's provider reports (ADR 0011), which photos.json overrides field
+  // by field: the Inspector shows them as placeholders and offers to revert an override.
+  photoProvided?: Record<string, ProvidedMetadata>;
   texts: Record<string, string>;
   sources?: Record<string, SourceStatus>;
 };

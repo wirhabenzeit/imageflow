@@ -65,6 +65,7 @@ export const commandRegistry = {
   'asset-remove': { label: 'Remove from Book', enabled: writable },
   'asset-locate': { label: 'Locate…', enabled: writable },
   'asset-locate-folder': { label: 'Locate Folder…', enabled: writable },
+  'asset-retry': { label: 'Retry', enabled: book },
   'box-replace-photo': { label: 'Replace Photo…', enabled: writable },
   'box-adjust-crop': { label: 'Adjust Crop…', enabled: writable },
   'box-reset-crop': { label: 'Reset Crop', enabled: writable },

@@ -7,7 +7,7 @@ import type { ProjectSummary } from './desktop';
 import { boxBase } from './project';
 import type { SpreadState } from './project';
 import { textChoices, textMenuChoices } from './source-items';
-import { sourceEntries } from './source-locations';
+import { photoName, sourceEntries } from './source-locations';
 import { openMarkdown } from './markdown-open';
 import type { SourceRef } from './source-items';
 import { centered, placementIn, setPlacement } from './spread';
@@ -52,7 +52,7 @@ export function PhotoContent({ summary, spread, box, label, change, inspect, adj
     <option value={assigned ?? ''}>{assigned ? 'Replace photo…' : 'Choose photo…'}</option>
     {Object.entries(summary.photoIndex).filter(([photo]) => photo !== assigned).map(([photo, entry]) =>
       <option key={photo} value={photo} disabled={!summary.photos[photo]}>
-        {(entry.title || entry.path.split('/').pop()) + (summary.photos[photo] ? '' : ' (missing)')}</option>)}
+        {photoName(summary, photo) + (summary.photos[photo] ? '' : ' (missing)')}</option>)}
   </select>;
   const remove = assigned && <button type="button" className="link" onClick={removePhoto}>Remove</button>;
   const fields = <div className="crop-values-fields">
@@ -172,7 +172,7 @@ export function TextContent({ summary, spread, box, label, change, importText, i
   // to place one (F-043). Quick Look and the default app are offered only for a text linked from outside the book.
   if (compact) {
     const readable = !!assigned && summary.texts[assigned] !== undefined;
-    const linked = !!assigned && sourceEntries(summary).some(({ key, linked }) => key === 'markdown:' + assigned && linked);
+    const linked = !!assigned && sourceEntries(summary).some((entry) => entry.key === 'markdown:' + assigned && entry.kind === 'markdown' && entry.linked);
     const others = textMenuChoices(summary).filter(({ id }) => id !== assigned);
     return <ActionMenu className="text-source-menu" label={<>Aa <span>{name}</span>{flow && flow.parts > 1 && <small>{flow.part}/{flow.parts}</small>}<Icon name="chevron" /></>}>
       {assigned && <button disabled={!readable} onClick={() => void editText(assigned)}>Edit Text…</button>}

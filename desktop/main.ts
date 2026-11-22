@@ -14,7 +14,14 @@ import type { RegisteredCommand } from '../src/commands';
 import { bookName } from '../src/book-name';
 import { collectSources, relocateSource, relinkFolder, saveDocumentCopy, removeSources, renameSource } from './source-actions';
 import { originalPath, within } from './source-store';
-import { sourceEntries } from '../src/source-locations';
+// The file a source is: Show in Finder, Edit in Default App, Quick Look and dragging out need one, so a photo that is
+// not a file has none of them (ADR 0011).
+async function sourceOriginal(folder: string, entry: SourceEntry) {
+  const file = fileSourceOf(entry);
+  if (!file) throw new Error(entry.name + ' is not a file on this Mac.');
+  return originalPath(folder, file);
+}
+import { fileSourceOf, sourceEntries } from '../src/source-locations';
 import type { SourceEntry } from '../src/source-locations';
 import { assetPageLabels, assetUsage, usageLabel } from '../src/asset-usage';
 import { importFeedback } from '../src/import-feedback';
@@ -310,7 +317,7 @@ async function confirmRemoval(owner: BrowserWindow, document: DocumentSession, c
   const used = chosen.filter(({ kind, id }) => kind === 'file' && usage.file[id]?.length);
   if (!used.length) return true;
   const where = [...new Set(used.flatMap(({ id }) => usage.file[id].map(({ pages }) => usageLabel(pages))))];
-  const names = used.map((entry) => basename(entry.path).replace(/^fl-[a-f0-9-]{12}-/, ''));
+  const names = used.map((entry) => entry.name);
   const answer = await dialog.showMessageBox(owner, { type: 'warning', buttons: ['Remove', 'Cancel'], defaultId: 0, cancelId: 1,
     message: chosen.length === 1 ? 'Remove “' + names[0] + '” from the book?' : 'Remove ' + chosen.length + ' assets from the book?',
     detail: (used.length === 1 ? 'This file is used in: ' : names.join(', ') + ' are used in: ') + where.join(', ') + '.\nRemoving it clears those assignments. Undo brings it back.' });
@@ -1671,7 +1678,7 @@ void app.whenReady().then(async () => {
     const document = assetsOwner(event);
     if (!document || !Array.isArray(keys) || !keys.every((key) => typeof key === 'string')) return;
     const entries = sourceEntries(document.book).filter(({ key }) => keys.includes(key));
-    const files = await Promise.all(entries.map((entry) => originalPath(document.book.folder, entry)));
+    const files = (await Promise.all(entries.map((entry) => sourceOriginal(document.book.folder, entry).catch(() => undefined)))).filter((file) => file !== undefined);
     if (files.length) assetsWindows.get(document)?.window.webContents.startDrag({ file: files[0], files, icon: await app.getFileIcon(files[0]) });
   });
   // Document icons are the same for every file of a type, so they are looked up by extension and kept.
@@ -1798,8 +1805,8 @@ void app.whenReady().then(async () => {
     }
     if (request.action === 'reveal' || request.action === 'open' || request.action === 'preview') {
       if (!source) throw new Error('Choose a registered source.');
-      const path = await originalPath(document.book.folder, source);
-      if (request.action === 'reveal') for (const entry of chosen) shell.showItemInFolder(await originalPath(document.book.folder, entry));
+      const path = await sourceOriginal(document.book.folder, source);
+      if (request.action === 'reveal') for (const entry of chosen) shell.showItemInFolder(await sourceOriginal(document.book.folder, entry));
       else if (request.action === 'open') { const error = await shell.openPath(path); if (error) throw new Error(error); }
       else owner.previewFile(path);
       return { summary: document.summary };
@@ -1826,7 +1833,7 @@ void app.whenReady().then(async () => {
       if (!source || chosen.length !== 1) throw new Error('Choose one asset to rename.');
       next = await renameSource(document.book, source.key, request.name);
       if (next === document.book) return { summary: document.summary };
-      message = 'Renamed to ' + basename(sourceEntries(next).find(({ key }) => key === source.key)!.path).replace(/^(?:tx|fl)-[a-f0-9-]{12}-/, '') + '.';
+      message = 'Renamed to ' + sourceEntries(next).find(({ key }) => key === source.key)!.name + '.';
     }
     else if (request.action === 'locate-folder') {
       const choice = await dialog.showOpenDialog(owner, { title: 'Locate Missing Sources in Folder', buttonLabel: 'Locate',
@@ -1836,13 +1843,16 @@ void app.whenReady().then(async () => {
         // the folder is the approval, and the rest of a moved or re-approved folder would otherwise stay missing.
         const result = await relinkFolder(document.book, choice.filePaths[0]);
         next = result.book;
-        const names = new Map(sourceEntries(document.book).map((entry) => [entry.key as string, basename(entry.path)]));
+        const names = new Map(sourceEntries(document.book).map((entry) => [entry.key as string, entry.name]));
         message = result.repaired + ' sources located.' + (result.ambiguous.length ? ' Multiple matches need Locate… for: ' + result.ambiguous.map((key) => names.get(key) ?? 'a source').join(', ') : '');
       }
     } else {
       if (!source) throw new Error('Choose a registered source.');
-      if (request.action === 'copy') next = await collectSources(document.book, chosen.filter(({ linked }) => linked).map(({ key }) => key));
+      if (request.action === 'copy') next = await collectSources(document.book, chosen.filter((entry) => fileSourceOf(entry)?.linked).map(({ key }) => key));
       else if (request.action === 'locate' || request.action === 'replace') {
+        // Locate is offered where the photo's provider offers it (`SourceProvider.repairs`); Replace is always a file.
+        const status = document.book.sources?.[source.key];
+        if (request.action === 'locate' && status && status.state !== 'available' && !status.repairs?.includes('locate')) throw new Error(source.name + ' cannot be located as a file.');
         if (source.kind === 'file' && !request.accept?.length) throw new Error('This template does not declare a compatible file parameter.');
         const choice = await dialog.showOpenDialog(owner, { title: request.action === 'replace' ? 'Replace Original' : 'Locate Original', properties: ['openFile'],
           filters: [{ name: source.kind === 'photo' ? 'Photos' : 'Source', extensions: source.kind === 'photo' ? ['jpg', 'jpeg', 'png', 'webp'] : source.kind === 'file' ? request.accept!.map((extension) => extension.slice(1)) : ['md'] }] });
@@ -1867,7 +1877,7 @@ void app.whenReady().then(async () => {
     if (includeAssets === undefined) {
       const answer = await dialog.showMessageBox(document.window, { type: 'question', message: 'Duplicate this book?',
         buttons: ['Duplicate', 'Cancel'], defaultId: 0, cancelId: 1, checkboxLabel: 'Include all files', checkboxChecked: true,
-        detail: sourceEntries(document.book).some(({ linked }) => linked) ? 'Unchecked: linked files keep their full paths.' : undefined });
+        detail: sourceEntries(document.book).some((entry) => fileSourceOf(entry)?.linked) ? 'Unchecked: linked files keep their full paths.' : undefined });
       if (answer.response !== 0) return null;
       includeAssets = answer.checkboxChecked;
     }
@@ -2036,7 +2046,7 @@ void app.whenReady().then(async () => {
     if (request.target && request.paths?.length) {
       document.currentBook(id);
       for (const source of sourceEntries(document.book).filter(({ kind }) => kind === request.kind)) {
-        const path = await originalPath(document.book.folder, source).catch(() => undefined);
+        const path = await sourceOriginal(document.book.folder, source).catch(() => undefined);
         if (!path || path !== request.paths[0]) continue;
         const files = structuredClone({ project: document.book.project, photoIndex: document.book.photoIndex });
         const spread = scopeSpread(files.project.spreads.find(({ id }) => id === request.target!.spread), request.target.page);

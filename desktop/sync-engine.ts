@@ -4,7 +4,7 @@ import { copyFile, lstat, mkdir, open, readFile, realpath, rename, rm, rmdir, wr
 import { basename, dirname, extname, join } from 'node:path';
 import sharp from 'sharp';
 import type { AssetFact } from '../src/asset-facts';
-import { parseDocument, photoIndexSchema, projectSchema } from '../src/project';
+import { parseDocument, photoIndexSchema, projectSchema, withBookFormat } from '../src/project';
 import type { PhotoIndex } from '../src/project';
 import { sourceEntries } from '../src/source-locations';
 import { packagePath } from '../src/source-locator';
@@ -367,16 +367,18 @@ async function stagePull(context: Context, tip: CommitHeader) {
   const staleOriginals: PullMarker['staleOriginals'] = {};
   const localDigests: PullMarker['localDigests'] = {};
   for (const [id, photo] of Object.entries(projected)) {
-    const owned = !!packagePath(photo)?.startsWith('photos/');
+    const path = packagePath(photo);
+    const owned = !!path?.startsWith('photos/');
     const original = owned ? blob.originals[id] : undefined;
     const wanted = owned ? original?.digest ?? blob.assetsMeta.assets[id]?.digest : undefined;
     const local = context.here[id];
-    const target = join(root, photo.path);
-    if (wanted && !keepLocal.has(id) && !(local?.path === target && local.digest === wanted)) {
+    // Only an owned photo has a path in the book; any other one is never written to it.
+    const target = path === undefined ? undefined : join(root, path);
+    if (path !== undefined && target && wanted && !keepLocal.has(id) && !(local?.path === target && local.digest === wanted)) {
       // The bytes are here under another path (the photo was renamed, or copied into the book on another Mac): copied
       // to the new path, so nothing is downloaded and the photo stays available.
       const reuse = Object.values(context.here).find((entry) => entry.digest === wanted && entry.path !== target);
-      if (reuse && !referenced.has(target) && await copyBeside(root, photo.path, reuse.path, wanted)) {
+      if (reuse && !referenced.has(target) && await copyBeside(root, path, reuse.path, wanted)) {
         localDigests[id] = wanted;
         continue;
       }
@@ -384,7 +386,7 @@ async function stagePull(context: Context, tip: CommitHeader) {
     // A kept local fact stays unrecorded, so it counts as ahead until a push carries it.
     if (!local || keepLocal.has(id)) continue;
     // An owned original the snapshot replaced goes, so the photo shows the new proxy until its new original is downloaded.
-    if (original && original.digest !== local.digest && local.path === target) { staleOriginals[photo.path] = local.digest; continue; }
+    if (path !== undefined && original && original.digest !== local.digest && local.path === target) { staleOriginals[path] = local.digest; continue; }
     localDigests[id] = local.digest;
   }
   await storeProxies(proxies);
@@ -446,7 +448,8 @@ async function ensureBookId(root: string) {
   const before = { 'project.json': await readFile(join(root, 'project.json')), 'photos.json': await readFile(join(root, 'photos.json')) };
   const project = parseDocument(projectSchema, JSON.parse(before['project.json'].toString('utf8')), 'project.json');
   if (project.bookId) return false;
-  const after = { ...before, 'project.json': Buffer.from(JSON.stringify(parseDocument(projectSchema, { ...project, bookId: randomUUID() }, 'project.json'), null, 2) + '\n') };
+  const photos = parseDocument(photoIndexSchema, JSON.parse(before['photos.json'].toString('utf8')), 'photos.json');
+  const after = { ...before, 'project.json': Buffer.from(JSON.stringify(withBookFormat(parseDocument(projectSchema, { ...project, bookId: randomUUID() }, 'project.json'), photos), null, 2) + '\n') };
   await persistProjectManifests(root, before, after, { origin: 'app', label: 'Prepare sync' });
   return true;
 }
@@ -560,9 +563,10 @@ async function missingOriginals(root: string, blob: StateBlob, ids?: readonly st
   const missing: { id: string; path: string; original: StateBlob['originals'][string] }[] = [];
   for (const [id, original] of Object.entries(blob.originals)) {
     const photo = photos[id];
-    if ((ids && !ids.includes(id)) || !photo || !packagePath(photo)?.startsWith('photos/')) continue;
-    if (await lstat(await bookPath(root, photo.path, { checking: true })).catch(() => undefined)) continue;
-    missing.push({ id, path: photo.path, original });
+    const path = photo && packagePath(photo);
+    if ((ids && !ids.includes(id)) || !path?.startsWith('photos/')) continue;
+    if (await lstat(await bookPath(root, path, { checking: true })).catch(() => undefined)) continue;
+    missing.push({ id, path, original });
   }
   return missing;
 }
@@ -621,8 +625,8 @@ export async function cloneFromRemote({ remote, tip, destination, syncFolder }: 
       }
     }
     const projected = projectManifests(blob, {});
-    const project = parseDocument(projectSchema, projected.project, 'project.json');
     const photos = parseDocument(photoIndexSchema, projected.photos, 'photos.json');
+    const project = withBookFormat(parseDocument(projectSchema, projected.project, 'project.json'), photos);
     await writeFile(join(staging, 'project.json'), JSON.stringify(project, null, 2) + '\n', { flag: 'wx' });
     await writeFile(join(staging, 'photos.json'), JSON.stringify(photos, null, 2) + '\n', { flag: 'wx' });
     facts = photoFacts(blob.assetsMeta.assets, photos);

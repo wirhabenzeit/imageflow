@@ -1,13 +1,18 @@
 import type { BookMenuState, ContextMenuItem, ProjectSummary } from './desktop';
 import { emptyMenuState } from './commands';
-import { sourceEntries } from './source-locations';
+import { sourceEntries, sourceFile } from './source-locations';
+import type { SourceRepair } from './source-locations';
 import { assetPageLabels, assetUsage, usageLabel } from './asset-usage';
 import type { SourceUsage } from './editing';
 
 export function assetMenu(summary: ProjectSummary, keys: string[], place = false, knownUsage?: SourceUsage): ContextMenuItem[] {
   const chosen = sourceEntries(summary).filter(({ key }) => keys.includes(key));
-  const linked = chosen.filter(({ linked }) => linked).length;
+  const linked = chosen.filter((entry) => sourceFile(entry)?.linked).length;
   const missing = chosen.some(({ key }) => summary.sources?.[key]?.state !== 'available');
+  // What each unavailable asset's provider offers (`SourceProvider.repairs`): a file is located, a photo of an app or a
+  // server that is not reachable is not. Statuses from before repairs were reported offer what a file does.
+  const offers = (repair: SourceRepair) => chosen.some(({ key }) => { const status = summary.sources?.[key];
+    return !!status && status.state !== 'available' && (status.repairs ?? ['locate', 'locate-folder']).includes(repair); });
   const usage = { ...assetUsage(summary, assetPageLabels(summary), summary.coverBoxIds ?? null), ...knownUsage };
   const placements = chosen.length === 1 ? usage[chosen[0].kind === 'markdown' ? 'text' : chosen[0].kind][chosen[0].id] ?? [] : [];
   return [
@@ -20,11 +25,14 @@ export function assetMenu(summary: ProjectSummary, keys: string[], place = false
     // Texts and files stored in the book can be renamed; a photo has its title, a linked original keeps its name.
     ...(chosen.length === 1 && chosen[0].kind !== 'photo' ? [{ command: 'asset-rename' as const, enabled: !missing && !chosen[0].linked,
       label: chosen[0].linked ? 'Rename… (Copy into Book First)' : undefined }] : []),
-    { type: 'separator' }, { command: 'asset-reveal', enabled: !missing },
+    // Show in Finder needs a file: a photo of another provider has none.
+    { type: 'separator' }, { command: 'asset-reveal', enabled: !missing && chosen.every((entry) => !!sourceFile(entry)) },
     ...(chosen.length === 1 && chosen[0].kind === 'markdown' ? [{ command: 'asset-open' as const, enabled: !missing }] : []),
     // Locate Folder… finds every missing asset in the folder chosen, whatever is selected (F-045).
-    ...(missing && chosen.length === 1 ? [{ command: 'asset-locate' as const }] : []),
-    ...(missing ? [{ command: 'asset-locate-folder' as const }] : []),
+    // Retry reads them again; it is the one repair for a photo whose app or server is not reachable now.
+    ...(missing && !offers('locate') && !offers('locate-folder') ? [{ command: 'asset-retry' as const }] : []),
+    ...(chosen.length === 1 && offers('locate') ? [{ command: 'asset-locate' as const }] : []),
+    ...(offers('locate-folder') ? [{ command: 'asset-locate-folder' as const }] : []),
     ...(linked ? [{ command: 'asset-copy' as const, label: linked > 1 ? 'Copy ' + linked + ' into Book' : undefined, enabled: !missing }] : []),
     { type: 'separator' }, { command: 'asset-remove', label: chosen.length > 1 ? 'Remove ' + chosen.length + ' Assets from Book' : undefined },
   ];
@@ -33,4 +41,4 @@ export function assetMenuState(busy: boolean): BookMenuState {
   return { ...emptyMenuState, document: true, writable: true, busy };
 }
 export const assetActions = { 'asset-reveal': 'reveal', 'asset-copy': 'copy', 'asset-remove': 'remove', 'asset-locate': 'locate',
-  'asset-locate-folder': 'locate-folder', 'asset-open': 'open', 'asset-place': 'place' } as const;
+  'asset-locate-folder': 'locate-folder', 'asset-open': 'open', 'asset-place': 'place', 'asset-retry': 'retry' } as const;

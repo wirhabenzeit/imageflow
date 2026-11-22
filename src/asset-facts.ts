@@ -10,8 +10,19 @@ import type { CaptureMetadata } from './photo-metadata';
 export const assetsMetaFile = 'assets-meta.json';
 
 const captureTime = z.object({ dateTime: z.string(), offset: z.string().nullable() });
-export const assetFactSchema = z.object({
-  /** SHA-256 of the original's bytes, as hex. */
+// Facts and the file keep keys this version does not know, as project.json does (ADR 0010, guardrail 2): a build that
+// predates a field never drops it when it writes the file again. Loose at run time, typed as stripping.
+const object = <S extends z.ZodRawShape>(shape: S) => z.looseObject(shape) as unknown as z.ZodObject<S, z.core.$strip>;
+/** A provider's read-only descriptive metadata (ADR 0011): an override in photos.json wins over each field. */
+export const providedFieldNames = ['title', 'caption', 'credit', 'altText'] as const;
+export type ProvidedField = typeof providedFieldNames[number];
+const providedSchema = object(Object.fromEntries(providedFieldNames.map((field) => [field, z.string().optional()])) as Record<ProvidedField, z.ZodOptional<z.ZodString>>);
+export type ProvidedMetadata = z.infer<typeof providedSchema>;
+export const assetFactSchema = object({
+  /**
+   * SHA-256 of the original's bytes, as hex. For a photo without a file (ADR 0011), of its stored preview's bytes
+   * without their metadata segments: what the proxy store keys it by.
+   */
   digest: z.string().regex(/^[a-f0-9]{64}$/),
   width: z.number().int().positive(),
   height: z.number().int().positive(),
@@ -20,8 +31,19 @@ export const assetFactSchema = z.object({
   camera: z.object({ make: z.string().optional(), model: z.string().optional() }).optional(),
   /** When this replica last observed the original at this digest, as an ISO instant. */
   verified: z.iso.datetime(),
+  /**
+   * For a photo without a file: the provider's two tokens (desktop/source-provider.ts) its stored facts and preview
+   * were read at. The host hands them back to the provider and compares them; it never reads them.
+   */
+  revisions: object({ revision: z.string(), contentRevision: z.string().optional() }).optional(),
+  /** For a photo without a file: its provider's title, caption, credit and alt text. */
+  provided: providedSchema.optional(),
+  /** For a photo without a file: what its provider keeps with the fact for its own use. */
+  extra: z.record(z.string(), z.unknown()).optional(),
 });
-export const assetsMetaSchema = z.object({ version: z.literal(1), assets: z.record(z.string(), assetFactSchema) });
+/** The `assets-meta.json` version this build reads and writes. A file with another one is never written over. */
+export const assetsMetaVersion = 1;
+export const assetsMetaSchema = object({ version: z.literal(assetsMetaVersion), assets: z.record(z.string(), assetFactSchema) });
 export type AssetFact = z.infer<typeof assetFactSchema>;
 export type AssetsMeta = z.infer<typeof assetsMetaSchema>;
 export type AssetFactObservation = { digest: string; width: number; height: number } & CaptureMetadata;

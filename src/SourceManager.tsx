@@ -6,7 +6,7 @@ import { PhotoViewMenu } from './PhotoViewMenu';
 import type { PhotoViewControl } from './PhotoViewMenu';
 import { photoGroups, photoDate, captureLabel } from './photo-view';
 import { sourceList } from './source-items';
-import { sourceEntries } from './source-locations';
+import { sourceEntries, sourceFile, sourceFolderName, sourceProvider } from './source-locations';
 import { useListSelection } from './list-selection';
 import { fileExtensionMime, fileMime, photoMime, textMime } from './source-items';
 import type { SourceRef } from './source-items';
@@ -15,7 +15,6 @@ import { assetMenu, assetMenuState, assetActions } from './asset-menu';
 import { assetPageLabels, assetUsage } from './asset-usage';
 import { ActionMenu } from './ActionMenu';
 import { Icon } from './Icon';
-import { fileName } from './source-items';
 import { fileExtension, useFileIcons } from './file-icons';
 
 // The Assets window shows photo thumbnails. Embedded in a book window's bottom panel it is a plain list: the
@@ -50,10 +49,10 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const entries = embedded ? raw.filter((entry) => entry.kind === 'file')
     : [...sourceList(summary, 'photo', view.value).map(({ id }) => raw.find((entry) => entry.kind === 'photo' && entry.id === id)!), ...raw.filter((entry) => entry.kind !== 'photo')];
   const usage = assetUsage(summary, assetPageLabels(summary));
-  const documentIcon = useFileIcons(embedded ? entries.map((entry) => fileExtension(fileName(entry.path))) : []);
+  const documentIcon = useFileIcons(embedded ? entries.map((entry) => fileExtension(entry.name)) : []);
   const placements = (entry: typeof entries[number]) => usage[entry.kind === 'markdown' ? 'text' : entry.kind][entry.id] ?? [];
   const unavailable = (key: string) => !!summary.sources?.[key] && summary.sources[key].state !== 'available';
-  const linked = entries.filter((entry) => entry.linked).length;
+  const linked = entries.filter((entry) => sourceFile(entry)?.linked).length;
   const missing = entries.filter((entry) => unavailable(entry.key)).length;
   async function act(request: SourceAction) {
     setBusy(true); setError(undefined); setNotice('');
@@ -89,16 +88,19 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const locked = busy || disabled;
   const shown = entries.filter((entry) => (kind === 'all' || kind === entry.kind) &&
     (used === 'all' || (used === 'used') === !!placements(entry).length) &&
-    (storage === 'all' || (storage === 'linked') === entry.linked) && (!attention || unavailable(entry.key)) &&
-    fileName(entry.path).toLocaleLowerCase().includes(search.toLocaleLowerCase()));
+    // Linked: anything not stored in the book, whether a file elsewhere or a photo of another provider.
+    (storage === 'all' || (storage === 'linked') === (sourceProvider(entry) !== 'package')) && (!attention || unavailable(entry.key)) &&
+    entry.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
   const groups = photoGroups(summary, shown.filter((entry) => entry.kind === 'photo').map(({ id }) => id), view.value);
   const headers = new Map(groups.filter((group) => group.label).map((group) => [group.ids[0], group]));
-  const list = useListSelection(shown.map(({ key }) => key), (key) => fileName(entries.find((entry) => entry.key === key)!.path));
+  const list = useListSelection(shown.map(({ key }) => key), (key) => entries.find((entry) => entry.key === key)!.name);
   const chosen = entries.filter(({ key }) => list.selected.includes(key));
-  const copyCount = chosen.filter(({ linked }) => linked).length;
+  // Copy into Book copies a linked file; a photo of another provider is not copied yet.
+  const copyable = (entry: typeof entries[number]) => !!sourceFile(entry)?.linked;
+  const copyCount = chosen.filter(copyable).length;
   // With nothing selected, the buttons act on every asset of the list; the embedded list holds only files.
   const everyKey = embedded ? (keep: (entry: typeof entries[number]) => boolean) => entries.filter(keep).map(({ key }) => key) : () => undefined;
-  const copyKeys = chosen.length ? chosen.filter(({ linked }) => linked).map(({ key }) => key) : everyKey(({ linked }) => linked);
+  const copyKeys = chosen.length ? chosen.filter(copyable).map(({ key }) => key) : everyKey(copyable);
   const preview = () => {
     const item = entries.find(({ key }) => key === list.selected[0]);
     if (item?.kind === 'file') void act({ action: 'preview', key: item.key });
@@ -142,7 +144,8 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
         const status = summary.sources?.[entry.key];
         const problem = unavailable(entry.key);
         const badge = problem ? status?.state === 'unapproved' ? 'Locate to approve' : status?.state === 'missing' ? 'Missing'
-          : status?.state === 'denied' ? 'Access denied' : 'Unavailable' : undefined;
+          : status?.state === 'denied' ? 'Access denied' : status?.state === 'offline' ? 'Offline' : status?.state === 'needs-sign-in' ? 'Sign in needed' : 'Unavailable' : undefined;
+        const file = sourceFile(entry);
         const group = entry.kind === 'photo' ? headers.get(entry.id) : undefined;
         return <Fragment key={entry.key}>
           {group && <button className="asset-group-heading" onClick={() => list.setSelection(group.ids.map((id) => 'photo:' + id))}>
@@ -154,7 +157,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
           onDragStart={(event) => {
             // In the bottom panel a file goes to a file setting in the Inspector (F-028).
             if (embedded) {
-              const extension = fileName(entry.path).match(/\.[^.]+$/)?.[0] ?? '';
+              const extension = entry.name.match(/\.[^.]+$/)?.[0] ?? '';
               event.dataTransfer.setData(fileMime, entry.id);
               event.dataTransfer.setData(fileExtensionMime(extension), '');
               event.dataTransfer.effectAllowed = 'link';
@@ -169,17 +172,17 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
             if (embedded) { if (!locked && !problem) preview(); return; }
             if (!locked && !problem) void act({ action: 'reveal', keys: list.selected.includes(entry.key) ? list.selected : [entry.key] });
           }}>
-          <span className={'asset-icon' + (embedded ? ' asset-icon-document' : '')}>{embedded ? <DocumentIcon src={documentIcon(fileExtension(fileName(entry.path)))} kind={entry.kind} />
+          <span className={'asset-icon' + (embedded ? ' asset-icon-document' : '')}>{embedded ? <DocumentIcon src={documentIcon(fileExtension(entry.name))} kind={entry.kind} />
             : entry.kind === 'photo' && summary.photos[entry.id] ? <img src={summary.photos[entry.id]} alt="" /> : <Glyph kind={entry.kind} />}</span>
-          <span className="asset-name" title={entry.path}><span className="asset-description">{renaming === entry.key
-            ? <RenameField name={fileName(entry.path)} done={(name) => {
+          <span className="asset-name" title={file?.path ?? entry.name}><span className="asset-description">{renaming === entry.key
+            ? <RenameField name={entry.name} done={(name) => {
                 setRenaming(undefined);
-                if (name !== undefined && name !== fileName(entry.path)) void act({ action: 'rename', key: entry.key, name });
+                if (name !== undefined && name !== entry.name) void act({ action: 'rename', key: entry.key, name });
               }} />
-            : <strong>{fileName(entry.path)}</strong>}
-            {(entry.linked || problem) && <span className="muted">{entry.path.split('/').slice(-2, -1)[0]}</span>}</span></span>
-          <span className="asset-status">{entry.kind === 'markdown' && <EditMarkdown api={api} id={entry.id} name={fileName(entry.path)} disabled={locked || problem} failure={(message) => setError({ message })} />}{entry.kind === 'photo' && view.value.showTime && <span className="muted" title={photoDate(summary, entry.id)?.capturedEstimated ? 'Estimated from file modification time' : undefined}>{captureLabel(photoDate(summary, entry.id)?.captured, photoDate(summary, entry.id)?.capturedEstimated)}{photoDate(summary, entry.id)?.capturedEstimated ? ' ≈' : ''}</span>}<span className="muted">{placements(entry).length ? placements(entry).length + '×' : 'Not used'}</span>{badge && <span className="source-badge warning" title={status?.problem}>{badge}</span>}
-            {entry.linked && <span className="asset-linked" role="img" aria-label="Linked to original file" title="Linked to original file"><Icon name="link" size={16} /></span>}
+            : <strong>{entry.name}</strong>}
+            {(file?.linked || problem) && sourceFolderName(entry) && <span className="muted">{sourceFolderName(entry)}</span>}</span></span>
+          <span className="asset-status">{entry.kind === 'markdown' && <EditMarkdown api={api} id={entry.id} name={entry.name} disabled={locked || problem} failure={(message) => setError({ message })} />}{entry.kind === 'photo' && view.value.showTime && <span className="muted" title={photoDate(summary, entry.id)?.capturedEstimated ? 'Estimated from file modification time' : undefined}>{captureLabel(photoDate(summary, entry.id)?.captured, photoDate(summary, entry.id)?.capturedEstimated)}{photoDate(summary, entry.id)?.capturedEstimated ? ' ≈' : ''}</span>}<span className="muted">{placements(entry).length ? placements(entry).length + '×' : 'Not used'}</span>{badge && <span className="source-badge warning" title={status?.problem}>{badge}</span>}
+            {file?.linked && <span className="asset-linked" role="img" aria-label="Linked to original file" title="Linked to original file"><Icon name="link" size={16} /></span>}
           </span>
         </div></Fragment>;
       })}
