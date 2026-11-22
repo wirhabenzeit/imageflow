@@ -83,8 +83,10 @@ function LayoutGrid({ summary, spread, template, page, choices, allowed, current
         (item?.span === 'page' || !spread.split);
       const unavailable = !blank && !allowed.has(id);
       const description = unavailable ? 'Available on the ' + item?.sides?.join(' or ') + ' page' : consequence(blank ? undefined : id);
+      // Names longer than a page tile are cut off, so the full name, and a family's variant, show on hover (UI-001).
+      const full = family && template.spreads[id].label !== name(id) ? name(id) + ' · ' + template.spreads[id].label : name(id);
       return <button key={id} type="button" role="radio" disabled={pending || unavailable} aria-checked={checked} aria-label={name(id)}
-        aria-description={description || undefined}
+        aria-description={description || undefined} title={full}
         draggable={!pending && !unavailable} onDragStart={(event) => event.dataTransfer.setData(layoutMime, id)}
         className={'layout-option' + (family ? ' layout-family' : '') + (blank ? ' layout-blank' : '') + (unavailable ? ' layout-unavailable' : '')}
         style={rect ? { left: rect.x - 4, top: rect.y - 4, width: rect.width + 8, height: rect.height + 25 }
