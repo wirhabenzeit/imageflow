@@ -136,13 +136,13 @@ export const mcpOutputSchemas = {
     template: z.looseObject({}).optional().describe('Parsed template declarations: the active format, every format in full (printFormats), parameters, layouts with their boxes and elements, layout families and opening spreads.'),
     templateIdentity: templateIdentitySchema,
     sources: z.record(z.string(), z.looseObject({ text: z.string(), sha256: z.string(), truncated: z.boolean() })).describe('Requested includeSource files.'),
-    templateFiles: z.array(z.string()).describe('Files under template/. Generated folders are listed once, ending in /.'),
-    topics: z.array(z.looseObject({ id: z.string(), title: z.string(), summary: z.string(), bytes: z.number() }))
+    templateFiles: z.array(z.string()).optional().describe('Files under template/. Generated folders are listed once, ending in /. Like template, topics and capabilities, left out when only docs, examples or sources were requested.'),
+    topics: z.array(z.looseObject({ id: z.string(), title: z.string(), summary: z.string(), bytes: z.number() })).optional()
       .describe('Table of contents of the template API reference. Request topics with docs.'),
     docs: z.record(z.string(), z.string()).optional().describe('Requested reference topics as Markdown, by topic ID.'),
     examples: z.array(z.looseObject({ name: z.string(), description: z.string(), source: z.string().optional() }))
       .describe('Shipped example templates. Requested ones include their source.'),
-    capabilities: z.looseObject({}),
+    capabilities: z.looseObject({}).optional(),
   }),
   inspect_book: z.looseObject({
     project: z.string(), ...reportFields,

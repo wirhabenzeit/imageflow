@@ -46,7 +46,7 @@ How an agent edits an ImageFlow book through the MCP server. The template API to
 ### Orientation
 
 1. Call `list_projects` to get the handle and input revision of the open, authorized book.
-2. Call `get_authoring_context`. It returns the parsed template declarations (`template`), saved and current template identity, the files under `template/`, a table of contents of the API reference (`topics`) and the shipped examples (`examples`). Ask for the topics you need with `docs: ['list-parameters', …]`, for example sources with `includeExamples: ['minimal']`, and for template or Markdown files with `includeSource`.
+2. Call `get_authoring_context`. It returns the parsed template declarations (`template`), saved and current template identity, the files under `template/`, a table of contents of the API reference (`topics`) and the shipped examples (`examples`). Ask for the topics you need with `docs: ['list-parameters', …]`, for example sources with `includeExamples: ['minimal']`, and for template or Markdown files with `includeSource`. Those calls return just what they ask for, without the declarations again.
 3. Call `inspect_book` for the saved spreads, sources and parameter values. The `elements` view measures boxes and elements of one spread after whole-book text flow.
 
 ### Editing

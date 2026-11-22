@@ -241,7 +241,8 @@ async function referenceTopics(docs: string, requested: string[]) {
   return { topics, docs: Object.fromEntries(requested.map((id, index) => [id, texts[index]])) };
 }
 
-const contextGuide = 'Start with docs: ["authoring-workflow"]. Use docs for topics, includeExamples for examples and includeSource for files. ' +
+const contextGuide = 'Start with docs: ["authoring-workflow"]. Use docs for topics, includeExamples for examples and includeSource for files; ' +
+  'such calls return just those, without declarations, unless includeTemplate is true. ' +
   'Edit template/ in the workspace. Save book edits with apply_project_changes and verify with check_book.';
 
 export function createAuthoringService(hooks: Hooks) {
@@ -733,13 +734,22 @@ export function createAuthoringService(hooks: Hooks) {
         const reference = await referenceTopics(hooks.docs, [...new Set<string>(args.docs ?? [])]);
         const types = hooks.authoringTypes?.();
         const sdkState = types ? await authoringSnapshotState(join(folder, 'template'), types).catch(() => undefined) : undefined;
-        result = {
+        const examples = await templateExamples(hooks.docs, args.includeExamples);
+        // A call for topics, examples or sources returns just those (API-001): the declarations, file list, topic list
+        // and capabilities it would repeat are tens of kilobytes the agent already has from its first call.
+        const requestedOnly = !args.includeTemplate && !!(args.docs?.length || args.includeExamples || args.includeSource?.length);
+        if (requestedOnly) {
+          result = { project: session.handle, revision: report.revision, root: session.book.folder, guide: contextGuide,
+            templateIdentity, diagnostics, checks: report.checks, sources,
+            ...(args.docs?.length ? { docs: reference.docs } : {}),
+            examples: examples.filter((example) => 'source' in example) };
+        } else result = {
           project: session.handle, revision: report.revision, root: session.book.folder, guide: contextGuide,
           template, templateIdentity, diagnostics, checks: report.checks, sources,
           templateFiles: files[0].status === 'fulfilled' ? files[0].value : [],
           topics: reference.topics,
           ...(args.docs?.length ? { docs: reference.docs } : {}),
-          examples: await templateExamples(hooks.docs, args.includeExamples),
+          examples,
           ...(sdkState ? { sdk: { snapshot: sdkState, ...(sdkState === 'stale' ? { notice: 'template/.imageflow-sdk is from an earlier ImageFlow version and lacks newer API declarations, so editor tooling may flag code that renders fine. Type checks here use the installed SDK. Call rebuild_dependencies to refresh it.' } : {}) } } : {}),
           capabilities: { commands: true, dryRun: true, batchReferences: '$alias', sharedUndo: true, preview: ['page', 'spread'],
             maxPreviewEdge: 1600, typescript: true, printPreflight: false, draftPreview: true, contactSheets: true,

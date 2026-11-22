@@ -223,7 +223,7 @@ for (const tool of ['get_authoring_context', 'inspect_book']) {
     test(tool + ' preserves diagnostics for malformed ' + name, async (t) => {
       const { folder, call } = await fixture(t);
       await writeFile(join(folder, name), '{ invalid JSON');
-      const result = await call(tool, tool === 'get_authoring_context' ? { includeSource: ['template/index.tsx'] } : {});
+      const result = await call(tool, tool === 'get_authoring_context' ? { includeSource: ['template/index.tsx'], includeTemplate: true } : {});
       const diagnostics = result.diagnostics as AuthoringDiagnostic[];
       assert.ok(diagnostics.some((diagnostic) => diagnostic.message.includes('invalid JSON') && diagnostic.location?.path === name));
       assert.match(String(result.revision), /^[a-f0-9]{64}$/);
@@ -257,7 +257,7 @@ for (const tool of ['get_authoring_context', 'inspect_book']) {
     const { folder, call } = await fixture(t);
     const broken = 'export default );';
     await writeFile(join(folder, 'template/index.tsx'), broken);
-    const result = await call(tool, tool === 'get_authoring_context' ? { includeSource: ['template/index.tsx'] } : { view: 'spreads' });
+    const result = await call(tool, tool === 'get_authoring_context' ? { includeSource: ['template/index.tsx'], includeTemplate: true } : { view: 'spreads' });
     assert.ok((result.diagnostics as AuthoringDiagnostic[]).some(({ code }) => code === 'template-compile-error'));
     assert.equal(result.template, undefined);
     assert.deepEqual(result.templateIdentity, {
@@ -340,7 +340,7 @@ test('a template directory outside the project cannot expose its source or filen
   await writeFile(join(outside, 'index.tsx'), 'PRIVATE_SOURCE_MUST_STAY_OUTSIDE');
   await writeFile(join(outside, 'PRIVATE_FILENAME_MUST_STAY_OUTSIDE.tsx'), 'private');
   await symlink(outside, join(folder, 'template'));
-  const result = await call('get_authoring_context', { includeSource: ['template/index.tsx'] });
+  const result = await call('get_authoring_context', { includeSource: ['template/index.tsx'], includeTemplate: true });
   assert.equal(result.revision, null);
   assert.deepEqual(result.sources, {});
   assert.deepEqual(result.templateFiles, []);
@@ -734,12 +734,33 @@ test('context reports the installed template API and returns shipped examples on
     { name: 'b-grid', description: 'A grid.', source: '// A grid.\nexport default {};\n' },
   ]);
   const one = await call('get_authoring_context', { includeExamples: ['b-grid'] });
-  assert.deepEqual(one.examples, [
+  assert.deepEqual(one.examples, [{ name: 'b-grid', description: 'A grid.', source: '// A grid.\nexport default {};\n' }]);
+  const listed = await call('get_authoring_context', { includeExamples: ['b-grid'], includeTemplate: true });
+  assert.deepEqual(listed.examples, [
     { name: 'a-minimal', description: 'The smallest template.' },
     { name: 'b-grid', description: 'A grid.', source: '// A grid.\nexport default {};\n' },
   ]);
   await assert.rejects(call('get_authoring_context', { includeExamples: ['missing'] }),
     (error) => error instanceof AuthoringError && error.code === 'EXAMPLE_NOT_FOUND' && error.message.includes('a-minimal, b-grid'));
+});
+
+test('a call for topics, examples or sources returns just those unless includeTemplate is true (API-001)', async (t) => {
+  const { call, hooks } = await fixture(t);
+  hooks.docs = resolve('docs');
+  const full = await call('get_authoring_context');
+  const requested = await call('get_authoring_context', { docs: ['authoring-workflow'] });
+  for (const field of ['template', 'templateFiles', 'topics', 'capabilities']) {
+    assert.ok(field in full, field + ' is in the full context');
+    assert.equal(field in requested, false, field + ' is left out of a call for topics');
+  }
+  assert.deepEqual(requested.examples, []);
+  assert.equal(requested.revision, full.revision);
+  assert.deepEqual(requested.templateIdentity, full.templateIdentity);
+  const docs = JSON.stringify(requested.docs).length;
+  assert.ok(JSON.stringify(requested).length < docs + 2_000, 'a call for one topic adds little beyond the topic');
+  const both = await call('get_authoring_context', { docs: ['authoring-workflow'], includeTemplate: true });
+  assert.deepEqual(both.template, full.template);
+  assert.deepEqual(both.topics, full.topics);
 });
 
 test('context lists reference topics and returns only the requested ones', async (t) => {

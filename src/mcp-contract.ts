@@ -39,6 +39,8 @@ export const mcpToolSchemas = {
       .describe('Example sources to include. Pass names from examples, or true for all.'),
     includeSource: z.array(relativePath(['template', 'texts']).describe('A path from templateFiles, or a Markdown file under texts/.')).max(8).optional()
       .describe('Template or Markdown files to return, up to 32,000 characters each.'),
+    includeTemplate: z.boolean().optional()
+      .describe('With docs, includeExamples or includeSource, also return declarations, files, topics and capabilities.'),
   }),
   inspect_book: z.strictObject({
     project,
@@ -137,7 +139,7 @@ export const mcpTools: { name: McpToolName; title: string; description: string; 
   { name: 'list_projects', title: 'List open books', readOnly: true,
     description: 'List authorized open books with their handles and revisions. Call first.' },
   { name: 'get_authoring_context', title: 'Get authoring context', readOnly: true,
-    description: 'Read parsed declarations, template identity and files. Before editing a template, request reference topics, examples and source files.' },
+    description: 'Read parsed declarations, template identity and files. Before editing a template, request reference topics, examples and source files: those calls return just what they request.' },
   { name: 'inspect_book', title: 'Inspect book', readOnly: true,
     description: 'Read saved spreads, cover, sources or parameters, or measure layout elements. Returns the revision for checks and commands.' },
   { name: 'check_book', title: 'Check book', readOnly: true,
