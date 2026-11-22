@@ -804,7 +804,8 @@ function croppedSheet(sheet: HTMLElement, crop: ReturnType<typeof sheetCrop>, pi
 
 // Uses the same flowed sheets and crop geometry as proof/export. Only the current crop and its neighbours
 // are mounted at full size; overview crops reuse the final artwork rather than the editor decoration.
-async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spreads: SpreadState[], sequence: ReturnType<typeof pageSequence>, format: ResolvedFormat, start: string) {
+async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spreads: SpreadState[], sequence: ReturnType<typeof pageSequence>, format: ResolvedFormat, start: string,
+  replacement: boolean) {
   // Keep source layouts measured while their asynchronous pictures finish. display:none would resize those
   // pictures to zero and cancel them; the presentation copies receive their finished pixels below.
   const sourceWidth = root.getBoundingClientRect().width;
@@ -824,10 +825,11 @@ async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spre
   let drawRevision = 0;
   let firstPaint!: () => void;
   const painted = new Promise<void>((resolve) => { firstPaint = resolve; });
-  // A new revision's frame starts at the spread the presentation started on, and is told the spread on screen once it
-  // has drawn. It is ready only with that spread's photos, so it does not load them after it replaced the previous
-  // frame, when they blinked. An empty book is never told a spread, so it does not wait long.
-  let told = !spreads.length;
+  // A new revision's frame (`replacement`) starts at the spread the presentation started on, and is told the spread on
+  // screen once it has drawn. It is ready only with that spread's photos, so it does not load them after it replaced
+  // the previous frame, when they blinked. The presentation's first frame starts on the spread on screen, and an empty
+  // book is never told a spread: neither waits.
+  let told = !replacement || !spreads.length;
   const untold = setTimeout(() => { told = true; draw(); }, 2000);
   function syncPictures() {
     for (const [frame, sheet] of sources) {
@@ -931,8 +933,10 @@ async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spre
   window.addEventListener('message', (event) => {
     if (event.source !== parent || event.origin !== 'imageflow://editor' || event.data?.type !== 'present') return;
     const next = event.data as PresentationView;
-    if (!spreads.some(({ id }) => id === next.spread) || !['page', 'left', 'right', 'spread'].includes(next.side) || !['trim', 'bleed'].includes(next.bounds)) return;
-    state = next;
+    const valid = spreads.some(({ id }) => id === next.spread) && ['page', 'left', 'right', 'spread'].includes(next.side) && ['trim', 'bleed'].includes(next.bounds);
+    // A spread this revision removed keeps the one the frame shows, without waiting to be told another.
+    if (!valid && told) return;
+    if (valid) state = next;
     told = true;
     clearTimeout(untold);
     draw();
@@ -2390,7 +2394,7 @@ export async function startRender(root: HTMLElement) {
       setGrid = layoutBook(root, laidOut, view, format, grid);
     }
     step('layout');
-    if (present) await renderPresentation(root, sheets, spreads, sequence, format, presentationStart);
+    if (present) await renderPresentation(root, sheets, spreads, sequence, format, presentationStart, query.has('replacement'));
     else if (lazy) {
       const load = photoLoader(root, () => onScreen);
       let timer: ReturnType<typeof setTimeout> | undefined;

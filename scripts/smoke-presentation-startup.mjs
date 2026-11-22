@@ -117,6 +117,9 @@ try {
   await checkHeader();
   if (!process.argv.includes('--measure')) {
     assert.equal(await proof.locator('body').evaluate(() => window.__heldProxyDecodes ?? 0), 0, 'Offscreen shaped photos never block startup on decode');
+    // The first frame starts on its spread; only a later revision's frame waits to be told the spread on screen.
+    assert.equal((await page.locator('.presentation .book-frame-present[data-current]').getAttribute('src')).includes('replacement'), false,
+      'The presentation\'s first frame does not wait as a replacement');
     assert.equal(requests.find((source) => !source.startsWith('p15'))?.split('/')[0], 'p30', 'The selected spread is the first ordinary photo requested');
     // Screen-sized, never the camera original, also for the spread on screen (p15 is drawn in an SVG picture).
     assert.ok(requests.filter((source) => !source.startsWith('p15')).every((source) => /\/\d+$/.test(source)), 'The presentation requests sized photos');
@@ -140,7 +143,9 @@ try {
     await proof.locator('.if-present-crop:visible img[data-src][src*="/p30/"]').waitFor();
     const current = proof.locator('.if-present-crop:visible');
     await current.locator('[data-rendered="ready"] img').waitFor();
-    assert.equal(await current.locator('img[data-src]').evaluate(image => image.naturalWidth), 1800);
+    // A rendition as wide as the screen needs, never wider than the 1800 px original.
+    assert.equal(await current.locator('img[data-src]').evaluate(image => image.naturalWidth),
+      Math.min(1800, Number((await current.locator('img[data-src]').getAttribute('src')).split('/').pop())));
     await page.keyboard.press('ArrowRight');
     await proof.locator('.if-present-crop:visible img[data-src][src*="/p31/"]').waitFor();
     await proof.locator('.if-present-crop:visible [data-rendered="ready"]').waitFor();

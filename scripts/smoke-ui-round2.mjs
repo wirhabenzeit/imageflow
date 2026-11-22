@@ -105,7 +105,8 @@ try {
   assert.equal(await proof.locator('.if-presentation .if-placeholder, .if-presentation [data-edit]').count(), 0);
   const photo = proof.locator('.if-present-crop:visible img').first();
   assert.match(await photo.getAttribute('src'), /\/proof-photo\//);
-  assert.equal(await photo.evaluate((image) => image.naturalWidth), 3200);
+  // A rendition as wide as the screen needs, never wider than the 3200 px original.
+  assert.equal(await photo.evaluate((image) => image.naturalWidth), Math.min(3200, Number((await photo.getAttribute('src')).split('/').pop())));
   await presentation.keyboard.press('ArrowRight');
   assert.match(await presentation.locator('.presentation-indicator').textContent(), /pp\. 8–9/);
   await presentation.keyboard.press('f');

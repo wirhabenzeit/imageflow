@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { renderOrigin, thumbsOrigin } from './desktop';
 import type { BookGeometry, BookView, RenderStatus } from './desktop';
 import type { PresentationView } from './presentation-model';
@@ -57,8 +57,13 @@ export function BookFrame({ busy = false, provisional, project, view, query = ''
 }) {
   // Thumbnails render from their own origin, in their own process, alongside the book view.
   const origin = view === 'thumbs' ? thumbsOrigin : renderOrigin;
-  const target = hold ? undefined : origin + '/render/' + project + '?view=' + view + (query && '&' + query);
+  // A presentation frame for a later revision replaces one on show, so it waits to be told the spread on screen
+  // (renderPresentation); the first one starts there. Decided once per revision, so the URL never changes under a frame.
+  const shownRef = useRef<string>(undefined);
+  const replacing = useMemo(() => view === 'present' && !!shownRef.current, [project, view]);
+  const target = hold ? undefined : origin + '/render/' + project + '?view=' + view + (query && '&' + query) + (replacing ? '&replacement' : '');
   const [shown, setShown] = useState<string>();
+  shownRef.current = shown;
   // The frame shown before `shown`, kept beneath it for a moment. Without it, a tall book's replacement frame showed
   // nothing at all for a moment while Chromium painted it (F-042).
   const [retiring, setRetiring] = useState<string>();
