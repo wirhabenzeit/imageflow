@@ -25,6 +25,8 @@ The contract in the ADR holds, with the changes below. They are in the types and
 - **Approvals stay inside `linked`.** An approval is a grant for one exact path of one book, checked while the path is resolved (`originalPath`). What another provider needs approved (an app, a server) is a different question, so the contract leaves trust out until a second provider asks it.
 - **Import is not in the contract.** `importIntoProject` takes file paths, a copy or link mode, and reports a file as already held by path, then by content. A Lightroom import arrives from the plugin. Both end in the same host step (assign an ID, write the entry, record facts), which is extracted when the second one exists.
 
+- **Sync needs nothing from a provider.** Proxies and facts sync for every photo; originals sync only for `package`. Which Mac can print which photo is in the ADR ([Sync between Macs](../decisions/0011-lightroom-classic.md#sync-between-macs)).
+
 Two findings concern the later Lightroom phase, not this one:
 
 - **A book format cannot follow `photos.json` today.** `bookFormatOf` ([`src/project.ts`](../../src/project.ts)) derives the format from `project.json` alone. The format bump for entries without a `path` needs it to see the photo index.

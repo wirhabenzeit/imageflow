@@ -177,6 +177,26 @@ The contract covers photos. Texts and files stay files. Approvals stay inside `l
 
 Full-resolution files go into the **source cache, not the rendition cache.** The rendition cache (`Cache/renditions`) is capped at 512 MB and pruned between sessions (`pruneRenditions`, `desktop/rendition-cache.ts`); at about 20 MB per 24 MP render, a 48-photo book alone would exceed it and re-render at every export. The source cache already has the retention a materialization needs (`pruneSourceCache`, `desktop/source-store.ts`): the most recently opened book keeps every snapshot it references whatever the limit, recent books are preferred, open books and running jobs pin theirs, and the 2 GB limit applies to the rest. A materialized Lightroom render is then the same kind of object as a snapshot of a linked file, and export pinning works unchanged. Settings shows the cache size and a **Clear** action, since a few large books reach several GB.
 
+### Sync between Macs
+
+Providers do not change how a book syncs ([0010](0010-sync-revisions-and-cloud-assets.md)); they generalise what a linked file already is there. Book state, facts and 1400 px proxies sync for every photo, whatever its provider. An original syncs only when its provider is `package`.
+
+**A Mac can print a photo if the photo is in the package, or if that Mac can reach the photo's provider.**
+
+| Reach | Providers | Full resolution on another Mac |
+| --- | --- | --- |
+| Travels with the book | `package` | Yes: the original is downloaded on demand |
+| Any Mac with access | Immich, S3 and other servers | Yes, once that Mac is signed in |
+| Bound to one Mac | `linked`, `lightroom` | Only if that Mac has the folder or the catalog |
+
+A book can therefore hold photos that no single Mac can print: one Mac adds Lightroom photos, another links a folder only it has. This is already possible with two linked folders, and each Mac shows the other's photos from their proxies. Only providers bound to one Mac cause it. There are three answers:
+
+1. **Copy into Book** on the Mac that has the source. The photo becomes a `package` photo and its original syncs. It no longer follows edits in Lightroom.
+2. **Say it before the export.** Book check lists the placed photos this Mac cannot print, with the reason (in Lightroom on another Mac, a linked folder not located here, not signed in), and the export is proof-only for them, as for a missing linked original today. Naming the other Mac needs a fact to record which Mac last read the original; today it records only when.
+3. **Syncing full-resolution renders of placed photos** (*deferred*). A materialization is a content-addressed file recorded against a revision, so the sync engine can upload it like an owned original, and another Mac can export from it while the photo stays a Lightroom photo. That Mac cannot ask Lightroom whether the render is current, so it prints the revision the render was made from and says so. This needs nothing from a provider and is decided when full-resolution export exists (phase 3).
+
+The provider contract needs nothing for this: the host asks whether a photo's provider is `package` (sync the original), and what `observe` returns on this Mac (can it print).
+
 ### Other prerequisites
 
 - **Older builds.** An entry without `path` is rejected by builds that predate it, so provider locators ship behind a `schemaVersion` bump (ADR 0009 and 0010's mixed-version rules). The format is derived from `project.json` alone today (`bookFormatOf`, `src/project.ts`), so it must come to depend on the photo index.
