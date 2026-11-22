@@ -94,7 +94,7 @@ const commandFields = {
 };
 
 const revisionMoved = z.looseObject({ expectedRevision: z.string(), revision: z.string() }).optional()
-  .describe('Present when the book changed after expectedRevision and this dry run or draft was planned at the current revision instead.');
+  .describe('The book changed after expectedRevision; planned at revision instead.');
 
 const checkpointFields = {
   checkpointId: z.string().nullable().optional().describe('The book history checkpoint of this commit, or null when nothing changed.'),

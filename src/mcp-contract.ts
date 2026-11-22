@@ -65,7 +65,9 @@ export const mcpToolSchemas = {
   check_book: z.strictObject({
     project,
     cover: z.literal(true).optional().describe('Check the exterior cover.'),
-    includeTemplate: z.boolean().optional().describe('Include full template declarations.'),
+    includeTemplate: z.boolean().optional().describe('Include full template declarations and render summary.'),
+    include: z.array(z.enum(['units', 'flow', 'anchors'])).max(3).optional()
+      .describe('Render lists to return for the whole book, not just the addressed spreads.'),
     expectedRevision: revision.optional()
       .describe('Required for drafts and page-number previews. Changed inputs return revision-conflict.'),
     preview: makePreviewRequestSchema(spreadReference).optional()

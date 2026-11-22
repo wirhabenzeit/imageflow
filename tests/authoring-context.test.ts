@@ -8,7 +8,7 @@ import { checkedOutput } from './mcp-output-check';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import sharp from 'sharp';
-import { AuthoringError, createAuthoringService } from '../desktop/authoring-service';
+import { AuthoringError, compactRender, createAuthoringService } from '../desktop/authoring-service';
 import { checkProject } from '../desktop/check';
 import { importIntoProject, loadProject } from '../desktop/project';
 import { ProjectSession } from '../desktop/project-session';
@@ -814,6 +814,26 @@ test('checks omit repeated template declarations unless requested and retain the
   const full = await call('check_book', { includeTemplate: true });
   assert.deepEqual((full.render as Record<string, unknown>).template, status.template);
   assert.deepEqual((await call('get_authoring_context')).template, status.template);
+});
+
+test('check replies count the book-wide render lists and list only the addressed spreads unless included (API-005)', () => {
+  const render: Extract<RenderStatus, { state: 'ready' }> = { ...status,
+    units: [{ side: 'left', spread: 'one', where: 'Page 1' }, { side: 'right', spread: 'two', where: 'Page 2' }],
+    errors: [{ message: 'Repeated in diagnostics' }],
+    flow: { 'one:body': { part: 1, parts: 2 }, 'two:body': { part: 2, parts: 2 }, 'two:left:body': { part: 1, parts: 1 } },
+    anchors: [{ id: 'a', spread: 'one', page: 1, side: 'left' }, { id: 'b', spread: 'two', page: 2, side: 'right' }] };
+  const overview = compactRender(render, {}, {});
+  assert.deepEqual(overview.counts, { units: 2, flow: 3, anchors: 2 });
+  assert.equal('units' in overview || 'flow' in overview || 'anchors' in overview || 'errors' in overview || 'template' in overview, false);
+  const previewed = compactRender(render, { image: { spread: 'two' } }, {});
+  assert.deepEqual(previewed.units, [render.units[1]]);
+  assert.deepEqual(previewed.flow, { 'two:body': render.flow['two:body'], 'two:left:body': render.flow['two:left:body'] });
+  assert.deepEqual(previewed.anchors, [render.anchors[1]]);
+  const drafted = compactRender(render, { draft: { affectedSpreads: ['one'] } }, { inspect: { spread: '$new' } });
+  assert.deepEqual(drafted.units, [render.units[0]]);
+  const included = compactRender(render, { image: { spread: 'two' } }, { include: ['anchors'] });
+  assert.deepEqual(included.anchors, render.anchors);
+  assert.deepEqual(included.units, [render.units[1]]);
 });
 
 test('inspection reports a split sheet\'s merge layout as restoreDefinition and lists sources by kind (F-017)', async (t) => {

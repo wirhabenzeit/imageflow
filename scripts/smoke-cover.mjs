@@ -132,7 +132,7 @@ try {
   assert.ok(interior.diagnostics.every(({ location }) => !location?.cover));
   const checked = (await call('check_book', { project: handle, cover: true })).data;
   assert.equal(checked.render.cover.status, 'ready');
-  assert.equal(checked.render.units.length, 0);
+  assert.equal(checked.render.counts.units, 0);
   const context = (await call('get_authoring_context', { project: handle })).data;
   assert.ok(context.template.coverFormats.blurbJacket);
   const operations = [{ op: 'insert_spread', after: 'spread-14', definition: 'panorama', ref: 'more' }];

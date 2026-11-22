@@ -58,6 +58,27 @@ const pause = (ms: number, signal: AbortSignal) => new Promise<void>((resolve, r
 
 const omitDefinition = <T extends { definition: string }>({ definition: _definition, ...rest }: T) => rest;
 
+// The render summary of a check_book reply (API-005). The book-wide lists, a few kilobytes for a long book, are
+// counted, and listed for the spreads the request addressed: the previewed, inspected and drafted ones. `include`
+// lists them in full. render.errors and render.warnings repeat the reply's diagnostics, so they are left out.
+type RenderList = 'units' | 'flow' | 'anchors';
+export function compactRender(render: NonNullable<AuthoringCheckResult['render']>, report: { image?: unknown; draft?: { affectedSpreads?: string[] } | { applied: boolean } }, args: { include?: RenderList[]; inspect?: { spread?: string } }) {
+  const { template: _template, errors: _errors, warnings: _warnings, units, flow, anchors, ...rest } = render;
+  const image = report.image as { spread?: string; cells?: { spread: string }[] } | undefined;
+  const addressed = new Set([image?.spread, ...image?.cells?.map(({ spread }) => spread) ?? [], args.inspect?.spread,
+    ...(report.draft && 'affectedSpreads' in report.draft ? report.draft.affectedSpreads ?? [] : [])].filter((id): id is string => !!id && !id.startsWith('$')));
+  const include = new Set(args.include ?? []);
+  const listed = (list: RenderList) => include.has(list) || addressed.size > 0;
+  const flowSpread = (key: string) => key.split(':', 1)[0];
+  return {
+    ...rest,
+    counts: { units: units.length, flow: Object.keys(flow).length, anchors: anchors.length },
+    ...(listed('units') ? { units: include.has('units') ? units : units.filter(({ spread }) => addressed.has(spread)) } : {}),
+    ...(listed('flow') ? { flow: include.has('flow') ? flow : Object.fromEntries(Object.entries(flow).filter(([key]) => addressed.has(flowSpread(key)))) } : {}),
+    ...(listed('anchors') ? { anchors: include.has('anchors') ? anchors : anchors.filter(({ spread }) => addressed.has(spread)) } : {}),
+  };
+}
+
 export class AuthoringError extends Error {
   constructor(readonly code: string, message: string, readonly details?: Record<string, unknown>) { super(message); }
 }
@@ -635,8 +656,7 @@ export function createAuthoringService(hooks: Hooks) {
       // Keep full declarations in the internal check cache for planning and context, not in every agent reply.
       const { template: _template, render, ...compact } = report;
       if (!render) return compact;
-      const { template: _renderTemplate, ...renderSummary } = render;
-      return { ...compact, render: renderSummary };
+      return { ...compact, render: compactRender(render, report, args) };
     }
     if (name === 'inspect_book' && args.view === 'elements') {
       const report = await checked(session, signal, { inspect: { spread: args.spread, cover: args.cover, page: args.page, box: args.box, element: args.element,

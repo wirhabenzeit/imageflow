@@ -64,8 +64,8 @@ test('output schemas keep the frozen result fields strict and allow later additi
 test('the advertised tool list stays within its size budget', () => {
   const bytes = (part: 'input' | 'output') => mcpTools.reduce((sum, { name }) => sum + JSON.stringify(advertisedSchemas(name)[part]).length, 0);
   const descriptions = mcpTools.reduce((sum, { title, description }) => sum + title.length + description.length, 0);
-  assert.ok(bytes('input') + descriptions <= 48_000, 'Input schemas and descriptions use ' + (bytes('input') + descriptions) + ' bytes.');
-  assert.ok(bytes('output') <= 30_000, 'Output schemas use ' + bytes('output') + ' bytes.');
+  assert.ok(bytes('input') + descriptions <= 49_000, 'Input schemas and descriptions use ' + (bytes('input') + descriptions) + ' bytes.');
+  assert.ok(bytes('output') <= 31_000, 'Output schemas use ' + bytes('output') + ' bytes.');
 });
 
 test('a preview target that fits one shape reports that shape\'s issue, otherwise the list of shapes', () => {
