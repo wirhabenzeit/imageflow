@@ -114,6 +114,11 @@ export const mcpToolSchemas = {
   }),
   rebuild_dependencies: z.strictObject({ project }),
   list_templates: z.strictObject({}),
+  read_library_template: z.strictObject({
+    template: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/).describe('Template ID from list_templates.'),
+    path: z.string().min(1).max(512).optional().describe('A text file from the file list, such as index.tsx. Without it, lists the files.'),
+    project: project.optional().describe('Compare the file list with this book\'s template/.'),
+  }),
   save_template_to_library: z.strictObject({
     project,
     replaceHash: z.string().regex(/^[a-f0-9]{64}$/, 'Expected a template hash from list_templates.').optional()
@@ -152,6 +157,8 @@ export const mcpTools: { name: McpToolName; title: string; description: string; 
     description: 'Install the npm packages listed in template/package.json outside the book, in a cache ImageFlow manages, and bundle the ones the template imports into template/vendor/, which is all the book renders. Call it after changing template/package.json or adding a package import; never run npm install in template/. A long install answers state "installing": call again until it is "ready", then check_book.' },
   { name: 'list_templates', title: 'List library templates', readOnly: true,
     description: 'List built-in and imported templates. Compare their hashes with a book\'s templateIdentity.' },
+  { name: 'read_library_template', title: 'Read library template', readOnly: true,
+    description: 'List a library template\'s files, or read one, such as a newer starter\'s, to port its changes into a book\'s fork. With project, says which files differ from the book\'s template/.' },
   { name: 'save_template_to_library', title: 'Save template to library', readOnly: false,
     description: 'Validate a book\'s template/ folder and save it into the template library, so New Book offers it. Raise version for a changed template. A conflict result names the entry it would replace; pass its hash as replaceHash only when the user wants it replaced.' },
   { name: 'import_sources', title: 'Import sources', readOnly: false,

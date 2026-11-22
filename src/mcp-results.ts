@@ -195,6 +195,13 @@ export const mcpOutputSchemas = {
   list_templates: z.looseObject({
     templates: z.array(libraryEntry),
   }),
+  read_library_template: z.looseObject({
+    template: libraryVersion,
+    files: z.array(z.looseObject({ path: z.string(), files: z.number().optional().describe('Files in a generated folder, listed once.'),
+      status: z.enum(['same', 'changed', 'library-only', 'book-only']).optional() })).optional(),
+    changelog: z.string().optional().describe('The file that lists changes per version.'),
+    path: z.string().optional(), text: z.string().optional(), truncated: z.boolean().optional(), sha256: z.string().optional(),
+  }),
   save_template_to_library: z.looseObject({
     status: z.enum(['saved', 'replaced', 'unchanged', 'conflict']).describe('conflict: nothing was saved; see reason and current.'),
     template: z.looseObject({ id: z.string(), version: z.string(), label: z.string(), hash: z.string().optional() }),

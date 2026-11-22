@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import type { TemplateInfo } from '../src/desktop';
 import { mm, printFormat } from '../src/format';
 import { TemplateImportError, TemplateLibrary } from '../desktop/template-library';
-import { agentLibraryEntry, saveTemplateToLibrary } from '../desktop/library-tools';
+import { agentLibraryEntry, readLibraryTemplate, saveTemplateToLibrary } from '../desktop/library-tools';
 import { AuthoringError } from '../desktop/authoring-service';
 import { mcpOutputSchemas } from '../src/mcp-contract';
 
@@ -162,5 +162,47 @@ test('a template that fails to load is an error with its diagnostics', async () 
     await template(book, { id: 'travel', version: '1', extra: 'BROKEN' });
     await assert.rejects(saveTemplateToLibrary(library, book, undefined, signal), (error: unknown) =>
       error instanceof AuthoringError && error.code === 'TEMPLATE_INVALID' && Array.isArray(error.details?.details));
+  } finally { await done(); }
+});
+
+test('agents read a library template\'s files and compare them with a book\'s fork (API-002)', async () => {
+  const { work, library, done } = await setup();
+  try {
+    const builtIn = join(work, 'builtin');
+    await writeFile(join(builtIn, 'CHANGELOG.md'), '# Changes\n');
+    await writeFile(join(builtIn, 'map.tsx'), 'export const map = 1;\n');
+    await mkdir(join(builtIn, 'vendor', 'modules'), { recursive: true });
+    await writeFile(join(builtIn, 'vendor', 'modules', 'a.js'), 'a');
+    await writeFile(join(builtIn, 'vendor', 'modules', 'b.js'), 'b');
+    // The fork: the same index.tsx, a changed map, a file of its own, and one vendored module rebuilt.
+    const fork = join(work, 'book');
+    await mkdir(join(fork, 'template', 'vendor', 'modules'), { recursive: true });
+    await writeFile(join(fork, 'template', 'index.tsx'), await readFile(join(builtIn, 'index.tsx')));
+    await writeFile(join(fork, 'template', 'map.tsx'), 'export const map = 2;\n');
+    await writeFile(join(fork, 'template', 'quote.tsx'), 'export const quote = 1;\n');
+    await writeFile(join(fork, 'template', 'vendor', 'modules', 'a.js'), 'a');
+    await writeFile(join(fork, 'template', 'vendor', 'modules', 'b.js'), 'changed');
+    const check = (value: Record<string, unknown>) => {
+      assert.ok(mcpOutputSchemas.read_library_template.safeParse(value).success, JSON.stringify(value));
+      return value;
+    };
+    const listed = check(await readLibraryTemplate(library, { template: 'starter' }));
+    assert.deepEqual(listed.files, [{ path: 'CHANGELOG.md' }, { path: 'index.tsx' }, { path: 'map.tsx' }, { path: 'vendor/', files: 2 }]);
+    assert.equal(listed.changelog, 'CHANGELOG.md');
+    assert.equal((listed.template as { id: string }).id, 'starter');
+    const compared = check(await readLibraryTemplate(library, { template: 'starter' }, fork));
+    assert.deepEqual(compared.files, [
+      { path: 'CHANGELOG.md', status: 'library-only' }, { path: 'index.tsx', status: 'same' }, { path: 'map.tsx', status: 'changed' },
+      { path: 'quote.tsx', status: 'book-only' }, { path: 'vendor/', files: 2, status: 'changed' },
+    ]);
+    const read = check(await readLibraryTemplate(library, { template: 'starter', path: 'map.tsx' }));
+    assert.equal(read.text, 'export const map = 1;\n');
+    assert.equal(read.truncated, false);
+    for (const [path, code] of [['../secret.ts', 'PATH_NOT_ALLOWED'], ['.hidden/a.ts', 'PATH_NOT_ALLOWED'], ['photo.jpg', 'SOURCE_TYPE_NOT_SUPPORTED'],
+      ['missing.tsx', 'SOURCE_NOT_FOUND']] as const) {
+      await assert.rejects(readLibraryTemplate(library, { template: 'starter', path }), (error) => error instanceof AuthoringError && error.code === code);
+    }
+    await assert.rejects(readLibraryTemplate(library, { template: 'nope' }),
+      (error) => error instanceof AuthoringError && error.code === 'TEMPLATE_NOT_FOUND' && error.message.includes('starter'));
   } finally { await done(); }
 });

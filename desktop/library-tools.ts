@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { extname, join } from 'node:path';
+import { templateFiles } from './template-library';
 import type { ImportPlan, TemplateLibrary } from './template-library';
 import { AuthoringError } from './authoring-service';
 import type { LibraryEntry } from '../src/library';
@@ -80,4 +84,65 @@ export async function saveTemplateToLibrary(library: TemplateLibrary, folder: st
     ...(decided?.plan.current ? { replaced: identity(decided.plan.current) } : {}),
     ...(network.length ? { notice: 'Saving does not allow the sites this template declares: books made from it ask once, until the user allows them in Templates → Manage Templates….' } : {}),
   };
+}
+
+// Generated folders are compared and listed as one entry each: nobody ports them file by file.
+const generatedFolders = ['vendor/', 'fonts/'];
+const readableExtensions = new Set(['.ts', '.tsx', '.css', '.json', '.md', '.js', '.mjs', '.txt', '.svg']);
+const sourceLimit = 32_000;
+
+const digest = async (file: string) => createHash('sha256').update(await readFile(file)).digest('hex');
+async function fileDigests(folder: string) {
+  const files = await templateFiles(folder);
+  return new Map(await Promise.all(files.map(async (path) => [path, await digest(join(folder, ...path.split('/')))] as const)));
+}
+const grouped = (path: string) => generatedFolders.find((prefix) => path.startsWith(prefix)) ?? path;
+
+/**
+ * Reads a library template's files for agents (API-002): its file list, or one text file, and with a book's template
+ * folder, which files differ from it, so a fork can bring over a newer starter's changes without the app's install path.
+ */
+export async function readLibraryTemplate(library: TemplateLibrary, args: { template: string; path?: string }, book?: string) {
+  const entries = await library.list();
+  const listed = entries.find(({ id }) => id === args.template);
+  if (!listed) throw new AuthoringError('TEMPLATE_NOT_FOUND', 'The library has no template ' + args.template + '. Templates: ' + entries.map(({ id }) => id).join(', ') + '.');
+  if (listed.unavailable) throw new AuthoringError('TEMPLATE_UNAVAILABLE', listed.unavailable);
+  return library.withTemplate(args.template, async ({ entry, folder }) => {
+    const template = { id: entry.id, version: entry.version, hash: entry.hash, source: entry.source };
+    if (args.path) {
+      const path = args.path;
+      if (path.split('/').some((part) => !part || part === '.' || part === '..' || part.startsWith('.'))) {
+        throw new AuthoringError('PATH_NOT_ALLOWED', 'Use a path from the file list, relative to the template folder, such as index.tsx.');
+      }
+      if (!readableExtensions.has(extname(path).toLowerCase())) {
+        throw new AuthoringError('SOURCE_TYPE_NOT_SUPPORTED', 'Only text files can be read: ' + [...readableExtensions].join(', ') + '.');
+      }
+      const files = await templateFiles(folder);
+      if (!files.includes(path)) throw new AuthoringError('SOURCE_NOT_FOUND', 'The template has no file ' + path + '. Call without path for its files.');
+      const bytes = await readFile(join(folder, ...path.split('/')));
+      const text = bytes.toString('utf8');
+      return { template, path, text: text.slice(0, sourceLimit), truncated: text.length > sourceLimit,
+        sha256: createHash('sha256').update(bytes).digest('hex') };
+    }
+    const shipped = await fileDigests(folder);
+    const own = book ? await fileDigests(join(book, 'template')) : undefined;
+    const entries = new Map<string, { status?: 'same' | 'changed' | 'library-only' | 'book-only'; files: number }>();
+    for (const [path, hash] of shipped) {
+      const key = grouped(path);
+      const status = !own ? undefined : !own.has(path) ? 'library-only' as const : own.get(path) === hash ? 'same' as const : 'changed' as const;
+      const listed = entries.get(key);
+      entries.set(key, { files: (listed?.files ?? 0) + 1,
+        ...(status ? { status: !listed?.status || listed.status === status ? status : 'changed' } : {}) });
+    }
+    for (const path of own?.keys() ?? []) {
+      if (shipped.has(path)) continue;
+      const key = grouped(path);
+      const listed = entries.get(key);
+      entries.set(key, { files: listed?.files ?? 0, status: listed ? 'changed' : 'book-only' });
+    }
+    const files = [...entries].sort(([a], [b]) => a.localeCompare(b)).map(([path, { status, files: count }]) => ({
+      path, ...(path.endsWith('/') ? { files: count } : {}), ...(status ? { status } : {}) }));
+    return { template, files, ...(own ? { compared: 'template/ of the book' } : {}),
+      ...(shipped.has('CHANGELOG.md') ? { changelog: 'CHANGELOG.md' } : {}) };
+  });
 }

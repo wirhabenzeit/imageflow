@@ -58,7 +58,7 @@ import type { SettingsPane } from '../src/settings';
 import { mcpTools } from '../src/mcp-contract';
 import { starters } from '../src/starters';
 import { copyTemplate, TemplateImportError, TemplateLibrary } from './template-library';
-import { agentLibraryEntry, saveTemplateToLibrary } from './library-tools';
+import { agentLibraryEntry, readLibraryTemplate, saveTemplateToLibrary } from './library-tools';
 import { TemplateTrust, trustedOrigins } from './template-trust';
 import { ReleasedTemplates } from './released-templates';
 import { isTemplateArchive, templateArchiveExtension } from './template-archive';
@@ -1350,6 +1350,12 @@ async function enableMcp() {
             scope: 'Open, authorized books. Select an explicit project handle; focus does not change the target. Handles expire when the book closes.' };
         }
         if (name === 'list_templates') return { templates: (await libraryWithTrust()).map(agentLibraryEntry) };
+        if (name === 'read_library_template') {
+          const book = args.project === undefined ? undefined
+            : [...documents.values()].find((document) => !document.closing && document.projectSession.handle === args.project);
+          if (args.project !== undefined && !book) throw new AuthoringError('PROJECT_CLOSED', 'This book is no longer open. Call list_projects for current handles.');
+          return await readLibraryTemplate(library, args as { template: string; path?: string }, book?.book.folder);
+        }
         const document = [...documents.values()].find((document) => !document.closing && document.projectSession.handle === args.project);
         if (!document) throw new AuthoringError('PROJECT_CLOSED', 'This book is no longer open. Call list_projects for current handles.');
         // Queued with the book's other agent calls, so closing the book waits for the save.
