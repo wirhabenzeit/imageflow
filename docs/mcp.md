@@ -138,6 +138,14 @@ Contact-sheet `maxEdge` ranges from 128 to 1600; columns range from 1 to 4 (defa
 
 For a close-up, use `preview.target: { "spread": "arrival", "box": "hero", "paddingMm": 2 }`, or use `element` instead of `box`. Padding defaults to 2 mm and is bounded to 0–20 mm. The axis-aligned crop is clipped to the spread's trim/bleed bounds and keeps neighboring artwork. `image.detail` identifies the owner and crop origin in millimetres from the sheet's outer bleed corner. Missing or entirely clipped targets return `preview-target-not-found`.
 
+### Layout-family pickers
+
+`preview.target: { "spread": "grid", "picker": true }` draws the picker of the layout family the spread shows, as the spread's settings show it: the app's segmented choice for a `choice` picker, or the template's own component. `family` names another family, `page` a facing page of a split sheet, and `current` the variant to show as chosen (by default the saved layout). `choose: "3 columns"` then clicks the picker control with that label, as the user would, and reports the variant the picker chose; nothing is saved. `image.kind` is `picker`, with `family`, `picker` (`choice` or `component`), the `variants` with their tags, `current`, `chosen`, and `notices` when the click changed nothing, such as on a disabled option or a choice of something that is not a variant. A label no control has returns `preview-target-not-found` with the labels it has. Switch the saved layout with `switch_layout`.
+
+```json
+{ "project": "handle-from-list_projects", "preview": { "target": { "spread": "grid", "picker": true, "current": "g22", "choose": "3 rows" } } }
+```
+
 ### Focused element inspection
 
 Use `inspect_book` with `view: "elements"` and a `spread`, or combine `inspect` with artwork in one `check_book` call:

@@ -761,7 +761,7 @@ export function createAuthoringService(hooks: Hooks) {
           ...(args.docs?.length ? { docs: reference.docs } : {}),
           examples,
           ...(sdkState ? { sdk: { snapshot: sdkState, ...(sdkState === 'stale' ? { notice: 'template/.imageflow-sdk is from an earlier ImageFlow version and lacks newer API declarations, so editor tooling may flag code that renders fine. Type checks here use the installed SDK. Call rebuild_dependencies to refresh it.' } : {}) } } : {}),
-          capabilities: { commands: true, dryRun: true, batchReferences: '$alias', sharedUndo: true, preview: ['page', 'spread'],
+          capabilities: { commands: true, dryRun: true, batchReferences: '$alias', sharedUndo: true, preview: ['page', 'spread', 'picker'],
             maxPreviewEdge: 1600, typescript: true, printPreflight: false, draftPreview: true, contactSheets: true,
             fixtures: { cases: [...fixtureCases], maxLayouts: fixtureLimits.layouts, maxFormats: fixtureLimits.formats,
               maxFixturesPerFormat: fixtureLimits.cellsPerFormat, maxPreviewFixtures: fixtureLimits.previewCells },

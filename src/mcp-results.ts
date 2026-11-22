@@ -83,6 +83,13 @@ export const imageSchema = z.union([
     cells: z.array(z.looseObject({ ...pageImage, x: z.number(), y: z.number(), label: z.string() })),
     ...imageFlags,
   }),
+  z.looseObject({
+    kind: z.literal('picker'), width: z.number(), height: z.number(), spread: z.string(), page: z.enum(['left', 'right']).optional(),
+    family: z.string(), picker: z.enum(['choice', 'component']),
+    variants: z.array(z.looseObject({ id: z.string(), label: z.string(), variant: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])) })),
+    current: z.string().describe('The variant shown as chosen.'), chosen: z.string().optional().describe('The variant the choose click picked.'),
+    notices: z.array(z.string()).optional(), ...imageFlags,
+  }),
 ]).describe('Metadata of the returned image.');
 
 const state = z.enum(['ready', 'error']);
