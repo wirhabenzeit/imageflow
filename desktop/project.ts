@@ -19,8 +19,9 @@ import type { ProjectPhoto } from './photos';
 import { CommittedProjectSaveError, persistProjectManifests, recoverProjectSave } from './persistence';
 import type { SaveCheckpoint } from './persistence';
 import { sourceEntries, sourcePath, sourceLinked, storedFileName } from '../src/source-locations';
-import type { SourceStatus } from '../src/source-locations';
+import type { SourceEntry, SourceStatus } from '../src/source-locations';
 import { digestBytes, SourceStore } from './source-store';
+import type { ResolvedSource } from './source-store';
 import { AssetFacts } from './asset-facts';
 import { proxyStore } from './proxy-store';
 import { resumeSyncPull } from './sync-pull';
@@ -270,52 +271,17 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
   // Derived facts follow photos the editor reads in place; a private export read changes nothing.
   if (writable) store.onDigest = (key, observation, digest) => { if (key.startsWith('photo:')) facts.digest(key.slice('photo:'.length), observation, digest); };
   const unavailablePhotos: Record<string, AssetFact> = {};
-  const proxies = proxyStore();
   for (let i = 0; i < entries.length; i += 8) {
     await Promise.all(entries.slice(i, i + 8).map(async (source) => {
       const { status, stored } = await store.resolve(book.folder, source, { pin: pinSources, cache: book.cache });
       sources[source.key] = status;
       if (status.problem && source.kind !== 'file') problems.push(source.kind + ' ' + source.id + ' · ' + status.problem);
       if (source.kind === 'photo') {
-        if (stored) {
-          // Only the editable metadata reaches templates; unknown keys of the entry stay in photos.json (ADR 0010).
-          const { title, caption, credit, altText } = book.photoIndex[source.id];
-          const details = await photoDetails(stored.snapshot, null);
-          // Without an EXIF capture time, photo views use the original's modification time, not the snapshot's.
-          const present = status.state === 'available' && !status.problem;
-          const remembered = present ? undefined : facts.get(source.id);
-          // A rendition has no EXIF block, so a missing original's capture data comes from assets-meta.json.
-          const capture = remembered ? Object.fromEntries(captureFields.flatMap((field) => remembered[field] ? [[field, remembered[field]]] : [])) : {};
-          const estimate = details.captured || remembered?.captured ? undefined : stored.modified ?? details.estimatedCapture;
-          if (present && writable) facts.note(source.id, stored.observation, details, status.digest ?? stored.digest);
-          photos.set(source.id, { title, caption, credit, altText, ...details, ...capture, estimatedCapture: estimate, observation: stored.direct && status.state === 'available' ? stored.observation : details.observation,
-            width: stored.width!, height: stored.height!, original: stored.snapshot,
-            key: stored.direct ? status.problem ? digestBytes(Buffer.from(stored.key + ':stale')) : stored.key! : digestBytes(Buffer.from(stored.digest + ':rendition-3')),
-            cache: renditionCacheFor(book.cache), ...(status.problem ? { problem: status.problem } : {}) });
-        } else if (facts.get(source.id)) {
-          const fact = facts.get(source.id)!;
-          // A sync proxy stored by digest stands in on the canvas for an original that is missing here (a linked photo not
-          // yet located, an owned photo not yet downloaded) or not approved on this Mac. It is read from the proxy store
-          // only, never from the original's path, so an unapproved location stays unread (ADR 0005, ADR 0010).
-          const proxy = status.state === 'missing' || status.state === 'unapproved' ? await (await proxies)?.path(fact.digest) : undefined;
-          const details = proxy ? await photoDetails(proxy, null).catch(() => undefined) : undefined;
-          if (proxy && details) {
-            const { title, caption, credit, altText } = book.photoIndex[source.id];
-            // The proxy's own size and capture data never reach layout: the original's do, from assets-meta.json, so
-            // aspect ratios, crop limits and resolution checks match the real photo.
-            const { captured: _captured, location: _location, camera: _camera, ...rendition } = details;
-            const capture = Object.fromEntries(captureFields.flatMap((field) => fact[field] ? [[field, fact[field]]] : []));
-            // A proxy is never changed in place: `put` replaces it by a rename, which gives it another inode. So it carries no
-            // observation (looking a proxy up touches its times for LRU pruning, which must not count as a change), and its
-            // renditions are keyed by inode and size only, so they survive reopening.
-            const identity = details.observation.split(':').slice(0, 2).join(':');
-            photos.set(source.id, { title, caption, credit, altText, ...rendition, ...capture, estimatedCapture: undefined, observation: undefined,
-              width: fact.width, height: fact.height, original: proxy, key: digestBytes(Buffer.from(fact.digest + ':proxy-v1:' + identity)),
-              cache: renditionCacheFor(book.cache), problem: status.problem ?? 'Original unavailable' });
-            // Shown like a cached preview: the source keeps its honest state, and print marks and blocks it.
-            sources[source.key] = { ...status, cached: true };
-          } else unavailablePhotos[source.id] = fact;
-        }
+        const loaded = await loadPhoto(book, source, { status, stored }, facts, writable);
+        if (loaded?.photo) photos.set(source.id, loaded.photo);
+        // Shown like a cached preview: the source keeps its honest state, and print marks and blocks it.
+        if (loaded?.standIn) sources[source.key] = { ...status, cached: true };
+        if (loaded?.fact) unavailablePhotos[source.id] = loaded.fact;
       } else if (source.kind === 'markdown') {
         if (stored) texts[source.id] = await readFile(stored.snapshot, 'utf8');
       } else {
@@ -327,6 +293,54 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
   await store.settled();
   if (writable) facts.prune(Object.keys(book.photoIndex));
   return { ...book, photos, texts, files, sources, problems: problems.sort(), ...(Object.keys(unavailablePhotos).length ? { unavailablePhotos } : {}) };
+}
+
+/**
+ * A photo as the book renders it. Its pixels are always a file on this Mac, whatever the photo's provider (ADR 0011):
+ * - the original, read where it is, or a private copy of it (an export);
+ * - what was last read of an original that cannot be read now;
+ * - a proxy from the proxy store, with the original's size and capture data from `assets-meta.json`, for an original
+ *   that is not here.
+ * Without any of them, only the fact is returned, so the book still lays out.
+ */
+async function loadPhoto(book: Pick<OpenProject, 'photoIndex' | 'cache'>, source: SourceEntry, { status, stored }: ResolvedSource, facts: AssetFacts, writable: boolean):
+  Promise<{ photo?: ProjectPhoto; standIn?: true; fact?: AssetFact } | undefined> {
+  // Only the editable metadata reaches templates; unknown keys of the entry stay in photos.json (ADR 0010).
+  const { title, caption, credit, altText } = book.photoIndex[source.id];
+  const cache = renditionCacheFor(book.cache);
+  if (stored) {
+    const details = await photoDetails(stored.snapshot, null);
+    // Without an EXIF capture time, photo views use the original's modification time, not the snapshot's.
+    const present = status.state === 'available' && !status.problem;
+    const remembered = present ? undefined : facts.get(source.id);
+    // A rendition has no EXIF block, so a missing original's capture data comes from assets-meta.json.
+    const capture = remembered ? Object.fromEntries(captureFields.flatMap((field) => remembered[field] ? [[field, remembered[field]]] : [])) : {};
+    const estimate = details.captured || remembered?.captured ? undefined : stored.modified ?? details.estimatedCapture;
+    if (present && writable) facts.note(source.id, stored.observation, details, status.digest ?? stored.digest);
+    return { photo: { title, caption, credit, altText, ...details, ...capture, estimatedCapture: estimate, observation: stored.direct && status.state === 'available' ? stored.observation : details.observation,
+      width: stored.width!, height: stored.height!, original: stored.snapshot,
+      key: stored.direct ? status.problem ? digestBytes(Buffer.from(stored.key + ':stale')) : stored.key! : digestBytes(Buffer.from(stored.digest + ':rendition-3')),
+      cache, ...(status.problem ? { problem: status.problem } : {}) } };
+  }
+  const fact = facts.get(source.id);
+  if (!fact) return undefined;
+  // A sync proxy stored by digest stands in on the canvas for an original that is missing here (a linked photo not
+  // yet located, an owned photo not yet downloaded) or not approved on this Mac. It is read from the proxy store
+  // only, never from the original's path, so an unapproved location stays unread (ADR 0005, ADR 0010).
+  const proxy = status.state === 'missing' || status.state === 'unapproved' ? await (await proxyStore())?.path(fact.digest) : undefined;
+  const details = proxy ? await photoDetails(proxy, null).catch(() => undefined) : undefined;
+  if (!proxy || !details) return { fact };
+  // The proxy's own size and capture data never reach layout: the original's do, from assets-meta.json, so
+  // aspect ratios, crop limits and resolution checks match the real photo.
+  const { captured: _captured, location: _location, camera: _camera, ...rendition } = details;
+  const capture = Object.fromEntries(captureFields.flatMap((field) => fact[field] ? [[field, fact[field]]] : []));
+  // A proxy is never changed in place: `put` replaces it by a rename, which gives it another inode. So it carries no
+  // observation (looking a proxy up touches its times for LRU pruning, which must not count as a change), and its
+  // renditions are keyed by inode and size only, so they survive reopening.
+  const identity = details.observation.split(':').slice(0, 2).join(':');
+  return { standIn: true, photo: { title, caption, credit, altText, ...rendition, ...capture, estimatedCapture: undefined, observation: undefined,
+    width: fact.width, height: fact.height, original: proxy, key: digestBytes(Buffer.from(fact.digest + ':proxy-v1:' + identity)),
+    cache, problem: status.problem ?? 'Original unavailable' } };
 }
 
 function projectJson(value: unknown) {
@@ -441,7 +455,7 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
   // whether the source is linked or copied; a copy or link asked for explicitly may add the other kind of source.
   type Held = { kind: 'photo' | 'markdown' | 'file'; id: string; path: string; linked: boolean };
   const held: Held[] = [
-    ...Object.entries(photoIndex).map(([id, photo]) => ({ kind: 'photo' as const, id, linked: !!photo.linked, path: photo.linked ? photo.path : join(book.folder, photo.path) })),
+    ...sourceEntries({ project, photoIndex }).filter(({ kind }) => kind === 'photo').map(({ id, linked, path }) => ({ kind: 'photo' as const, id, linked, path: linked ? path : join(book.folder, path) })),
     ...Object.entries(project.texts).map(([id, ref]) => ({ kind: 'markdown' as const, id, linked: sourceLinked(ref), path: sourceLinked(ref) ? sourcePath(ref) : join(book.folder, sourcePath(ref)) })),
     ...Object.entries(project.files).map(([id, ref]) => ({ kind: 'file' as const, id, linked: sourceLinked(ref), path: sourceLinked(ref) ? sourcePath(ref) : join(book.folder, sourcePath(ref)) })),
   ];

@@ -4,8 +4,8 @@ Plan for the provider contract of [ADR 0011](../decisions/0011-lightroom-classic
 
 It has two steps:
 
-1. **This document, the contract types and a paper check.** The inventory below, the two halves of the contract ([`src/source-locator.ts`](../../src/source-locator.ts), [`desktop/source-provider.ts`](../../desktop/source-provider.ts)) and four sketched providers that are type-checked against it ([`tests/source-provider-fit.ts`](../../tests/source-provider-fit.ts)): `package`, `linked`, Lightroom Classic and Immich. Nothing calls the contract yet.
-2. **The refactor,** one pull request of several commits ([below](#the-refactor)), with the existing tests as the safety net.
+1. **This document, the contract types and a paper check.** The inventory below, the two halves of the contract ([`src/source-locator.ts`](../../src/source-locator.ts), [`desktop/source-provider.ts`](../../desktop/source-provider.ts)) and sketched providers that are type-checked against it ([`tests/source-provider-fit.ts`](../../tests/source-provider-fit.ts)): `package` and `linked`, which are real since step 2, Lightroom Classic and Immich.
+2. **The refactor,** one pull request of several commits ([below](#the-refactor)), with the existing tests as the safety net. Done.
 
 The inventory names functions rather than lines; it describes the code at commit `768a283`.
 
@@ -144,15 +144,22 @@ What the host does with a result does not depend on the provider, only on whethe
 
 ## The refactor
 
-One pull request. Each commit keeps the unit tests green, changes no file format, no IPC or MCP type and no text in the UI, and keeps the exported functions the tests import (`SourceStore.resolve`, `loadProject`, `originalPath`, `relocateSource` and the others).
+Done in one pull request, without a change to a file format, an IPC or MCP type or a text in the UI. The exported functions the tests import (`SourceStore.resolve`, `loadProject`, `originalPath`, `relocateSource` and the others) kept their signatures and results.
 
-1. **Tests for what the refactor moves and nothing covers yet.** An export load (`loadProject` with `pinSources`): the pinned copy, and a source that changes during the copy. The linked-folder watch: a change, a replaced file and a reconnect. The rendition key of a given path and stamp, as a fixed value.
-2. **Locators.** Every reader of an entry's `path` and `linked` goes through `packageLocator` and `linkedLocator`: `sourceEntries`, `portablePhotos`, the sync snapshot, `ProjectSession`, `reference`, the input index and the sync engine's owned test.
-3. **The `package` and `linked` providers.** `desktop/providers/files.ts` gets the two branches of `originalPath`, the approval check, the stamp and the limit as their `observe`, and the export copy as `materialize`. `SourceStore.resolve` calls it for photos and keeps returning `{ status, stored }`; texts and files use the same file helpers directly.
-4. **One place builds a `ProjectPhoto`.** The three cases of `readContent` (a file in place, a snapshot, a proxy) become one host function over what `observe` returned.
-5. **Watching.** `watchLinkedSources` keeps its debounce and reload and gets its changes from `provider.watch`.
-6. **Actions and sync.** `sourceAction`, the menus' enabling and the sync engine ask which provider a photo has, and its `repairs`, instead of `linked`.
+1. **Tests for what moved and nothing covered** ([`tests/source-providers.test.ts`](../../tests/source-providers.test.ts)): the rendition key of a file read in place, and the private copies of an export load. The providers' own tests joined them: what `observe` reports, a materialized copy with its revisions, and the watch (a change, a replacement, a file that comes back, a change made before the watch started).
+2. **Locators.** `sourceEntries`, `portablePhotos`, the sync snapshot, `ProjectSession`, `reference`, the input index and the sync engine's owned test read an entry through `packageLocator` and `linkedLocator` (`locatorOf`, `portableEntry`, `sharedEntry`, `adoptedEntry`, `relocatedEntry`, `packagePath` in [`src/source-locator.ts`](../../src/source-locator.ts)).
+3. **The `package` and `linked` providers** ([`desktop/providers/files.ts`](../../desktop/providers/files.ts)). `SourceStore.resolve` asks a photo's provider for its state (`observe`) and, for an export, for its private copy (`materialize`). Texts and files call the same file functions (`observeFile`, `cloneFile`) directly.
+4. **Watching.** `DocumentSession` keeps the debounce, the reload and waiting for a save or an export, and gets changes from each photo's provider and, for linked texts and files, from `watchLinkedFiles`. The watch starts from the revision each source was last read at.
+5. **One place builds a `ProjectPhoto`** (`loadPhoto` in [`desktop/project.ts`](../../desktop/project.ts)): from the original or a copy of it, from what was last read of it, or from its fact and its proxy.
 
-Not part of it: a `photos.json` entry without a `path` and the format bump for it, new states in the UI, changes to import, and anything a second provider would be the first to need.
+Left for the Lightroom provider, because only a provider without a file can show what they must become:
 
-The safety net: [`tests/linked-sources.test.ts`](../../tests/linked-sources.test.ts) (41 tests on resolving, approvals, relinking, collection, facts and the proxy stand-in), `tests/revisions.test.ts`, `tests/sync.test.ts`, `tests/project-session.test.ts`, the compatibility books, and `scripts/smoke-linked-sources.mjs` end to end.
+- **`SourceEntry` still carries `path` and `linked`** for photos, derived from the locator. Texts and files have nothing else, and the source actions, the Assets window and the MCP `sources` view handle all three kinds alike. A photo without a file needs its locator there instead.
+- **Actions and menus still ask `linked`.** `provider.repairs` is implemented and has no caller: Locate and Locate Folder are offered as before.
+- **`SourceStore` keeps files only.** A provider that reports facts gets an `unreadable` state from it. Storing previews and materializations against a revision is new host code, not moved code.
+- **`observe` is called for one photo at a time,** as `resolve` is. A provider behind a bridge needs the book's photos in one call.
+- **A `photos.json` entry without a `path`,** the format bump for it, new states in the UI, and import.
+
+One difference in behaviour: a linked photo that is there but cannot be decoded is reloaded once more shortly after the book opens. The watch cannot tell it from a file that came back, and reports it once.
+
+The safety net was [`tests/linked-sources.test.ts`](../../tests/linked-sources.test.ts) (41 tests on resolving, approvals, relinking, collection, facts and the proxy stand-in), `tests/revisions.test.ts`, `tests/sync.test.ts`, `tests/project-session.test.ts`, the compatibility books, and `scripts/smoke-linked-sources.mjs` end to end.

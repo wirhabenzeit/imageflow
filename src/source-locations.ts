@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ProjectFiles } from './project';
+import { locatorOf, readableFileName } from './source-locator';
 
 // Like the objects of project.json: unknown keys survive a load and save (ADR 0010), but the type strips them.
 const looseObject = <S extends z.ZodRawShape>(shape: S) => z.looseObject(shape) as unknown as z.ZodObject<S, z.core.$strip>;
@@ -11,9 +12,7 @@ export type SourceReference = z.infer<typeof sourceReferenceSchema>;
 export type SourceKind = 'photo' | 'markdown' | 'file';
 export type SourceKey = `${SourceKind}:${string}`;
 export const sourcePath = (source: SourceReference | { path: string }) => typeof source === 'string' ? source : source.path;
-// Imported and created files are stored as "<id>-<name>"; the readable name leaves the storage ID out.
-export const sourceFileName = (source: SourceReference | { path: string }) =>
-  (sourcePath(source).split('/').pop() ?? sourcePath(source)).replace(/^(?:ph|tx|fl)-[a-f0-9-]{12}-/, '');
+export const sourceFileName = (source: SourceReference | { path: string }) => readableFileName(sourcePath(source));
 export const sourceLinked = (source: SourceReference | { path: string; linked?: boolean }) => typeof source !== 'string' && 'linked' in source && source.linked === true;
 export type SourceEntry = { key: SourceKey; kind: SourceKind; id: string; path: string; linked: boolean };
 export type SourceStatus = SourceEntry & { state: 'available' | 'missing' | 'unreadable' | 'denied' | 'unapproved'; problem?: string; cached?: boolean; digest?: string };
@@ -26,7 +25,11 @@ export const storedFileName = (name: string) => name.normalize('NFC').replace(/[
 export const sourceFolder = (kind: SourceKind) => kind === 'photo' ? 'photos' : kind === 'markdown' ? 'texts' : 'files';
 export function sourceEntries(files: ProjectFiles): SourceEntry[] {
   return [
-    ...Object.entries(files.photoIndex).map(([id, entry]) => ({ key: `photo:${id}` as const, kind: 'photo' as const, id, path: entry.path, linked: !!entry.linked })),
+    // A photo's source is read through its locator (ADR 0011). Every locator of this version names a file.
+    ...Object.entries(files.photoIndex).map(([id, entry]) => {
+      const locator = locatorOf(entry);
+      return { key: `photo:${id}` as const, kind: 'photo' as const, id, path: locator.path, linked: locator.provider === 'linked' };
+    }),
     ...Object.entries(files.project.texts).map(([id, ref]) => ({ key: `markdown:${id}` as const, kind: 'markdown' as const, id, path: sourcePath(ref), linked: sourceLinked(ref) })),
     ...Object.entries(files.project.files).map(([id, ref]) => ({ key: `file:${id}` as const, kind: 'file' as const, id, path: sourcePath(ref), linked: sourceLinked(ref) })),
   ];

@@ -3,7 +3,8 @@ import { assetsMetaSchema } from './asset-facts';
 import { canonicalJson } from './canonical-json';
 import { computeBookStateRevision } from './book-revision';
 import type { PhotoIndex, Project } from './project';
-import { fileNameOf, unlocatedPath } from './source-locator';
+import { adoptedEntry, fileNameOf, sharedEntry, unlocatedPath } from './source-locator';
+import type { LocatorFields } from './source-locator';
 
 /**
  * Immutable sync snapshots (ADR 0010, Milestone 1). A sync remote keeps two kinds of immutable record per book:
@@ -96,6 +97,8 @@ export { fileNameOf, isUnlocatedPath, unlocatedPath, unlocatedRoot } from './sou
 // Linked references keep their file name only, so one Mac's folder layout never reaches another.
 const linkedReference = (reference: unknown): reference is { path: string; linked: true } =>
   !!reference && typeof reference === 'object' && (reference as { linked?: unknown }).linked === true && typeof (reference as { path?: unknown }).path === 'string';
+// A snapshot is not validated when it is projected: only what has an entry's shape is read as one.
+const isEntry = (value: unknown): value is LocatorFields => !!value && typeof value === 'object' && !Array.isArray(value);
 const withPath = <T extends object>(reference: T, path: string) => ({ ...reference, path });
 const mapReferences = (references: Record<string, unknown>, map: (id: string, reference: { path: string; linked: true }) => unknown) =>
   Object.fromEntries(Object.entries(references).map(([id, reference]) => [id, linkedReference(reference) ? map(id, reference) : reference]));
@@ -105,7 +108,7 @@ export function portableManifests(project: Project, photos: PhotoIndex) {
   return {
     project: { ...project, texts: mapReferences(project.texts, (_id, reference) => withPath(reference, fileNameOf(reference.path))),
       files: mapReferences(project.files, (_id, reference) => withPath(reference, fileNameOf(reference.path))) } as Record<string, unknown>,
-    photos: mapReferences(photos, (_id, photo) => withPath(photo, fileNameOf(photo.path))) as Record<string, unknown>,
+    photos: Object.fromEntries(Object.entries(photos).map(([id, photo]) => [id, sharedEntry(photo)])) as Record<string, unknown>,
   };
 }
 
@@ -124,7 +127,7 @@ export function projectManifests(snapshot: Pick<StateBlob, 'project' | 'photos'>
     project: { ...project,
       texts: mapReferences(project.texts ?? {}, (id, reference) => withPath(reference, localPath(local.project?.texts, id) ?? unlocatedPath(reference.path))),
       files: mapReferences(project.files ?? {}, (id, reference) => withPath(reference, localPath(local.project?.files, id) ?? unlocatedPath(reference.path))) },
-    photos: mapReferences(snapshot.photos, (id, photo) => withPath(photo, localPath(local.photos, id) ?? unlocatedPath(photo.path))),
+    photos: Object.fromEntries(Object.entries(snapshot.photos).map(([id, photo]) => [id, isEntry(photo) ? adoptedEntry(photo, local.photos?.[id]) : photo])),
   };
 }
 

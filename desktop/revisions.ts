@@ -1,4 +1,5 @@
 import { sourcePath, sourceLinked } from '../src/source-locations';
+import { locatorOf } from '../src/source-locator';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import type { BigIntStats } from 'node:fs';
@@ -220,8 +221,10 @@ async function capture(folder: string, signal?: AbortSignal, index?: IndexState)
       ? { path: '@file/' + id, external: sourcePath(ref), folder: 'files' } : { path: sourcePath(ref), folder: 'files' });
   }
   if (photos.success) {
-    for (const [id, photo] of Object.entries(photos.data)) sources.push(photo.linked
-      ? { path: '@photo/' + id, external: photo.path, folder: 'photos' } : { path: photo.path, folder: 'photos' });
+    for (const [id, photo] of Object.entries(photos.data)) {
+      const locator = locatorOf(photo);
+      sources.push(locator.provider === 'linked' ? { path: '@photo/' + id, external: locator.path, folder: 'photos' } : { path: locator.path, folder: 'photos' });
+    }
   }
   for (const input of sources) {
     // Inspect each registry entry even if another registry has already used the same path.

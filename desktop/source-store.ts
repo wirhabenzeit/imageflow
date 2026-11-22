@@ -1,13 +1,16 @@
 import { constants } from 'node:fs';
-import type { BigIntStats } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { copyFile, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { extname, join } from 'node:path';
 import sharp from 'sharp';
 import { z } from 'zod';
 import type { SourceEntry, SourceStatus } from '../src/source-locations';
-import { sourceFolder } from '../src/source-locations';
-import { requireSourceAccess, sourceBookKey, SourceAccessError } from './source-access';
+import type { PhotoLocator } from '../src/source-locator';
+import { sourceBookKey } from './source-access';
+import { providerOf } from './providers';
+import { cloneFile, fileFailure, observeFile, within } from './providers/files';
+import type { ClonedFile, FileUnavailable, ObservedFile } from './providers/files';
+import type { SourceRef } from './source-provider';
 import { readSourceRegistry } from './source-identity';
 import { photoDetails } from './photos';
 import { isRenditionPath, renditionCacheFor } from './rendition-cache';
@@ -18,25 +21,27 @@ export function configureSourceStore(root: string) { persistentRoot = root; stor
 export const digestBytes = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 export { fileStamp as stamp } from './file-stamp';
 import { fileStamp as stamp } from './file-stamp';
-export function within(root: string, path: string) {
-  const rel = relative(root, path);
-  return !!rel && rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel);
+export { originalPath, within } from './providers/files';
+
+// A photo is read through its provider (ADR 0011); a text or a file is a file and nothing else. This store keeps
+// files only, so a provider that has no file to read in place cannot answer here.
+const photoRef = (source: SourceEntry): SourceRef<PhotoLocator> => ({ id: source.id, locator: { provider: source.linked ? 'linked' : 'package', path: source.path } });
+const noFile = { state: 'unreadable', problem: 'Original unavailable: This source is not a file.' } as const;
+async function observeSource(folder: string, source: SourceEntry): Promise<ObservedFile> {
+  if (source.kind !== 'photo') return observeFile(folder, source);
+  const ref = photoRef(source);
+  const [observed] = await providerOf(ref.locator).observe(folder, [ref]);
+  if (observed.state === 'available') return observed.file ? { state: 'available', revisions: observed.revisions, modified: observed.modified ?? new Date(0).toISOString(), file: observed.file } : noFile;
+  return observed.state === 'offline' || observed.state === 'needs-sign-in' ? { state: 'unreadable', problem: observed.problem } : { state: observed.state, problem: observed.problem };
 }
-export async function originalPath(folder: string, source: Pick<SourceEntry, 'kind' | 'path' | 'linked'> & { key?: string }) {
-  if (source.linked) {
-    await requireSourceAccess(folder, source);
-    if (!isAbsolute(source.path)) throw new Error('Linked sources must name an absolute file path.');
-    const actual = await realpath(source.path);
-    if (actual !== source.path) throw new SourceAccessError('The linked target changed. Locate this original again.');
-    if (within(folder, actual)) throw new Error('A linked source must be outside the book. Use Copy into Book for internal files.');
-    return actual;
+async function cloneSource(folder: string, source: SourceEntry, staging: string): Promise<ClonedFile> {
+  if (source.kind !== 'photo') return cloneFile(folder, source, staging);
+  const ref = photoRef(source);
+  for await (const copy of providerOf(ref.locator).materialize(folder, [ref], { staging, signal: new AbortController().signal })) {
+    if ('file' in copy) return copy;
+    return copy.state === 'offline' || copy.state === 'needs-sign-in' ? { state: 'unreadable', problem: copy.problem } : { state: copy.state, problem: copy.problem };
   }
-  const root = join(folder, sourceFolder(source.kind));
-  const path = resolve(folder, source.path);
-  if (isAbsolute(source.path) || !within(root, path)) throw new Error('Source must be inside ' + sourceFolder(source.kind) + '/.');
-  const actual = await realpath(path);
-  if (!within(root, actual)) throw new Error('Source points outside ' + sourceFolder(source.kind) + '/.');
-  return actual;
+  return noFile;
 }
 async function hashFile(path: string) {
   const hash = createHash('sha256');
@@ -44,9 +49,9 @@ async function hashFile(path: string) {
   for await (const chunk of handle.createReadStream()) hash.update(chunk);
   return hash.digest('hex');
 }
-// The original's modification time. A snapshot's own is its copy time, so photo views estimate an undated photo's
-// capture time from this instead (see desktop/capture-time.ts).
-const modifiedAt = (info: BigIntStats) => new Date(Number(info.mtimeMs)).toISOString();
+// `observation` is the revision the source's provider reported; for a file, its stamp. `modified` is the original's
+// modification time: a snapshot's own is its copy time, so photo views estimate an undated photo's capture time from
+// this instead (see desktop/capture-time.ts).
 export type StoredSource = { digest?: string; snapshot: string; path: string; observation: string; snapshotObservation?: string;
   width?: number; height?: number; modified?: string; direct?: boolean; key?: string; preview?: string; thumb?: string;
   // Renditions of the version before, for a photo read in place: they stand in while the current version has none.
@@ -107,49 +112,51 @@ export class SourceStore {
   }
   async resolve(folder: string, source: SourceEntry, options: { pin?: boolean; cache?: string } = {}): Promise<ResolvedSource> {
     try {
-      const actual = await originalPath(folder, source);
-      const before = await stat(actual, { bigint: true });
+      const observed = await observeSource(folder, source);
+      if (observed.state !== 'available') return await this.unavailable(source, observed, options);
+      const { file: actual, revisions: { revision } } = observed;
       // Exports read every photo, owned or linked, from a private copy that lives as long as the job. Checks don't pin.
       const privatePin = options.pin && source.kind === 'photo';
-      if (source.kind === 'markdown' && extname(source.path).toLowerCase() !== '.md') throw new Error('Expected a Markdown (.md) file.');
-      const maximum = source.kind === 'photo' ? source.linked ? 50 : undefined : source.kind === 'markdown' ? 5 : 20;
-      if (!before.isFile() || (maximum && before.size > BigInt(maximum * 1024 * 1024))) throw new Error(`Expected a regular file${maximum ? ` up to ${maximum} MB` : ''}.`);
       // The editor reads photos where they are, owned or linked, from their metadata: opening neither copies, hashes nor
-      // decodes them. A linked photo re-exported in place (from Lightroom, say) has another stamp, so it gets new
-      // renditions (rendition keys name the stamp) and the book reloads with it (DocumentSession watches linked folders).
+      // decodes them. A linked photo re-exported in place (from Lightroom, say) has another revision, so it gets new
+      // renditions (rendition keys name the file's stamp) and the book reloads with it (its provider watches it).
       if (source.kind === 'photo' && !options.pin) {
         const details = await photoDetails(actual, null);
-        if (stamp(await stat(actual, { bigint: true })) !== stamp(before)) throw new Error('Source changed while being read.');
+        const current = await observeSource(folder, source);
+        if (current.state !== 'available') return await this.unavailable(source, current, options);
+        if (current.revisions.revision !== revision) throw new Error('Source changed while being read.');
         const cache = renditionCacheFor(options.cache ?? '');
         const extension = details.alpha ? '.png' : '.jpg';
         // Locate Folder finds a moved linked original by its content, so its digest is kept: from the last record while
         // the file is unchanged, and otherwise computed in the background, not while the book opens.
         const previous = this.saved[source.key];
-        const digest = previous?.digest && previous.path === source.path && previous.observation === stamp(before) ? previous.digest : undefined;
+        const digest = previous?.digest && previous.path === source.path && previous.observation === revision ? previous.digest : undefined;
         // A re-exported photo keeps the renditions of the version before as a fallback, until its own exist: a file
         // caught half-written by the next export then still shows a picture.
         const earlier = previous?.direct && previous.key !== details.key ? [previous.preview, previous.thumb].filter((path): path is string => !!path)
           : previous?.direct ? previous.earlier : undefined;
-        const stored = { path: source.path, snapshot: actual, observation: stamp(before), direct: true, key: details.key, ...(digest ? { digest } : {}), ...(earlier?.length ? { earlier } : {}),
-          width: details.width, height: details.height, modified: modifiedAt(before), preview: join(cache, details.key + '-preview' + extension), thumb: join(cache, details.key + '-thumb' + extension) };
+        const stored = { path: source.path, snapshot: actual, observation: revision, direct: true, key: details.key, ...(digest ? { digest } : {}), ...(earlier?.length ? { earlier } : {}),
+          width: details.width, height: details.height, modified: observed.modified, preview: join(cache, details.key + '-preview' + extension), thumb: join(cache, details.key + '-thumb' + extension) };
         this.remember(source, stored);
-        if (!digest) this.recordDigest(source.key, actual, stamp(before));
+        if (!digest) this.recordDigest(source.key, actual, revision, async () => { const now = await observeSource(folder, source); return now.state === 'available' ? now.revisions.revision : undefined; });
         return { status: { ...source, state: 'available', ...(digest ? { digest } : {}) }, stored };
       }
       const previous = this.saved[source.key];
-      if (!privatePin && previous?.digest && !previous.direct && previous.path === source.path && previous.observation === stamp(before) &&
+      if (!privatePin && previous?.digest && !previous.direct && previous.path === source.path && previous.observation === revision &&
           await stat(previous.snapshot, { bigint: true }).then((info) => within(join(this.root, 'content'), previous.snapshot) && stamp(info) === previous.snapshotObservation, () => false)) {
-        if (source.kind === 'photo' && !previous.modified) { previous.modified = modifiedAt(before); this.remember(source, previous); }
+        if (source.kind === 'photo' && !previous.modified) { previous.modified = observed.modified; this.remember(source, previous); }
         this.pins.add(previous.snapshot);
         return { status: { ...source, state: 'available', digest: previous.digest }, stored: previous };
       }
       const requestedDirectory = privatePin ? join(options.cache!, 'pinned-sources') : join(this.root, 'content');
       await mkdir(requestedDirectory, { recursive: true });
       const directory = await realpath(requestedDirectory);
-      const temporary = join(directory, randomUUID() + '.tmp');
+      // Copied once (a clone where the volume makes them), then the private bytes are checked.
+      const copy = await cloneSource(folder, source, directory);
+      if ('state' in copy) return await this.unavailable(source, copy, options);
+      const temporary = copy.file;
       try {
-        // Clone/copy once, then validate the private bytes while the original's identity is guarded.
-        await copyFile(actual, temporary, constants.COPYFILE_FICLONE | constants.COPYFILE_EXCL);
+        if (copy.before.revision !== revision || copy.after.revision !== revision) throw new Error('Source changed while being read.');
         const digest = await hashFile(temporary);
         let dimensions: { width?: number; height?: number; modified?: string } = {};
         if (source.kind === 'photo') {
@@ -157,48 +164,51 @@ export class SourceStore {
           if (!['.jpg', '.jpeg', '.png', '.webp'].includes(extname(source.path).toLowerCase()) || !metadata.width || !metadata.height || (metadata.pages ?? 1) > 1) throw new Error('Expected a still JPEG, PNG or WebP image.');
           const turned = (metadata.orientation ?? 1) >= 5;
           await sharp(temporary, { failOn: 'warning' }).resize({ width: 1, height: 1 }).toBuffer();
-          dimensions = { modified: modifiedAt(before), width: turned ? metadata.height : metadata.width, height: turned ? metadata.width : metadata.height };
+          dimensions = { modified: observed.modified, width: turned ? metadata.height : metadata.width, height: turned ? metadata.width : metadata.height };
         }
-        if (await originalPath(folder, source) !== actual || stamp(await stat(actual, { bigint: true })) !== stamp(before)) throw new Error('Source changed while being read.');
         const snapshot = join(directory, digest + extname(source.path).toLowerCase());
         if (!privatePin) this.pins.add(snapshot);
         if (!await hashFile(snapshot).then((value) => value === digest, () => false)) await rename(temporary, snapshot);
-        const stored = { digest, snapshot, path: source.path, observation: stamp(before), snapshotObservation: stamp(await stat(snapshot, { bigint: true })), ...dimensions };
+        const stored = { digest, snapshot, path: source.path, observation: revision, snapshotObservation: stamp(await stat(snapshot, { bigint: true })), ...dimensions };
         if (!privatePin) this.remember(source, stored);
         return { status: { ...source, state: 'available', digest }, stored };
       } finally { await rm(temporary, { force: true }); }
     } catch (error) {
-      if (error instanceof SourceAccessError) return { status: { ...source, state: 'unapproved', problem: error.message, cached: false } };
-      const code = (error as NodeJS.ErrnoException).code;
-      const state = code === 'ENOENT' || code === 'ENOTDIR' ? 'missing' : code === 'EACCES' || code === 'EPERM' ? 'denied' : 'unreadable';
-      let stored: StoredSource | undefined = this.saved[source.key];
-      if (stored?.direct) {
-        const original = stored;
-        stored = undefined;
-        for (const path of [original.preview, original.thumb, ...(original.earlier ?? [])]) if (path && isRenditionPath(path, options.cache ?? '')) {
-          try {
-            if (!(await lstat(path)).isFile()) continue;
-            const metadata = await sharp(path).metadata();
-            if (metadata.width && metadata.height) { stored = { ...original, snapshot: path }; break; }
-          } catch { /* A preview is optional. */ }
-        }
-      } else if (stored && (!stored.digest || !within(join(this.root, 'content'), stored.snapshot) || await hashFile(stored.snapshot).then((digest) => digest !== stored!.digest, () => true))) stored = undefined;
-      if (stored && within(join(this.root, 'content'), stored.snapshot)) this.pins.add(stored.snapshot);
-      const problem = state === 'missing' ? (source.linked ? 'Original missing: ' : 'Missing project file: ') + source.path : state === 'denied' ? 'Access denied' : 'Original unavailable: ' + (error instanceof Error ? error.message : String(error));
-      // The last known content of the original, for Locate Folder, also when nothing cached can stand in for it.
-      const digest = stored?.digest ?? this.saved[source.key]?.digest;
-      return { status: { ...source, state, problem, cached: !!stored, ...(digest ? { digest } : {}) }, stored };
+      return this.unavailable(source, fileFailure(error, source), options);
     }
   }
+  /** The status of a source that cannot be read now, with what was last read from it when that can stand in. */
+  private async unavailable(source: SourceEntry, { state, problem }: { state: FileUnavailable; problem: string }, options: { cache?: string }): Promise<ResolvedSource> {
+    // An unapproved location stays unread, also what was cached from it.
+    if (state === 'unapproved') return { status: { ...source, state, problem, cached: false } };
+    let stored: StoredSource | undefined = this.saved[source.key];
+    if (stored?.direct) {
+      const original = stored;
+      stored = undefined;
+      for (const path of [original.preview, original.thumb, ...(original.earlier ?? [])]) if (path && isRenditionPath(path, options.cache ?? '')) {
+        try {
+          if (!(await lstat(path)).isFile()) continue;
+          const metadata = await sharp(path).metadata();
+          if (metadata.width && metadata.height) { stored = { ...original, snapshot: path }; break; }
+        } catch { /* A preview is optional. */ }
+      }
+    } else if (stored && (!stored.digest || !within(join(this.root, 'content'), stored.snapshot) || await hashFile(stored.snapshot).then((digest) => digest !== stored!.digest, () => true))) stored = undefined;
+    if (stored && within(join(this.root, 'content'), stored.snapshot)) this.pins.add(stored.snapshot);
+    // The last known content of the original, for Locate Folder, also when nothing cached can stand in for it.
+    const digest = stored?.digest ?? this.saved[source.key]?.digest;
+    return { status: { ...source, state, problem, cached: !!stored, ...(digest ? { digest } : {}) }, stored };
+  }
+  /** The revision a source had when it was last read; what its provider's watch compares the source with. */
+  observed(key: string) { return this.saved[key]?.observation; }
   private digests = Promise.resolve();
   /** Told when a background digest of a photo read in place is known (assets-meta.json records it, ADR 0010). */
   onDigest?: (key: string, observation: string, digest: string) => void;
   /** Records a photo's digest after it was read in place, one file at a time, if it is still the same file. */
-  private recordDigest(key: string, path: string, observation: string) {
+  private recordDigest(key: string, path: string, observation: string, current: () => Promise<string | undefined>) {
     this.digests = this.digests.then(async () => {
       if (this.saved[key]?.observation !== observation || this.saved[key]?.digest) return;
       const digest = await hashFile(path);
-      if (stamp(await stat(path, { bigint: true })) !== observation || this.saved[key]?.observation !== observation) return;
+      if (await current() !== observation || this.saved[key]?.observation !== observation) return;
       this.saved[key] = { ...this.saved[key], digest }; this.version++;
       this.onDigest?.(key, observation, digest);
       await this.settled();
