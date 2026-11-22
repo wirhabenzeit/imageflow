@@ -25,9 +25,11 @@ import type { Locator } from '../src/source-locator';
 import { providerOf } from './providers';
 import type { Observed, SourceRef } from './source-provider';
 import { refreshProvided } from './provided-photos';
+import { materializePhotos, placedPhotos } from './materialized-photos';
+import type { MaterializeOptions } from './materialized-photos';
 import type { ProvidedOutcome } from './provided-photos';
 import { digestBytes, SourceStore } from './source-store';
-import type { ResolvedSource } from './source-store';
+import type { ResolvedSource, StoredSource } from './source-store';
 import { AssetFacts } from './asset-facts';
 import { proxyStore } from './proxy-store';
 import { resumeSyncPull } from './sync-pull';
@@ -237,13 +239,21 @@ export type OpenProject = ProjectFiles & {
   fixture?: FixtureMarking;
   // The hash of the template files as loaded (see templateHash); network approvals hold for this hash only (ADR 0006).
   templateHash?: string;
+  // Set only by an export load: the photos without a file it prints from their full-resolution originals, with the
+  // provider revision each original was made from, so the export can tell them from what the open book has seen.
+  materialized?: Record<string, string>;
 };
 
 // Files for file parameters are read whole into the render data, so preview and export use the same input.
 export const maximumFileSize = 20 * 1024 * 1024;
 const fileName = (path: string) => basename(path).replace(/^fl-[0-9a-f-]{12}-/, '');
 
-export async function loadProject(path: string, fallback: string, readOnly = false, pinSources = false): Promise<OpenProject> {
+/**
+ * Loads a book. `pinSources` is an export's load: every photo is read from a private copy in `fallback`'s
+ * `pinned-sources`, and the placed photos without a file are materialized first (`options` reports progress and
+ * cancels that; a cancelled load still returns, drawing those photos from their previews).
+ */
+export async function loadProject(path: string, fallback: string, readOnly = false, pinSources = false, options: MaterializeOptions = {}): Promise<OpenProject> {
   const folder = await realpath(path);
   await recoverProjectSave(folder, { readOnly });
   // A sync pull interrupted after it began changing the book is finished from what it staged (ADR 0010).
@@ -255,10 +265,10 @@ export async function loadProject(path: string, fallback: string, readOnly = fal
   const hash = await templateHash(join(folder, 'template')).catch(() => undefined);
   const assets = await bundleTemplate(folder);
   const cache = fallback;
-  return readContent({ folder, viewKey: createHash('sha256').update(await sourceBookKey(folder)).digest('hex'), assets, cache, readOnly, project: withBookFormat(project, photoIndex), photoIndex, ...(hash ? { templateHash: hash } : {}), manifests: { 'project.json': projectFile, 'photos.json': photoFile } }, pinSources);
+  return readContent({ folder, viewKey: createHash('sha256').update(await sourceBookKey(folder)).digest('hex'), assets, cache, readOnly, project: withBookFormat(project, photoIndex), photoIndex, ...(hash ? { templateHash: hash } : {}), manifests: { 'project.json': projectFile, 'photos.json': photoFile } }, pinSources, options);
 }
 
-async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' | 'problems'>, pinSources = false): Promise<OpenProject> {
+async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' | 'problems'>, pinSources = false, options: MaterializeOptions = {}): Promise<OpenProject> {
   const photos = new Map<string, ProjectPhoto>();
   const texts: Record<string, string> = {};
   const files: Record<string, ProjectFile> = {};
@@ -282,10 +292,13 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
   // and previews brought up to date before they load.
   const observed = await observePhotos(book.folder, entries, store, facts);
   const provided = await refreshPhotos(book, observed, facts);
+  // An export prints the placed photos without a file from their full-resolution originals, where their provider can
+  // produce them now; the others stay drawn from their previews, as proofs.
+  const originals = pinSources ? await pinnedOriginals(book, entries, provided, store, options) : new Map<string, PinnedOriginal>();
   for (let i = 0; i < entries.length; i += 8) {
     await Promise.all(entries.slice(i, i + 8).map(async (source) => {
       if (source.kind === 'photo' && provided.has(source.id)) {
-        const { status, loaded } = await loadProvidedPhoto(book, source, provided.get(source.id)!, store);
+        const { status, loaded } = await loadProvidedPhoto(book, source, provided.get(source.id)!, store, pinSources, originals.get(source.id));
         sources[source.key] = status;
         if (status.problem) problems.push('photo ' + source.id + ' · ' + status.problem);
         if (loaded?.photo) photos.set(source.id, loaded.photo);
@@ -311,7 +324,8 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
   }
   await store.settled();
   if (writable) facts.prune(Object.keys(book.photoIndex));
-  return { ...book, photos, texts, files, sources, problems: problems.sort(), ...(Object.keys(unavailablePhotos).length ? { unavailablePhotos } : {}) };
+  return { ...book, photos, texts, files, sources, problems: problems.sort(), ...(Object.keys(unavailablePhotos).length ? { unavailablePhotos } : {}),
+    ...(originals.size ? { materialized: Object.fromEntries([...originals].map(([id, { revision }]) => [id, revision])) } : {}) };
 }
 
 type ObservedPhoto = { ref: SourceRef<Locator>; observed: Observed };
@@ -355,6 +369,29 @@ async function refreshPhotos(book: Pick<OpenProject, 'folder' | 'cache'>, observ
   return outcomes;
 }
 
+type PinnedOriginal = { pinned: string; stored: StoredSource; revision: string };
+/**
+ * The full-resolution originals of the placed photos without a file, materialized into the source cache (or found there
+ * for the revision just observed) and pinned into the export job. A photo its provider cannot produce now is left out:
+ * it is printed from its preview, as a proof.
+ */
+async function pinnedOriginals(book: Pick<OpenProject, 'folder' | 'cache' | 'project' | 'photoIndex'>, entries: readonly SourceEntry[],
+  provided: Map<string, ProvidedOutcome>, store: SourceStore, options: MaterializeOptions) {
+  const placed = placedPhotos(book);
+  const requests = entries.flatMap((entry) => {
+    const outcome = entry.kind === 'photo' && placed.has(entry.id) ? provided.get(entry.id) : undefined;
+    return entry.kind === 'photo' && outcome?.state === 'available' && outcome.fact.revisions ? [{ source: entry, revisions: outcome.fact.revisions }] : [];
+  });
+  const originals = new Map<string, PinnedOriginal>();
+  if (!requests.length) return originals;
+  for (const [id, result] of await materializePhotos(book.folder, store, requests, options)) {
+    if (result.state !== 'available' || options.signal?.aborted) continue;
+    try { originals.set(id, { pinned: await store.pinMaterialized(result.stored, book.cache), stored: result.stored, revision: result.revision }); }
+    catch { /* Not pinned: printed from its preview. */ }
+  }
+  return originals;
+}
+
 /** A photo's title, caption, credit and alt text: the book's override where photos.json has the key, else its provider's. */
 export function photoMetadata(entry: PhotoIndex[string], provided?: ProvidedMetadata) {
   return Object.fromEntries(providedFieldNames.flatMap((field) => {
@@ -365,21 +402,40 @@ export function photoMetadata(entry: PhotoIndex[string], provided?: ProvidedMeta
 
 /**
  * A photo without a file, from what its provider reported: laid out from its fact and drawn from its preview in the
- * proxy store. Available, it has no problem; it is printed as a proof only (`previewOnly`), since its original is not on
- * this Mac. A photo whose preview could not be stored keeps its state and stands in from what was stored before.
+ * proxy store. Available, it has no problem. A photo whose preview could not be stored keeps its state and stands in
+ * from what was stored before.
+ * An export (`pinned`) prints a photo whose full-resolution original was pinned (`original`) from it, and any other
+ * only as a proof (`previewOnly`). The editor marks none of them: an export materializes what its provider can produce.
  */
-async function loadProvidedPhoto(book: Pick<OpenProject, 'folder' | 'photoIndex' | 'cache'>, source: PhotoSourceEntry, outcome: ProvidedOutcome, store: SourceStore):
-  Promise<{ status: SourceStatus; loaded?: { photo?: ProjectPhoto; fact?: AssetFact } }> {
+async function loadProvidedPhoto(book: Pick<OpenProject, 'folder' | 'photoIndex' | 'cache'>, source: PhotoSourceEntry, outcome: ProvidedOutcome, store: SourceStore,
+  pinned: boolean, original?: PinnedOriginal): Promise<{ status: SourceStatus; loaded?: { photo?: ProjectPhoto; fact?: AssetFact } }> {
+  if (original && outcome.state === 'available') {
+    const photo = await originalPhoto(book, source.id, outcome.fact, original).catch(() => undefined);
+    if (photo) return { status: { ...source, state: 'available', digest: outcome.fact.digest }, loaded: { photo } };
+  }
   // The status of a photo that cannot be shown as reported, with the repairs its provider offers.
   const failed = async (failure: { state: Exclude<SourceStatus['state'], 'available'>; problem: string }) =>
     (await store.resolve(book.folder, source, { observed: failure })).status;
   if (outcome.state !== 'available' && !('fact' in outcome)) return { status: await failed(outcome) };
   const fact = outcome.fact;
-  const status: SourceStatus = outcome.state === 'available' ? { ...source, state: 'available', previewOnly: true, digest: outcome.fact.digest } : await failed(outcome);
+  const status: SourceStatus = outcome.state === 'available' ? { ...source, state: 'available', ...(pinned ? { previewOnly: true } : {}), digest: outcome.fact.digest } : await failed(outcome);
   if (!fact) return { status };
   const photo = await proxyPhoto(book, source.id, fact, outcome.state === 'available' ? undefined : outcome.problem);
   if (!photo) return { status, loaded: { fact } };
   return { status: outcome.state === 'available' ? status : { ...status, cached: true }, loaded: { photo } };
+}
+
+/**
+ * A photo drawn from its pinned full-resolution original. Its size is the original's own, so the layout matches the
+ * pixels printed; its titles and capture data are what the provider reported, which a render need not carry.
+ */
+async function originalPhoto(book: Pick<OpenProject, 'photoIndex' | 'cache'>, id: string, fact: AssetFact, { pinned, stored }: PinnedOriginal): Promise<ProjectPhoto> {
+  const { captured: _captured, location: _location, camera: _camera, ...details } = await photoDetails(pinned, null);
+  const capture = Object.fromEntries(captureFields.flatMap((field) => fact[field] ? [[field, fact[field]]] : []));
+  return { ...photoMetadata(book.photoIndex[id], fact.provided), ...details, ...capture, estimatedCapture: undefined,
+    ...(fact.provided ? { provided: fact.provided } : {}),
+    width: stored.width ?? details.width, height: stored.height ?? details.height, original: pinned,
+    key: digestBytes(Buffer.from(stored.digest + ':rendition-3')), cache: renditionCacheFor(book.cache) };
 }
 
 /** A photo drawn from its proxy, with the size and capture data of its fact, and the problem it is shown with. */

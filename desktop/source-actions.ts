@@ -2,16 +2,19 @@ import { constants } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { copyFile, cp, lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, posix } from 'node:path';
-import { coverInstance, storedBoxes } from '../src/project';
+import { coverInstance, storedBoxes, withBookFormat } from '../src/project';
 import type { ProjectFiles } from '../src/project';
 import { clearFileAssignments, fileAssigned } from '../src/asset-usage';
 import { fileSourceOf, sourceEntries, sourceFolder, storedFileName } from '../src/source-locations';
-import type { FileSource, ImportMode, SourceEntry } from '../src/source-locations';
-import { relocatedEntry } from '../src/source-locator';
+import type { FileSource, ImportMode, PhotoSourceEntry, SourceEntry } from '../src/source-locations';
+import { fileNameOf, isFileLocator, locatorName, relocatedEntry } from '../src/source-locator';
 import type { FileLocator } from '../src/source-locator';
+import { providedFieldNames } from '../src/asset-facts';
 import { createDocument } from './documents';
-import { readAssetFacts } from './asset-facts';
-import { loadProject, updateProject } from './project';
+import { AssetFacts, readAssetFacts } from './asset-facts';
+import { loadProject, observePhotos, updateProject } from './project';
+import { materializePhotos } from './materialized-photos';
+import type { MaterializeOptions } from './materialized-photos';
 import type { OpenProject } from './project';
 import { CommittedProjectSaveError } from './persistence';
 import type { SaveCheckpoint } from './persistence';
@@ -40,6 +43,60 @@ async function managedCopy(folder: string, source: FileSource, snapshot: string,
 
 // Imported copies are stored as "<id>-<name>", or as "<id>-<random>/<name>" when collected into the book.
 const storedPrefix = /^(?:ph|tx|fl)-[a-f0-9-]{12}-/;
+
+/** What Copy into Book and Save a Copy report and how they are cancelled, for photos materialized on the way. */
+export type CopyOptions = MaterializeOptions & {
+  /** A photo without a file its provider could not produce: its entry stays as it was, and the others are copied. */
+  failed?: (source: PhotoSourceEntry, problem: string) => void;
+};
+const isProvided = (source: SourceEntry): source is PhotoSourceEntry => source.kind === 'photo' && !isFileLocator(source.locator);
+
+/**
+ * Photos without a file, observed in one call per provider: those available with the revisions and titles they have now,
+ * and those that are not, which a copy of all files refuses like a missing file.
+ */
+async function observeProvided(book: OpenProject, sources: readonly PhotoSourceEntry[]) {
+  if (!sources.length) return { available: [], unavailable: [] };
+  const store = await SourceStore.forBook(book.folder, book.cache);
+  const facts = AssetFacts.registered(book.folder) ? await AssetFacts.forBook(book.folder) : await AssetFacts.readOnly(book.folder);
+  const observed = await observePhotos(book.folder, sources, store, facts);
+  const available: { source: PhotoSourceEntry; revisions: { revision: string; contentRevision?: string }; provided?: Record<string, string | undefined> }[] = [];
+  const unavailable: PhotoSourceEntry[] = [];
+  for (const source of sources) {
+    const result = observed.get(source.id)?.observed;
+    if (result?.state === 'available' && result.facts) available.push({ source, revisions: result.revisions, ...(result.facts.provided ? { provided: result.facts.provided } : {}) });
+    else unavailable.push(source);
+  }
+  return { available, unavailable };
+}
+
+/**
+ * Copy into Book of photos without a file (ADR 0011, §4.5): each is materialized (or its original found in the source
+ * cache for its current revision), copied into `root`'s `photos/` and its entry rewritten into a `package` entry, the
+ * same step that takes a linked file into the book. The titles its provider gave it become the book's own, since the
+ * photo no longer follows its source; everything else of the fact is read from the copied file from then on, like any
+ * owned photo's. A photo its provider cannot produce keeps its entry, and is reported to `failed`. Returns whether the
+ * copy was cancelled; the caller then removes `copied`.
+ */
+async function copyProvided(book: OpenProject, root: string, files: ProjectFiles, requests: Awaited<ReturnType<typeof observeProvided>>['available'],
+  copied: string[], { failed, ...options }: CopyOptions) {
+  if (!requests.length) return false;
+  const store = await SourceStore.forBook(book.folder, book.cache);
+  const results = await materializePhotos(book.folder, store, requests, options);
+  if (options.signal?.aborted) return true;
+  for (const { source, provided } of requests) {
+    const result = results.get(source.id)!;
+    if (result.state !== 'available') { failed?.(source, result.problem); continue; }
+    // Named after the photo's original where its locator names one, with the extension of what was materialized.
+    const base = fileNameOf(locatorName(source.id, source.locator)).replace(/\.[^.]*$/, '') || source.id;
+    const name = base + extname(result.stored.snapshot);
+    const path = await managedCopy(root, { key: source.key, kind: 'photo', id: source.id, path: name, linked: true }, result.stored.snapshot, copied);
+    const entry = relocatedEntry(files.photoIndex[source.id], { provider: 'package', path } as FileLocator);
+    for (const field of providedFieldNames) if (!Object.hasOwn(entry, field) && provided?.[field] !== undefined) entry[field] = provided[field];
+    files.photoIndex[source.id] = entry;
+  }
+  return false;
+}
 
 /**
  * Renames a text or file stored in the book (beta finding F-027): its copy is renamed in place, keeping its ID
@@ -119,19 +176,29 @@ export async function relocateSource(book: OpenProject, key: string, selection?:
   }
 }
 
-export async function collectSources(book: OpenProject, keys?: readonly string[]) {
+/**
+ * Copy into Book: copies linked files and photos without a file (`keys`, or every source) into the book. Every one must
+ * be readable now. A photo without a file is materialized first (`options`: progress, cancel, and the photos its
+ * provider could not produce, which keep their entries); a cancelled copy changes nothing.
+ */
+export async function collectSources(book: OpenProject, keys?: readonly string[], options: CopyOptions = {}) {
   const before = await captureProjectInputs(book.folder);
   const store = await SourceStore.forBook(book.folder, book.cache);
-  const linked = sourceEntries(book).filter(({ key }) => !keys || keys.includes(key));
-  const originals = await Promise.all(linked.map(async (source) => ({ source, resolved: await store.resolve(book.folder, source) })));
-  const missing = originals.filter(({ resolved }) => resolved.status.state !== 'available');
-  if (missing.length) throw new Error('Cannot include all assets. Locate or restore: ' + missing.map(({ source }) => source.name).join(', ') + '.');
+  const chosen = sourceEntries(book).filter(({ key }) => !keys || keys.includes(key));
+  const provided = await observeProvided(book, chosen.filter(isProvided));
+  const originals = await Promise.all(chosen.filter((source) => !isProvided(source)).map(async (source) => ({ source, resolved: await store.resolve(book.folder, source) })));
+  const missing = [...originals.filter(({ resolved }) => resolved.status.state !== 'available').map(({ source }) => source), ...provided.unavailable];
+  if (missing.length) throw new Error('Cannot include all assets. Locate or restore: ' + missing.map((source) => source.name).join(', ') + '.');
   const files = filesOf(book);
   const copied: string[] = [];
   try {
     for (const { source, resolved } of originals) {
       const file = fileSourceOf(source);
       if (file?.linked) reference(files, source, await managedCopy(book.folder, file, resolved.stored!.snapshot, copied), false);
+    }
+    if (await copyProvided(book, book.folder, files, provided.available, copied, options)) {
+      await Promise.all(copied.map((path) => rm(path, { force: true })));
+      return book;
     }
     const after = await captureProjectInputs(book.folder);
     if (before.revision !== after.revision || before.observation !== after.observation) throw new Error('Sources changed while collecting assets. Please retry.');
@@ -214,8 +281,14 @@ export async function removeSources(book: OpenProject, keys: readonly string[]) 
   return updateProject(book, files, true, { origin: 'app', label: 'Remove sources' });
 }
 
+/** Thrown by a Save a Copy cancelled while it materialized photos; nothing was created. */
+export class CopyCancelled extends Error {
+  constructor() { super('The copy was cancelled.'); this.name = 'CopyCancelled'; }
+}
+
 /** Save a consistent copy. Collection is prepared before publishing any destination document. */
-export async function saveDocumentCopy(source: OpenProject, destination: string, includeAssets: boolean, importMode?: ImportMode, keepLineage = false) {
+export async function saveDocumentCopy(source: OpenProject, destination: string, includeAssets: boolean, importMode?: ImportMode, keepLineage = false,
+  options: CopyOptions = {}) {
   const before = await captureProjectInputs(source.folder);
   const book = await loadProject(source.folder, source.cache, true);
   const result = await createDocument(destination, async (stage) => {
@@ -229,7 +302,11 @@ export async function saveDocumentCopy(source: OpenProject, destination: string,
     } });
     const files = filesOf(book);
     const store = await SourceStore.forBook(book.folder, book.cache);
+    // With all files included, a photo without a file is copied into the new book too, as Copy into Book would.
+    const provided = includeAssets ? await observeProvided(book, sourceEntries(book).filter(isProvided)) : undefined;
+    if (provided?.unavailable.length) throw new Error('Cannot include all assets. Locate or restore ' + provided.unavailable[0].name + '.');
     for (const entry of sourceEntries(book)) {
+      if (provided && isProvided(entry)) continue;
       const { status, stored } = await store.resolve(book.folder, entry);
       if (includeAssets && status.state !== 'available') throw new Error('Cannot include all assets. Locate or restore ' + entry.name + '.');
       const file = fileSourceOf(entry);
@@ -237,7 +314,11 @@ export async function saveDocumentCopy(source: OpenProject, destination: string,
         reference(files, entry, await managedCopy(stage, file, stored.snapshot, []), false);
       }
     }
+    // A cancelled copy is never published: createDocument removes its stage.
+    if (provided && await copyProvided(book, stage, files, provided.available, [], options)) throw new CopyCancelled();
     if (includeAssets) files.project.importMode = 'copy'; else if (importMode) files.project.importMode = importMode;
+    // The format follows the photo index: a copy whose photos all became files opens in older builds again.
+    files.project = withBookFormat(files.project, files.photoIndex);
     await writeFile(join(stage, 'project.json'), JSON.stringify(files.project, null, 2) + '\n');
     await writeFile(join(stage, 'photos.json'), JSON.stringify(files.photoIndex, null, 2) + '\n');
     const after = await captureProjectInputs(source.folder);

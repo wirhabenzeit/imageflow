@@ -43,6 +43,7 @@ import { AuthoringQueue } from './authoring-queue';
 import { authoringErrorResult } from './authoring-errors';
 import { ImportReceipts } from './import-receipts';
 import { renameSource, saveDocumentCopy } from './source-actions';
+import type { CopyOptions } from './source-actions';
 import { rebuildTemplateDependencies } from './dependency-install';
 import type { DependencyRebuild } from './dependency-install';
 import { AssetFacts } from './asset-facts';
@@ -471,7 +472,23 @@ export class DocumentSession {
     const busy = reply && typeof reply === 'object' && typeof (reply as { busy?: unknown }).busy === 'string' ? { busy: (reply as { busy: string }).busy.slice(0, 120) } : undefined;
     this.agentLeases.get(id)?.(reply === true || busy || (parseActiveEditor(reply) ?? false));
   }
-  cancelExport() { this.exportJob?.abort(); }
+  /** A Copy into Book or Duplicate that materializes photos without a file: Cancel stops it as it stops an export. */
+  copyJob?: AbortController;
+  cancelExport() { this.exportJob?.abort(); this.copyJob?.abort(); }
+  /**
+   * Runs a copy that may materialize photos (`collectSources`, `saveDocumentCopy`) with this session's cancel and the
+   * status bar's progress. Only one at a time: a second waits for nothing and is refused.
+   */
+  async copying<T>(owner: BrowserWindow, task: (options: CopyOptions) => Promise<T>) {
+    if (this.copyJob) throw new Error('Wait for the copy in progress to finish.');
+    const job = new AbortController();
+    this.copyJob = job;
+    // The window's own task clears its status when it ends; only what is still running is reported.
+    const progress = (stage: string) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage); };
+    try {
+      return await task({ signal: job.signal, progress: ({ done, total }) => { if (total && done < total) progress('Preparing originals: ' + done + ' of ' + total + '…'); } });
+    } finally { if (this.copyJob === job) this.copyJob = undefined; }
+  }
   cancelCheck() { this.checkJob?.abort(); }
   /** Where template packages are installed, outside every book; set by the app. */
   dependencyCache?: string;
@@ -957,11 +974,19 @@ export class DocumentSession {
   private async runExport(owner: BrowserWindow, job: AbortController, surface?: 'cover') {
     const before = await this.projectSession.inputs.capture();
     const privateCache = await mkdtemp(join(this.cache, 'export-'));
+    const progress = (stage: string) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage); };
     try {
-      const book = await loadProject(this.book.folder, privateCache, true, true);
+      // Placed photos without a file are materialized first, where their provider can produce them now (ADR 0011, §4):
+      // the export prints them from full-resolution originals instead of as proofs. Cancel stops it between photos.
+      const book = await loadProject(this.book.folder, privateCache, true, true, { signal: job.signal,
+        progress: ({ done, total }) => { if (total) progress(done < total ? 'Preparing originals: ' + done + ' of ' + total + '…' : 'Preparing export…'); } });
       if (job.signal.aborted) return null;
       const loaded = await this.projectSession.inputs.capture();
       if (before.revision !== loaded.revision || before.observation !== loaded.observation) throw new Error('Sources changed while preparing export. Please retry.');
+      // An original made from a revision the open book has not seen yet (the photo changed just before the export, and
+      // its provider's watch has not reported it) would print another version than the one checked and shown.
+      const facts = await this.factsOf(this.book);
+      if (Object.entries(book.materialized ?? {}).some(([id, revision]) => facts.get(id)?.revisions?.revision !== revision)) throw new Error('Sources changed while preparing export. Please retry.');
       const fileName = bookName(book.folder).normalize('NFC').replace(/[^\p{L}\p{M}\p{N} _-]/gu, '-').slice(0, 80) + (surface === 'cover' ? ' - Cover' : '') + '.pdf';
       const { canceled, filePath } = await dialog.showSaveDialog(owner, {
         title: surface === 'cover' ? 'Export Cover PDF' : 'Export PDF', defaultPath: join(app.getPath('documents'), fileName),
@@ -970,7 +995,6 @@ export class DocumentSession {
       if (canceled || !filePath || owner.isDestroyed() || job.signal.aborted) return null;
       const id = randomUUID();
       this.renders.set(id, { book: this.marked(book), mode: 'export', network: () => this.originsFor(book) });
-      const progress = (stage: string) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage); };
       try {
         const fonts = bundledFontNames(book.assets.files);
         const { bytes, warnings, errors } = await printBook(renderOrigin + '/render/' + id + (surface === 'cover' ? '?view=cover' : ''), fonts, job.signal, progress, surface);
