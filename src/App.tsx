@@ -523,6 +523,8 @@ export function App() {
   }
 
   function adopt(next: ProjectSummary, reset = false, selected?: string) {
+    // Another book, or the book opened again, does not export a PDF asked for before.
+    if (reset) pendingExport.current = undefined;
     if (!reset) {
       preserveViewAnchor();
       if (current.current?.project.format !== next.project.format) revealedThumb.current = '';
@@ -1995,9 +1997,14 @@ export function App() {
   // The export menu's other PDF shows its view first, and exports once that has rendered and checked.
   const pendingExport = useRef<{ surface: 'content' | 'cover'; arrived: boolean; at: number }>(undefined);
   function exportSurface(surface: 'content' | 'cover') {
+    if ((surface === 'cover') === coverActive) {
+      // The view on show exports now, or says why it cannot; nothing waits to export it later.
+      pendingExport.current = undefined;
+      act('export');
+      return;
+    }
     pendingExport.current = { surface, arrived: false, at: Date.now() };
-    if ((surface === 'cover') !== coverActive) setBookView(surface);
-    else exportPending();
+    setBookView(surface);
   }
   const exportPending = useEffectEvent(() => {
     const pending = pendingExport.current;
@@ -2010,11 +2017,17 @@ export function App() {
       return;
     }
     pending.arrived = true;
-    if (!pdfCommand.enabled) return;
+    if (!pdfCommand.enabled) {
+      // The view has rendered, and cannot export (its check failed, say): the request lapses, so the export does not
+      // start later, out of the blue, once something else makes it possible.
+      const settled = coverActive ? !!currentCoverStatus : render?.state === 'ready' || render?.state === 'error';
+      if (settled && !busy && !exporting) pendingExport.current = undefined;
+      return;
+    }
     pendingExport.current = undefined;
     act('export');
   });
-  useEffect(() => exportPending(), [coverActive, pdfCommand.enabled]);
+  useEffect(() => exportPending(), [coverActive, pdfCommand.enabled, currentCoverStatus, render?.state]);
 
   const format = formatOf(template);
   // The Book check and export report a saved format the template no longer includes.
