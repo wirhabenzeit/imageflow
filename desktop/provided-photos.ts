@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { assetFactSchema } from '../src/asset-facts';
 import type { AssetFact } from '../src/asset-facts';
+import { canonicalJson } from '../src/canonical-json';
 import type { Locator } from '../src/source-locator';
 import type { AssetFacts } from './asset-facts';
 import { proxyStore } from './proxy-store';
@@ -48,8 +50,10 @@ export function strippedPreview(input: Uint8Array): Buffer {
       // Markers without a length.
       if (code === 0x01 || (code >= 0xd0 && code <= 0xd7)) { kept.push(bytes.subarray(at, marker + 1)); at = marker + 1; continue; }
       if (marker + 2 >= bytes.length) throw new Error('The preview is not a whole JPEG image.');
-      const end = marker + 1 + bytes.readUInt16BE(marker + 1);
-      if (end > bytes.length) throw new Error('The preview is not a whole JPEG image.');
+      // The length counts its own two bytes, so it is at least 2.
+      const length = bytes.readUInt16BE(marker + 1);
+      const end = marker + 1 + length;
+      if (length < 2 || end > bytes.length) throw new Error('The preview is not a whole JPEG image.');
       if (!jpegMetadata.has(code)) kept.push(bytes.subarray(at, end));
       at = end;
     }
@@ -94,11 +98,15 @@ export type ProvidedOutcome =
   | { state: Unavailable; problem: string };
 
 type Reported = { ref: SourceRef<Locator>; facts: ProvidedFacts; revisions: Revisions };
+// The fact recorded for what a provider reported, or undefined when what it reported is not a valid fact (a width of
+// 0, say): the photo is then unreadable rather than laid out from facts that were never recorded.
 const factOf = (facts: AssetFacts, id: string, digest: string, { facts: reported, revisions }: Omit<Reported, 'ref'>) => {
   const { width, height, captured, location, camera, provided, extra } = reported;
-  facts.provide(id, { digest, width, height, captured, location, camera, revisions, provided, extra });
-  return facts.get(id);
+  return facts.provide(id, { digest, width, height, captured, location, camera, revisions, provided, extra }) === undefined ? undefined : facts.get(id);
 };
+const invalidFacts = 'Original unavailable: The source reported facts ImageFlow cannot use.';
+const usable = ({ facts: { width, height, captured, location, camera, provided, extra }, revisions }: Omit<Reported, 'ref'>) =>
+  assetFactSchema.safeParse({ digest: '0'.repeat(64), width, height, captured, location, camera, revisions, provided, extra, verified: new Date().toISOString() }).success;
 
 // One refresh per book at a time, so a photo is never previewed twice at once: a reload and a watch of the same book
 // would otherwise both ask for it.
@@ -123,20 +131,23 @@ export function refreshProvided(folder: string, provider: SourceProvider<Locator
     const outcomes = new Map<string, ProvidedOutcome>();
     const store = await proxyStore();
     const wanted: Reported[] = [];
+    const failed = (reported: Reported, problem: string) => outcomes.set(reported.ref.id, { state: 'unreadable', problem, ...(facts.get(reported.ref.id) ? { fact: facts.get(reported.ref.id)! } : {}) });
     for (const [index, ref] of refs.entries()) {
       const result = observed[index];
       if (result.state !== 'available') { outcomes.set(ref.id, { state: result.state, problem: result.problem }); continue; }
       if (!result.facts) continue;
       const previous = facts.get(ref.id);
       const reported = { ref, facts: result.facts, revisions: result.revisions };
+      // Facts that could not be recorded are not worth a preview.
+      if (!usable(reported)) { failed(reported, invalidFacts); continue; }
       // The stored preview still shows the photo: only the facts and the revisions are recorded again.
       if (previous?.revisions && contentKey(previous.revisions) === contentKey(result.revisions) && await store?.path(previous.digest)) {
-        const fact = factOf(facts, ref.id, previous.digest, reported)!;
-        outcomes.set(ref.id, { state: 'available', fact, previous, change: previous.revisions.revision === result.revisions.revision ? 'unchanged' : 'metadata' });
+        const fact = factOf(facts, ref.id, previous.digest, reported);
+        if (!fact) failed(reported, invalidFacts);
+        else outcomes.set(ref.id, { state: 'available', fact, previous, change: previous.revisions.revision === result.revisions.revision ? 'unchanged' : 'metadata' });
       } else wanted.push(reported);
     }
     if (!wanted.length) return outcomes;
-    const failed = (reported: Reported, problem: string) => outcomes.set(reported.ref.id, { state: 'unreadable', problem, ...(facts.get(reported.ref.id) ? { fact: facts.get(reported.ref.id)! } : {}) });
     if (!store) { for (const reported of wanted) failed(reported, 'Preview unavailable: ImageFlow has no proxy store.'); return outcomes; }
     if (!provider.preview) { for (const reported of wanted) failed(reported, 'Preview unavailable: The source provides no previews.'); return outcomes; }
     await mkdir(staging, { recursive: true });
@@ -145,6 +156,10 @@ export function refreshProvided(folder: string, provider: SourceProvider<Locator
       // A preview made while its photo changed is discarded and asked for once more, as a materialization is.
       let pending = wanted;
       for (let attempt = 0; pending.length && attempt < 2 && !signal.aborted; attempt++) {
+        // What changed during the first preview may have changed its size or titles too: it is observed again, so the
+        // facts recorded with the next preview are the ones of its revision.
+        if (attempt > 0) pending = await reobserved(provider, folder, pending, (reported, result) => outcomes.set(reported.ref.id, result));
+        if (!pending.length) break;
         const byId = new Map(pending.map((reported) => [reported.ref.id, reported]));
         const again: Reported[] = [];
         for await (const result of provider.preview(folder, pending.map(({ ref }) => ref), { staging: directory, signal })) {
@@ -162,7 +177,8 @@ export function refreshProvided(folder: string, provider: SourceProvider<Locator
             const digest = createHash('sha256').update(bytes).digest('hex');
             await store.put(digest, bytes);
             const previous = facts.get(result.id);
-            const fact = factOf(facts, result.id, digest, { facts: reported.facts, revisions: result.after })!;
+            const fact = factOf(facts, result.id, digest, { facts: reported.facts, revisions: result.after });
+            if (!fact) { failed(reported, invalidFacts); continue; }
             outcomes.set(result.id, { state: 'available', fact, ...(previous ? { previous } : {}), change: previous?.digest === digest ? previous.revisions?.revision === result.after.revision ? 'unchanged' : 'metadata' : 'content' });
           } catch (error) { failed(reported, 'Preview unavailable: ' + (error instanceof Error ? error.message : String(error))); }
           finally { await rm(result.file, { force: true }); }
@@ -178,6 +194,29 @@ export function refreshProvided(folder: string, provider: SourceProvider<Locator
     return outcomes;
   });
 }
+
+/** Photos observed again before their preview is asked for once more; those that are no longer available say why. */
+async function reobserved(provider: SourceProvider<Locator>, folder: string, pending: Reported[], unavailable: (reported: Reported, outcome: ProvidedOutcome) => void) {
+  let results: Observed[];
+  try { results = await provider.observe(folder, pending.map(({ ref }) => ref)); }
+  catch (error) { results = pending.map(() => ({ state: 'unreadable', problem: 'Original unavailable: ' + (error instanceof Error ? error.message : String(error)) })); }
+  return pending.flatMap((reported, index): Reported[] => {
+    const result = results[index];
+    if (result?.state === 'available' && result.facts && usable({ facts: result.facts, revisions: result.revisions })) return [{ ...reported, facts: result.facts, revisions: result.revisions }];
+    if (result?.state === 'available' && result.facts) { unavailable(reported, { state: 'unreadable', problem: invalidFacts }); return []; }
+    unavailable(reported, result && result.state !== 'available' ? { state: result.state, problem: result.problem }
+      : { state: 'unreadable', problem: 'Preview unavailable: The source no longer reports this photo.' });
+    return [];
+  });
+}
+
+/**
+ * Whether a fact differs from the one before in what the book shows of it besides its pixels: its size, capture data
+ * or provided titles. A change of anything else the provider records (a rating, say) moves only its revision.
+ */
+const shown = ({ width, height, captured, location, camera, provided }: AssetFact) => canonicalJson(Object.fromEntries(
+  Object.entries({ width, height, captured, location, camera, provided }).filter(([, value]) => value !== undefined)));
+export const visibleChange = (before: AssetFact, after: AssetFact) => shown(before) !== shown(after);
 
 /** Whether a photo's aspect ratio changed enough that a crop placed on it shows another part of it (ADR 0011, §3.8). */
 export const aspectChanged = (before: { width: number; height: number }, after: { width: number; height: number }) =>
@@ -225,7 +264,8 @@ export async function providedChanges(folder: string, provider: SourceProvider<L
       continue;
     }
     if (outcome.change !== 'unchanged') changes.revised.push(id);
-    if (outcome.change === 'content' || !before) changes.reload.push(id);
+    // A new preview, or new titles or capture data that templates and the Inspector show, are shown at once.
+    if (outcome.change === 'content' || !before || (outcome.change === 'metadata' && (!outcome.previous || visibleChange(outcome.previous, outcome.fact)))) changes.reload.push(id);
     if (outcome.change === 'content' && outcome.previous && aspectChanged(outcome.previous, outcome.fact)) changes.reshaped.push(id);
   }
   return changes;

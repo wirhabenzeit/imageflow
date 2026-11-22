@@ -65,6 +65,7 @@ class MemoryProvider implements SourceProvider<MemoryLocator> {
   watched: string[] = [];
   // Changes an asset between the revision read before a preview and the one after, once.
   editDuringPreview?: string;
+  duringPreview?: () => void;
   revisions = (asset: Asset): Revisions => ({ revision: asset.revision, contentRevision: asset.content });
   async observe(_book: string, refs: readonly SourceRef<MemoryLocator>[]): Promise<Observed[]> {
     this.observed.push(refs.map(({ id, known }) => ({ id, ...(known ? { known } : {}) })));
@@ -86,7 +87,7 @@ class MemoryProvider implements SourceProvider<MemoryLocator> {
       const scale = Math.min(1, 140 / Math.max(asset.width, asset.height));
       const file = join(staging, randomUUID() + '.jpg');
       await writeFile(file, await render(asset.color, Math.round(asset.width * scale), Math.round(asset.height * scale)));
-      if (this.editDuringPreview === locator.asset) { this.editDuringPreview = undefined; asset.revision += '+'; }
+      if (this.editDuringPreview === locator.asset) { this.editDuringPreview = undefined; asset.revision += '+'; this.duringPreview?.(); }
       yield { id, file, before, after: this.revisions(asset) };
     }
   }
@@ -235,6 +236,8 @@ test('two renders of the same pixels have one digest once their metadata segment
   assert.ok(metadata.icc, 'the ICC profile stays');
   assert.equal(metadata.exif, undefined);
   assert.throws(() => strippedPreview(Buffer.from('GIF89a')), /JPEG or PNG/);
+  // A segment length counts its own two bytes: 0 or 1 is no JPEG.
+  for (const length of [0, 1]) assert.throws(() => strippedPreview(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, length, 0xff, 0xd9])), /not a whole JPEG/);
 });
 
 test('titles come from the provider unless photos.json overrides them; an empty override blanks', async (t) => {
@@ -266,15 +269,21 @@ const refsOf = (book: OpenProject, ids: string[]) => ids.map((id) => ({ id, loca
 const changesOf = async (f: Awaited<ReturnType<typeof fixture>>, ids: string[], available = (id: string) => f.book.sources?.['photo:' + id]?.state === 'available') =>
   providedChanges(f.folder, f.provider, refsOf(f.book, ids), await AssetFacts.forBook(f.folder), { staging: join(f.cache, 'provider-staging'), available });
 
-test('a metadata edit records new revisions and titles without a preview or a reload', async (t) => {
+test('a metadata edit records new revisions without a preview, and reloads only for what the book shows', async (t) => {
   const f = await fixture(t);
   const asset = f.provider.assets.get('a1')!;
   const previews = f.provider.previewed.length;
+  // A rating, say: the revision moves, nothing the book shows does. No preview, no reload.
+  const initial = await captureProjectInputs(f.folder);
+  asset.revision = 'r1b';
+  assert.deepEqual(await changesOf(f, ['mem1']), { reload: [], revised: ['mem1'], reshaped: [] });
+  assert.notEqual((await captureProjectInputs(f.folder)).revision, initial.revision, 'the render inputs follow the revision token');
+  // A new title is shown at once: templates print inherited titles and the Inspector shows them.
   const before = await captureProjectInputs(f.folder);
   asset.revision = 'r2';
   asset.provided = { title: 'Renamed in the source' };
   const changes = await changesOf(f, ['mem1']);
-  assert.deepEqual(changes, { reload: [], revised: ['mem1'], reshaped: [] });
+  assert.deepEqual(changes, { reload: ['mem1'], revised: ['mem1'], reshaped: [] });
   assert.equal(f.provider.previewed.length, previews, 'no preview for a metadata edit');
   const fact = (await AssetFacts.forBook(f.folder)).get('mem1')!;
   assert.deepEqual(fact.revisions, { revision: 'r2', contentRevision: 'c1' });
@@ -323,9 +332,32 @@ test('a preview made while the photo changed is discarded and asked for again', 
   asset.revision = 'r2'; asset.content = 'c2'; asset.color = '#00ffff';
   f.provider.editDuringPreview = 'a1';
   const previews = f.provider.previewed.length;
+  // The edit made during the first preview also changes the photo's size: the facts recorded are the new ones.
+  f.provider.duringPreview = () => { asset.width = 3000; asset.provided = { title: 'Edited meanwhile' }; };
   await changesOf(f, ['mem1']);
   assert.equal(f.provider.previewed.length, previews + 2);
-  assert.equal((await AssetFacts.forBook(f.folder)).get('mem1')!.revisions?.revision, 'r2+');
+  const fact = (await AssetFacts.forBook(f.folder)).get('mem1')!;
+  assert.equal(fact.revisions?.revision, 'r2+');
+  assert.equal(fact.width, 3000);
+  assert.equal(fact.provided?.title, 'Edited meanwhile');
+});
+
+test('facts a provider reports that are not valid leave the photo unreadable, not laid out from them', async (t) => {
+  const f = await fixture(t);
+  f.provider.assets.set('a3', { revision: 'r1', content: 'c1', width: 0, height: 10, color: '#ffffff' });
+  const files = structuredClone({ project: f.book.project, photoIndex: f.book.photoIndex });
+  files.photoIndex.mem3 = { memory: { asset: 'a3' } } as never;
+  const book = await updateProject(f.book, files, true);
+  assert.equal(book.sources!['photo:mem3'].state, 'unreadable');
+  assert.match(book.sources!['photo:mem3'].problem!, /cannot use/);
+  assert.equal(book.photos.has('mem3'), false);
+  assert.equal((await AssetFacts.forBook(f.folder)).get('mem3'), undefined);
+  // The same for a photo that had a valid fact: it is not reported as available with its old one.
+  f.provider.assets.get('a1')!.revision = 'r2';
+  f.provider.assets.get('a1')!.width = 0;
+  const outcome = (await refreshProvided(f.folder, f.provider as never, refsOf(f.book, ['mem1']), await f.provider.observe(f.folder, refsOf(f.book, ['mem1'])),
+    await AssetFacts.forBook(f.folder), { staging: join(f.cache, 'staging') })).get('mem1')!;
+  assert.equal(outcome.state, 'unreadable');
 });
 
 test('an offline provider shows its photos from their proxies, offers its own repairs, and prints them as proofs', async (t) => {

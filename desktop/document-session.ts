@@ -244,11 +244,7 @@ export class DocumentSession {
 
   get book() { return this.projectSession.book; }
   get summary(): ProjectSummary {
-    const summary = projectSummary(this.book, this.active.id);
-    // A photo reshaped in its source keeps its warning for the session (ADR 0011, §3.8).
-    const sources = summary.sources && this.reshaped.size ? Object.fromEntries(Object.entries(summary.sources).map(([key, status]) =>
-      [key, status.kind === 'photo' && this.reshaped.has(status.id) ? { ...status, reshaped: true } : status])) : summary.sources;
-    return { ...summary, sources, handle: this.projectSession.handle, history: this.projectSession.history,
+    return { ...projectSummary(this.marked(this.book), this.active.id), handle: this.projectSession.handle, history: this.projectSession.history,
       network: [...this.networkOrigins], pageLabels: this.menuState?.pageLabels, coverBoxIds: this.menuState?.coverBoxIds };
   }
   notify(change: ProjectChange) {
@@ -592,7 +588,7 @@ export class DocumentSession {
       }
     }
     this.renderIds.add(id);
-    this.renders.set(id, { book, mode: 'edit', network: () => this.originsFor(book), pictures: this.previewPictures });
+    this.renders.set(id, { book: this.marked(book), mode: 'edit', network: () => this.originsFor(book), pictures: this.previewPictures });
     // A changed template gets the approvals for its own hash, if any, and the frames are rendered again with them.
     if (this.networkPrepared && book.templateHash !== this.network.hash) queueMicrotask(() => void this.updateNetwork().catch(() => {}));
     this.window.setTitle(bookName(book.folder));
@@ -645,6 +641,15 @@ export class DocumentSession {
   private factsOf(book: OpenProject) { return book.readOnly ? AssetFacts.readOnly(book.folder) : AssetFacts.forBook(book.folder); }
   /** Photos without a file whose aspect ratio changed in their source while placed in this session (ADR 0011, §3.8). */
   private reshaped = new Set<string>();
+  /**
+   * A book with the session's reshaped photos marked on their statuses, as every render and the summary see it: the
+   * mark lives in the session, not in what a load reads, so a reload or a check snapshot keeps the warning.
+   */
+  private marked(book: OpenProject): OpenProject {
+    if (!this.reshaped.size || !book.sources) return book;
+    return { ...book, sources: Object.fromEntries(Object.entries(book.sources).map(([key, status]) =>
+      [key, status.kind === 'photo' && this.reshaped.has(status.id) ? { ...status, reshaped: true } : status])) };
+  }
   // A provider reported photos without a file as changed: their facts and previews are brought up to date, and the
   // book reloads only for what it shows differently.
   private async providedChanged(provider: SourceProvider<Locator>, refs: SourceRef<Locator>[], facts: AssetFacts) {
@@ -964,7 +969,7 @@ export class DocumentSession {
       });
       if (canceled || !filePath || owner.isDestroyed() || job.signal.aborted) return null;
       const id = randomUUID();
-      this.renders.set(id, { book, mode: 'export', network: () => this.originsFor(book) });
+      this.renders.set(id, { book: this.marked(book), mode: 'export', network: () => this.originsFor(book) });
       const progress = (stage: string) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage); };
       try {
         const fonts = bundledFontNames(book.assets.files);
@@ -1008,7 +1013,7 @@ export class DocumentSession {
     try {
       return await checkProject(book, this.cache, request, async (snapshot, preview, signal, inspect, cover) => {
         const id = randomUUID();
-        this.renders.set(id, { book: snapshot, mode: 'export', network: () => this.originsFor(snapshot) });
+        this.renders.set(id, { book: this.marked(snapshot), mode: 'export', network: () => this.originsFor(snapshot) });
         try {
           const url = renderOrigin + '/render/' + id;
           if (snapshot.fixture?.coverPages !== undefined) return { status: await checkCoverRender(url, signal, arm) };

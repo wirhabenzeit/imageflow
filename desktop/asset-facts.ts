@@ -155,15 +155,16 @@ export class AssetFacts {
   /**
    * Records what a provider reported for a photo without a file (ADR 0011): its facts, revisions and provided values,
    * with the digest of its stored preview. Keys of the earlier fact this version does not know stay while the digest
-   * does. Returns whether the fact changed.
+   * does. Returns whether the fact changed, or undefined for facts that are not valid, which are not recorded.
    */
-  provide(id: string, reported: ProvidedFact): boolean {
+  provide(id: string, reported: ProvidedFact): boolean | undefined {
     const previous = this.facts[id];
     const { digest, width, height, revisions, provided, extra } = reported;
     const fact = assetFactSchema.safeParse({ ...(previous?.digest === digest ? unknownOf(previous) : {}), digest, width, height, ...captureOf(reported),
       ...(revisions ? { revisions } : {}), ...(provided && Object.keys(provided).length ? { provided } : {}), ...(extra ? { extra } : {}),
       verified: new Date().toISOString() });
-    if (!fact.success || same(previous, fact.data)) return false;
+    if (!fact.success) return undefined;
+    if (same(previous, fact.data)) return false;
     this.facts[id] = fact.data;
     this.notes.delete(id); this.digests.delete(id);
     this.removed.delete(id);
