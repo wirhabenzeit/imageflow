@@ -21,7 +21,7 @@ function applyPatch(current: AppSettings, patch: unknown): AppSettings {
   const keepOriginals = 'keepOriginals' in patch ? patch.keepOriginals : current.keepOriginals;
   if (keepOriginals !== undefined && typeof keepOriginals !== 'boolean') throw new Error('Invalid keep originals setting.');
   return { appearance, automaticUpdates, updateChannel, ...(newBookSize ? { newBookSize: newBookSize as {width:number;height:number} } : {}),
-    ...(agentAccess ? { agentAccess: true } : {}), ...(keepOriginals ? { keepOriginals: true } : {}) };
+    ...(agentAccess ? { agentAccess: true } : {}), ...(keepOriginals === false ? { keepOriginals: false } : {}) };
 }
 
 export class SettingsStore {

@@ -2,12 +2,12 @@ import { bookName } from '../src/book-name';
 import { agentFootprint } from '../src/agent-footprint';
 import type { AgentFootprint } from '../src/agent-footprint';
 import { SourceStore } from './source-store';
-import { sourceEntries } from '../src/source-locations';
+import { cachedPreviewNote, sourceEntries } from '../src/source-locations';
 import type { FileSourceEntry, PhotoSourceEntry, SourceEntry } from '../src/source-locations';
 import { isFileLocator } from '../src/source-locator';
 import type { Locator, PhotoLocator } from '../src/source-locator';
 import { providerOf } from './providers';
-import { providedChanges } from './provided-photos';
+import { previewProgress, providedChanges } from './provided-photos';
 import type { Revisions, SourceProvider, SourceRef } from './source-provider';
 import { assetPageLabels, assetUsage } from '../src/asset-usage';
 import { watchLinkedFiles } from './providers/files';
@@ -19,7 +19,7 @@ import type { FSWatcher } from 'node:fs';
 import { lstat, mkdtemp, readdir, rm, stat, mkdir, rename, rmdir } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
 import { channels, desktopScheme, issueText, renderOrigin, renderOrigins } from '../src/desktop';
-import type { AgentLeaseReply, BookMenuState, CanvasLayout, ImportRequest, Issue, ProjectChange, ProjectSummary, Result } from '../src/desktop';
+import type { AgentLeaseReply, BookMenuState, CanvasLayout, ImportRequest, Issue, ProjectChange, ProjectSummary, Result, TaskProgress } from '../src/desktop';
 import { coverInstance, identifier } from '../src/project';
 import { parseActiveEditor } from '../src/mcp-results';
 import type { RenderProject } from '../src/project';
@@ -49,7 +49,7 @@ import type { CopyOptions } from './source-actions';
 import { rebuildTemplateDependencies } from './dependency-install';
 import type { DependencyRebuild } from './dependency-install';
 import { AssetFacts } from './asset-facts';
-import { describeLocalChange, describeSync, downloadOriginals, syncBook } from './sync-engine';
+import { describeLocalChange, describeSync, pendingOriginals, placeOriginals, stageOriginals, syncBook } from './sync-engine';
 import type { SyncOptions, SyncOutcome } from './sync-engine';
 import { remoteCommits } from './sync-remote';
 import type { SyncRemote } from './sync-remote';
@@ -85,10 +85,26 @@ async function fingerprint(path: string) {
 /** A window owns its writer, history, watchers, jobs and agent queue until all work has settled. */
 // The export confirmation names the first few errors; Book check lists them all.
 const shownExportErrors = 8;
+/**
+ * The errors an export asks about. Unavailable originals are summed up by their cause, one line for all the photos of a
+ * Lightroom Classic that is not running, say, instead of one line per box; the other errors are listed as they are.
+ */
 function exportErrorList(errors: Issue[]) {
-  const shown = errors.slice(0, shownExportErrors).map(issueText);
-  const more = errors.length - shown.length;
-  return shown.join('\n') + (more > 0 ? '\n…and ' + more + ' more ' + (more === 1 ? 'error' : 'errors') + ' in Book check.' : '');
+  const unavailable = new Map<string, Issue[]>();
+  const other: Issue[] = [];
+  for (const issue of errors) {
+    if (issue.code !== 'source-unavailable') { other.push(issue); continue; }
+    const cause = issue.message.endsWith(cachedPreviewNote) ? issue.message.slice(0, -cachedPreviewNote.length) : issue.message;
+    unavailable.set(cause, [...unavailable.get(cause) ?? [], issue]);
+  }
+  const summaries = [...unavailable].map(([cause, issues]) => {
+    const photos = new Set(issues.map(({ source, spread, box }) => source ?? spread + ':' + box)).size;
+    const spreads = new Set(issues.map(({ spread }) => spread)).size;
+    return cause + ': ' + (photos === 1 ? '1 photo' : photos + ' photos') + ' on ' + (spreads === 1 ? '1 spread' : spreads + ' spreads') + ' will print from cached previews.';
+  });
+  const shown = other.slice(0, Math.max(0, shownExportErrors - summaries.length)).map(issueText);
+  const more = other.length - shown.length;
+  return [...summaries, ...shown].join('\n') + (more > 0 ? '\n…and ' + more + ' more ' + (more === 1 ? 'error' : 'errors') + ' in Book check.' : '');
 }
 
 /** Asks which of several versions on the remote to continue with. At most four fit; Cancel follows them and answers nothing. */
@@ -370,7 +386,13 @@ export class DocumentSession {
     // A sync or a remote refresh that started meanwhile publishes its own, newer status.
     if (this.syncView === view && !this.syncing && status !== view.status) this.publishSync({ folder: view.folder, status });
   }
+  /** A download of originals running in the background, and how far it is; every published view carries it. */
+  private downloadJob?: AbortController;
+  private downloading?: { done: number; total: number };
+  /** The photos whose originals the last sync has and this Mac does not yet: their problem says so (`marked`). */
+  private notDownloaded = new Set<string>();
   private publishSync(view: SyncView | undefined) {
+    if (view) { const { downloading: _, ...rest } = view; view = this.downloading ? { ...rest, downloading: this.downloading } : rest; }
     this.syncView = view;
     if (!this.closing && !this.window.isDestroyed()) this.window.webContents.send(channels.syncChanged, view ?? null);
     this.syncChanged?.();
@@ -403,6 +425,13 @@ export class DocumentSession {
     const status = (await lstat(folder).catch(() => undefined))?.isDirectory()
       ? await describeSync(this.book.folder, new FolderRemote(folder))
       : { state: 'unavailable' as const, detail: 'The sync folder is not available.', pendingOriginals: 0 };
+    const ids = status.pendingOriginals ? await pendingOriginals(this.book.folder, new FolderRemote(folder)).catch(() => [] as string[]) : [];
+    if (ids.join() !== [...this.notDownloaded].join()) {
+      this.notDownloaded = new Set(ids);
+      // The book check and the asset statuses say so at once: the book renders again with the new statuses. While
+      // the book is busy, the save or load that follows renders them anyway.
+      if (!this.closing && !this.busy) this.notify({ value: this.activate(this.book) });
+    }
     if (!this.syncing) this.publishSync({ folder, status, ...(notice ? { message: notice } : {}) });
   }
   /** Syncs with the book's sync folder and says what happened in the status bar. Errors are thrown for the app to show. */
@@ -412,13 +441,15 @@ export class DocumentSession {
     this.publishSync({ ...this.syncView, folder: remote.root, syncing: true, message: undefined });
     let message: string | undefined;
     try {
-      const result = await this.sync(remote, { fetchOriginals: this.keepOriginals?.() ?? false });
+      // Originals come after the sync, in the background (`downloadSyncedOriginals`), so the book stays usable.
+      const result = await this.sync(remote);
       if ('error' in result) throw new Error(result.error);
       message = describeOutcome(result.value);
       return result.value;
     } finally {
       this.syncing = false;
       await this.refreshSync({ message }).catch((error) => console.warn('ImageFlow could not read the sync status', error));
+      if (this.keepOriginals?.() && this.syncView?.status?.pendingOriginals) void this.downloadSyncedOriginals().catch((error) => { if (!this.window.isDestroyed()) this.window.webContents.send(channels.appNotice, 'Originals are still to be downloaded: ' + errorMessage(error)); });
     }
   }
   /** Makes the book sync through `folder` on this Mac. The record of the last sync stays only if the folder has it. */
@@ -447,22 +478,52 @@ export class DocumentSession {
     if ('error' in result) throw new Error(result.error);
     await this.refreshSync();
   }
-  /** Downloads the owned originals that are only proxies here, then shows them. */
+  /**
+   * Downloads the owned originals that are only previews here, in the background: the book stays usable while they are
+   * fetched and checked (`stageOriginals`), the sync status shows how far it is with Cancel, and they go into place in
+   * one short step at the end, when the book reloads to show them. A second request while one runs waits for nothing.
+   * Cancel keeps the originals downloaded by then.
+   */
   async downloadSyncedOriginals() {
+    if (this.downloadJob) return [];
     const remote = await this.folderRemote();
-    const result = await this.run(async () => {
-      this.stopWatch();
-      try {
-        const downloaded = await downloadOriginals({ remote, book: this.book });
-        if (downloaded.length) this.notify({ value: this.activate(await loadProject(this.book.folder, this.cache), true) });
-        return downloaded;
-      } finally { this.watchProject(this.book); }
-    });
-    if ('error' in result) { await this.refreshSync(); throw new Error(result.error); }
-    const count = result.value.length;
-    await this.refreshSync({ message: count ? 'Downloaded ' + count + (count === 1 ? ' original.' : ' originals.') : 'Every original is on this Mac.' });
-    return result.value;
+    const job = new AbortController();
+    this.downloadJob = job;
+    const show = (downloading?: { done: number; total: number }) => {
+      this.downloading = downloading;
+      if (this.syncView) this.publishSync(this.syncView);
+    };
+    let placed: string[] = [];
+    let total = 0;
+    try {
+      const staged = await stageOriginals({ remote, folder: this.book.folder, signal: job.signal,
+        progress: (done, all) => { total = all; if (all) show({ done, total: all }); } });
+      if (staged.length) {
+        const result = await this.run(async () => {
+          this.stopWatch();
+          try {
+            const ids = await placeOriginals(this.book.folder, staged);
+            if (ids.length) this.notify({ value: this.activate(await loadProject(this.book.folder, this.cache), true) });
+            return ids;
+          } finally { this.watchProject(this.book); }
+        });
+        if ('error' in result) { await Promise.all(staged.map(({ staging }) => rm(staging, { force: true }))); throw new Error(result.error); }
+        placed = result.value;
+      }
+    } catch (error) {
+      show(undefined);
+      await this.refreshSync();
+      throw error;
+    } finally { if (this.downloadJob === job) this.downloadJob = undefined; }
+    show(undefined);
+    const left = total - placed.length;
+    await this.refreshSync({ message: !total ? 'Every original is on this Mac.' : job.signal.aborted && left > 0
+      ? 'Downloaded ' + placed.length + ' of ' + total + ' originals. The rest stay previews until you download them.'
+      : 'Downloaded ' + placed.length + (placed.length === 1 ? ' original.' : ' originals.') });
+    return placed;
   }
+  /** Stops a download of originals; those downloaded so far are kept. */
+  cancelDownload() { this.downloadJob?.abort(); }
   async reload() {
     const next = await loadProject(this.book.folder, this.cache);
     const summary = this.activate(next, true);
@@ -481,14 +542,16 @@ export class DocumentSession {
    * Runs a copy that may materialize photos (`collectSources`, `saveDocumentCopy`) with this session's cancel and the
    * status bar's progress. Only one at a time: a second waits for nothing and is refused.
    */
-  async copying<T>(owner: BrowserWindow, task: (options: CopyOptions) => Promise<T>) {
+  async copying<T>(owner: BrowserWindow, task: (options: CopyOptions) => Promise<T>, label = 'Copying into book') {
     if (this.copyJob) throw new Error('Wait for the copy in progress to finish.');
     const job = new AbortController();
     this.copyJob = job;
-    // The window's own task clears its status when it ends; only what is still running is reported.
-    const progress = (stage: string) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage); };
+    // The window's own task clears its status when it ends; only what is still running is reported. The count is of
+    // the originals its sources render, such as Lightroom's; the files copied besides them are quick.
+    const progress = (value: TaskProgress) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, value); };
+    progress({ text: label, cancel: true });
     try {
-      return await task({ signal: job.signal, progress: ({ done, total }) => { if (total && done < total) progress('Preparing originals: ' + done + ' of ' + total + '…'); } });
+      return await task({ signal: job.signal, progress: ({ done, total }) => { if (total && done < total) progress({ text: label, done, total, cancel: true }); } });
     } finally { if (this.copyJob === job) this.copyJob = undefined; }
   }
   cancelCheck() { this.checkJob?.abort(); }
@@ -665,9 +728,15 @@ export class DocumentSession {
    * mark lives in the session, not in what a load reads, so a reload or a check snapshot keeps the warning.
    */
   private marked(book: OpenProject): OpenProject {
-    if (!this.reshaped.size || !book.sources) return book;
-    return { ...book, sources: Object.fromEntries(Object.entries(book.sources).map(([key, status]) =>
-      [key, status.kind === 'photo' && this.reshaped.has(status.id) ? { ...status, reshaped: true } : status])) };
+    if ((!this.reshaped.size && !this.notDownloaded.size) || !book.sources) return book;
+    return { ...book, sources: Object.fromEntries(Object.entries(book.sources).map(([key, status]) => {
+      if (status.kind !== 'photo') return [key, status];
+      let marked = this.reshaped.has(status.id) ? { ...status, reshaped: true } : status;
+      // An original another Mac synced and this one has not downloaded yet is not missing: it is on its way.
+      if (status.state === 'missing' && this.notDownloaded.has(status.id)) marked = { ...marked, problem: 'Original not downloaded yet' +
+        (this.downloading ? ' (downloading)' : ' (File → Sync → Download Originals)') };
+      return [key, marked];
+    })) };
   }
   // A provider reported photos without a file as changed: their facts and previews are brought up to date, and the
   // book reloads only for what it shows differently.
@@ -841,9 +910,14 @@ export class DocumentSession {
    * the book holds already are counted, not added again. The book's facts and previews of the new photos are read
    * while it loads again.
    */
-  async importProvided(locators: readonly PhotoLocator[], label: string) {
+  async importProvided(locators: readonly PhotoLocator[], label: string, previews?: (done: number, total: number) => void) {
     const book = this.book;
-    const { book: next, imported, counts } = await importProvidedPhotos(book, locators, { checkpoint: { origin: 'app', label } });
+    const run = () => importProvidedPhotos(book, locators, { checkpoint: { origin: 'app', label } });
+    // What the import starts while it loads (the provider's watch, later refreshes) inherits this context: the callback
+    // goes quiet once the import is done, so a later refresh never reports as this import.
+    let active = true;
+    const report = previews && ((done: number, total: number) => { if (active) previews(done, total); });
+    const { book: next, imported, counts } = await (report ? previewProgress.run(report, run) : run()).finally(() => { active = false; });
     if (next === book) return { summary: this.summary, imported, counts };
     this.projectSession.adoptExternal(book);
     this.projectSession.record(next, label, true, false);
@@ -896,8 +970,8 @@ export class DocumentSession {
     const noun = request.kind === 'photo' ? 'photos' : request.kind === 'markdown' ? 'texts' : 'files';
     const progress = report ? ({ done, total, saving }: ImportProgress) => {
       if (owner.isDestroyed()) return;
-      owner.webContents.send(channels.progress, saving ? 'Adding ' + total + ' ' + (total === 1 ? noun.slice(0, -1) : noun) + ' to the book…'
-        : total > 1 ? 'Importing ' + noun + '… ' + done + ' of ' + total : 'Importing ' + noun.slice(0, -1) + '…');
+      owner.webContents.send(channels.progress, saving ? { text: 'Adding ' + total + ' ' + (total === 1 ? noun.slice(0, -1) : noun) + ' to the book…' }
+        : total > 1 ? { text: 'Importing ' + noun, done, total } : { text: 'Importing ' + noun.slice(0, -1) + '…' });
     } : undefined;
     const { book: next, imported, copied, createdDirectories, counts } = await importIntoProject(book, request, [...new Set(files)], progress, checkpoint);
     for (const file of [...createdDirectories, ...copied]) {
@@ -1020,7 +1094,8 @@ export class DocumentSession {
     };
     const id = randomUUID();
     this.renders.set(id, { book: this.marked(book), mode: 'export', network: () => this.originsFor(book), pictures: this.previewPictures });
-    const progress = (stage: string) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage); };
+    // Cancel stops an export at any stage.
+    const progress = (stage: string, count?: { done: number; total: number }) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage ? { text: stage, ...count, cancel: true } : ''); };
     try {
       const query = new URLSearchParams({ view: 'proof', per: String(perPage), title: book.project.title || name,
         date: new Date().toLocaleDateString(app.getLocale(), { dateStyle: 'medium' }) });
@@ -1042,12 +1117,13 @@ export class DocumentSession {
   private async runExport(owner: BrowserWindow, job: AbortController, surface?: 'cover') {
     const before = await this.projectSession.inputs.capture();
     const privateCache = await mkdtemp(join(this.cache, 'export-'));
-    const progress = (stage: string) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage); };
+    // Cancel stops an export at any stage.
+    const progress = (stage: string, count?: { done: number; total: number }) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage ? { text: stage, ...count, cancel: true } : ''); };
     try {
       // Placed photos without a file are materialized first, where their provider can produce them now (ADR 0011, §4):
       // the export prints them from full-resolution originals instead of as proofs. Cancel stops it between photos.
       const book = await loadProject(this.book.folder, privateCache, true, true, { signal: job.signal,
-        progress: ({ done, total }) => { if (total) progress(done < total ? 'Preparing originals: ' + done + ' of ' + total + '…' : 'Preparing export…'); } });
+        progress: ({ done, total }) => { if (total) { if (done < total) progress('Preparing originals', { done, total }); else progress('Preparing export…'); } } });
       if (job.signal.aborted) return null;
       const loaded = await this.projectSession.inputs.capture();
       if (before.revision !== loaded.revision || before.observation !== loaded.observation) throw new Error('Sources changed while preparing export. Please retry.');
@@ -1067,8 +1143,11 @@ export class DocumentSession {
         const fonts = bundledFontNames(book.assets.files);
         const { bytes, warnings, errors } = await printBook(renderOrigin + '/render/' + id + (surface === 'cover' ? '?view=cover' : ''), fonts, job.signal, progress, surface);
         if (errors.length) {
-          const choice = await dialog.showMessageBox(owner, { type: 'warning', message: 'Export PDF with errors?',
-            detail: exportErrorList(errors) + '\n\nThe PDF may contain missing content or printing problems. Pages with unavailable originals will be marked. Export anyway?',
+          // Only unavailable originals: the PDF is a proof of the cached previews, and says so on its pages.
+          const previewsOnly = errors.every(({ code }) => code === 'source-unavailable');
+          const choice = await dialog.showMessageBox(owner, { type: 'warning', message: previewsOnly ? 'Export PDF with cached previews?' : 'Export PDF with errors?',
+            detail: exportErrorList(errors) + (previewsOnly ? '\n\nThose pages will be marked ORIGINAL UNAVAILABLE. Export anyway?'
+              : '\n\nThe PDF may contain missing content or printing problems. Pages with unavailable originals will be marked. Export anyway?'),
             buttons: ['Cancel', 'Export Anyway'], defaultId: 0, cancelId: 0 });
           if (choice.response !== 1) return null;
         }

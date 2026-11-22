@@ -63,5 +63,7 @@ export function PhotoViewMenu({ view, update, custom, photos = true, children }:
       <hr />
       <button onClick={() => update({ showTime: !view.showTime })}>Show Capture Time{view.showTime ? ' ✓' : ''}</button>
     </>}
+    {!photos && <hr />}
+    <button onClick={() => update({ showSource: !view.showSource })}>Show Source Indicators{view.showSource ? ' ✓' : ''}</button>
   </ActionMenu>;
 }

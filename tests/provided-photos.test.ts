@@ -14,7 +14,7 @@ import { loadProject, photoMetadata, projectSummary, updateProject, withProjectF
 import type { OpenProject } from '../desktop/project';
 import { captureProjectInputs } from '../desktop/revisions';
 import { registerProvider } from '../desktop/providers';
-import { providedChanges, refreshProvided, strippedPreview } from '../desktop/provided-photos';
+import { compactPreview, providedChanges, refreshProvided, strippedPreview } from '../desktop/provided-photos';
 import { materializePhotos, placedPhotos } from '../desktop/materialized-photos';
 import { collectSources, saveDocumentCopy } from '../desktop/source-actions';
 import type { Materialized, MaterializeOptions, Observed, Revisions, SourceProvider, SourceRef, Unavailable } from '../desktop/source-provider';
@@ -272,6 +272,25 @@ test('two renders of the same pixels have one digest once their metadata segment
   assert.throws(() => strippedPreview(Buffer.from('GIF89a')), /JPEG or PNG/);
   // A segment length counts its own two bytes: 0 or 1 is no JPEG.
   for (const length of [0, 1]) assert.throws(() => strippedPreview(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, length, 0xff, 0xd9])), /not a whole JPEG/);
+});
+
+test('a preview is kept as a compact JPEG of at most 1400 px with its colour profile, equal pixels giving equal bytes', async () => {
+  // Like Lightroom's: full chroma, high quality, a fresh metadata segment on each render, and larger than a preview.
+  const noisy = await sharp({ create: { width: 2000, height: 1300, channels: 3, background: '#808080', noise: { type: 'gaussian', mean: 128, sigma: 40 } } })
+    .jpeg({ quality: 96, chromaSubsampling: '4:4:4' }).withIccProfile('srgb').toBuffer();
+  const segment = Buffer.from('http://ns.adobe.com/xap/1.0/\0' + randomUUID());
+  const head = Buffer.alloc(4); head.writeUInt16BE(0xffe1, 0); head.writeUInt16BE(segment.length + 2, 2);
+  const rendered = () => Buffer.concat([noisy.subarray(0, 2), head, segment, noisy.subarray(2)]);
+  const [one, two] = [await compactPreview(rendered()), await compactPreview(rendered())];
+  assert.equal(sha256(one), sha256(two), 'two renders of the same pixels keep one digest');
+  assert.ok(one.length < noisy.length / 2, 'much smaller than what arrived: ' + one.length + ' of ' + noisy.length);
+  const metadata = await sharp(one).metadata();
+  assert.deepEqual([metadata.format, metadata.width, metadata.height, metadata.chromaSubsampling], ['jpeg', 1400, 910, '4:2:0']);
+  assert.ok(metadata.icc, 'the colour profile stays');
+  assert.equal(metadata.exif, undefined);
+  // A preview that is small already is never made larger.
+  const small = await render('#336699', 40, 30);
+  assert.ok((await compactPreview(small)).length <= strippedPreview(small).length);
 });
 
 test('titles come from the provider unless photos.json overrides them; an empty override blanks', async (t) => {
@@ -722,7 +741,7 @@ test('the Assets menu offers Copy into Book for a photo without a file', async (
   const menu = assetMenu(projectSummary(f.book, 'view'), ['photo:mem1', 'photo:mem2']);
   const copy = menu.find((item) => (item as { command?: string }).command === 'asset-copy') as { enabled: boolean; label?: string };
   assert.equal(copy.enabled, true);
-  assert.equal(copy.label, 'Copy 2 into Book');
+  assert.equal(copy.label, 'Copy 2 into Book…');
 });
 
 test('Save a Copy with all files included copies photos without a file into the new book', async (t) => {

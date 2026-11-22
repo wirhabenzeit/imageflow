@@ -20,6 +20,7 @@ const icons = {
   undo: 'M6 4L3 7l3 3M3 7h6a3 3 0 0 1 3 3v2',
   redo: 'M10 4l3 3-3 3M13 7H7a3 3 0 0 0-3 3v2',
   export: 'M8 10V2M5 5l3-3 3 3M3 8v5h10V8',
+  import: 'M8 2v8M5 7l3 3 3-3M3 8v5h10V8',
   chevron: 'M5 6l3 3 3-3',
   play: 'M5 3l8 5-8 5z',
   add: 'M8 3v10M3 8h10',
@@ -30,6 +31,8 @@ const icons = {
   // Settings toolbar: sliders for General, an open book for Templates, a sparkle for agents.
   templates: 'M2.5 3.5H6.5A1.5 1.5 0 0 1 8 5V13A1.5 1.5 0 0 0 6.5 11.5H2.5ZM13.5 3.5H9.5A1.5 1.5 0 0 0 8 5V13A1.5 1.5 0 0 1 9.5 11.5H13.5Z',
   settings: 'M2.5 5h5.5M11.5 5h2M2.5 11h1.5M7.5 11h6M8 5a1.75 1.75 0 1 0 3.5 0a1.75 1.75 0 1 0-3.5 0M4 11a1.75 1.75 0 1 0 3.5 0a1.75 1.75 0 1 0-3.5 0',
+  // Sources: a photo in front of another, for the pane of photo sources such as Lightroom Classic.
+  sources: 'M4.5 2.5h9v8M2.5 4.5h9v9h-9zM2.5 11.5l2.5-2.5 2 2 1.5-1.5 3 3M8.5 7v.1',
   agent: 'M7 2.5l1.3 3.7 3.7 1.3-3.7 1.3L7 12.5 5.7 8.8 2 7.5l3.7-1.3zM12 10.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z',
 };
 export const Icon = ({ name, size = 14, activeSide }: { name: keyof typeof icons; size?: number; activeSide?: 'left' | 'right' }) => <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true">

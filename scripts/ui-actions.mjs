@@ -131,7 +131,7 @@ export async function testBook(app, path, create = false) {
 export async function menuAction(app, name) {
   const labels = { 'New project…': 'New Book…', 'Open project…': 'Open…', Reload: 'Reload from Disk', 'Reload Book': 'Reload from Disk',
     'Agent Connections…': 'Connect an Agent…', 'Move Spread Down': 'Move Down', 'Move Spread Up': 'Move Up', 'Add Spread': 'New Spread',
-    'Show Book Check': 'Check Book', 'Save a Copy…': 'Duplicate…' };
+    'Show Book Check': 'Check Book', 'Save a Copy…': 'Duplicate…', 'Assets…': 'Manage Assets…' };
   const ids = { 'Delete Spread': 'delete-spread', 'Undo Book Edit': 'undo', 'Redo Book Edit': 'redo', 'Undo Project Edit': 'undo', 'Redo Project Edit': 'redo' };
   const page = activePages.get(app) ?? app.windows().find((page) => page.url() === 'imageflow://editor/') ?? await app.firstWindow();
   const request = { label: labels[name] ?? name, commandId: ids[name], id: await app.browserWindow(page).then((window) => window.evaluate((window) => window.id)) };

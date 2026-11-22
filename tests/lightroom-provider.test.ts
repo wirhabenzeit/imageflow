@@ -203,6 +203,30 @@ test('watch reports changed photos, and every photo when Lightroom goes away or 
   assert.equal(reported.length, 0, 'a stopped watch reports nothing');
 });
 
+test('a watch that starts after Lightroom connected still brings back photos the book last saw offline', async (t) => {
+  const { provider, fake, bridge } = await setup(t);
+  const refs = [ref('a', uuid(1)), ref('b', uuid(2))];
+  // The book loads before the plugin reconnects (the app was restarted): its photos are offline.
+  for (const result of await provider.observe('/book', refs)) assert.equal(result.state, 'offline');
+  const plugin = fake();
+  plugin.add(1); plugin.add(2);
+  await plugin.connect();
+  await until(() => !!bridge.connection);
+  // Its watch starts only now; no connection event is coming, so the watch itself reports every photo once.
+  const reported: string[][] = [];
+  const stop = provider.watch('/book', refs, (ids) => reported.push(ids));
+  await until(() => reported.length === 1);
+  assert.deepEqual(reported[0], ['a', 'b']);
+  for (const result of await provider.observe('/book', refs)) assert.equal(result.state, 'available');
+  stop();
+  // A watch that starts with the book's last look matching the connection reports nothing.
+  const quiet: string[][] = [];
+  const again = provider.watch('/book', refs, (ids) => quiet.push(ids));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(quiet, []);
+  again();
+});
+
 test('Launch opens Lightroom Classic by name, without a shell, and says so when it is not installed', async () => {
   const calls: [string, readonly string[]][] = [];
   await launchLightroom(async (file, args) => { calls.push([file, args]); });

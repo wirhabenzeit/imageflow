@@ -1,6 +1,7 @@
 import { EditMarkdown, NewMarkdown } from './MarkdownActions';
 import { assetMenu, assetMenuState, assetActions } from './asset-menu';
 import { PhotoViewMenu } from './PhotoViewMenu';
+import { SourceBadge, sourceOrigin } from './SourceBadge';
 import type { PhotoViewControl } from './PhotoViewMenu';
 import { photoGroups, photoDate, captureLabel, captureFact } from './photo-view';
 import type { PhotoView } from './photo-view';
@@ -10,7 +11,7 @@ import { Icon } from './Icon';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, KeyboardEvent } from 'react';
 import { renderOrigin } from './desktop';
-import type { ProjectSummary } from './desktop';
+import type { ProjectSummary, SourceAction } from './desktop';
 import type { SourceUsage } from './editing';
 import { markdownToHtml } from './markdown';
 import { excerpt, fileName, photosMime, photoMime, sourceList, textMime, words } from './source-items';
@@ -34,6 +35,8 @@ type SourcesProps = {
   writable: boolean; busy: boolean; importSources: (command: 'import') => void;
   importPaths: (files: File[]) => void; quickLook: (source: SourceRef) => void;
   failure: (message: string) => void; changed: (summary: ProjectSummary) => void;
+  // Runs an asset action as a task of the book window, with its progress in the status bar.
+  sourceAction: (request: SourceAction) => Promise<void>;
   // The extensions the template's file parameters accept, and the import that takes them as files (dropped files, or a chooser).
   fileTypes: string[]; importFileRequest: (files?: File[]) => void;
 };
@@ -67,7 +70,7 @@ export function Sources(props: SourcesProps) {
     fileTypes={fileTypes} importFiles={(files) => { if (writable && !busy) importFileRequest(files); }} />;
 }
 
-function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writable, busy, importSources, importPaths, quickLook, changed, failure, assets }: SourcesProps & { tab: SourceKind; assets: boolean }) {
+function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writable, busy, importSources, importPaths, quickLook, failure, sourceAction, assets }: SourcesProps & { tab: SourceKind; assets: boolean }) {
   const list = useRef<HTMLDivElement>(null);
   const [unused, setUnused] = useState(false);
   const items = useMemo(() => {
@@ -116,9 +119,7 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
     const request = result.command === 'asset-jump' ? { action: 'jump' as const, spread: result.value } :
       result.command in assetActions ? { action: assetActions[result.command as keyof typeof assetActions], keys } : undefined;
     if (!request) return;
-    const response = await api.sourceAction(request);
-    if ('error' in response) failure(response.error);
-    if ('value' in response && response.value.summary.id !== summary.id) changed(response.value.summary);
+    await sourceAction(request);
   }
   function keys(event: KeyboardEvent<HTMLElement>) {
     if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); void context(selection.selected.length ? selection.selected : current ? [current] : []); return; }
@@ -142,7 +143,8 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
     const placed = usage[tab][id];
     const sourceState = summary.sources?.[(tab === 'photo' ? 'photo:' : 'markdown:') + id];
     const sourceLabel = sourceState?.state !== 'available' && sourceState?.problem ? (sourceState.cached ? sourceState.state === 'offline' ? 'Cached · Offline' : 'Cached · Missing' : sourceState.state === 'offline' ? 'Offline' : 'Unavailable')
-      : sourceState && sourceFile(sourceState)?.linked ? 'Linked' : undefined;
+      : sourceState && sourceFile(sourceState)?.linked && !view.value.showSource ? 'Linked' : undefined;
+    const origin = view.value.showSource ? sourceOrigin(sourceState) : undefined;
     const common = {
       'data-id': id, role: 'option', 'aria-selected': selection.selected.includes(id),
       tabIndex: visibleCurrent === id || (!visibleCurrent && id === items[0]?.id) ? 0 : -1,
@@ -162,6 +164,7 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
       const date = photoDate(summary, id);
       return <div key={id} className="source-item source-photo" style={{ aspectRatio: summary.photoSizes[id] ? summary.photoSizes[id].width / summary.photoSizes[id].height : 1.4 }} {...common}>
         {summary.photos[id] ? <img src={summary.photos[id]} alt="" loading="lazy" draggable={false} /> : <span className="missing">Missing</span>}
+        {origin && <SourceBadge origin={origin} className="source-origin-tile" />}
         {view.value.showTime && date?.captured && <small className="photo-capture-time" title={date.capturedEstimated ? 'Estimated from file modification time' : date.captured}>{captureLabel(date.captured, date.capturedEstimated)}{date.capturedEstimated ? ' ≈' : ''}</small>}
         <span className="source-title">{title}</span>
         {sourceLabel && <small className="source-storage">{sourceLabel}</small>}
@@ -173,7 +176,7 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
     const source = summary.texts[id];
     const { heading, body } = source === undefined ? { heading: undefined, body: '' } : excerpt(source);
     return <div key={id} className="source-item source-text" {...common}>
-      <span className="source-title">{title}</span>
+      <span className="source-title">{origin && <SourceBadge origin={origin} />}{title}</span>
       <EditMarkdown id={id} name={title} disabled={!writable || busy || source === undefined} failure={failure} />
       {source === undefined ? <span className="missing">Missing file</span> : <span className="source-excerpt">
         {heading && <strong>{heading} </strong>}{body}

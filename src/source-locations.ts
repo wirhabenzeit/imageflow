@@ -47,6 +47,8 @@ export type SourceStatus = SourceEntry & { state: SourceState; problem?: string;
  * Why print cannot use a source's original here, or undefined when it can: it is drawn from a cached preview, or only
  * its provider's preview is on this Mac (ADR 0011). Print marks such a page ORIGINAL UNAVAILABLE and is a proof only.
  */
+/** What a Book check error for an unavailable original adds after its cause; the export summary strips it again. */
+export const cachedPreviewNote = '. Showing a cached preview; the original is required for print.';
 export function printProblem(status: SourceStatus | undefined): string | undefined {
   if (!status) return undefined;
   if (status.state !== 'available' && status.cached) return status.problem ?? 'Original unavailable';

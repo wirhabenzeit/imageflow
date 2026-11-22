@@ -23,7 +23,8 @@ import { assetUsage, fileExtensions } from './asset-usage';
 import { sourcePlacements } from './source-placement';
 import { importFeedback } from './import-feedback';
 import { commandState } from './commands';
-import type { ActiveBookEditor, BookMenuState } from './desktop';
+import type { ActiveBookEditor, BookMenuState, TaskProgress } from './desktop';
+import { TaskStatus, taskProgress } from './TaskStatus';
 import { bookName } from './book-name';
 import type { ImportMode } from './source-locations';
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -31,7 +32,7 @@ import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
 import { bookLayout, gridColumns, isRenderOrigin, renderOrigin, spreadCommands, thumbsOrigin } from './desktop';
 import { resolveTarget, targetAnchor, targetKey } from './edit-targets';
 import type { TargetAnchor } from './edit-targets';
-import type { BookGeometry, CanvasLayout, Command, ImportRequest, Issue, ProjectChange, ProjectSummary, Rect, RenderStatus, TemplateInfo } from './desktop';
+import type { BookGeometry, CanvasLayout, Command, ImportRequest, Issue, ProjectChange, ProjectSummary, Rect, RenderStatus, SourceAction, TemplateInfo } from './desktop';
 import { PanelDivider, useCanvasLayout, usePanels, useSectionOpen } from './panels';
 import { PanelSection } from './PanelSection';
 import { Icon } from './Icon';
@@ -167,6 +168,9 @@ export function App() {
   const [coverStatus, setCoverStatus] = useState<{ project: string; status: RenderStatus }>();
   const [render, setRender] = useState<RenderStatus>();
   const [reload, setReload] = useState<'loading' | 'rendering' | { error: string }>();
+  // What a reload the app started says it is doing (`ProjectChange.stage`), shown while the book loads again.
+  const [reloadStage, setReloadStage] = useState<TaskProgress>();
+  useEffect(() => { if (reload !== 'loading') setReloadStage(undefined); }, [reload]);
   const reloading = useRef(false);
   // A reload that finished with an error is settled: the agent may commit a repair, while human edits stay disabled.
   const reloadFailed = useRef(false);
@@ -260,7 +264,12 @@ export function App() {
   const [focusBox, setFocusBox] = useState<{ box: string; at: number }>();
   const [quick, setQuick] = useState<SourceRef>();
   const [busy, setBusy] = useState('');
+  // The count and Cancel of the task `busy` names, when it reports them (`TaskProgress`).
+  const [busyTask, setBusyTask] = useState<TaskProgress>();
+  useEffect(() => { if (!busy) setBusyTask(undefined); }, [busy]);
   const [exporting, setExporting] = useState(false);
+  // Copy into Book from the asset strip: its progress shows in the status bar, with Cancel, as an export's does.
+  const [copying, setCopying] = useState(false);
   const [notice, setNotice] = useState('');
   useEffect(() => {
     if (!notice) return;
@@ -442,14 +451,15 @@ export function App() {
   // The agent's revision renders behind the book on show, which stays usable: no progress cursor over it.
   const showingChange = saving || reloadingFiles || (!!summary && !render && !!lastReady && !reload && !agentRendering);
   const updating = useDelayed(showingChange, 250);
-  // A shorter wait for the cursor, which says that something is happening without asking for attention.
-  const busyCursor = useDelayed(showingChange, 100);
+  // A shorter wait for the cursor, which says that something is happening without asking for attention: the book
+  // changing, or a task of this window reporting progress, such as Copy into Book while Lightroom renders originals.
+  const busyCursor = useDelayed(showingChange || !!busy, 100);
   // Until the book has rendered once, the spread list would show placeholder names ("Spread 1", "Blank page"), and the
   // thumbnails may arrive before or after the book view. The list appears once both show the book, in one step, or
   // a second after the book view if its thumbnails are late.
   const thumbnailsLate = useDelayed(!!lastReady && !thumbs, 1000);
   const opening = !!summary && render?.state !== 'error' && (!lastReady || (!thumbs && !thumbnailsLate));
-  const updatingText = reloadingFiles ? 'Updating the book after its files changed…' : 'Updating the book…';
+  const updatingText = reloadStage?.text ?? (reloadingFiles ? 'Updating the book after its files changed…' : 'Updating the book…');
   const agentText = 'Agent is updating the book…';
   const canvasReady = render?.state === 'ready' && !reload;
   const holdPreview = reload === 'loading' || typeof reload === 'object';
@@ -836,7 +846,11 @@ export function App() {
   const viewCommand = (command: Command) => isPhotoViewCommand(command) || command.startsWith('toggle-') || command.startsWith('layout-') || command.startsWith('grid-columns-') || command.startsWith('zoom-') || command === 'book-check' || command === 'presentation' || command === 'presentation-start';
   const onCommand = useEffectEvent((command: Command) => { if (viewCommand(command) || (!busy && !agentLocked.current)) act(command); });
   const onProjectChanged = useEffectEvent((change: ProjectChange) => {
-    if ('building' in change) beginReload();
+    if ('building' in change) {
+      // Later stages of the same reload only say what it is doing now.
+      if (!(change.stage && reloading.current && reload === 'loading')) beginReload();
+      setReloadStage(change.stage ? { text: change.stage, ...(change.total ? { done: change.done, total: change.total } : {}) } : undefined);
+    }
     else if ('error' in change) {
       if (!reloading.current) beginReload();
       failReload(change.error);
@@ -960,7 +974,7 @@ export function App() {
     // Progress belongs to the import or export that is running. A message can arrive after its task has finished and
     // cleared the status (IPC sends are not ordered with invoke replies); taking it then would leave the book busy,
     // with a spinner that never stops and Quit refused.
-    const progress = api.onProgress((stage) => { if (pendingTasks.current) setBusy(stage); });
+    const progress = api.onProgress((value) => { if (!pendingTasks.current) return; const task = taskProgress(value); setBusy(task.text); setBusyTask(task.text ? task : undefined); });
     const appError = api.onAppError(setError);
     const appNotice = api.onAppNotice(setNotice);
     let mounted = true;
@@ -2076,6 +2090,19 @@ export function App() {
 
   const chooseSource = useLiveCallback(choose);
   const adoptSource = useLiveCallback((next: ProjectSummary) => adopt(next));
+  // Asset actions from the strip's menu run as tasks of this window, so the status bar shows their progress (Copy into
+  // Book renders Lightroom originals, which takes a while) and the book stays busy until they finish.
+  const runSourceAction = useLiveCallback((request: SourceAction) => new Promise<void>((resolve) => enqueue(async () => {
+    const copy = request.action === 'copy' || request.action === 'collect';
+    if (copy) setCopying(true);
+    try {
+      if (!api) return;
+      const response = await api.sourceAction(request);
+      if ('error' in response) throw new Error(response.error);
+      if (response.value.summary.id !== current.current?.id) adoptSource(response.value.summary);
+      if (response.value.message) setNotice(response.value.message);
+    } finally { if (copy) setCopying(false); resolve(); }
+  })));
   const importSources = useLiveCallback(act);
   const importSourcePaths = useLiveCallback((files: File[]) => {
     const paths = api?.pathsForFiles(files) ?? [];
@@ -2114,7 +2141,7 @@ export function App() {
   const targetsStale = !!spread && shownLayouts.current[spread.id] !== layoutOf(spread);
   const sourcesPanel = useMemo(() => (summary && <Sources view={sourcesView} summary={summary} tab={sourceTab} setTab={setSourceTab}
           selected={selectedSource ? { [selectedSource.kind]: selectedSource.id } : {}} choose={chooseSource}
-          failure={setError} changed={adoptSource} usage={usage} writable={writable} busy={!!busy} importSources={importSources} quickLook={setQuick}
+          failure={setError} changed={adoptSource} sourceAction={runSourceAction} usage={usage} writable={writable} busy={!!busy} importSources={importSources} quickLook={setQuick}
           importPaths={importSourcePaths} fileTypes={fileTypes} importFileRequest={importFileRequest} />),
     [summary, sourcesView, sourceTab, selectedSource, usage, writable, busy, chooseSource, adoptSource, importSources, importSourcePaths, fileTypes, importFileRequest]);
   const inspectorPanel = useMemo(() => (summary && spread && <Inspector summary={summary} writable={writable}
@@ -2483,9 +2510,10 @@ export function App() {
     {photoView.dialog}
     <footer className="status-bar">
       <span title={issue || busy || notice || undefined} className={issue ? 'status status-error' : busy || updating || agentActive ? 'status status-busy' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
-        {!issue && (busy || updating || agentActive) && <span className="status-spinner" aria-hidden="true" />}{issue || busy || (agentActive ? agentText : notice || (updating ? updatingText : ''))}
+        {!issue && busy ? <TaskStatus progress={busyTask ?? { text: busy }} cancel={exporting || copying || busyTask?.cancel ? () => void api?.cancelExport() : undefined} />
+          : !issue && !agentActive && !notice && updating && reloadStage ? <TaskStatus progress={reloadStage} />
+          : <>{!issue && (updating || agentActive) && <span className="status-spinner" aria-hidden="true" />}{issue || (agentActive ? agentText : notice || (updating ? updatingText : ''))}</>}
       </span>
-      {exporting && <button type="button" className="status-cancel" onClick={() => void api?.cancelExport()}>Cancel</button>}
       {summary && <SyncStatus api={api} notice={setNotice} />}
       <AgentStatus api={api} />
       {summary && <BookCheckIndicator requestSpread={checkScope} request={checkRequest} check={combinedCheck} checking={!checkCurrent || checkingCover}

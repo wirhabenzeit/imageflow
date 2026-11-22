@@ -78,7 +78,8 @@ function start() {
     stdio: 'inherit',
     env: { ...process.env, IMAGEFLOW_DEV_SERVER: devServer, IMAGEFLOW_DEV_STATE: devState, IMAGEFLOW_DEV_SAMPLE: join(root, 'sample') },
   });
-  child.on('exit', () => {
+  child.on('exit', (code, signal) => {
+    if (!restarting) console.log('Electron exited' + (signal ? ' on ' + signal : ' with code ' + code) + '.');
     if (restarting) {
       restarting = false;
       start();

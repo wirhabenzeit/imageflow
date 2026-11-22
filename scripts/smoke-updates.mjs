@@ -49,7 +49,7 @@ try {
   }
   assert.ok(settings, 'Settings window opened');
   await settings.getByText('Updates are available in the signed macOS release of ImageFlow.', { exact: true }).waitFor();
-  const automatic = settings.getByRole('checkbox', { name: 'Automatically check for updates' });
+  const automatic = settings.getByRole('checkbox', { name: 'Check automatically' });
   assert.equal(await automatic.isChecked(), true);
   assert.equal(await automatic.isDisabled(), true);
   await instance.evaluate(({ autoUpdater }) => { autoUpdater.emit('update-not-available'); });

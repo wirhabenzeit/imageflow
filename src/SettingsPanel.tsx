@@ -8,6 +8,7 @@ import type { DesktopApi } from './desktop';
 import type { AppSettings, Appearance, SettingsPane } from './settings';
 
 const panes = [{ value: 'general', label: 'General', icon: 'settings' },
+  { value: 'sources', label: 'Sources', icon: 'sources' },
   { value: 'agents', label: 'Agents', icon: 'agent' }] as const satisfies readonly { value: SettingsPane; label: string; icon: string }[];
 
 const appearances: { value: Appearance; label: string }[] = [
@@ -109,17 +110,16 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
           </div>
           <span className="settings-label">Updates:</span>
           <div className="settings-control">
-            <label><input type="checkbox" checked={settings?.automaticUpdates ?? true} disabled={!settings || !update || update.status === 'unavailable' || update.status === 'initializing'}
-              onChange={(event) => void choose({ automaticUpdates: event.target.checked })} /> Automatically check for updates</label>
-            <label className="update-channel">Channel: <select aria-label="Update channel" value={settings?.updateChannel ?? 'stable'}
-              disabled={!settings || !update || ['initializing', 'unavailable', 'checking', 'downloading', 'ready'].includes(update.status)}
-              onChange={(event) => void choose({ updateChannel: event.target.value as UpdateChannel })}>
-              <option value="stable">Stable</option><option value="beta">Beta</option>
-            </select></label>
-            <p className="settings-note">Beta includes early versions. Switching to Stable does not downgrade the app.</p>
+            <label className="pc-switch"><input type="checkbox" checked={settings?.automaticUpdates ?? true} disabled={!settings || !update || update.status === 'unavailable' || update.status === 'initializing'}
+              onChange={(event) => void choose({ automaticUpdates: event.target.checked })} />Check automatically</label>
             <div className="settings-update-actions">
-              <button disabled={!api || update?.status === 'initializing' || update?.status === 'checking' || update?.status === 'downloading'} onClick={() => void api?.checkUpdates()}>Check for Updates…</button>
-              {update?.status === 'ready' && <button onClick={() => void api?.restartUpdate()}>Restart to Update</button>}
+              <select aria-label="Update channel" title="Beta includes early versions. Switching to Stable does not downgrade the app." value={settings?.updateChannel ?? 'stable'}
+                disabled={!settings || !update || ['initializing', 'unavailable', 'checking', 'downloading', 'ready'].includes(update.status)}
+                onChange={(event) => void choose({ updateChannel: event.target.value as UpdateChannel })}>
+                <option value="stable">Stable</option><option value="beta">Beta</option>
+              </select>
+              <button disabled={!api || update?.status === 'initializing' || update?.status === 'checking' || update?.status === 'downloading'} onClick={() => void api?.checkUpdates()}>Check Now</button>
+              {update?.status === 'ready' && <button className="primary" onClick={() => void api?.restartUpdate()}>Restart to Update</button>}
             </div>
             <p className="settings-note update-status" role="status">{update?.status === 'current' ? "You’re up to date." :
               update?.status === 'initializing' ? 'Preparing update checks…' : update?.status === 'checking' ? 'Checking for updates…' : update?.status === 'downloading' ? 'Downloading update…' :
@@ -127,14 +127,13 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
           </div>
           <span className="settings-label">Sync:</span>
           <div className="settings-control">
-            <label><input type="checkbox" checked={settings?.keepOriginals ?? false} disabled={!settings}
-              onChange={(event) => void choose({ keepOriginals: event.target.checked })} /> Keep originals of synced books on this Mac</label>
-            <p className="settings-note">Otherwise photos copied into a book on another Mac show as previews until you choose File → Sync → Download Originals.</p>
+            <label className="pc-switch" title="Synced books download their originals in the background. Off: only previews, until File → Sync → Download Originals.">
+              <input type="checkbox" checked={settings?.keepOriginals !== false} disabled={!settings}
+                onChange={(event) => void choose({ keepOriginals: event.target.checked })} />Keep originals of synced books on this Mac</label>
           </div>
-          <span className="settings-label" id="lightroom-label">Lightroom:</span>
-          <LightroomSettings api={api} />
           {error && <p role="alert" className="error-text settings-control">{error}</p>}
         </div>}
+        {pane === 'sources' && <div className="source-cards"><LightroomSettings api={api} /></div>}
         {pane === 'agents' && <AgentSettings api={api} />}
       </div>}
     </div>

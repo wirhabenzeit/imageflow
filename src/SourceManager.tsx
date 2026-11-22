@@ -5,6 +5,9 @@ import type { DesktopApi, ProjectSummary, SourceAction } from './desktop';
 import { PhotoViewMenu } from './PhotoViewMenu';
 import type { PhotoViewControl } from './PhotoViewMenu';
 import { photoGroups, photoDate, captureLabel } from './photo-view';
+import { SourceBadge, sourceOrigin } from './SourceBadge';
+import { TaskStatus, taskProgress } from './TaskStatus';
+import type { TaskProgress } from './desktop';
 import { sourceList } from './source-items';
 import { sourceEntries, sourceFile, sourceFolderName, sourceProvider } from './source-locations';
 import { useListSelection } from './list-selection';
@@ -33,6 +36,10 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   fileTypes?: string[];
 }) {
   const [busy, setBusy] = useState(false);
+  // What a long action of this window reports while it runs, such as Copy into Book rendering Lightroom originals.
+  const [progress, setProgress] = useState<TaskProgress>();
+  const busyRef = useRef(false);
+  useEffect(() => api.onProgress((value) => { if (busyRef.current) { const task = taskProgress(value); setProgress(task.text ? task : undefined); } }), [api]);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const [error, setError] = useState<{ message: string; code?: string }>();
@@ -58,7 +65,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const missing = entries.filter((entry) => offers(entry.key, 'locate-folder')).length;
   const launchable = entries.filter((entry) => offers(entry.key, 'launch'));
   async function act(request: SourceAction) {
-    setBusy(true); setError(undefined); setNotice('');
+    setBusy(true); busyRef.current = true; setProgress(undefined); setError(undefined); setNotice('');
     try {
       let result = await api.sourceAction(request);
       // Background book checks can briefly own the document. A busy response has not started the action.
@@ -70,7 +77,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
       if ('error' in result) setError({ message: result.error, code: result.code });
       else { adopt(result.value.summary); setNotice(result.value.message ?? ''); }
     } catch (error) { setError({ message: error instanceof Error ? error.message : 'Could not update assets.' }); }
-    finally { setBusy(false); }
+    finally { setBusy(false); busyRef.current = false; setProgress(undefined); }
   }
   const bring = (files?: File[]) => {
     if (importFiles) importFiles(files);
@@ -186,7 +193,8 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
             : <strong>{entry.name}</strong>}
             {(file?.linked || problem) && sourceFolderName(entry) && <span className="muted">{sourceFolderName(entry)}</span>}</span></span>
           <span className="asset-status">{entry.kind === 'markdown' && <EditMarkdown api={api} id={entry.id} name={entry.name} disabled={locked || problem} failure={(message) => setError({ message })} />}{entry.kind === 'photo' && view.value.showTime && <span className="muted" title={photoDate(summary, entry.id)?.capturedEstimated ? 'Estimated from file modification time' : undefined}>{captureLabel(photoDate(summary, entry.id)?.captured, photoDate(summary, entry.id)?.capturedEstimated)}{photoDate(summary, entry.id)?.capturedEstimated ? ' ≈' : ''}</span>}<span className="muted">{placements(entry).length ? placements(entry).length + '×' : 'Not used'}</span>{badge && <span className="source-badge warning" title={status?.problem}>{badge}</span>}
-            {file?.linked && <span className="asset-linked" role="img" aria-label="Linked to original file" title="Linked to original file"><Icon name="link" size={16} /></span>}
+            {view.value.showSource ? <SourceBadge origin={sourceOrigin(entry)!} className="asset-origin" />
+              : file?.linked && <span className="asset-linked" role="img" aria-label="Linked to original file" title="Linked to original file"><Icon name="link" size={16} /></span>}
           </span>
         </div></Fragment>;
       })}
@@ -194,11 +202,12 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
       {!shown.length && <p className="asset-empty muted">{entries.length ? 'No matching assets' : 'No assets'}</p>}
     </div>
     <footer className="asset-status-bar">
-      <span className="muted">{shown.length} of {entries.length}{chosen.length ? ' · ' + chosen.length + ' selected' : ''}</span>
+      {progress ? <span className="asset-progress" role="status"><TaskStatus progress={progress} cancel={progress.cancel ? () => void api.cancelExport() : undefined} /></span>
+        : <span className="muted">{shown.length} of {entries.length}{chosen.length ? ' · ' + chosen.length + ' selected' : ''}</span>}
       {missing > 0 && <button disabled={locked} onClick={() => void act({ action: 'locate-folder', keys: everyKey(({ key }) => offers(key, 'locate-folder')) })}>Locate Folder…</button>}
       {launchable.length > 0 && <button disabled={locked} onClick={() => void act({ action: 'launch', keys: launchable.map(({ key }) => key) })}>Open Lightroom Classic</button>}
       {linked > 0 && <button disabled={locked || (chosen.length > 0 && !copyCount)} onClick={() => void act({ action: 'collect', keys: copyKeys })}>
-        {chosen.length ? 'Copy ' + copyCount + ' Selected into Book' : 'Copy All ' + linked + ' into Book'}</button>}
+        {chosen.length ? 'Copy ' + copyCount + ' Selected into Book…' : 'Copy All ' + linked + ' into Book…'}</button>}
     </footer>
     {error && <p role="alert" data-error-code={error.code} className="error-text">{error.message}</p>}{notice && <p role="status">{notice}</p>}
   </section>;

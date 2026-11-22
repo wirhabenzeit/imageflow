@@ -4,6 +4,8 @@ import { Icon } from './Icon';
 import { useEffect, useRef, useState } from 'react';
 import { issueText } from './desktop';
 import type { Issue } from './desktop';
+import { groupExtent, groupIssues } from './issue-groups';
+import type { IssueLevel, LeveledIssue } from './issue-groups';
 
 // `pictures`: how many <RenderedImage> pictures the book view is still drawing; their failures join `errors` as they come.
 export type BookCheck = { id: string; errors: Issue[]; warnings: Issue[]; pictures?: number };
@@ -17,9 +19,9 @@ export function BookCheckIndicator({ check, checking, spread, select, request = 
   const [scope, setScope] = useState<string>();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
-  const items = [
-    ...(check?.errors ?? []).map((issue) => ({ issue, level: 'error' })),
-    ...(check?.warnings ?? []).map((issue) => ({ issue, level: 'warning' })),
+  const items: LeveledIssue[] = [
+    ...(check?.errors ?? []).map((issue) => ({ issue, level: 'error' as IssueLevel })),
+    ...(check?.warnings ?? []).map((issue) => ({ issue, level: 'warning' as IssueLevel })),
   ];
   async function menu(issue: Issue) {
     const target = issueTarget(issue);
@@ -48,6 +50,15 @@ export function BookCheckIndicator({ check, checking, spread, select, request = 
     if (request) { setScope(requestSpread); setOpen(true); root.current?.querySelector('button')?.focus(); }
   }, [request]);
 
+  const issueItem = ({ issue, level }: LeveledIssue, key: number) => <li key={key} tabIndex={0} onContextMenu={(event) => { event.preventDefault(); void menu(issue); }}
+    onKeyDown={(event) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); void menu(issue); } }}
+    className={'issue-' + level + (issueTarget(issue) === spread ? ' issue-current' : '')}>
+    {(issue.spread || issue.cover) && issue.where ? <button type="button" className="link" onClick={() => {
+      select(issueTarget(issue)!, issue.page);
+      setOpen(false);
+    }}>{issue.where}{issue.page ? ' · ' + issue.page + ' page' : ''}</button> : null}
+    {(issue.spread || issue.cover) && issue.where ? ' · ' : ''}{issue.message}
+  </li>;
   if (!check) return null;
   const drawing = !checking && !!check.pictures;
   const title = 'Book check · ' + (checking ? 'Checking…' : drawing ? 'Rendering…' : label);
@@ -61,13 +72,12 @@ export function BookCheckIndicator({ check, checking, spread, select, request = 
     {open && <div className="book-check-panel" role="dialog" aria-label="Book check">
       <p className="book-check-heading">Book check · {scope === coverInstance ? 'This cover' : scope ? 'This spread' : label}{scope && <button className="link" onClick={() => setScope(undefined)}>Show all</button>}</p>
       {!scopedItems.length && <p>{checking ? 'Checking book…' : drawing ? 'Rendering…' : 'No issues found.'}</p>}
-      <ul>{scopedItems.map(({ issue, level }, i) => <li key={i} tabIndex={0} onContextMenu={(event) => { event.preventDefault(); void menu(issue); }} onKeyDown={(event) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); void menu(issue); } }} className={'issue-' + level + (issueTarget(issue) === spread ? ' issue-current' : '')}>
-        {(issue.spread || issue.cover) && issue.where ? <button type="button" className="link" onClick={() => {
-          select(issueTarget(issue)!, issue.page);
-          setOpen(false);
-        }}>{issue.where}{issue.page ? ' · ' + issue.page + ' page' : ''}</button> : null}
-        {(issue.spread || issue.cover) && issue.where ? ' · ' : ''}{issue.message}
-      </li>)}</ul>
+      <ul>{groupIssues(scopedItems).map((row, i) => 'item' in row ? issueItem(row.item, i) :
+        <li key={i} className={'issue-group issue-' + row.group.level}>
+          <details><summary><strong>{row.group.cause}</strong> · {groupExtent(row.group)}</summary>
+            <ul>{row.group.items.map((item, j) => issueItem(item, j))}</ul>
+          </details>
+        </li>)}</ul>
     </div>}
   </div>;
 }

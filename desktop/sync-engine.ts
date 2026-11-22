@@ -571,6 +571,60 @@ async function missingOriginals(root: string, blob: StateBlob, ids?: readonly st
   return missing;
 }
 
+/** An original downloaded into the book's root and checked, waiting to go to its place in photos/. */
+export type StagedOriginal = { id: string; path: string; staging: string };
+
+/**
+ * The first half of a download that leaves the book usable: the owned originals photos/ lacks are downloaded one by one
+ * into `.imageflow-write-*.tmp` files in the book's root (which revision tracking ignores) and checked against their
+ * digests, without holding the book. `signal` stops between files; what was downloaded by then is returned, whole.
+ * `placeOriginals` then moves them into place while the session holds the book.
+ */
+export async function stageOriginals({ remote, folder, signal, progress }: { remote: SyncRemote; folder: string; signal?: AbortSignal;
+  progress?: (done: number, total: number) => void }): Promise<StagedOriginal[]> {
+  const root = await realpath(folder);
+  const synced = (await readSyncState(root)).lastSynced;
+  if (!synced) return [];
+  const missing = await missingOriginals(root, await fetchState(remote, synced.stateDigest));
+  const staged: StagedOriginal[] = [];
+  progress?.(0, missing.length);
+  try {
+    for (const { id, path, original } of missing) {
+      if (signal?.aborted) break;
+      const staging = join(root, '.imageflow-write-' + randomUUID() + '.tmp');
+      if (!await remote.downloadBlob(originalBlobKey(original.digest, original.ext), staging) || await fileDigest(staging) !== original.digest) {
+        await rm(staging, { force: true });
+        throw new RemoteSyncingError('an original photo has not fully arrived yet.');
+      }
+      staged.push({ id, path, staging });
+      progress?.(staged.length, missing.length);
+    }
+    return staged;
+  } catch (error) {
+    await Promise.all(staged.map(({ staging }) => rm(staging, { force: true })));
+    throw error;
+  }
+}
+
+/**
+ * The second half: each staged original goes to its path, unless the book has a file there by now (this Mac's own,
+ * which wins) or no longer names it. Staged files that are not placed are removed. Returns the photos placed.
+ */
+export async function placeOriginals(folder: string, staged: readonly StagedOriginal[]) {
+  const root = await realpath(folder);
+  const photos = photoIndexSchema.parse(JSON.parse(await readFile(join(root, 'photos.json'), 'utf8')));
+  const placed: string[] = [];
+  for (const { id, path, staging } of staged) {
+    try {
+      const photo = photos[id];
+      if (!photo || packagePath(photo) !== path || await lstat(await bookPath(root, path, { checking: true })).catch(() => undefined)) continue;
+      await rename(staging, await bookPath(root, path));
+      placed.push(id);
+    } finally { await rm(staging, { force: true }); }
+  }
+  return placed;
+}
+
 /** The owned originals of the last synced snapshot that are not on this Mac, without hashing anything. */
 export async function pendingOriginals(folder: string, remote: SyncRemote) {
   const root = await realpath(folder);

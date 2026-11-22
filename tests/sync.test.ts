@@ -15,7 +15,7 @@ import { importIntoProject, loadProject, updateProject } from '../desktop/projec
 import type { OpenProject } from '../desktop/project';
 import { collectSources, relinkFolder } from '../desktop/source-actions';
 import { captureBookStateRevision } from '../desktop/revisions';
-import { cloneFromRemote, describeLocalChange, describeSync, downloadOriginals, RemoteSyncingError, stageSyncPull, syncBook } from '../desktop/sync-engine';
+import { cloneFromRemote, describeLocalChange, describeSync, downloadOriginals, placeOriginals, RemoteSyncingError, stageOriginals, stageSyncPull, syncBook } from '../desktop/sync-engine';
 import type { SyncOptions } from '../desktop/sync-engine';
 import { MemoryRemote, remoteBooks, remoteTips } from '../desktop/sync-remote';
 import type { SyncRemote } from '../desktop/sync-remote';
@@ -559,6 +559,25 @@ test('a push refuses a proxy another Mac has not finished writing, and a failed 
   assert.deepEqual((await readdir(join(a.folder, 'photos'))).filter((name) => name.startsWith('.imageflow-write-')), []);
   remote.blobs.set(original, good);
   await on(a, async (book) => assert.deepEqual(await downloadOriginals({ remote, book }), [id]));
+  // In the background: downloaded into the book's root and checked without holding the book, then placed. A damaged
+  // download leaves nothing behind; a cancelled one before it started downloads nothing.
+  const path = join(a.folder, (await manifests(a)).photos[id].path);
+  await rm(path);
+  remote.blobs.set(original, good.slice(0, 100));
+  await assert.rejects(stageOriginals({ remote, folder: a.folder }), RemoteSyncingError);
+  assert.deepEqual((await readdir(a.folder)).filter((name) => name.startsWith('.imageflow-write-')), []);
+  remote.blobs.set(original, good);
+  const cancelled = new AbortController();
+  cancelled.abort();
+  assert.deepEqual(await stageOriginals({ remote, folder: a.folder, signal: cancelled.signal }), []);
+  const counts: number[][] = [];
+  const staged = await stageOriginals({ remote, folder: a.folder, progress: (done, total) => counts.push([done, total]) });
+  assert.deepEqual(staged.map(({ id: staged }) => staged), [id]);
+  assert.deepEqual(counts, [[0, 1], [1, 1]]);
+  assert.equal(await lstat(path).catch(() => undefined), undefined, 'nothing is in photos/ until it is placed');
+  assert.deepEqual(await placeOriginals(a.folder, staged), [id]);
+  assert.equal(sha(await readFile(path)), state.originals[id].digest);
+  assert.deepEqual((await readdir(a.folder)).filter((name) => name.startsWith('.imageflow-write-')), []);
 });
 
 /** A commit on top of `tip` whose state blob is `change`d by hand, as another version or a hostile remote might write. */

@@ -138,7 +138,7 @@ try {
   // A linked-file refresh may still own the book just after the renderer becomes ready.
   // Retry only that explicit busy response; any other error must fail with its actual message.
   const collection = await retryBookRefresh(async () => {
-    await manager.getByRole('button', { name: /^Copy All \d+ into Book$/ }).click();
+    await manager.getByRole('button', { name: /^Copy All \d+ into Book…$/ }).click();
     const alert = manager.getByRole('alert');
     await alert.waitFor();
     return { error: await alert.innerText(), code: await alert.getAttribute('data-error-code') };
@@ -207,18 +207,20 @@ try {
   await menuAction(app, 'Assets…');
   const linkedWindow = await assetWindow();
   const linkedRow = linkedWindow.locator('[data-source="photo:' + unusedId + '"]');
-  await linkedRow.getByRole('img', { name: 'Linked to original file' }).waitFor();
-  await app.evaluate(({ Menu }) => {
+  await linkedRow.getByRole('img', { name: 'Linked file' }).waitFor();
+  await app.evaluate(({ Menu, dialog }) => {
+    // Copy into Book asks first: it cuts the photo off from its original.
+    dialog.showMessageBox = async () => ({ response: 0 });
     Menu.prototype.popup = function ({ callback }) {
       globalThis.assetMenuLabels = this.items.map(({ label }) => label);
-      this.items.find(({ label }) => label === 'Copy into Book').click();
+      this.items.find(({ label }) => label === 'Copy into Book…').click();
       callback();
     };
   });
   await linkedRow.click({ button: 'right' });
   await waitForPage(linkedWindow, async (id) => !(await window.imageflow.currentProject()).value.photoIndex[id].linked, unusedId);
-  assert.deepEqual(await app.evaluate(() => globalThis.assetMenuLabels), ['Quick Look', 'Place on Current Spread', '', 'Show in Finder', 'Copy into Book', '', 'Remove from Book']);
-  await linkedRow.getByRole('img', { name: 'Linked to original file' }).waitFor({ state: 'detached' });
+  assert.deepEqual(await app.evaluate(() => globalThis.assetMenuLabels), ['Quick Look', 'Place on Current Spread', '', 'Show in Finder', 'Copy into Book…', '', 'Remove from Book']);
+  await linkedRow.getByRole('img', { name: 'Linked file' }).waitFor({ state: 'detached' });
   await stat(unused);
   await linkedWindow.close();
   // A shared manifest cannot approve a local file, even when its extension is valid for a parameter.
