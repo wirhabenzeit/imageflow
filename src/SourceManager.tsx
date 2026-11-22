@@ -10,7 +10,7 @@ import { sourceEntries, sourceFile, sourceFolderName, sourceProvider } from './s
 import { useListSelection } from './list-selection';
 import { fileExtensionMime, fileMime, photoMime, textMime } from './source-items';
 import type { SourceRef } from './source-items';
-import type { SourceKind } from './source-locations';
+import type { SourceKind, SourceRepair } from './source-locations';
 import { assetMenu, assetMenuState, assetActions } from './asset-menu';
 import { assetPageLabels, assetUsage } from './asset-usage';
 import { ActionMenu } from './ActionMenu';
@@ -52,8 +52,11 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const documentIcon = useFileIcons(embedded ? entries.map((entry) => fileExtension(entry.name)) : []);
   const placements = (entry: typeof entries[number]) => usage[entry.kind === 'markdown' ? 'text' : entry.kind][entry.id] ?? [];
   const unavailable = (key: string) => !!summary.sources?.[key] && summary.sources[key].state !== 'available';
-  const linked = entries.filter((entry) => sourceFile(entry)?.linked).length;
-  const missing = entries.filter((entry) => unavailable(entry.key)).length;
+  const linked = entries.filter((entry) => sourceProvider(entry) !== 'package').length;
+  // Locate Folder… finds files; a photo of an app that is not running is brought back by opening the app instead.
+  const offers = (key: string, repair: SourceRepair) => unavailable(key) && (summary.sources![key].repairs ?? ['locate', 'locate-folder']).includes(repair);
+  const missing = entries.filter((entry) => offers(entry.key, 'locate-folder')).length;
+  const launchable = entries.filter((entry) => offers(entry.key, 'launch'));
   async function act(request: SourceAction) {
     setBusy(true); setError(undefined); setNotice('');
     try {
@@ -95,8 +98,9 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const headers = new Map(groups.filter((group) => group.label).map((group) => [group.ids[0], group]));
   const list = useListSelection(shown.map(({ key }) => key), (key) => entries.find((entry) => entry.key === key)!.name);
   const chosen = entries.filter(({ key }) => list.selected.includes(key));
-  // Copy into Book copies a linked file; a photo of another provider is not copied yet.
-  const copyable = (entry: typeof entries[number]) => !!sourceFile(entry)?.linked;
+  // Copy into Book takes whatever the package does not own: a linked file is copied, a photo without a file is
+  // materialized by its provider first (as in asset-menu.ts).
+  const copyable = (entry: typeof entries[number]) => sourceProvider(entry) !== 'package';
   const copyCount = chosen.filter(copyable).length;
   // With nothing selected, the buttons act on every asset of the list; the embedded list holds only files.
   const everyKey = embedded ? (keep: (entry: typeof entries[number]) => boolean) => entries.filter(keep).map(({ key }) => key) : () => undefined;
@@ -191,7 +195,8 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
     </div>
     <footer className="asset-status-bar">
       <span className="muted">{shown.length} of {entries.length}{chosen.length ? ' · ' + chosen.length + ' selected' : ''}</span>
-      {missing > 0 && <button disabled={locked} onClick={() => void act({ action: 'locate-folder', keys: everyKey(({ key }) => unavailable(key)) })}>Locate Folder…</button>}
+      {missing > 0 && <button disabled={locked} onClick={() => void act({ action: 'locate-folder', keys: everyKey(({ key }) => offers(key, 'locate-folder')) })}>Locate Folder…</button>}
+      {launchable.length > 0 && <button disabled={locked} onClick={() => void act({ action: 'launch', keys: launchable.map(({ key }) => key) })}>Open Lightroom Classic</button>}
       {linked > 0 && <button disabled={locked || (chosen.length > 0 && !copyCount)} onClick={() => void act({ action: 'collect', keys: copyKeys })}>
         {chosen.length ? 'Copy ' + copyCount + ' Selected into Book' : 'Copy All ' + linked + ' into Book'}</button>}
     </footer>

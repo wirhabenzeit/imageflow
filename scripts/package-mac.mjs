@@ -5,7 +5,7 @@ import { parseArgs } from 'node:util';
 import { packager } from '@electron/packager';
 import electronChecksums from 'electron/checksums.json' with { type: 'json' };
 import metadata from '../package.json' with { type: 'json' };
-import { esbuildBinary, sample, stageDesktop } from './stage-desktop.mjs';
+import { esbuildBinary, lightroomPlugin, sample, stageDesktop } from './stage-desktop.mjs';
 import { renderTemplatePreviews } from './render-template-previews.mjs';
 import { macBuildOptions } from './mac-build-options.mjs';
 import { verifyMacSigning } from './verify-mac-signing.mjs';
@@ -83,7 +83,8 @@ async function packageApp() {
       asar: { unpackDir: 'node_modules/@img', unpack: '**/{mcp-bridge.cjs,mac-header.node}' },
       // Document icons and the compiled Icon Composer app icon; the classic app icon comes from `icon` below.
       // Sources and generator: resources/brand/, npm run build:icons.
-      extraResource: [esbuildBinary, books, previews, ...['ImageFlowBook.icns', 'ImageFlowTemplate.icns', 'Assets.car'].map((icon) => join(root, 'resources', icon))],
+      // The Lightroom Classic plugin goes to Contents/Resources/ImageFlow.lrplugin, which Settings installs from (ADR 0011).
+      extraResource: [esbuildBinary, books, previews, lightroomPlugin, ...['ImageFlowBook.icns', 'ImageFlowTemplate.icns', 'Assets.car'].map((icon) => join(root, 'resources', icon))],
       icon: join(root, 'resources', 'ImageFlow.icns'),
       prune: false,
       overwrite: true,

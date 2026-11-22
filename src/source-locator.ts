@@ -77,6 +77,39 @@ export const linkedLocator: LocatorKind<LinkedLocator> = {
   name: ({ path }) => readableFileName(path),
 };
 
+/**
+ * A photo in a Lightroom Classic catalog (ADR 0011, section 1), read through the companion plugin. `catalog` is the
+ * catalog's identity as the plugin reports it (a UUID it keeps in the catalog), never its path: the path is this Mac's,
+ * the identity travels with the book. `uuid` is the photo's own `uuid` inside that catalog. `name` is the file name it
+ * had when it was imported, a hint for a photo without a title.
+ */
+export type LightroomLocator = { provider: 'lightroom'; catalog: string; uuid: string; name?: string };
+// Lightroom's UUIDs and the catalog identities the plugin makes are hex digits and hyphens. Anything else is refused
+// where it enters (photos.json, the plugin bridge), so neither reaches a path, a URL or a log as something else.
+const lightroomIdentifier = /^[A-Za-z0-9][A-Za-z0-9-]{7,63}$/;
+export const isLightroomIdentifier = (value: unknown): value is string => typeof value === 'string' && lightroomIdentifier.test(value);
+// A name is a file name: one line, without separators, and short.
+const lightroomName = (value: unknown) => typeof value === 'string' && value && value.length <= 255 && !/[\x00-\x1f/\\]/.test(value) ? value : undefined;
+export const lightroomLocator: LocatorKind<LightroomLocator> = {
+  provider: 'lightroom',
+  fields: ['lightroom'],
+  read: (entry) => {
+    const value = entry.lightroom as Partial<Record<keyof LightroomLocator, unknown>> | null | undefined;
+    if (!value || typeof value !== 'object' || !isLightroomIdentifier(value.catalog) || !isLightroomIdentifier(value.uuid)) return undefined;
+    const name = lightroomName(value.name);
+    return { provider: 'lightroom', catalog: value.catalog, uuid: value.uuid, ...(name ? { name } : {}) };
+  },
+  write: ({ catalog, uuid, name }) => ({ lightroom: { catalog, uuid, ...(name ? { name } : {}) } }),
+  // The catalog identity and the UUID are the same on every Mac; the name is only a hint and may differ.
+  portable: ({ catalog, uuid }) => ({ lightroom: { catalog, uuid } }),
+  shared: (locator) => locator,
+  // Nothing in it is this Mac's, so a pull takes it as it is.
+  adopt: (shared) => shared,
+  // UUIDs are upper-case hex in Lightroom; one written in another case is the same photo.
+  key: ({ catalog, uuid }) => catalog.toLowerCase() + ':' + uuid.toLowerCase(),
+  name: ({ name }) => name,
+};
+
 /** A photo that is a file on this Mac: the two locators the host reads in place. */
 export type FileLocator = PackageLocator | LinkedLocator;
 export const isFileLocator = (locator: Locator): locator is FileLocator => locator.provider === 'package' || locator.provider === 'linked';
@@ -88,10 +121,11 @@ export type PhotoLocator = Locator;
 
 // The kinds this build reads, in the order they are asked. Method parameters are bivariant, so each kind stands in
 // this list for every locator; each function below hands a kind only the locator that kind itself read or that names it.
-const locatorKinds: LocatorKind<Locator>[] = [packageLocator, linkedLocator] as LocatorKind<Locator>[];
+const locatorKinds: LocatorKind<Locator>[] = [packageLocator, linkedLocator, lightroomLocator] as LocatorKind<Locator>[];
 /**
- * Adds a kind of locator this build reads, and returns a function that removes it again. Every provider without a file
- * (ADR 0011) registers its kind here; until one ships, only tests do, with a provider that exists in memory only.
+ * Adds a kind of locator this build reads, and returns a function that removes it again. The kinds this build ships
+ * (Lightroom Classic, ADR 0011) are in the list above, so the renderer, sync and the MCP bridge read them too; tests
+ * register a provider that exists in memory only.
  */
 export function registerLocatorKind<L extends Locator>(kind: LocatorKind<L>): () => void {
   if (locatorKinds.some(({ provider }) => provider === kind.provider)) throw new Error('The locator kind ' + kind.provider + ' is registered already.');
