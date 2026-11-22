@@ -8,12 +8,12 @@ import { sourceFileName } from './source-locations';
  */
 export type Locator = { provider: string };
 
-/** The fields of a `photos.json` entry. Each provider owns the keys it names in `fields`; the rest are the host's. */
+/** The fields of a `photos.json` entry. A provider reads and writes the keys it names in `fields`; the rest are the host's. */
 export type LocatorFields = Readonly<Record<string, unknown>>;
 
 export interface LocatorKind<L extends Locator> {
   provider: L['provider'];
-  /** The entry keys this provider owns. Changing a photo's provider removes them (Copy into Book). */
+  /** The entry keys this provider writes. Changing a photo's provider removes them first (Copy into Book). */
   fields: readonly string[];
   /** The locator of an entry, or undefined when the entry is not this provider's. */
   read(entry: LocatorFields): L | undefined;
@@ -32,26 +32,39 @@ export interface LocatorKind<L extends Locator> {
   key(locator: L): string;
   /** A readable name for a photo without a title. */
   name(locator: L): string | undefined;
-  /** Whether the book package holds the original's bytes, so they sync as originals and the source can be renamed. */
-  owned(locator: L): boolean;
 }
 
-/** A file: inside the package's `photos/` (owned, a relative path) or anywhere else on this Mac (linked, absolute). */
-export type LocalLocator = { provider: 'local'; path: string; linked: boolean };
+/** A file inside the book package's `photos/`, as a path relative to the book. The package is the host's own storage. */
+export type PackageLocator = { provider: 'package'; path: string };
+/** A file anywhere else on this Mac, as an absolute path. */
+export type LinkedLocator = { provider: 'linked'; path: string };
 
 const baseName = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? '';
 // Where a linked photo from another Mac points until it is located here (see unlocatedPath in sync-snapshot.ts).
 const unlocated = (name: string) => '/imageflow-unlocated/' + (baseName(name).replace(/[\x00-\x1f]/g, '-') || 'original');
 
-export const localLocator: LocatorKind<LocalLocator> = {
-  provider: 'local',
-  fields: ['path', 'linked'],
-  read: (entry) => typeof entry.path === 'string' ? { provider: 'local', path: entry.path, linked: entry.linked === true } : undefined,
-  write: ({ path, linked }) => linked ? { path, linked: true } : { path },
-  portable: ({ path, linked }) => linked ? { linked: true } : { path },
-  shared: (locator) => locator.linked ? { ...locator, path: baseName(locator.path) } : locator,
-  adopt: (shared, here) => !shared.linked ? shared : here?.linked ? here : { ...shared, path: unlocated(shared.path) },
+// Both read the entry's `path`; `linked` decides whose entry it is, as it does in photos.json today.
+export const packageLocator: LocatorKind<PackageLocator> = {
+  provider: 'package',
+  fields: ['path'],
+  read: (entry) => typeof entry.path === 'string' && entry.linked !== true ? { provider: 'package', path: entry.path } : undefined,
+  write: ({ path }) => ({ path }),
+  portable: ({ path }) => ({ path }),
+  shared: (locator) => locator,
+  adopt: (shared) => shared,
   key: ({ path }) => path,
   name: (locator) => sourceFileName(locator),
-  owned: ({ linked }) => !linked,
+};
+
+export const linkedLocator: LocatorKind<LinkedLocator> = {
+  provider: 'linked',
+  fields: ['path', 'linked'],
+  read: (entry) => typeof entry.path === 'string' && entry.linked === true ? { provider: 'linked', path: entry.path } : undefined,
+  write: ({ path }) => ({ path, linked: true }),
+  // Only that it is linked: the path is this Mac's.
+  portable: () => ({ linked: true }),
+  shared: (locator) => ({ ...locator, path: baseName(locator.path) }),
+  adopt: (shared, here) => here ?? { ...shared, path: unlocated(shared.path) },
+  key: ({ path }) => path,
+  name: (locator) => sourceFileName(locator),
 };

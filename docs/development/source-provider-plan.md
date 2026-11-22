@@ -1,10 +1,10 @@
 # Source provider contract: inventory and plan
 
-Plan for the provider contract of [ADR 0011](../decisions/0011-lightroom-classic.md#source-providers): today's file behaviour moves behind a `SourceProvider` interface as the `local` provider, with no visible change, before any Lightroom code exists.
+Plan for the provider contract of [ADR 0011](../decisions/0011-lightroom-classic.md#source-providers): today's file behaviour moves behind a `SourceProvider` interface as two providers, `package` and `linked`, with no visible change, before any Lightroom code exists.
 
 It has two steps:
 
-1. **This document, the contract types and a paper check.** The inventory below, the two halves of the contract ([`src/source-locator.ts`](../../src/source-locator.ts), [`desktop/source-provider.ts`](../../desktop/source-provider.ts)) and three sketched providers that are type-checked against it ([`tests/source-provider-fit.ts`](../../tests/source-provider-fit.ts)): `local`, Lightroom Classic and Immich. Nothing calls the contract yet.
+1. **This document, the contract types and a paper check.** The inventory below, the two halves of the contract ([`src/source-locator.ts`](../../src/source-locator.ts), [`desktop/source-provider.ts`](../../desktop/source-provider.ts)) and four sketched providers that are type-checked against it ([`tests/source-provider-fit.ts`](../../tests/source-provider-fit.ts)): `package`, `linked`, Lightroom Classic and Immich. Nothing calls the contract yet.
 2. **The refactor,** one pull request of several commits ([below](#the-refactor)), with the existing tests as the safety net.
 
 The inventory names functions rather than lines; it describes the code at commit `768a283`.
@@ -13,15 +13,16 @@ The inventory names functions rather than lines; it describes the code at commit
 
 The contract in the ADR holds, with the changes below. They are in the types and in the ADR.
 
-- **A provider's photo is either a file the host reads in place, or facts.** This is the one distinction the host makes. `local` reports a file, and the host then does everything it does today: it reads the facts with `sharp`, derives previews and renditions, keys them by the file's path and stamp, guards each read with the stamp and hashes the bytes for the input revision. A provider without a file reports facts, and its pixels come from `preview` and `materialize`. So none of the file machinery changes for `local`, and none of it has to be generalised for Lightroom.
+- **Owned and linked photos are two providers, not one `local`.** They share only how a file is read. A photo in the package's `photos/` is in the host's own storage: no approval, no size limit, watched by the book folder watcher, its original synced, and renamable. A linked photo is an external source like any other: approved per path, limited to 50 MB, watched where it is, never uploaded. Copy into Book is then one operation for every provider, a change to `package`. One provider for both needed a question (`owned`) that only it answered differently from all the others. The named local roots of ADR 0010 would be a third file provider on the same helpers.
+- **A provider's photo is either a file the host reads in place, or facts.** This is the one distinction the host makes. `package` and `linked` report a file, and the host then does everything it does today: it reads the facts with `sharp`, derives previews and renditions, keys them by the file's path and stamp, guards each read with the stamp and hashes the bytes for the input revision. A provider without a file reports facts, and its pixels come from `preview` and `materialize`. So none of the file machinery changes for them, and none of it has to be generalised for Lightroom.
 - **The editor already shows photos that have no readable original.** A photo that is missing or unapproved on this Mac is laid out from its `assets-meta.json` fact and drawn from its proxy in the proxy store (`readContent` in [`desktop/project.ts`](../../desktop/project.ts)). A Lightroom photo in the editor is the same case without the problem. The protocol handler and `photoFile` always get a local file and need no change.
-- **`local` does materialize.** The ADR says local files are read in place and `materialize` does nothing. In the editor they are; an export copies every photo into `pinned-sources` and checks that it did not change meanwhile (`SourceStore.resolve` with `pin`). That copy and check are `materialize`, with the same before-and-after revision rule the ADR sets for Lightroom renders.
+- **File providers do materialize.** The ADR said local files are read in place and `materialize` does nothing. In the editor they are; an export copies every photo into `pinned-sources` and checks that it did not change meanwhile (`SourceStore.resolve` with `pin`). That copy and check are `materialize`, with the same before-and-after revision rule the ADR sets for Lightroom renders.
 - **Two revisions, not one.** Besides the stamp, `ProjectInputIndex` ([`desktop/revisions.ts`](../../desktop/revisions.ts)) hashes the bytes of every photo into the render-input revision. The export guard ("Sources changed during export") and the check cache compare it. For a photo without a file, the provider's `revision` token takes the place of the bytes there.
 - **Half of the contract is pure and lives in `src/`.** The portable book-state revision, sync snapshots and the renderer read `path` and `linked` of a `photos.json` entry, and none of them runs in the main process. That half is `LocatorKind`: how an entry reads as a locator, its portable and shared forms, its key, its name, and whether the package owns its bytes.
 - **`observe` gets the last known revisions.** Lightroom's develop hash costs one SDK call per photo, so it is read only when the revision moved. The provider keeps no state for that: the host hands in what it stored.
-- **Photos only.** `SourceStore` also resolves texts and files. They stay files and share the file helpers of `local`; a provider for texts would be a different set of capabilities.
+- **Photos only.** `SourceStore` also resolves texts and files. They stay files and use the file helpers the two file providers share; a provider for texts would be a different set of capabilities.
 - **More states than the ADR lists.** Today there are `missing`, `unreadable`, `denied` and `unapproved`; the ADR adds `offline` and `needs-sign-in`. The proxy stands in for `missing` and `unapproved` only, and `offline` joins them with the Lightroom provider.
-- **Approvals stay inside `local`.** An approval is a grant for one exact path of one book, checked while the path is resolved (`originalPath`). What another provider needs approved (an app, a server) is a different question, so the contract leaves trust out until a second provider asks it.
+- **Approvals stay inside `linked`.** An approval is a grant for one exact path of one book, checked while the path is resolved (`originalPath`). What another provider needs approved (an app, a server) is a different question, so the contract leaves trust out until a second provider asks it.
 - **Import is not in the contract.** `importIntoProject` takes file paths, a copy or link mode, and reports a file as already held by path, then by content. A Lightroom import arrives from the plugin. Both end in the same host step (assign an ID, write the entry, record facts), which is extracted when the second one exists.
 
 Two findings concern the later Lightroom phase, not this one:
@@ -117,18 +118,18 @@ Templates see none of this: `Photo` has no path.
 
 ## The contract against three providers
 
-| | `local` | Lightroom Classic | Immich (on paper, API not verified) |
-| --- | --- | --- | --- |
-| Locator | `{ path, linked }`, as today | `{ catalog, uuid, name? }` | `{ server, asset, name? }` |
-| Portable form | Owned: the path. Linked: only that it is linked | Catalog identity and UUID | Server name and asset ID |
-| `observe` | Approval, realpath, `stat`; reports the file | One `batchGetRawMetadata`; reports facts | `GET /assets/{id}`; reports facts |
-| `revision` | The file stamp | `lrRevision` | Checksum and `updatedAt` |
-| `contentRevision` | None: the same as `revision` | The develop hash, read only when `revision` moved | The checksum |
-| `preview` | None: the host derives it | A 1400 px render | The server's preview |
-| `materialize` | A clone of the file | `LrExportSession`, five photos at a time | The original, downloaded |
-| `watch` | The linked-folder poll and watches | The plugin's poll, and its connection | The server's asset events, or a poll |
-| Unavailable | `missing`, `denied`, `unreadable`, `unapproved` | `offline` (not running, another catalog), `missing` | `offline`, `needs-sign-in`, `missing` |
-| Repairs | Locate, Locate Folder | Launch Lightroom | Sign in |
+| | `package` | `linked` | Lightroom Classic | Immich (on paper, API not verified) |
+| --- | --- | --- | --- | --- |
+| Locator | `{ path }`, relative to the book | `{ path, linked: true }`, absolute | `{ catalog, uuid, name? }` | `{ server, asset, name? }` |
+| Portable form | The path | Only that it is linked | Catalog identity and UUID | Server name and asset ID |
+| `observe` | Inside `photos/`, `stat`; reports the file | Approval, realpath, 50 MB, `stat`; reports the file | One `batchGetRawMetadata`; reports facts | `GET /assets/{id}`; reports facts |
+| `revision` | The file stamp | The file stamp | `lrRevision` | Checksum and `updatedAt` |
+| `contentRevision` | None | None | The develop hash, read only when `revision` moved | The checksum |
+| `preview` | None: the host derives it | None | A 1400 px render | The server's preview |
+| `materialize` | A clone of the file | A clone of the file | `LrExportSession`, five photos at a time | The original, downloaded |
+| `watch` | Nothing: the book folder watcher covers it | The linked-folder poll and watches | The plugin's poll, and its connection | The server's asset events, or a poll |
+| Unavailable | `missing`, `denied`, `unreadable` | `missing`, `denied`, `unreadable`, `unapproved` | `offline` (not running, another catalog), `missing` | `offline`, `needs-sign-in`, `missing` |
+| Repairs | Locate, Locate Folder | Locate, Locate Folder | Launch Lightroom | Sign in |
 
 What the host does with a result does not depend on the provider, only on whether it got a file:
 
@@ -144,11 +145,11 @@ What the host does with a result does not depend on the provider, only on whethe
 One pull request. Each commit keeps the unit tests green, changes no file format, no IPC or MCP type and no text in the UI, and keeps the exported functions the tests import (`SourceStore.resolve`, `loadProject`, `originalPath`, `relocateSource` and the others).
 
 1. **Tests for what the refactor moves and nothing covers yet.** An export load (`loadProject` with `pinSources`): the pinned copy, and a source that changes during the copy. The linked-folder watch: a change, a replaced file and a reconnect. The rendition key of a given path and stamp, as a fixed value.
-2. **Locators.** Every reader of an entry's `path` and `linked` goes through `localLocator`: `sourceEntries`, `portablePhotos`, the sync snapshot, `ProjectSession`, `reference`, the input index and the sync engine's owned test.
-3. **The `local` provider.** `desktop/providers/local.ts` gets `originalPath`, the approval check, the stamp and the limits as `observe`, and the export copy as `materialize`. `SourceStore.resolve` calls it for photos and keeps returning `{ status, stored }`; texts and files use the same file helpers directly.
+2. **Locators.** Every reader of an entry's `path` and `linked` goes through `packageLocator` and `linkedLocator`: `sourceEntries`, `portablePhotos`, the sync snapshot, `ProjectSession`, `reference`, the input index and the sync engine's owned test.
+3. **The `package` and `linked` providers.** `desktop/providers/files.ts` gets the two branches of `originalPath`, the approval check, the stamp and the limit as their `observe`, and the export copy as `materialize`. `SourceStore.resolve` calls it for photos and keeps returning `{ status, stored }`; texts and files use the same file helpers directly.
 4. **One place builds a `ProjectPhoto`.** The three cases of `readContent` (a file in place, a snapshot, a proxy) become one host function over what `observe` returned.
 5. **Watching.** `watchLinkedSources` keeps its debounce and reload and gets its changes from `provider.watch`.
-6. **Actions and sync.** `sourceAction`, the menus' enabling and the sync engine ask `LocatorKind.owned` and `provider.repairs` instead of `linked`.
+6. **Actions and sync.** `sourceAction`, the menus' enabling and the sync engine ask which provider a photo has, and its `repairs`, instead of `linked`.
 
 Not part of it: a `photos.json` entry without a `path` and the format bump for it, new states in the UI, changes to import, and anything a second provider would be the first to need.
 
