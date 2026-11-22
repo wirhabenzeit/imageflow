@@ -20,8 +20,8 @@ import { CommittedProjectSaveError, persistProjectManifests, recoverProjectSave 
 import type { SaveCheckpoint } from './persistence';
 import { fileSourceOf, sourceEntries, sourcePath, sourceLinked, storedFileName } from '../src/source-locations';
 import type { PhotoSourceEntry, SourceEntry, SourceStatus } from '../src/source-locations';
-import { isFileLocator } from '../src/source-locator';
-import type { Locator } from '../src/source-locator';
+import { isFileLocator, locatorKindOf } from '../src/source-locator';
+import type { Locator, PhotoLocator } from '../src/source-locator';
 import { providerOf } from './providers';
 import type { Observed, SourceRef } from './source-provider';
 import { refreshProvided } from './provided-photos';
@@ -645,7 +645,7 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
         imported.push(previous);
         continue;
       }
-      const id = { photo: 'ph-', markdown: 'tx-', file: 'fl-' }[kind] + randomUUID().slice(0, 12);
+      const id = newSourceId(kind);
       const name = storedFileName(basename(file));
       const relativePath = folder + '/' + id + '-' + name;
       const path = join(book.folder, relativePath);
@@ -663,20 +663,7 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
     }
     // Links are approved before the book refers to them, all in one write.
     await approveSources(book.folder, approvals, request.accept);
-    // Nothing new, and nothing to place: the book is unchanged.
-    if (!imported.length || (!request.target && !(counts.photos + counts.texts + counts.files))) return { book, imported, copied, createdDirectories, counts };
-    if (request.target && request.kind && request.kind !== 'file') {
-      const spread = scopeSpread(project.spreads.find(({ id }) => id === request.target?.spread), request.target.page);
-      if (!spread) throw new Error('The selected spread no longer exists.');
-      const id = request.target.box;
-      spread.boxes[id] = {
-        ...boxBase(spread.boxes[id]),
-        ...(request.kind === 'photo' ? { photo: imported[0] } : { text: imported[0] }),
-      };
-    }
-    progress?.({ done: imported.length, total: imported.length, saving: true });
-    if (checkpoint.mcp) checkpoint.mcp.sources = [...imported];
-    const next = await updateProject(book, { project, photoIndex }, true, checkpoint);
+    const next = await finishImport(book, { project, photoIndex }, { imported, counts }, request, progress, checkpoint);
     return { book: next, imported, copied, createdDirectories, counts };
   } catch (error) {
     // A durable save intent may already refer to these assets, including when it needs recovery on next open.
@@ -686,6 +673,61 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
     }
     throw error;
   }
+}
+
+/** A new source ID: `ph-`, `tx-` or `fl-` and twelve hex digits. */
+const newSourceId = (kind: 'photo' | 'markdown' | 'file') => ({ photo: 'ph-', markdown: 'tx-', file: 'fl-' }[kind] + randomUUID().slice(0, 12));
+
+/**
+ * The host step every import ends in, whatever the sources came from (ADR 0011): the new entries are in `files`
+ * already; the first new photo or text goes into the target box, if one was asked for, and the book is saved and
+ * loaded again. Loading is what records the new photos' facts and, for photos without a file, fetches their previews
+ * (`observePhotos`, `refreshProvided`). Nothing new and nothing to place leaves the book as it is.
+ */
+async function finishImport(book: OpenProject, { project, photoIndex }: ProjectFiles, { imported, counts }: { imported: string[]; counts: ImportCounts },
+  request: Pick<ImportRequest, 'target' | 'kind'>, progress: ((value: ImportProgress) => void) | undefined, checkpoint: SaveCheckpoint) {
+  if (!imported.length || (!request.target && !(counts.photos + counts.texts + counts.files))) return book;
+  if (request.target && request.kind && request.kind !== 'file') {
+    const spread = scopeSpread(project.spreads.find(({ id }) => id === request.target?.spread), request.target.page);
+    if (!spread) throw new Error('The selected spread no longer exists.');
+    const id = request.target.box;
+    spread.boxes[id] = {
+      ...boxBase(spread.boxes[id]),
+      ...(request.kind === 'photo' ? { photo: imported[0] } : { text: imported[0] }),
+    };
+  }
+  progress?.({ done: imported.length, total: imported.length, saving: true });
+  if (checkpoint.mcp) checkpoint.mcp.sources = [...imported];
+  return updateProject(book, { project, photoIndex }, true, checkpoint);
+}
+
+/**
+ * Imports photos that are not files, by their locators: Lightroom Classic photos sent from the plugin or picked there
+ * for Import from Lightroom Classic…. A photo the book holds already, by its locator's key (same catalog and UUID),
+ * is reported as existing and not added again, as a file is by path. A new photo gets no title of its own, so it
+ * inherits its provider's (ADR 0011, §1). The rest is the same host step as a file import.
+ */
+export async function importProvidedPhotos(book: OpenProject, locators: readonly PhotoLocator[], { target, progress, checkpoint = { origin: 'app', label: 'Import sources' } }:
+  { target?: ImportRequest['target']; progress?: (value: ImportProgress) => void; checkpoint?: SaveCheckpoint } = {}) {
+  const project = structuredClone(book.project);
+  const photoIndex: PhotoIndex = structuredClone(book.photoIndex);
+  const counts: ImportCounts = { photos: 0, texts: 0, files: 0, skipped: 0, failed: 0 };
+  const imported: string[] = [];
+  const keyOf = (locator: PhotoLocator) => locator.provider + '\0' + locatorKindOf(locator).key(locator);
+  const held = new Map(sourceEntries({ project, photoIndex }).flatMap((entry) => entry.kind === 'photo' ? [[keyOf(entry.locator), entry.id] as const] : []));
+  for (const locator of locators) {
+    if (isFileLocator(locator)) { counts.skipped++; continue; }
+    const key = keyOf(locator);
+    const previous = held.get(key);
+    if (previous) { counts.existing = (counts.existing ?? 0) + 1; imported.push(previous); continue; }
+    const id = newSourceId('photo');
+    photoIndex[id] = locatorKindOf(locator).write(locator) as PhotoIndex[string];
+    held.set(key, id);
+    imported.push(id);
+    counts.photos++;
+  }
+  const next = await finishImport(book, { project, photoIndex }, { imported, counts }, { target, kind: 'photo' }, progress, checkpoint);
+  return { book: next, imported, counts };
 }
 
 export function projectSummary(book: OpenProject, id: string): ProjectSummary {

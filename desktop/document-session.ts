@@ -5,7 +5,7 @@ import { SourceStore } from './source-store';
 import { sourceEntries } from '../src/source-locations';
 import type { FileSourceEntry, PhotoSourceEntry, SourceEntry } from '../src/source-locations';
 import { isFileLocator } from '../src/source-locator';
-import type { Locator } from '../src/source-locator';
+import type { Locator, PhotoLocator } from '../src/source-locator';
 import { providerOf } from './providers';
 import { providedChanges } from './provided-photos';
 import type { Revisions, SourceProvider, SourceRef } from './source-provider';
@@ -25,7 +25,7 @@ import { parseActiveEditor } from '../src/mcp-results';
 import type { RenderProject } from '../src/project';
 import { printBook, savePdf } from './export';
 import { approveNetwork, approvedNetwork, bookTrusted, trustBook } from './source-access';
-import { importIntoProject, loadProject, projectSummary, readProjectManifest } from './project';
+import { importIntoProject, importProvidedPhotos, loadProject, projectSummary, readProjectManifest } from './project';
 import type { ImportProgress } from './project';
 import type { OpenProject } from './project';
 import { photoExtensions } from './photos';
@@ -832,6 +832,20 @@ export class DocumentSession {
   currentBook(id: string) {
     if (!this.active || this.active.id !== id) throw new Error('The project changed. Try again using the current project.');
     return this.active.book;
+  }
+
+  /**
+   * Imports photos that are not files, by their locators (Lightroom Classic, ADR 0011), as one undoable step. Photos
+   * the book holds already are counted, not added again. The book's facts and previews of the new photos are read
+   * while it loads again.
+   */
+  async importProvided(locators: readonly PhotoLocator[], label: string) {
+    const book = this.book;
+    const { book: next, imported, counts } = await importProvidedPhotos(book, locators, { checkpoint: { origin: 'app', label } });
+    if (next === book) return { summary: this.summary, imported, counts };
+    this.projectSession.adoptExternal(book);
+    this.projectSession.record(next, label, true, false);
+    return { summary: this.activate(next), imported, counts };
   }
 
   /** `report` sends progress to the owner's status bar; only the book window's own import, which clears it, asks. */
