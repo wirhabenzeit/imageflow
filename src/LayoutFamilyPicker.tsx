@@ -68,8 +68,8 @@ export function LayoutFamilyPicker({ project, template, spread, params, family, 
 }
 
 // A family whose picker is a `choice`: the app's own segmented control, drawn at once, with no frame or template code.
-export function FamilyChoice({ template, spread, family, page, readOnly, chooseLayout }: {
-  template: TemplateInfo; spread: SpreadState; family: string; page?: PageSide; readOnly: boolean; chooseLayout: (definition: string) => void;
+export function FamilyChoice({ template, spread, family, page, readOnly, blocked, chooseLayout }: {
+  template: TemplateInfo; spread: SpreadState; family: string; page?: PageSide; readOnly: boolean; blocked?: string; chooseLayout: (definition: string) => void;
 }) {
   const declared = template.layoutFamilies?.[family];
   const choice = declared?.picker?.choice;
@@ -83,9 +83,9 @@ export function FamilyChoice({ template, spread, family, page, readOnly, chooseL
     const id = variants.find((variant) => String(template.spreads[variant].variant?.[choice.tag]) === value);
     return id ? [{ value: id, label }] : [];
   });
-  return <div className="field layout-family-field" role="region" aria-label={title}>
-    <span className="field-name">{title}</span>
-    <Choice label={title} hideLabel value={current} options={options} disabled={readOnly}
+  // The choice draws its own labelled field, spaced like the settings below it.
+  return <div className="layout-family-field" role="region" aria-label={title} title={blocked}>
+    <Choice label={title} value={current} options={options} disabled={readOnly || !!blocked}
       onChange={(next) => { if (next !== current) chooseLayout(next); }} />
   </div>;
 }

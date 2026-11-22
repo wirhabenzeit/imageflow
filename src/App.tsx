@@ -2097,8 +2097,8 @@ export function App() {
         openTarget={openInspectorTarget} place={placeInspector} chooseLayout={chooseInspectorLayout}
         holdPreviews={!render && !!lastReady} targetsStale={targetsStale}
         familyPicker={template && layoutFamily && (template.layoutFamilies?.[layoutFamily]?.picker?.choice
-          ? <FamilyChoice template={template} spread={spread} page={selectedPage} family={layoutFamily} readOnly={!writable || !!previewNotice}
-            chooseLayout={chooseInspectorLayout} />
+          ? <FamilyChoice template={template} spread={spread} page={selectedPage} family={layoutFamily} readOnly={!writable}
+            blocked={previewNotice || undefined} chooseLayout={chooseInspectorLayout} />
           : <HeldPicker
           id={JSON.stringify([summary.handle, spread.id, selectedPage, layoutFamily, summary.templateHash, template.format, summary.network])}>
           {(showing) => <LayoutFamilyPicker

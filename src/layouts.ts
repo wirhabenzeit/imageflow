@@ -198,7 +198,8 @@ export function familyProblems(layouts: Layouts, families: LayoutFamilies = {}) 
             choice.tag + ' (' + JSON.stringify(key) + '), so the family\'s choice cannot tell them apart. Use a component picker for more than one tag.' });
         } else named.set(key, id);
       }
-      for (const key of Object.keys(choice.options)) if (!ids.some((id) => String(layouts[id].variant?.[choice.tag]) === key)) {
+      // Among the values found: a variant without the tag must not match an option named "undefined".
+      for (const key of Object.keys(choice.options)) if (!named.has(key)) {
         problems.push({ path: ['layoutFamilies', family, 'picker', 'choice', 'options', key], message: 'Family ' + family + '\'s choice offers ' +
           JSON.stringify(key) + ', but no layout of the family has ' + choice.tag + ': ' + JSON.stringify(key) + '.' });
       }

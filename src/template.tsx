@@ -697,8 +697,8 @@ export type TemplateDeclaration = {
   parameters?: Parameters;
   controls?: ControlItem[];
   layoutFamilies?: Record<string, { label: string; picker?: { label?: string } & (
-    { choice: { tag: string; options: Record<string, string> }; component?: undefined } |
-    { component: (props: LayoutPickerProps) => ReactNode; choice?: undefined }) }>;
+    { choice: { tag: string; options: Record<string, string> }; component?: never } |
+    { component: (props: LayoutPickerProps) => ReactNode; choice?: never }) }>;
   spreads: Record<string, DeclaredSpread> | ((tools: { spread: typeof spreadBuilder; page: typeof pageBuilder }) => Record<string, DeclaredSpread>);
   openingSpreads?: import('./editing').OpeningSpreadInput[];
   coverFormats?: Record<string, CoverFormat>;
