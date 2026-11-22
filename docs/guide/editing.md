@@ -44,6 +44,8 @@ Escape, **Done** or a click elsewhere deselects the photo. Select a photo in the
 
 Drop a Markdown file onto a text box, or click the box to assign or import a source. Assign the same source to several boxes to continue its text through the book.
 
+Drag a text box that holds a text onto another text box to swap the two texts, or onto an empty text box to move it there. Only the dragged box's assignment moves: other boxes the text continues through keep it. Undo reverts the swap in one step.
+
 **New Text** in the Texts strip creates a source inside the book. A source's pencil button opens a Markdown editor with a live preview. Changes save after a short pause. Linked sources offer a choice to edit the original or copy it into the book first.
 
 External changes reload automatically unless you have pending edits; then the editor asks you to resolve the conflict.
