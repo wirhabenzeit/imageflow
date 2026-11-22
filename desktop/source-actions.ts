@@ -7,6 +7,7 @@ import type { ProjectFiles } from '../src/project';
 import { clearFileAssignments, fileAssigned } from '../src/asset-usage';
 import { sourceEntries, sourceFolder, storedFileName } from '../src/source-locations';
 import type { ImportMode, SourceEntry } from '../src/source-locations';
+import { relocatedEntry } from '../src/source-locator';
 import { createDocument } from './documents';
 import { readAssetFacts } from './asset-facts';
 import { loadProject, updateProject } from './project';
@@ -20,8 +21,7 @@ import { approveSource, approvedExtensions, transferSourceAccess, transferBookTr
 const filesOf = (book: OpenProject): ProjectFiles => structuredClone({ project: book.project, photoIndex: book.photoIndex });
 function reference(files: ProjectFiles, source: SourceEntry, path: string, linked: boolean) {
   if (source.kind === 'photo') {
-    files.photoIndex[source.id].path = path;
-    if (linked) files.photoIndex[source.id].linked = true; else delete files.photoIndex[source.id].linked;
+    files.photoIndex[source.id] = relocatedEntry(files.photoIndex[source.id], { provider: linked ? 'linked' : 'package', path });
   } else files.project[source.kind === 'markdown' ? 'texts' : 'files'][source.id] = linked ? { path, linked: true } : path;
 }
 async function managedCopy(folder: string, source: SourceEntry, snapshot: string, copied: string[]) {

@@ -1,5 +1,6 @@
 import { canonicalJson } from './canonical-json';
 import type { PhotoIndex, Project } from './project';
+import { portableEntry } from './source-locator';
 
 /**
  * The portable book-state revision (ADR 0010, Guardrail 5): a hash of what the user authored, identical on every Mac
@@ -31,8 +32,7 @@ const portableReferences = (references: Record<string, unknown>) =>
 export const portableProject = (project: Project) => ({ ...project, texts: portableReferences(project.texts), files: portableReferences(project.files) });
 
 /** `photos.json` as the revision sees it: linked photos without their paths. */
-export const portablePhotos = (photos: PhotoIndex) => Object.fromEntries(Object.entries(photos).map(([id, photo]) =>
-  [id, photo.linked === true ? Object.fromEntries(Object.entries(photo).filter(([key]) => key !== 'path')) : photo]));
+export const portablePhotos = (photos: PhotoIndex) => Object.fromEntries(Object.entries(photos).map(([id, photo]) => [id, portableEntry(photo)]));
 
 const hex = (bytes: ArrayBuffer) => [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 

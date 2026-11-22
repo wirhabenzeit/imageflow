@@ -441,7 +441,7 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
   // whether the source is linked or copied; a copy or link asked for explicitly may add the other kind of source.
   type Held = { kind: 'photo' | 'markdown' | 'file'; id: string; path: string; linked: boolean };
   const held: Held[] = [
-    ...Object.entries(photoIndex).map(([id, photo]) => ({ kind: 'photo' as const, id, linked: !!photo.linked, path: photo.linked ? photo.path : join(book.folder, photo.path) })),
+    ...sourceEntries({ project, photoIndex }).filter(({ kind }) => kind === 'photo').map(({ id, linked, path }) => ({ kind: 'photo' as const, id, linked, path: linked ? path : join(book.folder, path) })),
     ...Object.entries(project.texts).map(([id, ref]) => ({ kind: 'markdown' as const, id, linked: sourceLinked(ref), path: sourceLinked(ref) ? sourcePath(ref) : join(book.folder, sourcePath(ref)) })),
     ...Object.entries(project.files).map(([id, ref]) => ({ kind: 'file' as const, id, linked: sourceLinked(ref), path: sourceLinked(ref) ? sourcePath(ref) : join(book.folder, sourcePath(ref)) })),
   ];

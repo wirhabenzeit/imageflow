@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ProjectFiles } from '../src/project';
+import { locatorOf, relocatedEntry } from '../src/source-locator';
 import type { HistoryState } from '../src/desktop';
 import { updateProject } from './project';
 import type { SaveCheckpoint } from './persistence';
@@ -86,8 +87,7 @@ export class ProjectSession {
     files.photoIndex = { ...this.book.photoIndex, ...files.photoIndex };
     for (const [id, current] of Object.entries(this.book.photoIndex)) {
       if (!files.photoIndex[id]) continue;
-      files.photoIndex[id].path = current.path;
-      if (current.linked) files.photoIndex[id].linked = true; else delete files.photoIndex[id].linked;
+      files.photoIndex[id] = relocatedEntry(files.photoIndex[id], locatorOf(current));
     }
     const next = await updateProject(this.book, files, true, { origin: 'app', label: 'Revert to Last Opened' });
     this.record(next, 'Revert to Last Opened');
@@ -105,8 +105,7 @@ export class ProjectSession {
     files.photoIndex = { ...this.book.photoIndex, ...files.photoIndex };
     for (const [id, current] of Object.entries(this.book.photoIndex)) {
       if (!files.photoIndex[id]) continue;
-      files.photoIndex[id].path = current.path;
-      if (current.linked) files.photoIndex[id].linked = true; else delete files.photoIndex[id].linked;
+      files.photoIndex[id] = relocatedEntry(files.photoIndex[id], locatorOf(current));
     }
     // Replay only this action's membership changes; later imports and non-undoable location repairs survive.
     for (const id of entry.membership?.photos ?? []) if (!Object.hasOwn(entry.files.photoIndex, id)) delete files.photoIndex[id];

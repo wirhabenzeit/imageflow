@@ -7,6 +7,7 @@ import type { AssetFact } from '../src/asset-facts';
 import { parseDocument, photoIndexSchema, projectSchema } from '../src/project';
 import type { PhotoIndex } from '../src/project';
 import { sourceEntries } from '../src/source-locations';
+import { packagePath } from '../src/source-locator';
 import { changedOriginals, commitHeaderSchema, contentBlobKey, decideSync, deriveTips, encodeStateBlob, factsAhead, newerStateBlob, NewerSyncFormatError, originalBlobKey, portableManifests,
   projectManifests, proxyBlobKey, stateBlobSchema, stateMatchesHeader } from '../src/sync-snapshot';
 import type { CommitHeader, StateBlob, SyncDecision, SyncedCommit } from '../src/sync-snapshot';
@@ -236,10 +237,12 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
   }));
   const originals: StateBlob['originals'] = {};
   for (const [id, photo] of Object.entries(state.photos)) {
-    if (photo.linked) continue;
+    // Only the package's own photos sync as originals (ADR 0011, Sync between Macs).
+    const owned = packagePath(photo);
+    if (owned === undefined) continue;
     const here = context.here[id];
     if (here && here.digest === assets[id]?.digest) {
-      const entry = { digest: here.digest, ext: extname(photo.path).toLowerCase() };
+      const entry = { digest: here.digest, ext: extname(owned).toLowerCase() };
       const key = originalBlobKey(entry.digest, entry.ext);
       if (!await remote.hasBlob(key)) {
         if (await fileDigest(here.path) !== here.digest) throw new Error('A photo changed during sync. Sync again.');
@@ -354,7 +357,7 @@ async function stagePull(context: Context, tip: CommitHeader) {
   const localProject = projectSchema.safeParse(JSON.parse(await readFile(join(root, 'project.json'), 'utf8'))).data;
   const projected = photoIndexSchema.parse(projectManifests(blob, { project: localProject, photos: localPhotos }).photos);
   // Paths in photos/ the book refers to now: never written before the pull is marked.
-  const referenced = new Set(Object.values(localPhotos ?? {}).filter((photo) => !photo.linked).map((photo) => join(root, photo.path)));
+  const referenced = new Set(Object.values(localPhotos ?? {}).flatMap((photo) => { const path = packagePath(photo); return path === undefined ? [] : [join(root, path)]; }));
   const synced = (await readSyncState(root)).lastSynced;
   const here = hereDigests(context);
   // Photos whose original changed here since the last sync keep their local fact; every other original here that
@@ -364,7 +367,7 @@ async function stagePull(context: Context, tip: CommitHeader) {
   const staleOriginals: PullMarker['staleOriginals'] = {};
   const localDigests: PullMarker['localDigests'] = {};
   for (const [id, photo] of Object.entries(projected)) {
-    const owned = !photo.linked && photo.path.startsWith('photos/');
+    const owned = !!packagePath(photo)?.startsWith('photos/');
     const original = owned ? blob.originals[id] : undefined;
     const wanted = owned ? original?.digest ?? blob.assetsMeta.assets[id]?.digest : undefined;
     const local = context.here[id];
@@ -557,7 +560,7 @@ async function missingOriginals(root: string, blob: StateBlob, ids?: readonly st
   const missing: { id: string; path: string; original: StateBlob['originals'][string] }[] = [];
   for (const [id, original] of Object.entries(blob.originals)) {
     const photo = photos[id];
-    if ((ids && !ids.includes(id)) || !photo || photo.linked || !photo.path.startsWith('photos/')) continue;
+    if ((ids && !ids.includes(id)) || !photo || !packagePath(photo)?.startsWith('photos/')) continue;
     if (await lstat(await bookPath(root, photo.path, { checking: true })).catch(() => undefined)) continue;
     missing.push({ id, path: photo.path, original });
   }

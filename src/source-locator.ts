@@ -1,4 +1,3 @@
-import { sourceFileName } from './source-locations';
 
 /**
  * Where a photo comes from, as its `photos.json` entry records it (ADR 0011, Source providers). A locator never becomes
@@ -39,6 +38,8 @@ export type PackageLocator = { provider: 'package'; path: string };
 /** A file anywhere else on this Mac, as an absolute path. */
 export type LinkedLocator = { provider: 'linked'; path: string };
 
+// Imported and created files are stored as "<id>-<name>"; the readable name leaves the storage ID out.
+export const readableFileName = (path: string) => (path.split('/').pop() ?? path).replace(/^(?:ph|tx|fl)-[a-f0-9-]{12}-/, '');
 /** The file name of a path, with either separator. */
 export const fileNameOf = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? '';
 /**
@@ -60,7 +61,7 @@ export const packageLocator: LocatorKind<PackageLocator> = {
   shared: (locator) => locator,
   adopt: (shared) => shared,
   key: ({ path }) => path,
-  name: (locator) => sourceFileName(locator),
+  name: ({ path }) => readableFileName(path),
 };
 
 export const linkedLocator: LocatorKind<LinkedLocator> = {
@@ -73,5 +74,49 @@ export const linkedLocator: LocatorKind<LinkedLocator> = {
   shared: (locator) => ({ ...locator, path: fileNameOf(locator.path) }),
   adopt: (shared, here) => here ?? { ...shared, path: unlocatedPath(shared.path) },
   key: ({ path }) => path,
-  name: (locator) => sourceFileName(locator),
+  name: ({ path }) => readableFileName(path),
 };
+
+/** The locators a photos.json entry can hold today. */
+export type PhotoLocator = PackageLocator | LinkedLocator;
+// Method parameters are bivariant, so each kind stands in this list for the union it reads one member of; every
+// function below hands a kind only the locator that kind itself read or that names it.
+const locatorKinds: readonly LocatorKind<PhotoLocator>[] = [packageLocator, linkedLocator];
+const kindOf = (locator: PhotoLocator) => locatorKinds.find(({ provider }) => provider === locator.provider)!;
+
+/** The locator of an entry, or undefined for an entry no provider of this version reads. */
+export function readLocator(entry: LocatorFields): PhotoLocator | undefined {
+  for (const kind of locatorKinds) { const locator = kind.read(entry); if (locator) return locator; }
+}
+/** The locator of an entry that passed `photoIndexSchema`. */
+export function locatorOf(entry: LocatorFields): PhotoLocator {
+  const locator = readLocator(entry);
+  if (!locator) throw new Error('This photo names no source this version of ImageFlow can read.');
+  return locator;
+}
+/** The path of a photo the book package holds, relative to the book; undefined for any other photo. */
+export const packagePath = (entry: LocatorFields) => { const locator = readLocator(entry); return locator?.provider === 'package' ? locator.path : undefined; };
+
+const without = (entry: LocatorFields, keys: readonly string[]) => Object.fromEntries(Object.entries(entry).filter(([key]) => !keys.includes(key)));
+// An entry with its locator's fields replaced by others. Only the keys the locator occupies go, so whatever else the
+// entry holds stays as it is.
+function rewritten(entry: LocatorFields, fields: (kind: LocatorKind<PhotoLocator>, locator: PhotoLocator) => Record<string, unknown>) {
+  const locator = readLocator(entry);
+  if (!locator) return entry;
+  const kind = kindOf(locator);
+  return { ...without(entry, Object.keys(kind.write(locator))), ...fields(kind, locator) };
+}
+/** An entry as the portable book-state revision counts it. */
+export const portableEntry = (entry: LocatorFields) => rewritten(entry, (kind, locator) => kind.portable(locator));
+/** An entry as a sync snapshot carries it. */
+export const sharedEntry = (entry: LocatorFields) => rewritten(entry, (kind, locator) => kind.write(kind.shared(locator)));
+/** A snapshot's entry as a pull writes it, given the entry this Mac has for the photo. */
+export const adoptedEntry = (shared: LocatorFields, here: LocatorFields | undefined) => rewritten(shared, (kind, locator) => {
+  const mine = here && readLocator(here);
+  return kind.write(kind.adopt(locator, mine?.provider === locator.provider ? mine : undefined));
+});
+/** An entry with another locator, of any provider, in place of its own. */
+export function relocatedEntry<E extends LocatorFields>(entry: E, locator: PhotoLocator): E {
+  const own = readLocator(entry);
+  return { ...without(entry, own ? kindOf(own).fields : []), ...kindOf(locator).write(locator) } as unknown as E;
+}
