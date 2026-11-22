@@ -37,7 +37,7 @@ import { basename, dirname, extname, join, isAbsolute, parse } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, renderOrigins, settingsURL, startURL, starterURL, assetsURL, templatesURL } from '../src/desktop';
-import type { AgentLeaseReply, BookMenuState, Command, ImportRequest, OpenAction, ProjectSummary, Result, MarkdownAction, McpClientTarget, McpSettings, SourceAction, SyncAction, TemplateInfo } from '../src/desktop';
+import type { AgentLeaseReply, BookMenuState, Command, ImportRequest, LightroomState, OpenAction, ProjectSummary, Result, MarkdownAction, McpClientTarget, McpSettings, SourceAction, SyncAction, TemplateInfo } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
 import { renderPolicy } from './csp';
 import { assetTypes, loadProject, renderData, TemplateCompileError } from './project';
@@ -82,6 +82,7 @@ import { decodes, readTemplatePreview } from './template-preview-file';
 import { previewTypes } from '../src/template-preview';
 import { LightroomBridge } from './lightroom/bridge';
 import { launchLightroom } from './lightroom/launch';
+import { defaultModules, installMessage, installPlugin, lightroomRunning, pluginStatus } from './lightroom/plugin-install';
 import { lightroomProvider } from './providers/lightroom';
 import { registerProvider } from './providers';
 
@@ -1337,6 +1338,21 @@ function publishUpdates() {
   for (const owner of updateWindows()) owner.webContents.send(channels.updateChanged, updateStateFor(owner));
 }
 
+// The plugin ships beside the app in development and in Contents/Resources in a package. IMAGEFLOW_LIGHTROOM_MODULES
+// points a development build at another Modules folder, so trying the install never touches Lightroom's own.
+const lightroomLocations = () => ({ bundled: join(app.isPackaged ? process.resourcesPath : app.getAppPath(), 'ImageFlow.lrplugin'),
+  modules: (!app.isPackaged && process.env.IMAGEFLOW_LIGHTROOM_MODULES) || defaultModules() });
+async function lightroomState(): Promise<LightroomState> {
+  const connection = lightroom?.connection;
+  return { plugin: await pluginStatus(lightroomLocations()),
+    ...(connection ? { connection: { plugin: connection.plugin.version, ...(connection.catalog.name ? { catalog: connection.catalog.name } : {}) } } : {}) };
+}
+async function publishLightroom() {
+  if (!settingsWindow || settingsWindow.isDestroyed()) return;
+  const state = await lightroomState().catch(() => undefined);
+  if (state && settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.webContents.send(channels.lightroomChanged, state);
+}
+
 function publishMcpSettings() {
   const value = mcpSettings();
   for (const owner of appWindows()) if (!owner.isDestroyed()) owner.webContents.send(channels.mcpChanged, value);
@@ -1431,6 +1447,7 @@ void app.whenReady().then(async () => {
   // Photos of a Lightroom Classic catalog are read through the plugin; until it connects they are offline.
   lightroom = new LightroomBridge({ file: join(app.getPath('userData'), 'lightroom-bridge.json'), version: app.getVersion() });
   registerProvider(lightroomProvider(lightroom));
+  lightroom.onConnection(() => void publishLightroom());
   void lightroom.start().catch((error) => console.warn('ImageFlow could not start the Lightroom bridge:', errorMessage(error)));
   nativeTheme.themeSource = settings.value.appearance;
   const checkFeed = () => checkUpdateFeed({ baseURL: updateTestConfiguration?.baseURL ?? updateBaseURL,
@@ -2069,6 +2086,22 @@ void app.whenReady().then(async () => {
     if (!settingsOwner(event)) return { error: 'Request is only available to Settings.' };
     try { return { value: await installMcp(target) }; }
     catch (error) { return { error: errorMessage(error) }; }
+  });
+  ipcMain.handle(channels.lightroom, async (event) => {
+    if (!settingsOwner(event)) return { error: 'Request is only available to Settings.' };
+    try { return { value: await lightroomState() }; }
+    catch (error) { return { error: errorMessage(error) }; }
+  });
+  ipcMain.handle(channels.lightroomInstall, async (event) => {
+    if (!settingsOwner(event)) return { error: 'Request is only available to Settings.' };
+    try {
+      const locations = lightroomLocations();
+      const before = await pluginStatus(locations);
+      const after = await installPlugin(locations);
+      // A running Lightroom keeps the plugin it loaded at start until it is restarted.
+      const running = !!lightroom?.connection || await lightroomRunning();
+      return { value: { state: await lightroomState(), message: installMessage(before, after, running) } };
+    } catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.on(channels.agentLeaseReply, (event, id: string, reply: AgentLeaseReply) => { editorOwner(event)?.replyLease(id, reply); });
   ipcMain.handle(channels.import, (event, id: string, request: ImportRequest) => fromEditor(event, async (document) => {
