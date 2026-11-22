@@ -52,7 +52,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const documentIcon = useFileIcons(embedded ? entries.map((entry) => fileExtension(entry.name)) : []);
   const placements = (entry: typeof entries[number]) => usage[entry.kind === 'markdown' ? 'text' : entry.kind][entry.id] ?? [];
   const unavailable = (key: string) => !!summary.sources?.[key] && summary.sources[key].state !== 'available';
-  const linked = entries.filter((entry) => sourceFile(entry)?.linked).length;
+  const linked = entries.filter((entry) => sourceProvider(entry) !== 'package').length;
   const missing = entries.filter((entry) => unavailable(entry.key)).length;
   async function act(request: SourceAction) {
     setBusy(true); setError(undefined); setNotice('');
@@ -95,8 +95,9 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const headers = new Map(groups.filter((group) => group.label).map((group) => [group.ids[0], group]));
   const list = useListSelection(shown.map(({ key }) => key), (key) => entries.find((entry) => entry.key === key)!.name);
   const chosen = entries.filter(({ key }) => list.selected.includes(key));
-  // Copy into Book copies a linked file; a photo of another provider is not copied yet.
-  const copyable = (entry: typeof entries[number]) => !!sourceFile(entry)?.linked;
+  // Copy into Book takes whatever the package does not own: a linked file is copied, a photo without a file is
+  // materialized by its provider first (as in asset-menu.ts).
+  const copyable = (entry: typeof entries[number]) => sourceProvider(entry) !== 'package';
   const copyCount = chosen.filter(copyable).length;
   // With nothing selected, the buttons act on every asset of the list; the embedded list holds only files.
   const everyKey = embedded ? (keep: (entry: typeof entries[number]) => boolean) => entries.filter(keep).map(({ key }) => key) : () => undefined;
