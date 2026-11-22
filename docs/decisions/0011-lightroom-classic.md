@@ -113,7 +113,7 @@ The SDK has no change notification, so the plugin polls. What it can and cannot 
 
 ### 4. On-demand rendering during PDF export and collection
 
-Full-resolution print renditions are rendered only when needed and only for photos that are actually used:
+Full-resolution print renditions are rendered only when needed and only for photos that are actually used. *The host side of this section is done, for every provider* ([plan](../development/source-provider-plan.md#full-resolution-originals)), with two differences from what follows: the export load does not update `assets-meta.json` for a revision that moved, but refuses the export ("Sources changed while preparing export") until the open book has seen the new revision; and an export while the provider is offline stays a proof even when an original for the last known revision is cached.
 
 1. **Filtering to placed photos (`assetUsage`):**
    - When starting **Export PDF** (`desktop/document-session.ts`) or a `proof-photo` inspection, ImageFlow computes the active photo placements via `assetUsage(book, ...)` (`src/asset-usage.ts`), covering active spread layouts and the active cover layout. Unused candidate photos in the book's library are never rendered at full resolution.
