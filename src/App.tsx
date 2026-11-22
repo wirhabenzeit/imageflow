@@ -1040,6 +1040,14 @@ export function App() {
     for (const { spread } of list as Issue[]) if (spread) spreadIssues.set(spread, level);
   }
 
+  // The spreads on screen, or within `margin` of it, and the selected one: a view's replacement frame waits for the
+  // cached pictures of these before it shows, and restores the others after (renderer `settleRestoredImages`). The
+  // thumbnails take none: a screen of them is many spreads, which held the replacement back as long as all of them.
+  function nearSpreads(shown: BookGeometry | undefined, top: number, bottom: number, margin = bottom - top) {
+    if (!shown) return undefined;
+    const near = shown.sheets.filter(({ y, height }) => y < bottom + margin && y + height > top - margin).map(({ spread }) => spread);
+    return spreadId && !near.includes(spreadId) ? [...near, spreadId] : near;
+  }
   // Scrolls the book vertically so a spread is fully visible. Waits for the next layout if the spread is new.
   function reveal(id: string, instant = false) {
     const sheet = geometry?.sheets.find(({ spread }) => spread === id);
@@ -1068,7 +1076,8 @@ export function App() {
     const range = viewport();
     if (!range) return undefined;
     // Artwork stays laid out at Fit. The frame loads pictures for the visible area in its own coordinates.
-    return { top: range.top / zoom, bottom: range.bottom / zoom, left: range.left / zoom, right: range.right / zoom, columns };
+    const top = range.top / zoom, bottom = range.bottom / zoom;
+    return { top, bottom, left: range.left / zoom, right: range.right / zoom, columns, spreads: nearSpreads(fittedGeometry, top, bottom) };
   }
   // Tells a view's current and pending frames which area is on screen, so they load the pictures near it.
   function postViewport(host: HTMLElement | null, view: 'book' | 'thumbs', range: ReturnType<typeof viewport>) {
@@ -1083,7 +1092,7 @@ export function App() {
     if (!view) return undefined;
     // The placed thumbnail list has no padding, so the scroll position is already in the frame's coordinates.
     const top = view.scrollTop;
-    return { top, bottom: top + view.clientHeight, left: 0, right: view.clientWidth, columns: 0 };
+    return { top, bottom: top + view.clientHeight, left: 0, right: view.clientWidth, columns: 0, spreads: nearSpreads(thumbs, top, top + view.clientHeight, 0) };
   }
   function measureThumbnails() { postViewport(thumbList.current, 'thumbs', thumbnailViewport()); }
   useEffect(() => {

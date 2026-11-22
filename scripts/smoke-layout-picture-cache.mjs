@@ -155,6 +155,19 @@ try {
     window.__thumbMessages = [];
   });
   await page.locator('iframe.book-frame-thumbs[data-current][data-ready]').waitFor();
+  // A replacement draws the pictures of the spreads on screen before it shows, and every other one once it is ready.
+  // With the map's thumbnail scrolled out of sight, the sidebar's replacement draws it after it shows.
+  const scrolled = await page.locator('iframe.book-frame-thumbs[data-current]').evaluate((frame) => {
+    let view = frame.parentElement;
+    while (view && view.scrollHeight <= view.clientHeight) view = view.parentElement;
+    view.scrollTop = view.scrollHeight;
+    return view.scrollTop;
+  });
+  assert.ok(scrolled > 0, 'the sidebar scrolls');
+  const beforeScrolledEdit = await thumbUrl();
+  await page.getByRole('checkbox', { name: 'Page numbers', exact: true }).check();
+  await page.waitForFunction((before) => { const frame = document.querySelector('iframe.book-frame-thumbs[data-current][data-ready]'); return !!frame && frame.dataset.revision !== before; }, beforeScrolledEdit);
+  await thumbnails().locator(mapPage + '[data-rendered="ready"]').waitFor({ timeout: 30_000 });
   console.log('Picture cache passed: layout navigation, sidebar map stability through unrelated edits, input and template invalidation.');
 } catch (error) { console.error('Picture requests:', pictures); throw error; }
 finally { await closeApp(app); await rm(work, { recursive: true, force: true }); }

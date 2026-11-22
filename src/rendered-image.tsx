@@ -69,6 +69,12 @@ export function configureRenderedImages(next: Partial<Settings>) {
 }
 
 const activationListeners = new Set<() => void>();
+/** Lets every picture draw, after a frame drew only those of some spreads first (`activeSpreads`). */
+export function activateAllRenderedImages() {
+  if (!settings.activeSpreads) return;
+  settings = { ...settings, activeSpreads: undefined };
+  for (const listener of activationListeners) listener();
+}
 // Presentation draws pictures only for the current spread and its neighbours. Checks and exports draw all.
 export function activateRenderedImageSpreads(spreads: string[]) {
   if (!settings.activeSpreads) return;

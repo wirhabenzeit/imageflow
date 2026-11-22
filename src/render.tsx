@@ -8,7 +8,7 @@ import { bundlesFamily, familiesOf, missingCharacters, setTemplateFonts } from '
 import { parseSentinel, sentinelStrip, sentinelWidth } from './capture-sentinel';
 import type { Sentinel } from './capture-sentinel';
 import { impureMessage, impureSuggestion, installPurityGuards, unlocatedImpureSuggestion } from './purity';
-import { activateRenderedImageSpreads, configureRenderedImages, renderedImageNotes, renderedImageState, renderingImages, settleRenderedImages, settleRestoredImages, watchRenderedImages } from './rendered-image';
+import { activateAllRenderedImages, activateRenderedImageSpreads, configureRenderedImages, renderedImageNotes, renderedImageState, renderingImages, settleRenderedImages, settleRestoredImages, watchRenderedImages } from './rendered-image';
 import type { RenderedImageFailure } from './rendered-image';
 import type { ImportMode, SourceReference } from './source-locations';
 import React from 'react';
@@ -1295,7 +1295,7 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
 
 // Loads the photos of spreads within a screen of the visible range and unloads those more than three screens
 // away, so memory and the work per edit follow what is on screen rather than the length of the book.
-type Viewport = { top: number; bottom: number; left: number; right: number };
+type Viewport = { top: number; bottom: number; left: number; right: number; spreads?: Set<string> };
 // Loads the photos of spreads within a screen's distance of the visible area, in both directions, and unloads those
 // far from it.
 function photoLoader(root: HTMLElement, visible: () => Viewport | undefined) {
@@ -1933,7 +1933,8 @@ export async function startRender(root: HTMLElement) {
   window.addEventListener('message', (event) => {
     if (event.origin !== editorURL.slice(0, -1) || event.data?.type !== 'viewport') return;
     const { top, bottom, left, right } = event.data;
-    onScreen = { top: Number(top), bottom: Number(bottom), left: Number(left ?? 0), right: Number(right ?? innerWidth) };
+    const near = Array.isArray(event.data.spreads) && event.data.spreads.every((id: unknown) => typeof id === 'string') ? new Set<string>(event.data.spreads) : undefined;
+    onScreen = { top: Number(top), bottom: Number(bottom), left: Number(left ?? 0), right: Number(right ?? innerWidth), spreads: near };
     const requested = { columns: Math.max(0, Math.min(8, Math.floor(Number(event.data.columns) || 0))) };
     if (requested.columns !== grid.columns) {
       grid = requested;
@@ -2037,6 +2038,10 @@ export async function startRender(root: HTMLElement) {
         // pictures are shared across pixel ratios).
         previewCache: location.pathname + '/picture/' } : edit ? { mode: 'preview', pixelRatio: view === 'book' ? Math.min(window.devicePixelRatio || 1, 2) : 0.5,
         concurrency: view === 'book' ? 2 : 1, timeoutMs: pictureTimeoutMs.preview,
+        // A replacement of the book view or the thumbnails draws the pictures of the spreads on screen first, which the
+        // editor names, and the others once it is ready (activateAllRenderedImages). Restoring every map of a long book
+        // from the cache, which parses each one's SVG again, held each edit back by a second.
+        activeSpreads: (view === 'book' || view === 'thumbs') && onScreen?.spreads ? new Set(onScreen.spreads) : undefined,
         previewCache: location.pathname + '/picture/' }
         : printPictures(check ? 'check' : artwork || inspect ? 'preview' : 'export', target));
       // The picture cache's scope for each template file, and the Inspector's layout previews, which show a stand-in
@@ -2412,6 +2417,8 @@ export async function startRender(root: HTMLElement) {
       flow: Object.fromEntries(Object.entries(positions).map(([key, { meta: _meta, ...position }]) => [key, position])), anchors: index.anchors,
       ...(inspection ? { inspection } : {}),
     });
+    // Then the pictures of the other spreads, out of sight (activeSpreads above).
+    if (lazy) setTimeout(activateAllRenderedImages, 0);
     // The editor's book view does not wait for its pictures. It reports them to the live Book check as they start,
     // finish or fail, so a map that failed on the page is never missing from the check.
     if (edit && view === 'book' && window.parent !== window) {
