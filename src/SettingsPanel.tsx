@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AgentSettings } from './AgentSettings';
+import { LightroomSettings } from './LightroomSettings';
 import { Icon } from './Icon';
 import type { UpdateChannel } from './update-feed';
 import type { UpdateState } from './updates';
@@ -130,6 +131,8 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
               onChange={(event) => void choose({ keepOriginals: event.target.checked })} /> Keep originals of synced books on this Mac</label>
             <p className="settings-note">Otherwise photos copied into a book on another Mac show as previews until you choose File → Sync → Download Originals.</p>
           </div>
+          <span className="settings-label" id="lightroom-label">Lightroom:</span>
+          <LightroomSettings api={api} />
           {error && <p role="alert" className="error-text settings-control">{error}</p>}
         </div>}
         {pane === 'agents' && <AgentSettings api={api} />}

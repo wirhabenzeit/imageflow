@@ -202,4 +202,14 @@ The host side of `materialize` (ADR 0011, §4), provider-independent and unit-te
 
 Not done here: an offline export from an original cached for the last known revision (the ADR allows it; the export stays a proof), a Cancel button for Copy into Book in the Assets window (the session's cancel stops it, but only the export shows one), and syncing originals between Macs (ADR 0011, deferred).
 
-Still left for the Lightroom provider: the plugin and its loopback bridge, import, and Launch Lightroom as a repair action.
+## The Lightroom provider
+
+Built on the host support above, with no change to the contract ([ADR 0011, Implementation](../decisions/0011-lightroom-classic.md#implementation)):
+
+- **`lightroomLocator`** ships in the build's list of locator kinds ([`src/source-locator.ts`](../../src/source-locator.ts)), so the renderer, sync and the MCP bridge read such entries; catalog and UUID are checked as Lightroom identifiers.
+- **`lightroomProvider`** ([`desktop/providers/lightroom.ts`](../../desktop/providers/lightroom.ts)) over the loopback bridge ([`desktop/lightroom/bridge.ts`](../../desktop/lightroom/bridge.ts)), registered by the main process at start. `observe` is one metadata job per 500 photos and uses `known` so the plugin skips the develop hash; `preview` and `materialize` run sessions of five; `watch` follows the plugin's change poll and its connection; `repairs` offers `launch` for `offline`.
+- **Import** of photos without a file: `importProvidedPhotos` in [`desktop/project.ts`](../../desktop/project.ts), which shares its last step (`finishImport`: place, save, load) with `importIntoProject`. Already held means the same locator key.
+- **Launch** is a source action: the asset menus and the Assets footer offer **Open Lightroom Classic** where a photo's repairs include `launch`, and Locate Folder… only where they include `locate-folder`.
+- **Tests** run the real bridge and provider against a fake plugin that speaks the protocol over HTTP ([`tests/lightroom-fake.ts`](../../tests/lightroom-fake.ts)): `lightroom-bridge`, `lightroom-provider` (with a book loaded end to end), `lightroom-import`, `lightroom-install` and `lightroom-locator`.
+
+With the host's materialization ([Full-resolution originals](#full-resolution-originals)), an export prints these photos from full-resolution renders while Lightroom is reachable, and Copy into Book turns them into the book's own files.

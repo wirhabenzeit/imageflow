@@ -49,6 +49,7 @@ export const channels = {
   history: 'project:history', mcp: 'mcp:settings', mcpChanged: 'mcp:changed', mcpInstall: 'mcp:install',
   agentLease: 'project:agent-lease', agentLeaseReply: 'project:agent-lease-reply', agentRelease: 'project:agent-release',
   syncState: 'project:sync-state', syncChanged: 'project:sync-changed', syncAction: 'project:sync-action',
+  lightroom: 'lightroom:state', lightroomChanged: 'lightroom:changed', lightroomInstall: 'lightroom:install',
 } as const;
 
 export type OpenAction = 'open' | 'new' | 'reload';
@@ -118,6 +119,13 @@ export type McpSettings = { enabled: boolean; clients: { name: string }[]; launc
 // Codex, which share ~/.codex/config.toml. `skill` saves the ImageFlow templates agent skill as an archive.
 export type McpClientTarget = 'claude' | 'codex' | 'skill';
 export type ProjectChange = Result<ProjectSummary> | { building: true };
+/**
+ * The ImageFlow plugin in Lightroom's Modules folder against the one this app bundles (ADR 0011): not there, the same,
+ * older, newer, a link to a development copy, or a version that cannot be read.
+ */
+export type LightroomPluginStatus = { state: 'missing' | 'current' | 'outdated' | 'newer' | 'linked' | 'unknown'; installed?: string; available?: string };
+/** What Settings shows for Lightroom Classic: the plugin, and the catalog and plugin version of a running Lightroom. */
+export type LightroomState = { plugin: LightroomPluginStatus; connection?: { catalog?: string; plugin: string } };
 // `file` imports into the files/ registry for file parameters, offering the parameter's `accept` extensions. Without a
 // kind, `accept` lists the extensions of the template's file parameters: files of those types import as files.
 export type ImportRequest = {
@@ -126,7 +134,7 @@ export type ImportRequest = {
 
 export type RecentDocument = { id: string; path: string; title: string; openedAt: string; available: boolean; cover?: string };
 
-export type SourceAction = { action: 'retry' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump' | 'import' | 'rename'; spread?: string; key?: string; keys?: string[]; accept?: string[]; paths?: string[]; name?: string };
+export type SourceAction = { action: 'retry' | 'launch' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump' | 'import' | 'rename'; spread?: string; key?: string; keys?: string[]; accept?: string[]; paths?: string[]; name?: string };
 
 export type ContextMenuItem = import('./commands').RegisteredCommand | { command: import('./commands').RegisteredCommand; value?: string; label?: string; enabled?: boolean; checked?: boolean; items?: ContextMenuItem[] } | { type: 'separator' };
 export type ContextMenuResult = { command: import('./commands').RegisteredCommand; value?: string };
@@ -210,6 +218,10 @@ export type DesktopApi = {
   mcpSettings(enabled?: boolean): Promise<Result<McpSettings>>;
   onMcpChanged(listener: (settings: McpSettings) => void): () => void;
   installMcp(target: McpClientTarget): Promise<Result<string>>;
+  // The Lightroom Classic plugin (ADR 0011): its state, changes to it, and installing or updating it from Settings.
+  lightroomState(): Promise<Result<LightroomState>>;
+  onLightroomChanged(listener: (state: LightroomState) => void): () => void;
+  installLightroomPlugin(): Promise<Result<{ state: LightroomState; message: string }>>;
   // `footprint`: the layouts the agent's save changes, or the whole book (agent-footprint.ts).
   onAgentLease(listener: (id: string, footprint?: import('./agent-footprint').AgentFootprint) => AgentLeaseReply): () => void;
   onAgentRelease(listener: () => void): () => void;

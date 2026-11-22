@@ -37,7 +37,7 @@ import { basename, dirname, extname, join, isAbsolute, parse } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, renderOrigins, settingsURL, startURL, starterURL, assetsURL, templatesURL } from '../src/desktop';
-import type { AgentLeaseReply, BookMenuState, Command, ImportRequest, OpenAction, ProjectSummary, Result, MarkdownAction, McpClientTarget, McpSettings, SourceAction, SyncAction, TemplateInfo } from '../src/desktop';
+import type { AgentLeaseReply, BookMenuState, Command, ImportRequest, LightroomState, OpenAction, ProjectSummary, Result, MarkdownAction, McpClientTarget, McpSettings, SourceAction, SyncAction, TemplateInfo } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
 import { renderPolicy } from './csp';
 import { assetTypes, loadProject, renderData, TemplateCompileError } from './project';
@@ -80,6 +80,14 @@ import { configureRenditionCache, pruneRenditions } from './rendition-cache';
 import { configureProxyStore, proxyStore } from './proxy-store';
 import { decodes, readTemplatePreview } from './template-preview-file';
 import { previewTypes } from '../src/template-preview';
+import { LightroomBridge } from './lightroom/bridge';
+import type { SentPhotos } from './lightroom/bridge';
+import { parseResult, selectionResultSchema } from './lightroom/protocol';
+import type { LightroomLocator } from '../src/source-locator';
+import { launchLightroom } from './lightroom/launch';
+import { defaultModules, installMessage, installPlugin, lightroomRunning, pluginStatus } from './lightroom/plugin-install';
+import { lightroomProvider } from './providers/lightroom';
+import { registerProvider } from './providers';
 
 const presentationWindows = new PresentationWindows({
   hidden: () => hidden,
@@ -111,6 +119,9 @@ const quitReplies = new Map<string, { sender: number; resolve: (allowed: boolean
 let quitReady = false;
 let quitCleanup: Promise<void> | undefined;
 let connectionSettingsQueue = Promise.resolve();
+// The loopback bridge to the ImageFlow plugin in Lightroom Classic (ADR 0011). Its file is in this profile's folder, so
+// a run with another profile (the smoke tests) never writes into the one the plugin reads.
+let lightroom: LightroomBridge | undefined;
 let cache: string;
 let settings: SettingsStore;
 let recents: RecentDocuments;
@@ -1141,6 +1152,7 @@ function installMenu() {
       else if (id === 'reveal-book') shell.showItemInFolder(document.book.folder);
       else if (id === 'rename-book' || id === 'move-book') void moveBook(document, id === 'rename-book').catch((error) => report(document.window, error));
       else if (id === 'revert-opened') void revertOpened(document).catch((error) => report(document.window, error));
+      else if (id === 'import-lightroom') void importFromLightroom(document).catch((error) => report(document.window, error));
       else if (command) {
         const target = command.startsWith('photos-') && owner === assetsWindows.get(document)?.window ? assetsWindows.get(document)!.window : document.window;
         target.webContents.send(channels.command, command);
@@ -1166,7 +1178,7 @@ function installMenu() {
       { type: 'separator' }, { role: 'close' }, registered('save-copy'), registered('rename-book'), registered('move-book'),
       { label: 'Revert To', submenu: [registered('revert-opened'), registered('reload')] },
       { type: 'separator' },
-      registered('import'),
+      registered('import'), registered('import-lightroom'),
       registered('export'), { type: 'separator' },
       { id: 'open-sync-folder', label: 'Open from Sync Folder…', click: (_item, owner) => {
         const window = owner ? BrowserWindow.fromId(owner.id) ?? undefined : undefined;
@@ -1330,6 +1342,84 @@ function publishUpdates() {
   for (const owner of updateWindows()) owner.webContents.send(channels.updateChanged, updateStateFor(owner));
 }
 
+// The plugin ships beside the app in development and in Contents/Resources in a package. IMAGEFLOW_LIGHTROOM_MODULES
+// points a development build at another Modules folder, so trying the install never touches Lightroom's own.
+const lightroomLocations = () => ({ bundled: join(app.isPackaged ? process.resourcesPath : app.getAppPath(), 'ImageFlow.lrplugin'),
+  modules: (!app.isPackaged && process.env.IMAGEFLOW_LIGHTROOM_MODULES) || defaultModules() });
+async function lightroomState(): Promise<LightroomState> {
+  const connection = lightroom?.connection;
+  return { plugin: await pluginStatus(lightroomLocations()),
+    ...(connection ? { connection: { plugin: connection.plugin.version, ...(connection.catalog.name ? { catalog: connection.catalog.name } : {}) } } : {}) };
+}
+async function publishLightroom() {
+  if (!settingsWindow || settingsWindow.isDestroyed()) return;
+  const state = await lightroomState().catch(() => undefined);
+  if (state && settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.webContents.send(channels.lightroomChanged, state);
+}
+
+/**
+ * Adds Lightroom Classic photos to a book (ADR 0011): from Send to ImageFlow in Lightroom, or from Import from
+ * Lightroom Classic… here. Both end in the same host step as a file import; photos the book holds already are
+ * reported, not added again. The editor shows that it is busy while the previews are rendered.
+ */
+async function importLightroomPhotos(document: DocumentSession, { catalog, photos }: SentPhotos) {
+  const locators: LightroomLocator[] = photos.map(({ uuid, name }) => ({ provider: 'lightroom', catalog, uuid, ...(name ? { name } : {}) }));
+  const result = await document.run(async () => {
+    document.notify({ building: true });
+    try { return await document.importProvided(locators, 'Import from Lightroom Classic'); }
+    catch (error) { document.notify({ error: errorMessage(error) }); throw error; }
+  });
+  if ('error' in result) throw new Error(result.error);
+  document.notify({ value: result.value.summary });
+  if (!document.window.isDestroyed()) document.window.webContents.send(channels.appNotice, importFeedback(result.value.imported.length, result.value.counts));
+}
+
+/** Import from Lightroom Classic…: the photos selected in Lightroom now. */
+async function importFromLightroom(document: DocumentSession) {
+  if (!lightroom?.connection) {
+    const answer = await dialog.showMessageBox(document.window, { type: 'info', message: 'Lightroom Classic is not connected',
+      detail: 'Open Lightroom Classic with the ImageFlow plugin installed (Settings → General → Lightroom), select the photos to add, and choose Import from Lightroom Classic… again.',
+      buttons: ['Open Lightroom Classic', 'Lightroom Settings…', 'Cancel'], defaultId: 0, cancelId: 2 });
+    if (answer.response === 0) await launchLightroom();
+    else if (answer.response === 1) showSettings('general');
+    return;
+  }
+  const selection = parseResult(selectionResultSchema, await lightroom.request('selection', {}, { timeout: 30_000 }), 'selection');
+  if (!selection.photos.length) {
+    await dialog.showMessageBox(document.window, { type: 'info', message: 'No photos are selected in Lightroom Classic',
+      detail: 'Select the photos to add in Lightroom Classic, then choose Import from Lightroom Classic… again. Videos are left out.', buttons: ['OK'] });
+    return;
+  }
+  await importLightroomPhotos(document, selection);
+}
+
+/**
+ * Send to ImageFlow from Lightroom: the photos go into the book in front, else the one used last. Without an open book
+ * ImageFlow asks for one; the plugin was answered already, so the question can wait for the user.
+ */
+async function receiveLightroomPhotos(sent: SentPhotos) {
+  if (quitting || preparingQuit) return;
+  app.focus({ steal: true });
+  let document = focusedDocument() ?? [...documents.values()].filter((open) => !open.closing).at(-1);
+  if (!document || document.closing) {
+    showStart();
+    const owner = startWindow ?? undefined;
+    const count = sent.photos.length === 1 ? 'one photo' : sent.photos.length + ' photos';
+    const options = { type: 'question' as const, message: 'Open a book for ' + count + ' from Lightroom Classic',
+      detail: 'No book is open. Choose the book to add them to.', buttons: ['Open Book…', 'Cancel'], defaultId: 0, cancelId: 1 };
+    const answer = owner ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options);
+    if (answer.response !== 0) return;
+    const choice = owner ? await dialog.showOpenDialog(owner, { title: 'Open ImageFlow Book', properties: ['openFile'], filters: [{ name: 'ImageFlow Book', extensions: ['imageflow'] }] })
+      : await dialog.showOpenDialog({ title: 'Open ImageFlow Book', properties: ['openFile'], filters: [{ name: 'ImageFlow Book', extensions: ['imageflow'] }] });
+    if (choice.canceled || !choice.filePaths[0]) return;
+    document = await openDocument(choice.filePaths[0]);
+    if (!document) return;
+  }
+  focus(document.window);
+  if (document.book.readOnly) throw new Error('This book is read-only. Use New Project to make an editable copy, then send the photos again.');
+  await importLightroomPhotos(document, sent);
+}
+
 function publishMcpSettings() {
   const value = mcpSettings();
   for (const owner of appWindows()) if (!owner.isDestroyed()) owner.webContents.send(channels.mcpChanged, value);
@@ -1421,6 +1511,12 @@ void app.whenReady().then(async () => {
   configurePersistence(join(app.getPath('userData'), 'persistence'));
   // Sync proxies of photos whose originals are not on this Mac (ADR 0010); kept with the other caches, never in books.
   void configureProxyStore(join(app.getPath('userData'), 'Cache', 'proxies')).catch((error) => console.warn('ImageFlow could not open the sync proxy cache', error));
+  // Photos of a Lightroom Classic catalog are read through the plugin; until it connects they are offline.
+  lightroom = new LightroomBridge({ file: join(app.getPath('userData'), 'lightroom-bridge.json'), version: app.getVersion() });
+  registerProvider(lightroomProvider(lightroom));
+  lightroom.onConnection(() => void publishLightroom());
+  lightroom.onSend((sent) => void receiveLightroomPhotos(sent).catch((error) => report(lastDocument?.window ?? startWindow, error)));
+  void lightroom.start().catch((error) => console.warn('ImageFlow could not start the Lightroom bridge:', errorMessage(error)));
   nativeTheme.themeSource = settings.value.appearance;
   const checkFeed = () => checkUpdateFeed({ baseURL: updateTestConfiguration?.baseURL ?? updateBaseURL,
     channel: settings.value.updateChannel, platform: process.platform + '-' + process.arch, installed: app.getVersion(),
@@ -1564,6 +1660,8 @@ void app.whenReady().then(async () => {
     quitCleanup ??= (async () => {
       await connectionSettingsQueue;
       await disableMcp();
+      // The plugin sees the bridge file go and waits for the next run of ImageFlow.
+      await lightroom?.stop().catch(() => {});
       await Promise.allSettled([...opening.values()]);
       await Promise.allSettled([...closing]);
       await Promise.all([settings.settled(), recents.settled()]);
@@ -1814,6 +1912,13 @@ void app.whenReady().then(async () => {
     let next = document.book;
     let message: string | undefined;
     if (request.action === 'retry') return { summary: activate(await document.reload()) };
+    if (request.action === 'launch') {
+      // Offered only where the photo's provider offers it (`SourceProvider.repairs`). Once the plugin connects, the
+      // provider's watch reports the photos and the book observes them again: nothing waits here.
+      if (!chosen.some(({ key }) => document.book.sources?.[key]?.repairs?.includes('launch'))) throw new Error('These assets cannot be brought back by opening an app.');
+      await launchLightroom();
+      return { summary: document.summary, message: lightroom?.connection ? undefined : 'Opening Lightroom Classic. Its photos come back once the ImageFlow plugin connects.' };
+    }
     // Photos without a file are materialized on the way; one whose source cannot produce it stays as it was.
     const unproduced: string[] = [];
     const collect = (chosenKeys?: readonly string[]) => document.copying(owner, (options) =>
@@ -2049,6 +2154,22 @@ void app.whenReady().then(async () => {
     if (!settingsOwner(event)) return { error: 'Request is only available to Settings.' };
     try { return { value: await installMcp(target) }; }
     catch (error) { return { error: errorMessage(error) }; }
+  });
+  ipcMain.handle(channels.lightroom, async (event) => {
+    if (!settingsOwner(event)) return { error: 'Request is only available to Settings.' };
+    try { return { value: await lightroomState() }; }
+    catch (error) { return { error: errorMessage(error) }; }
+  });
+  ipcMain.handle(channels.lightroomInstall, async (event) => {
+    if (!settingsOwner(event)) return { error: 'Request is only available to Settings.' };
+    try {
+      const locations = lightroomLocations();
+      const before = await pluginStatus(locations);
+      const after = await installPlugin(locations);
+      // A running Lightroom keeps the plugin it loaded at start until it is restarted.
+      const running = !!lightroom?.connection || await lightroomRunning();
+      return { value: { state: await lightroomState(), message: installMessage(before, after, running) } };
+    } catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.on(channels.agentLeaseReply, (event, id: string, reply: AgentLeaseReply) => { editorOwner(event)?.replyLease(id, reply); });
   ipcMain.handle(channels.import, (event, id: string, request: ImportRequest) => fromEditor(event, async (document) => {

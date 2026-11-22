@@ -10,7 +10,7 @@ import { sourceEntries, sourceFile, sourceFolderName, sourceProvider } from './s
 import { useListSelection } from './list-selection';
 import { fileExtensionMime, fileMime, photoMime, textMime } from './source-items';
 import type { SourceRef } from './source-items';
-import type { SourceKind } from './source-locations';
+import type { SourceKind, SourceRepair } from './source-locations';
 import { assetMenu, assetMenuState, assetActions } from './asset-menu';
 import { assetPageLabels, assetUsage } from './asset-usage';
 import { ActionMenu } from './ActionMenu';
@@ -53,7 +53,10 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const placements = (entry: typeof entries[number]) => usage[entry.kind === 'markdown' ? 'text' : entry.kind][entry.id] ?? [];
   const unavailable = (key: string) => !!summary.sources?.[key] && summary.sources[key].state !== 'available';
   const linked = entries.filter((entry) => sourceProvider(entry) !== 'package').length;
-  const missing = entries.filter((entry) => unavailable(entry.key)).length;
+  // Locate Folder… finds files; a photo of an app that is not running is brought back by opening the app instead.
+  const offers = (key: string, repair: SourceRepair) => unavailable(key) && (summary.sources![key].repairs ?? ['locate', 'locate-folder']).includes(repair);
+  const missing = entries.filter((entry) => offers(entry.key, 'locate-folder')).length;
+  const launchable = entries.filter((entry) => offers(entry.key, 'launch'));
   async function act(request: SourceAction) {
     setBusy(true); setError(undefined); setNotice('');
     try {
@@ -192,7 +195,8 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
     </div>
     <footer className="asset-status-bar">
       <span className="muted">{shown.length} of {entries.length}{chosen.length ? ' · ' + chosen.length + ' selected' : ''}</span>
-      {missing > 0 && <button disabled={locked} onClick={() => void act({ action: 'locate-folder', keys: everyKey(({ key }) => unavailable(key)) })}>Locate Folder…</button>}
+      {missing > 0 && <button disabled={locked} onClick={() => void act({ action: 'locate-folder', keys: everyKey(({ key }) => offers(key, 'locate-folder')) })}>Locate Folder…</button>}
+      {launchable.length > 0 && <button disabled={locked} onClick={() => void act({ action: 'launch', keys: launchable.map(({ key }) => key) })}>Open Lightroom Classic</button>}
       {linked > 0 && <button disabled={locked || (chosen.length > 0 && !copyCount)} onClick={() => void act({ action: 'collect', keys: copyKeys })}>
         {chosen.length ? 'Copy ' + copyCount + ' Selected into Book' : 'Copy All ' + linked + ' into Book'}</button>}
     </footer>

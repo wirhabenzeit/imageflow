@@ -32,6 +32,8 @@ export function assetMenu(summary: ProjectSummary, keys: string[], place = false
     ...(chosen.length === 1 && chosen[0].kind === 'markdown' ? [{ command: 'asset-open' as const, enabled: !missing }] : []),
     // Locate Folder… finds every missing asset in the folder chosen, whatever is selected (F-045).
     // Retry reads them again; it is the one repair for a photo whose app or server is not reachable now.
+    // An app that is not running is opened; its photos come back once it connects (Lightroom Classic, ADR 0011).
+    ...(offers('launch') ? [{ command: 'asset-launch' as const }] : []),
     ...(missing && !offers('locate') && !offers('locate-folder') ? [{ command: 'asset-retry' as const }] : []),
     ...(chosen.length === 1 && offers('locate') ? [{ command: 'asset-locate' as const }] : []),
     ...(offers('locate-folder') ? [{ command: 'asset-locate-folder' as const }] : []),
@@ -43,4 +45,4 @@ export function assetMenuState(busy: boolean): BookMenuState {
   return { ...emptyMenuState, document: true, writable: true, busy };
 }
 export const assetActions = { 'asset-reveal': 'reveal', 'asset-copy': 'copy', 'asset-remove': 'remove', 'asset-locate': 'locate',
-  'asset-locate-folder': 'locate-folder', 'asset-open': 'open', 'asset-place': 'place', 'asset-retry': 'retry' } as const;
+  'asset-locate-folder': 'locate-folder', 'asset-open': 'open', 'asset-place': 'place', 'asset-retry': 'retry', 'asset-launch': 'launch' } as const;
