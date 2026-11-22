@@ -113,6 +113,8 @@ export class LightroomBridge {
 
   /** The address the plugin reaches, once started. */
   get address() { return this.server ? { host: '127.0.0.1', port: this.port } : undefined; }
+  /** Whether a poll of the plugin's is held now, waiting for a job. */
+  get holding() { return !!this.poll; }
   /** The connected plugin and the catalog it has open, or undefined while none is connected. */
   get connection(): LightroomConnection | undefined { return this.current; }
 

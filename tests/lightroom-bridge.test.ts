@@ -14,7 +14,7 @@ import { catalogId, FakeLightroom, otherCatalogId } from './lightroom-fake';
 async function setup(t: { after: (fn: () => Promise<void>) => void }, options: Partial<ConstructorParameters<typeof LightroomBridge>[0]> = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'if-lr-bridge-')));
   const file = join(root, 'ImageFlow', 'lightroom-bridge.json');
-  const bridge = new LightroomBridge({ file, version: '1.0.0-test', hold: 300, grace: 1500, closeGrace: 200, ...options });
+  const bridge = new LightroomBridge({ file, version: '1.0.0-test', hold: 300, grace: 5000, closeGrace: 200, ...options });
   await bridge.start();
   const plugins: FakeLightroom[] = [];
   const plugin = () => { const fake = new FakeLightroom(file); plugins.push(fake); return fake; };
@@ -120,7 +120,8 @@ test('jobs reach a long poll and results come back; a plugin that does not answe
 });
 
 test('a plugin that quits or breaks off goes offline with its jobs, and reconnecting brings it back', async (t) => {
-  const { bridge, plugin, file } = await setup(t);
+  // Polls are held long enough that the crash below always breaks a held one; between polls the grace applies.
+  const { bridge, plugin, file } = await setup(t, { hold: 10_000 });
   const fake = plugin();
   let changes = 0;
   bridge.onConnection(() => changes++);
@@ -141,6 +142,7 @@ test('a plugin that quits or breaks off goes offline with its jobs, and reconnec
   assert.equal(await waited, true);
   assert.equal(connectionOf(bridge)?.catalog.id, otherCatalogId);
   // A crash: the held poll's connection breaks and no request follows.
+  await until(() => bridge.holding);
   await again.quit(true);
   await until(() => !bridge.connection, 2000);
   assert.equal(changes, 4, 'connected, quit, connected, gone');

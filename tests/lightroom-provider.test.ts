@@ -27,7 +27,7 @@ import './persistence-root';
 
 async function setup(t: { after: (fn: () => Promise<void>) => void }) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'if-lr-provider-')));
-  const bridge = new LightroomBridge({ file: join(root, 'bridge.json'), version: 'test', hold: 300, grace: 1500, closeGrace: 200 });
+  const bridge = new LightroomBridge({ file: join(root, 'bridge.json'), version: 'test', hold: 300, grace: 5000, closeGrace: 200 });
   await bridge.start();
   const provider = lightroomProvider(bridge);
   const fakes: FakeLightroom[] = [];
@@ -190,6 +190,8 @@ test('watch reports changed photos, and every photo when Lightroom goes away or 
   assert.deepEqual(reported.shift(), ['a', 'b', 'again'], 'connected: observed again, so offline photos come back');
   await plugin.changes([uuid(1)]);
   assert.deepEqual(reported.shift(), ['a', 'again']);
+  // A crash breaks the held poll; between polls the bridge's grace would apply instead.
+  await until(() => bridge.holding);
   await plugin.quit(true);
   await until(() => reported.length === 1, 2000);
   assert.deepEqual(reported.shift(), ['a', 'b', 'again']);
