@@ -103,6 +103,7 @@ const sidebar: DefaultTheme.Sidebar = {
         { text: '0008 Baseline freeze at release', link: '/decisions/0008-baseline-freeze-at-release' },
         { text: '0009 Page templates', link: '/decisions/0009-page-templates' },
         { text: '0010 Sync, revisions and cloud assets', link: '/decisions/0010-sync-revisions-and-cloud-assets' },
+        { text: '0011 Lightroom Classic integration', link: '/decisions/0011-lightroom-classic' },
       ],
     },
     {
