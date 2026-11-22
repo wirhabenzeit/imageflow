@@ -957,11 +957,19 @@ export class DocumentSession {
   private async runExport(owner: BrowserWindow, job: AbortController, surface?: 'cover') {
     const before = await this.projectSession.inputs.capture();
     const privateCache = await mkdtemp(join(this.cache, 'export-'));
+    const progress = (stage: string) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage); };
     try {
-      const book = await loadProject(this.book.folder, privateCache, true, true);
+      // Placed photos without a file are materialized first, where their provider can produce them now (ADR 0011, §4):
+      // the export prints them from full-resolution originals instead of as proofs. Cancel stops it between photos.
+      const book = await loadProject(this.book.folder, privateCache, true, true, { signal: job.signal,
+        progress: ({ done, total }) => { if (total) progress(done < total ? 'Preparing originals: ' + done + ' of ' + total + '…' : 'Preparing export…'); } });
       if (job.signal.aborted) return null;
       const loaded = await this.projectSession.inputs.capture();
       if (before.revision !== loaded.revision || before.observation !== loaded.observation) throw new Error('Sources changed while preparing export. Please retry.');
+      // An original made from a revision the open book has not seen yet (the photo changed just before the export, and
+      // its provider's watch has not reported it) would print another version than the one checked and shown.
+      const facts = await this.factsOf(this.book);
+      if (Object.entries(book.materialized ?? {}).some(([id, revision]) => facts.get(id)?.revisions?.revision !== revision)) throw new Error('Sources changed while preparing export. Please retry.');
       const fileName = bookName(book.folder).normalize('NFC').replace(/[^\p{L}\p{M}\p{N} _-]/gu, '-').slice(0, 80) + (surface === 'cover' ? ' - Cover' : '') + '.pdf';
       const { canceled, filePath } = await dialog.showSaveDialog(owner, {
         title: surface === 'cover' ? 'Export Cover PDF' : 'Export PDF', defaultPath: join(app.getPath('documents'), fileName),
@@ -970,7 +978,6 @@ export class DocumentSession {
       if (canceled || !filePath || owner.isDestroyed() || job.signal.aborted) return null;
       const id = randomUUID();
       this.renders.set(id, { book: this.marked(book), mode: 'export', network: () => this.originsFor(book) });
-      const progress = (stage: string) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage); };
       try {
         const fonts = bundledFontNames(book.assets.files);
         const { bytes, warnings, errors } = await printBook(renderOrigin + '/render/' + id + (surface === 'cover' ? '?view=cover' : ''), fonts, job.signal, progress, surface);

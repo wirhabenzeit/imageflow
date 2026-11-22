@@ -1,11 +1,12 @@
 import { constants } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import sharp from 'sharp';
 import { z } from 'zod';
 import { fileSourceOf } from '../src/source-locations';
 import type { PhotoSourceEntry, SourceEntry, SourceRepair, SourceState, SourceStatus } from '../src/source-locations';
+import { locatorKindOf } from '../src/source-locator';
 import type { Locator } from '../src/source-locator';
 import { sourceBookKey } from './source-access';
 import { providerOf } from './providers';
@@ -28,6 +29,11 @@ export { originalPath, within } from './providers/files';
 // only: a photo whose provider reports facts is the host's other path (desktop/provided-photos.ts), and is answered
 // here as available without anything stored.
 const photoRef = (source: PhotoSourceEntry): SourceRef<Locator> => ({ id: source.id, locator: source.locator });
+// A photo's full-resolution materialization is recorded beside its other entries, under its own key, so neither the
+// editor's reads nor a stand-in for an unavailable photo ever take it for a snapshot of a file. Its `path` is the
+// locator it was made for: another locator (the photo relocated) is another original.
+const materializedKey = (source: PhotoSourceEntry) => 'full:' + source.key;
+const locatorKey = (locator: Locator) => locator.provider + ':' + locatorKindOf(locator).key(locator);
 type ObservedSource = ObservedFile | { state: 'available'; facts: true } | { state: 'offline' | 'needs-sign-in'; problem: string };
 const asObservedSource = (observed: Observed): ObservedSource => observed.state !== 'available' ? observed
   : observed.file !== undefined ? { state: 'available', revisions: observed.revisions, modified: observed.modified ?? new Date(0).toISOString(), file: observed.file }
@@ -127,7 +133,7 @@ export class SourceStore {
       const observed = options.observed ? asObservedSource(options.observed) : await observeSource(folder, source);
       if (observed.state !== 'available') return await this.unavailable(source, observed, options);
       // A provider without a file: its facts and preview are recorded elsewhere, and nothing is stored here.
-      if ('facts' in observed) return { status: { ...source, state: 'available', previewOnly: true } };
+      if ('facts' in observed) return { status: { ...source, state: 'available' } };
       const { file: actual, revisions: { revision } } = observed;
       // Exports read every photo, owned or linked, from a private copy that lives as long as the job. Checks don't pin.
       const privatePin = options.pin && source.kind === 'photo';
@@ -224,6 +230,67 @@ export class SourceStore {
     const repairs = source.kind === 'photo' ? providerOf(source.locator).repairs(state) : ['locate', 'locate-folder'] as const;
     return repairs.length ? { repairs: [...repairs] } : {};
   }
+  /**
+   * The full-resolution original of a photo without a file that is still valid for `revision` (ADR 0011, Where renders
+   * are stored): recorded against that revision for the photo's current locator, and still the file that was stored.
+   * Undefined when there is none, or when the revision moved since: the photo is then materialized again.
+   */
+  async materialization(source: PhotoSourceEntry, revision: string): Promise<StoredSource | undefined> {
+    const stored = this.saved[materializedKey(source)];
+    if (!stored?.digest || stored.path !== locatorKey(source.locator) || stored.observation !== revision) return undefined;
+    const intact = await stat(stored.snapshot, { bigint: true }).then((info) => within(join(this.root, 'content'), stored.snapshot) && stamp(info) === stored.snapshotObservation, () => false);
+    if (!intact) return undefined;
+    this.pins.add(stored.snapshot);
+    return stored;
+  }
+  /**
+   * A new folder for a provider to write originals into, inside the source cache so a checked file moves into
+   * `content/` by a rename. Its caller removes it, with whatever is left in it.
+   */
+  async staging() {
+    const directory = join(this.root, 'staging');
+    await mkdir(directory, { recursive: true });
+    return mkdtemp(join(directory, 'materialize-'));
+  }
+  /**
+   * Takes a file a provider materialized for `revision` into the source cache: hashed, checked to be one still JPEG,
+   * PNG or WebP whose pixels decode, moved to `content/<sha256>.<ext>` and recorded against the revision. The file is
+   * the host's from then on; one that fails a check is left where it is for the caller to remove.
+   */
+  async keepMaterialized(source: PhotoSourceEntry, revision: string, file: string): Promise<StoredSource> {
+    const digest = await hashFile(file);
+    const metadata = await sharp(file, { failOn: 'warning' }).metadata();
+    const extension = ({ jpeg: '.jpg', png: '.png', webp: '.webp' } as Record<string, string>)[metadata.format ?? ''];
+    if (!extension || !metadata.width || !metadata.height || (metadata.pages ?? 1) > 1) throw new Error('Expected a still JPEG, PNG or WebP image.');
+    await sharp(file, { failOn: 'warning' }).resize({ width: 1, height: 1 }).toBuffer();
+    const turned = (metadata.orientation ?? 1) >= 5;
+    const directory = join(this.root, 'content');
+    const snapshot = join(directory, digest + extension);
+    this.pins.add(snapshot);
+    if (!await hashFile(snapshot).then((value) => value === digest, () => false)) await rename(file, snapshot);
+    const stored: StoredSource = { digest, snapshot, path: locatorKey(source.locator), observation: revision, snapshotObservation: stamp(await stat(snapshot, { bigint: true })),
+      width: turned ? metadata.height : metadata.width, height: turned ? metadata.width : metadata.height };
+    this.saved[materializedKey(source)] = stored; this.version++;
+    return stored;
+  }
+  /**
+   * A private copy of a materialized original in an export job's `pinned-sources`, as every file photo of an export is
+   * read (ADR 0005): the job keeps printing these bytes whatever happens to the cache meanwhile. Checked against the
+   * digest it was recorded with.
+   */
+  async pinMaterialized(stored: StoredSource, cache: string) {
+    const requested = join(cache, 'pinned-sources');
+    await mkdir(requested, { recursive: true });
+    const pinned = join(await realpath(requested), stored.digest + extname(stored.snapshot));
+    if (await hashFile(pinned).then((value) => value === stored.digest, () => false)) return pinned;
+    const temporary = pinned + '.' + randomUUID() + '.tmp';
+    try {
+      await copyFile(stored.snapshot, temporary, constants.COPYFILE_FICLONE);
+      if (await hashFile(temporary) !== stored.digest) throw new Error('The stored original changed.');
+      await rename(temporary, pinned);
+    } finally { await rm(temporary, { force: true }); }
+    return pinned;
+  }
   /** The revision a source had when it was last read; what its provider's watch compares the source with. */
   observed(key: string) { return this.saved[key]?.observation; }
   private digests = Promise.resolve();
@@ -273,6 +340,12 @@ async function prune(recentFolders: string[], maximumBytes: number) {
     const path = join(directory, name);
     const info = await lstat(path).catch(() => undefined);
     if (info?.isFile() && info.mtimeMs < Date.now() - 24 * 60 * 60 * 1000) await rm(path, { force: true });
+  }
+  // Materialization staging folders a crash left behind (SourceStore.staging); a running one is younger than a day.
+  for (const name of await readdir(join(root, 'staging')).catch(() => [] as string[])) {
+    const path = join(root, 'staging', name);
+    const info = await lstat(path).catch(() => undefined);
+    if (info?.isDirectory() && info.mtimeMs < Date.now() - 24 * 60 * 60 * 1000) await rm(path, { recursive: true, force: true });
   }
   const active = await Promise.all(stores.values());
   const pins = new Set(active.flatMap((store) => [...store.pins]));
