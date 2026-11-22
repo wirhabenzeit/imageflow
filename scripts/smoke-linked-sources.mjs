@@ -108,7 +108,8 @@ try {
     const owner = BrowserWindow.fromId(id);
     const send = owner.webContents.send.bind(owner.webContents);
     owner.webContents.send = (channel, ...args) => {
-      if (channel === 'project:progress' && String(args[0]).startsWith('Rendering spreads')) {
+      // Progress is a TaskProgress ({ text, done, total, cancel }) or, from older senders, a string.
+      if (channel === 'project:progress' && String(args[0]?.text ?? args[0]).startsWith('Rendering spreads')) {
         fs.renameSync(replacement, photo);
         owner.webContents.send = send;
       }
@@ -252,7 +253,7 @@ try {
   });
   await unapprovedRow.click({ button: 'right' });
   await accessWindow.waitForFunction(() => !document.querySelector('[data-source="file:notchosen"]')?.textContent.includes('Locate to approve'));
-  assert.deepEqual(await app.evaluate(() => globalThis.assetMenuLabels), ['Quick Look', 'Choose Files in a Spread’s Settings', 'Rename… (Copy into Book First)', '', 'Show in Finder', 'Locate…', 'Locate Folder…', 'Copy into Book', '', 'Remove from Book']);
+  assert.deepEqual(await app.evaluate(() => globalThis.assetMenuLabels), ['Quick Look', 'Choose Files in a Spread’s Settings', 'Rename… (Copy into Book First)', '', 'Show in Finder', 'Locate…', 'Locate Folder…', 'Copy into Book…', '', 'Remove from Book']);
   assert.deepEqual((await current(page)).history, historyBeforeLocate, 'Locate does not add an empty Undo step');
   await accessWindow.close();
   // Locate publishes a new revision to the open book. Verify that very frame can read the approved file.

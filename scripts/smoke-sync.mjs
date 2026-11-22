@@ -4,7 +4,7 @@
 // change in a trusted book. Both "Macs" are windows of one app, each with its own book and the same sync folder.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
@@ -121,7 +121,12 @@ try {
   await waitForPrompt((prompt) => prompt.message === trustQuestion && prompt.window === laptopWindow);
   assert.equal((await current(laptop)).project.bookId, bookId);
   await statusIs(laptop, 'in-sync');
-  assert.equal((await current(laptop)).sources['photo:shore'].state, 'missing', 'owned originals stay in the sync folder');
+  // Owned originals download in the background after Open from Sync Folder (the default), and the book then shows them.
+  for (let attempt = 0; (await current(laptop)).sources['photo:shore'].state !== 'available'; attempt++) {
+    assert.ok(attempt < 400, 'owned originals download after Open from Sync Folder');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  await stat(join(laptopBook, (await current(laptop)).photoIndex.shore.path));
 
   // A normal sync: the laptop pushes a caption, the desktop pulls it and its editor reloads.
   assert.ok((await setCaption(laptop, 'shore', 'From the laptop')).value);
