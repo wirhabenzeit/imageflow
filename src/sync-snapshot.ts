@@ -3,6 +3,7 @@ import { assetsMetaSchema } from './asset-facts';
 import { canonicalJson } from './canonical-json';
 import { computeBookStateRevision } from './book-revision';
 import type { PhotoIndex, Project } from './project';
+import { fileNameOf, unlocatedPath } from './source-locator';
 
 /**
  * Immutable sync snapshots (ADR 0010, Milestone 1). A sync remote keeps two kinds of immutable record per book:
@@ -89,8 +90,8 @@ export const blobKeyPattern = /^blobs\/(?:content\/[a-f0-9]{64}|originals\/[a-f0
 /** The bytes of a state blob as stored and hashed. */
 export const encodeStateBlob = (blob: StateBlob) => new TextEncoder().encode(canonicalJson(stateBlobSchema.parse(blob)));
 
-/** The file name of a path, with either separator. */
-export const fileNameOf = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? '';
+// The file name of a path and the unlocated placeholder live with the locators that use them.
+export { fileNameOf, isUnlocatedPath, unlocatedPath, unlocatedRoot } from './source-locator';
 
 // Linked references keep their file name only, so one Mac's folder layout never reaches another.
 const linkedReference = (reference: unknown): reference is { path: string; linked: true } =>
@@ -107,14 +108,6 @@ export function portableManifests(project: Project, photos: PhotoIndex) {
     photos: mapReferences(photos, (_id, photo) => withPath(photo, fileNameOf(photo.path))) as Record<string, unknown>,
   };
 }
-
-/**
- * Where a linked source that arrived from another Mac points until it is located here: an absolute path that does not
- * exist and is never approved, keeping the original's file name so Assets shows it and Locate Folder… can match it.
- */
-export const unlocatedRoot = '/imageflow-unlocated/';
-export const unlocatedPath = (name: string) => unlocatedRoot + (fileNameOf(name).replace(/[\x00-\x1f]/g, '-') || 'original');
-export const isUnlocatedPath = (path: string) => path.startsWith(unlocatedRoot);
 
 /**
  * The manifests a pull writes: the snapshot's, except that every source still linked here keeps this Mac's own path

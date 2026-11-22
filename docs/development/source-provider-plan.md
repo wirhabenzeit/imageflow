@@ -118,7 +118,7 @@ Two findings concern the later Lightroom phase, not this one:
 
 Templates see none of this: `Photo` has no path.
 
-## The contract against three providers
+## The contract against four providers
 
 | | `package` | `linked` | Lightroom Classic | Immich (on paper, API not verified) |
 | --- | --- | --- | --- | --- |

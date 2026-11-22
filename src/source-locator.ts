@@ -39,14 +39,21 @@ export type PackageLocator = { provider: 'package'; path: string };
 /** A file anywhere else on this Mac, as an absolute path. */
 export type LinkedLocator = { provider: 'linked'; path: string };
 
-const baseName = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? '';
-// Where a linked photo from another Mac points until it is located here (see unlocatedPath in sync-snapshot.ts).
-const unlocated = (name: string) => '/imageflow-unlocated/' + (baseName(name).replace(/[\x00-\x1f]/g, '-') || 'original');
+/** The file name of a path, with either separator. */
+export const fileNameOf = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? '';
+/**
+ * Where a linked source that arrived from another Mac points until it is located here: an absolute path that does not
+ * exist and is never approved, keeping the original's file name so Assets shows it and Locate Folder… can match it.
+ */
+export const unlocatedRoot = '/imageflow-unlocated/';
+export const unlocatedPath = (name: string) => unlocatedRoot + (fileNameOf(name).replace(/[\x00-\x1f]/g, '-') || 'original');
+export const isUnlocatedPath = (path: string) => path.startsWith(unlocatedRoot);
 
 // Both read the entry's `path`; `linked` decides whose entry it is, as it does in photos.json today.
 export const packageLocator: LocatorKind<PackageLocator> = {
   provider: 'package',
-  fields: ['path'],
+  // `linked: false` is a package entry too, so the key goes with the entry when its provider changes.
+  fields: ['path', 'linked'],
   read: (entry) => typeof entry.path === 'string' && entry.linked !== true ? { provider: 'package', path: entry.path } : undefined,
   write: ({ path }) => ({ path }),
   portable: ({ path }) => ({ path }),
@@ -63,8 +70,8 @@ export const linkedLocator: LocatorKind<LinkedLocator> = {
   write: ({ path }) => ({ path, linked: true }),
   // Only that it is linked: the path is this Mac's.
   portable: () => ({ linked: true }),
-  shared: (locator) => ({ ...locator, path: baseName(locator.path) }),
-  adopt: (shared, here) => here ?? { ...shared, path: unlocated(shared.path) },
+  shared: (locator) => ({ ...locator, path: fileNameOf(locator.path) }),
+  adopt: (shared, here) => here ?? { ...shared, path: unlocatedPath(shared.path) },
   key: ({ path }) => path,
   name: (locator) => sourceFileName(locator),
 };
