@@ -80,6 +80,21 @@ local function hex(digest)
 end
 local function fingerprint(value) return hex(LrMD5.digest(encode(value))) end
 
+--- JPEG bytes without APPn and COM segments. Lightroom writes a fresh xmpMM:DocumentID and xmp:MetadataDate into
+--- every export, whatever the metadata option, so only the image data can be compared between renders.
+local function imageData(bytes)
+  if bytes:byte(1) ~= 0xFF or bytes:byte(2) ~= 0xD8 then return bytes end
+  local parts, i = { bytes:sub(1, 2) }, 3
+  while i + 3 <= #bytes do
+    local marker = bytes:byte(i + 1)
+    if marker == 0xDA then parts[#parts + 1] = bytes:sub(i) break end
+    local length = bytes:byte(i + 2) * 256 + bytes:byte(i + 3)
+    if not ((marker >= 0xE0 and marker <= 0xEF) or marker == 0xFE) then parts[#parts + 1] = bytes:sub(i, i + 1 + length) end
+    i = i + 2 + length
+  end
+  return table.concat(parts)
+end
+
 function Spike.log(entry)
   entry.t = LrDate.currentTime() -- seconds since 2001-01-01 GMT, the epoch of lastEditTime
   entry.at = LrDate.timeToUserFormat(entry.t, '%Y-%m-%d %H:%M:%S')
@@ -95,7 +110,7 @@ local function now() return LrDate.currentTime() end
 --- Runs an experiment in an async task and logs any error instead of losing it.
 function Spike.runTask(name)
   LrTasks.startAsyncTask(function()
-    local ok, err = pcall(Spike[name])
+    local ok, err = LrTasks.pcall(Spike[name])
     if not ok then
       Spike.log({ kind = 'error', experiment = name, message = tostring(err) })
       LrDialogs.message('ImageFlow Spike: ' .. name .. ' failed', tostring(err), 'critical')
@@ -117,7 +132,7 @@ local candidateKeys = {
 local function workingKeys(catalog, photos, candidates)
   local working, rejected = {}, {}
   for _, key in ipairs(candidates) do
-    local ok, result = pcall(catalog.batchGetRawMetadata, catalog, photos, { key })
+    local ok, result = LrTasks.pcall(catalog.batchGetRawMetadata, catalog, photos, { key })
     if ok and type(result) == 'table' then working[#working + 1] = key else rejected[#rejected + 1] = key .. ': ' .. tostring(result) end
   end
   return working, rejected
@@ -132,7 +147,7 @@ local function parseSize(value)
 end
 
 local function name(photo)
-  local ok, result = pcall(photo.getFormattedMetadata, photo, 'fileName')
+  local ok, result = LrTasks.pcall(photo.getFormattedMetadata, photo, 'fileName')
   return ok and result or '?'
 end
 
@@ -149,8 +164,8 @@ end
 
 local developMarkers = { 'MaskGroupBasedCorrections', 'RetouchAreas', 'GradientBasedCorrections', 'PaintBasedCorrections', 'CircularGradientBasedCorrections' }
 
-local function developInfo(photo)
-  local ok, settings = pcall(photo.getDevelopSettings, photo)
+local function developInfo(photo, before)
+  local ok, settings = LrTasks.pcall(photo.getDevelopSettings, photo)
   if not ok or type(settings) ~= 'table' then return { error = tostring(settings) } end
   local count = 0
   local present = {}
@@ -159,7 +174,27 @@ local function developInfo(photo)
     local value = settings[marker]
     if value ~= nil then present[marker] = type(value) == 'table' and #value or tostring(value) end
   end
-  return { hash = fingerprint(settings), keys = count, present = present }
+  -- Which top-level develop settings changed since the last snapshot, so a run needs no markers to be readable.
+  local changedSettings
+  if before and before.settings then
+    changedSettings = {}
+    local seen = {}
+    for key, value in pairs(settings) do
+      seen[key] = true
+      if encode(value) ~= encode(before.settings[key]) then changedSettings[#changedSettings + 1] = key end
+    end
+    for key in pairs(before.settings) do
+      if not seen[key] then changedSettings[#changedSettings + 1] = key end
+    end
+    table.sort(changedSettings)
+  end
+  return { hash = fingerprint(settings), keys = count, present = present, changedSettings = changedSettings, settings = settings }
+end
+
+--- Log entry for a develop snapshot, without the full settings table.
+local function developSummary(info)
+  if not info then return nil end
+  return { hash = info.hash, keys = info.keys, present = info.present, changedSettings = info.changedSettings, changed = info.changed, error = info.error }
 end
 
 function Spike.watchStart()
@@ -175,7 +210,7 @@ function Spike.watchStart()
   local ticks, spent, slowest = 0, 0, 0
   while Spike.state.watching and Spike.state.generation == generation do
     local started = now()
-    local ok, data = pcall(catalog.batchGetRawMetadata, catalog, photos, keys)
+    local ok, data = LrTasks.pcall(catalog.batchGetRawMetadata, catalog, photos, keys)
     local took = now() - started
     ticks, spent = ticks + 1, spent + took
     if took > slowest then slowest = took end
@@ -189,12 +224,13 @@ function Spike.watchStart()
           local before = previous[uuid]
           if not before then
             develop[uuid] = developInfo(photo)
-            Spike.log({ kind = 'initial', uuid = uuid, file = name(photo), values = row, develop = develop[uuid] })
+            Spike.log({ kind = 'initial', uuid = uuid, file = name(photo), values = row, develop = developSummary(develop[uuid]) })
           else
             local changed = {}
             local any = false
             for _, key in ipairs(keys) do
-              if row[key] ~= before[key] then
+              -- Compare encoded values: croppedDimensions is a table, a new one on every call.
+              if encode(row[key]) ~= encode(before[key]) then
                 changed[key] = { before[key], row[key] }
                 any = true
               end
@@ -203,13 +239,13 @@ function Spike.watchStart()
               local visual = changed.editCount or changed.lastEditTime or changed.croppedDimensions
               local info
               if visual then
-                info = developInfo(photo)
+                info = developInfo(photo, develop[uuid])
                 info.changed = develop[uuid] ~= nil and info.hash ~= develop[uuid].hash
                 develop[uuid] = info
               end
               local lag
               if row.lastEditTime then lag = now() - row.lastEditTime end
-              Spike.log({ kind = 'change', uuid = uuid, file = name(photo), changed = changed, lag = lag, develop = info })
+              Spike.log({ kind = 'change', uuid = uuid, file = name(photo), changed = changed, lag = lag, develop = developSummary(info) })
             end
           end
           previous[uuid] = row
@@ -374,7 +410,7 @@ local function render(catalog, photo, mode, label)
   if not LrFileUtils.exists(path) then return { mode = mode, label = label, seconds = seconds, error = 'no file at ' .. path } end
   local content = readAll(path)
   local width, height = pixelSize(path)
-  return { mode = mode, label = label, seconds = seconds, bytes = content and #content or 0, md5 = content and hex(LrMD5.digest(content)), width = width, height = height, path = path }
+  return { mode = mode, label = label, seconds = seconds, bytes = content and #content or 0, md5 = content and hex(LrMD5.digest(content)), imageMd5 = content and hex(LrMD5.digest(imageData(content))), width = width, height = height, path = path }
 end
 
 function Spike.benchRender()
@@ -391,7 +427,8 @@ function Spike.benchRender()
     Spike.log({
       kind = 'bench-render', file = name(photo), uuid = uuid, croppedDimensions = row.croppedDimensions, croppedWidth = cw, croppedHeight = ch,
       editCountBefore = row.editCount, editCountAfter = editCountAfter and editCountAfter.editCount,
-      preview = first, previewAgain = second, identicalPreviewBytes = first.md5 ~= nil and first.md5 == second.md5, full = full,
+      preview = first, previewAgain = second, identicalPreviewBytes = first.md5 ~= nil and first.md5 == second.md5,
+      identicalPreviewImageData = first.imageMd5 ~= nil and first.imageMd5 == second.imageMd5, full = full,
       fullMatchesCropped = full.width ~= nil and cw ~= nil and full.width == cw and full.height == ch,
     })
   end
@@ -434,6 +471,17 @@ function Spike.loopback()
   local _, denied = LrHttp.get(base .. '/secret', { { field = 'Authorization', value = 'Bearer wrong' } }, 5)
   Spike.log({ kind = 'loopback-auth', status = denied and denied.status })
   LrDialogs.message('ImageFlow Spike', 'Loopback tests finished. See the log.', 'info')
+end
+
+--- Logs the mask and retouch structures of the selected photos (which mask types getDevelopSettings exposes).
+function Spike.dumpDevelop()
+  local _, photos = targets()
+  for _, photo in ipairs(photos) do
+    local settings = photo:getDevelopSettings() or {}
+    local entry = { kind = 'develop-dump', file = name(photo), uuid = photo:getRawMetadata('uuid') }
+    for _, marker in ipairs(developMarkers) do entry[marker] = settings[marker] end
+    Spike.log(entry)
+  end
 end
 
 function Spike.reveal()

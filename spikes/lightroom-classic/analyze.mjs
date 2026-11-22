@@ -19,6 +19,7 @@ for (const entry of entries) {
 groups.push(current);
 
 const yes = (value) => (value ? 'yes' : 'no');
+const size = (value) => (value && typeof value === 'object' ? `${value.width}×${value.height}` : String(value));
 console.log('## Which actions change what\n');
 console.log('| Action | editCount | lastEditTime | croppedDimensions | rating/pick | develop hash | masks/retouch in develop | lag (s) |');
 console.log('| --- | --- | --- | --- | --- | --- | --- | --- |');
@@ -38,7 +39,7 @@ for (const entry of entries) {
   if (entry.kind === 'bench-batch-stress') console.log(`- stress: ${entry.calls} calls over ${entry.photos} photos in ${entry.totalSeconds.toFixed(2)} s`);
   if (entry.kind === 'watch-tick' || entry.kind === 'watch-stop') console.log(`- watch poll: ${entry.ticks} ticks, average ${(entry.averageSeconds * 1000).toFixed(1)} ms, slowest ${(entry.slowestSeconds * 1000).toFixed(1)} ms`);
   if (entry.kind === 'bench-render') {
-    console.log(`- render ${entry.file}: preview ${entry.preview.seconds?.toFixed(2)} s (${entry.preview.width}×${entry.preview.height}, ${entry.preview.bytes} B), full ${entry.full.seconds?.toFixed(2)} s (${entry.full.width}×${entry.full.height}); croppedDimensions "${entry.croppedDimensions}" ${entry.fullMatchesCropped ? 'matches' : 'DIFFERS FROM'} the real size; identical preview bytes on re-render: ${yes(entry.identicalPreviewBytes)}; editCount ${entry.editCountBefore} → ${entry.editCountAfter}`);
+    console.log(`- render ${entry.file}: preview ${entry.preview.seconds?.toFixed(2)} s (${entry.preview.width}×${entry.preview.height}, ${entry.preview.bytes} B), full ${entry.full.seconds?.toFixed(2)} s (${entry.full.width}×${entry.full.height}); croppedDimensions ${size(entry.croppedDimensions)} ${entry.fullMatchesCropped ? 'matches' : 'DIFFERS FROM'} the real size; identical preview bytes on re-render: ${yes(entry.identicalPreviewBytes)}, identical image data: ${'identicalPreviewImageData' in entry ? yes(entry.identicalPreviewImageData) : 'n/a'}; editCount ${entry.editCountBefore} → ${entry.editCountAfter}`);
     if (entry.preview.error || entry.full.error) console.log(`  errors: ${entry.preview.error ?? ''} ${entry.full.error ?? ''}`);
   }
   if (entry.kind === 'loopback-ping') console.log(`- loopback: ${entry.calls} POSTs median ${(entry.medianSeconds * 1000).toFixed(1)} ms, max ${(entry.maxSeconds * 1000).toFixed(1)} ms (status ${entry.firstStatus})`);

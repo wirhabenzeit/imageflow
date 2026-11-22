@@ -1,8 +1,8 @@
 # 0011: Lightroom Classic preview-first editing and on-demand export rendering
 
-Status: proposed, 2026-11-22 (revised after feasibility review: change detection, IPC and source-model prerequisites). Builds on [0004](0004-document-packages.md) (document packages), [0005](0005-linked-sources.md) (linked sources) and [0010](0010-sync-revisions-and-cloud-assets.md) (sync, revision tracking and cloud assets).
+Status: proposed, 2026-11-22 (revised after feasibility review: change detection, IPC and source-model prerequisites; revised again after the spike ran in Lightroom Classic 16.0.1: change detection, digest, `croppedDimensions`). Builds on [0004](0004-document-packages.md) (document packages), [0005](0005-linked-sources.md) (linked sources) and [0010](0010-sync-revisions-and-cloud-assets.md) (sync, revision tracking and cloud assets).
 
-The direction (a companion plugin that renders in Lightroom's own engine) is feasible. Several mechanisms first drafted here rested on SDK behaviour that is **unverified or contradicted by developer reports**; those are marked *unverified* below and are gated on the spike in [Validation spike](#validation-spike) (`spikes/lightroom-classic/`). The larger cost is not the Lua plugin but teaching ImageFlow's source model about photos that have no file ([Prerequisites in ImageFlow](#prerequisites-in-imageflow)).
+The direction (a companion plugin that renders in Lightroom's own engine) is feasible. Several mechanisms first drafted here rested on SDK behaviour that was **unverified or contradicted by developer reports**. The spike in [Validation spike](#validation-spike) (`spikes/lightroom-classic/`) has since measured most of it on a real 40,000-photo catalog in Lightroom Classic 16.0.1; what it has not measured is still marked *unverified* below. The larger cost is not the Lua plugin but teaching ImageFlow's source model about photos that have no file ([Prerequisites in ImageFlow](#prerequisites-in-imageflow)).
 
 ## Problem
 
@@ -37,7 +37,8 @@ Integrate with **Lightroom Classic on macOS** through a bundled companion Lua pl
 │  │ ImageFlow.lrplugin (Lua)                                          │  │
 │  │ • Pull bridge: LrHttp client long-polls ImageFlow's loopback API  │  │
 │  │ • Fast change poll: catalog:batchGetRawMetadata(photos, keys)     │  │
-│  │ • Revision key:     editCount + lastEditTime + croppedDimensions  │  │
+│  │ • Revision key:     lastEditTime + editCount + croppedDimensions  │  │
+│  │ • Edit classifier:  hash of getDevelopSettings() (visual vs meta) │  │
 │  │ • Preview render:   LrExportSession (1400 px sRGB JPEG, q86)      │  │
 │  │ • Export render:    LrExportSession (full / target width, q95)    │  │
 │  └───────────────┬───────────────────────────────────▲───────────────┘  │
@@ -50,7 +51,7 @@ Integrate with **Lightroom Classic on macOS** through a bundled companion Lua pl
 │                                                                         │
 │  • photos.json:      { "ph-abc": { "lightroom": { "uuid": "..." } } }   │
 │  • assets-meta.json: { "ph-abc": { "width": 6000, "height": 4000,       │
-│                        "digest": "<sha256(preview bytes)>",             │
+│                        "digest": "<sha256(stored preview bytes)>",      │
 │                        "lightroom": { "revision": "<editCount:time>" }}}│
 │  • ProxyStore:       Cache/proxies/<digest>-preview-v1.jpg (1400 px)    │
 │  • Rendition cache:  Cache/renditions/<digest>-export[-<w>].jpg         │
@@ -63,9 +64,9 @@ Consistent with [0005](0005-linked-sources.md) and [0010](0010-sync-revisions-an
 
 - **Provider-tagged locator in `photos.json`:** A Lightroom-backed photo entry records a `lightroom` locator with the photo's catalog UUID (`photo:getRawMetadata("uuid")`) **and a catalog identity**, plus an optional source filename/collection hint, alongside user-editable `title`, `caption`, `credit` and `altText`. A UUID is only meaningful inside one catalog, and Lightroom has one catalog open at a time, so the plugin reports the open catalog's identity and a photo whose catalog is not the open one is "unavailable", never silently missing. (*Unverified:* that UUIDs survive catalog export/import and merge; the spike checks it.) Machine-local catalog paths stay in local app settings/approvals rather than in portable book manifests.
 - **Portable book-state revision (`src/book-revision.ts`):** `computeBookStateRevision` retains `{ lightroom: { uuid } }` while stripping machine-local paths, so two synced Macs compute the exact same portable `bookStateRevision`.
-- **True dimensions and EXIF in `assets-meta.json` (`src/asset-facts.ts`, `desktop/asset-facts.ts`):** When importing or refreshing a photo from Lightroom, ImageFlow records its **post-crop** dimensions (`croppedDimensions`, reported as a string such as `"3072 x 2304"`), capture timestamp, GPS coordinates and camera make/model in `assets-meta.json`.
-- **`digest` keeps its ADR 0010 meaning.** In `assets-meta.json`, `digest` is "SHA-256 of the original's bytes", and Locate Folder and the proxy store key on it. A Lightroom photo's `digest` is therefore the SHA-256 of the **rendered preview bytes**, never a synthetic hash of Lightroom state. The Lightroom revision that produced it (`editCount`, `lastEditTime`) goes in a separate `lightroom` object on the fact. Two edits that render identically then share a digest, so downstream proxies and renditions are not invalidated.
-- **`croppedDimensions` is an estimate until a full-resolution render exists.** It can differ by a few pixels from the real export (Upright, Super Resolution, rotation crops). Whenever a full-resolution render is produced, its actual pixel size replaces the estimate in `assets-meta.json`, so the 300 DPI checks converge on the truth.
+- **True dimensions and EXIF in `assets-meta.json` (`src/asset-facts.ts`, `desktop/asset-facts.ts`):** When importing or refreshing a photo from Lightroom, ImageFlow records its **post-crop** dimensions (`croppedDimensions`, a table `{ width, height }`), capture timestamp, GPS coordinates and camera make/model in `assets-meta.json`.
+- **`digest` keeps its ADR 0010 meaning.** In `assets-meta.json`, `digest` is "SHA-256 of the original's bytes", and Locate Folder and the proxy store key on it. A Lightroom photo's `digest` is therefore the SHA-256 of the **stored preview bytes**, never a synthetic hash of Lightroom state. Lightroom writes a fresh `xmp:MetadataDate` and a random `xmpMM:DocumentID` into every export, whatever the metadata option, so two renders of the same edit differ in bytes. ImageFlow therefore removes the EXIF/XMP (APP1) and comment segments from a rendered preview, keeping the ICC profile, before storing and hashing it. The spike found the remaining image data identical across re-renders. The Lightroom revision that produced it (`lrRevision`) and the develop-settings hash go in a separate `lightroom` object on the fact. Two edits that render identically then share a digest, so downstream proxies and renditions are not invalidated.
+- **`croppedDimensions` is an estimate until a full-resolution render exists.** It matched the real export size on every photo the spike tested (cropped and uncropped), but it can still differ by a few pixels from the real export (Upright, Super Resolution, rotation crops). Whenever a full-resolution render is produced, its actual pixel size replaces the estimate in `assets-meta.json`, so the 300 DPI checks converge on the truth.
 
 ### 2. Preview-first editing via `ProxyStore` and `assets-meta.json`
 
@@ -73,7 +74,7 @@ ImageFlow already decouples layout geometry and print-resolution checks from pro
 
 - **1400 px sRGB preview on import:** When photos are imported from Lightroom Classic (either pushed from Lightroom via **File → Plug-in Extras → Send to ImageFlow** or pulled from ImageFlow via **Import from Lightroom Classic…**), the plugin renders a 1400 px long-edge sRGB JPEG (`LrExportSession` with `LR_format = 'JPEG'`, `LR_export_colorSpace = 'sRGB'`, `LR_jpeg_quality = 0.86`, `LR_size_doConstrain = true`, `LR_size_resizeType = 'wh'`, `LR_size_maxWidth = 1400`, `LR_size_maxHeight = 1400`).
   - Why `LrExportSession` at 1400 px instead of `photo:requestJpegThumbnail()`: `requestJpegThumbnail` reads Lightroom's internal `.lrprev` cache, which can be stale if Lightroom has not yet rebuilt previews after a Develop adjustment, and varies in behavior between the Library and Develop modules. A 1400 px `LrExportSession` guarantees current Develop settings and crop; `requestJpegThumbnail(240, 240)` may still be used for immediate grid thumbnails while 1400 px previews finish rendering.
-- **Stored in `ProxyStore` by content digest:** ImageFlow stores the 1400 px preview in `ProxyStore` (`Cache/proxies/<sha256 of the preview bytes>-preview-v1.jpg`) and derives the 240 px filmstrip thumbnail from it.
+- **Stored in `ProxyStore` by content digest:** ImageFlow stores the 1400 px preview, without its metadata segments, in `ProxyStore` (`Cache/proxies/<sha256 of the stored bytes>-preview-v1.jpg`) and derives the 240 px filmstrip thumbnail from it.
 - **Layout, cropping and 300 DPI checks without full-resolution files:** Because `ProjectPhoto.width` and `ProjectPhoto.height` come from `assets-meta.json` (`croppedDimensions`), the spread canvas, normalized box crops (`centerX`, `centerY`, `zoom` in `[0..1]`) and `Book check`'s effective-DPI warnings operate against the true post-crop pixel dimensions of the RAW photo even though only a 1400 px preview exists on disk.
 - **Multi-Mac sync compatibility:** Because `assets-meta.json` and `ProxyStore` entries sync across Macs under [0010](0010-sync-revisions-and-cloud-assets.md), a book with Lightroom Classic photos imported on an iMac can be opened, laid out and cropped on a MacBook without Lightroom Classic or the original RAW files present.
 
@@ -81,20 +82,23 @@ ImageFlow already decouples layout geometry and print-resolution checks from pro
 
 The SDK has no change notification, so the plugin polls. What it can and cannot tell apart is the main risk of this ADR.
 
-**What the SDK reports (and what developers report about it):**
+**What the spike measured** (Lightroom Classic 16.0.1, `spikes/lightroom-classic/README.md`):
 
-- `catalog:batchGetRawMetadata(photos, keys)` returns raw metadata for many photos in one call, including `uuid`, `editCount`, `lastEditTime` (seconds since 2001-01-01 GMT), `croppedDimensions`, `isCropped` and the orientation key. Adobe's SDK notes describe `editCount` as "not an absolute counter". *Unverified:* the key spelling of the orientation key, and the earlier claim that the batch call runs natively in a few milliseconds for hundreds of photos. The spike measures both.
-- `editCount` and `lastEditTime` also change on **catalog metadata** edits such as rating or comments. Developers report this on current SDKs, so neither value can by itself separate a visual edit from a metadata edit.
-- `photo:getDevelopSettings()` is **not a reliable fingerprint of the visual edit.** Developers report it omitting mask data (graduated and radial filters, brush adjustments, and masks created in earlier Lightroom versions), and the mask representation changed between Lightroom versions. A mask-only or AI-mask edit can leave its output unchanged, which would leave a book with a stale preview, or, worse, a stale print render.
+- `catalog:batchGetRawMetadata(photos, keys)` returns `uuid`, `editCount`, `lastEditTime` (seconds since 2001-01-01 GMT), `croppedDimensions` (a table), `isCropped` and `orientation` (lower case) in one call. It costs about 35 µs per photo, linearly (500 photos 14 ms, 10,000 photos 350 ms), about 3× less than single calls. Polling 5–25 tracked photos once a second took 3–6 ms per poll.
+- **`lastEditTime` changed on every edit tested**, and the poll saw it within 0.1–1 s: global sliders, crops, spot removal, an AI Sky mask, a brush mask, tweaking and removing a mask, and metadata edits.
+- **`editCount` is not a revision.** It went up on the first visual edit of a photo and then stayed put through later crops, spot removal and mask edits, yet it went up on every metadata edit.
+- **`photo:getDevelopSettings()` includes masks.** Developers report it omitting mask data on earlier versions. In 16.0.1 it returns the full `MaskGroupBasedCorrections` (mask type and subtype, a `MaskDigest`, every local adjustment) and `RetouchAreas`, and its hash changed on every visual edit tested, mask tweaks included. **It did not change on metadata edits.** *Unverified:* radial, linear and AI Subject masks, presets, Sync Settings, and masks created in older Lightroom versions.
 
-**Decision: err towards re-rendering, never towards a stale image.**
+**Decision: classify by develop settings for previews, and never trust a stale print render.**
 
-1. **Revision key.** The photo's Lightroom revision is `lrRevision = uuid : editCount : lastEditTime : croppedWidth x croppedHeight`, read in bulk. Any change to it marks the photo *dirty*. `getDevelopSettings()` is not part of the key. The plugin may record a hash of it for diagnostics only.
-2. **Cheap false positives, free suppression.** A dirty photo gets a new 1400 px preview. ImageFlow hashes the rendered bytes: if they equal the stored `digest`, nothing downstream is invalidated (no proxy, thumbnail or rendition churn, no `DocumentSession` reload). A rating change thus costs one background render and no visible change. Whether Lightroom renders byte-identical JPEGs for identical settings is *unverified*; if it does not, the suppression is dropped and rating changes cost a reload, which is acceptable.
-3. **Debounce.** Lightroom coalesces rapid slider drags for a few seconds. The plugin reports a photo dirty only after its revision has been stable for one poll interval, and ImageFlow renders at most one preview per photo at a time.
-4. **Polling.** The plugin polls the tracked UUIDs (`catalog:findPhotoByUuid`) every 1–2 s while an open book has Lightroom sources, immediately on request (window focus, before export), and not at all otherwise. Tracked sets are small (hundreds), so the cost is bounded; the spike measures it.
-5. **Hot reload.** When a re-rendered preview changes `digest`, ImageFlow writes it to `ProxyStore`, updates `width`, `height`, `digest` and the `lightroom.revision` in `assets-meta.json`, and reloads the active `DocumentSession`, as saving an external linked photo in place does today (`desktop/document-session.ts`).
-6. **Crops keep their numbers, not necessarily their framing.** Box crops in `project.json` are normalized `[0..1]` coordinates, so they stay valid when a photo is re-cropped in Lightroom, and DPI checks update from the new dimensions. But a changed aspect ratio shifts what the box shows, so ImageFlow flags photos whose aspect ratio changed since they were placed.
+1. **Revision key.** The photo's Lightroom revision is `lrRevision = uuid : lastEditTime : editCount : croppedWidth x croppedHeight`, read in bulk. Any change to it marks the photo *dirty*. `lastEditTime` does the work; the other parts only add safety.
+2. **Metadata edits cost nothing.** For a dirty photo the plugin hashes `getDevelopSettings()` (sorted-key encoding) and compares it with the hash stored for the last preview (`lightroom.developHash`). If it is unchanged, and so is `croppedDimensions`, the edit was metadata only: the new `lrRevision` is recorded and no preview is rendered. A rating change thus costs one `getDevelopSettings()` call.
+3. **Visual edits re-render the preview,** and the stored-bytes `digest` is a second filter: if the new preview's digest equals the stored one (an edit that renders the same), nothing downstream is invalidated (no proxy, thumbnail or rendition churn, no `DocumentSession` reload).
+4. **Print is conservative.** The full-resolution render cache is keyed on `lrRevision`, not on the develop hash, so any change Lightroom records, including one the develop hash might miss on an untested mask type, re-renders a placed photo at export. A wasted full render after a rating change (about 1.5 s per photo) is the price of never printing a stale image.
+5. **Debounce.** A dragged slider moves `lastEditTime` several times. The plugin reports a photo dirty only after its revision has been stable for one poll interval, and ImageFlow renders at most one preview per photo at a time.
+6. **Polling.** The plugin polls the tracked UUIDs (`catalog:findPhotoByUuid`) every 1–2 s while an open book has Lightroom sources, immediately on request (window focus, before export), and not at all otherwise.
+7. **Hot reload.** When a re-rendered preview changes `digest`, ImageFlow writes it to `ProxyStore`, updates `width`, `height`, `digest`, `lightroom.revision` and `lightroom.developHash` in `assets-meta.json`, and reloads the active `DocumentSession`, as saving an external linked photo in place does today (`desktop/document-session.ts`).
+8. **Crops keep their numbers, not necessarily their framing.** Box crops in `project.json` are normalized `[0..1]` coordinates, so they stay valid when a photo is re-cropped in Lightroom, and DPI checks update from the new dimensions. But a changed aspect ratio shifts what the box shows, so ImageFlow flags photos whose aspect ratio changed since they were placed.
 
 **Not covered by polling:** a photo removed from the catalog, replaced by a different catalog, or the plugin not running. These surface as an unavailable source with the ordinary `Retry` and `Locate` actions, and never as a silent success.
 
@@ -121,7 +125,7 @@ Full-resolution print renditions are rendered only when needed and only for phot
 
 ### 5. Local IPC and plugin packaging
 
-- **The plugin is the client; ImageFlow is the server.** `LrHttp` can only make requests, and `LrSocket` carries one direction per socket and has reported bind and receive failures. So the plugin long-polls ImageFlow's loopback API for jobs (`GET /lightroom/jobs`) and posts results (`POST /lightroom/revisions`, `POST /lightroom/renders`). No URL handler is needed. A job-spool directory in Application Support, which the plugin polls with `LrFileUtils`, is the fallback if `LrHttp` to loopback proves unreliable in the spike.
+- **The plugin is the client; ImageFlow is the server.** `LrHttp` can only make requests, and `LrSocket` carries one direction per socket and has reported bind and receive failures. So the plugin long-polls ImageFlow's loopback API for jobs (`GET /lightroom/jobs`) and posts results (`POST /lightroom/revisions`, `POST /lightroom/renders`). No URL handler is needed. In the spike, loopback requests took 0.6 ms (median), a 10 s long poll did not block another plugin task, and headers reached the server (a wrong token got 401). A job-spool directory in Application Support, which the plugin polls with `LrFileUtils`, remains the fallback if `LrHttp` proves unreliable while Lightroom is busy with a large export (*unverified*).
 - **No dependence on `URLHandler`.** A plugin URL handler is not called when Lightroom is launched by the URL ([reported](https://community.adobe.com/bug-reports-674/p-urlhandler-of-plugins-do-net-get-called-if-lightroom-classic-is-not-yet-running-664202)), so the handler is at most a convenience for "Send to ImageFlow" while Lightroom is already running.
 - **Plugin installation:** ImageFlow bundles `ImageFlow.lrplugin` inside its macOS app bundle (`Contents/Resources/ImageFlow.lrplugin`) and installs or updates it in `~/Library/Application Support/Adobe/Lightroom/Modules/ImageFlow.lrplugin` on user request from Settings or the Import menu. The user still enables it once in Lightroom's Plug-in Manager.
 - **Loopback-only authenticated server:** ImageFlow's server binds strictly to `127.0.0.1` on a port it chooses and writes, with a per-user bearer token, to a file in `~/Library/Application Support/ImageFlow/` with `0600` permissions that the plugin reads. Untrusted local webpages and other local accounts cannot query catalog metadata or trigger exports. Requests also check the `Host` header to resist DNS rebinding.
@@ -145,7 +149,7 @@ The plugin is a few hundred lines of Lua. Most of the work is in ImageFlow, whos
 
 ## Validation spike
 
-`spikes/lightroom-classic/` holds a plugin that answers, on a real catalog, the questions this ADR depends on. Its `README.md` has the procedure. Questions, and what each outcome changes:
+`spikes/lightroom-classic/` holds a plugin that answers, on a real catalog, the questions this ADR depends on. Its `README.md` has the procedure and the full results of the first run (2026-11-22, Lightroom Classic 16.0.1, macOS 27.2.1). In short: masks do bump `lastEditTime` and appear in `getDevelopSettings()`; metadata edits do not change the develop hash; renders take 0.5–1 s (1400 px) and about 1.5 s (full resolution, 24 MP Sony ARW) and are identical except for their metadata; loopback `LrHttp` works; `croppedDimensions` matched the real export size; the setting names below work and `doExportOnCurrentTask` returns with the file in place. Still open: the mask types and actions listed as *unverified* in section 3, UI stutter under polling, loopback under load, UUIDs across catalog export, and `croppedDimensions` on Upright and Super Resolution photos. The questions:
 
 1. Which actions change `editCount` and `lastEditTime`: slider, mask, AI mask, spot removal, crop, rating, flag, keyword, virtual copy, undo, Sync Settings, Auto Sync, presets? If masks do not bump the revision, section 3 does not work and the fallback is re-rendering at export.
 2. What does `getDevelopSettings()` return for mask and retouch edits (diagnostic only)?
@@ -158,7 +162,7 @@ The plugin is a few hundred lines of Lua. Most of the work is in ImageFlow, whos
 
 **Phasing** (each phase is useful alone):
 
-0. Spike (above); revise this ADR from the results.
+0. Spike (above); revise this ADR from the results. *Done for questions 1–5, 7 and part of 8.*
 1. Minimal Publish Service plugin: previews and a sidecar to a folder, linked by ImageFlow as today. Ships without the provider abstraction.
 2. Source-provider abstraction and the `lightroom` locator, with the pull bridge and previews.
 3. Full-resolution rendering at export, collection and Copy into Book.
@@ -169,5 +173,5 @@ The plugin is a few hundred lines of Lua. Most of the work is in ImageFlow, whos
 - Layout geometry, normalized crops and `Book check` 300 DPI warnings remain accurate during editing because `assets-meta.json` records Lightroom's true post-crop `croppedDimensions` alongside the 1400 px `ProxyStore` image.
 - Tweaking exposure, masks or crops in Lightroom Classic updates only the affected photos' 1400 px previews during editing, and full-resolution `LrExportSession` rendering runs at PDF export time only for the photos actually placed in the book (and only for those whose `lrRevision` changed since the last export).
 - Syncing a book to a second Mac ([0010](0010-sync-revisions-and-cloud-assets.md)) carries the 1400 px Lightroom previews and post-crop dimensions automatically, allowing offline layout and cropping on a laptop while keeping final full-resolution PDF export on the Mac with the Lightroom Classic catalog (or converting selected photos into owned package files via *Copy into Book*).
-- Change detection errs towards re-rendering: a rating change may cost a background preview render, but an edit Lightroom does not report in `getDevelopSettings()` (such as an AI mask) is never missed.
+- Change detection is cheap for metadata edits (no preview render) and conservative for print: any recorded change to a placed photo re-renders it at export, so a mask type the develop hash might not cover can cost a stale *preview*, never a stale print.
 - ImageFlow needs a source-provider abstraction and a schema bump before any Lightroom code ships; that work is useful for the other providers ADR 0010 lists.

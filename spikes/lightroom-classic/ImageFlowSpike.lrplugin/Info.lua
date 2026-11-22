@@ -5,7 +5,8 @@ return {
   LrToolkitIdentifier = 'com.imageflow.spike',
   LrPluginName = 'ImageFlow Spike',
   LrForceInitPlugin = true,
-  LrLibraryMenuItems = {
+  -- File → Plug-in Extras (LrExportMenuItems) is available in every module, Develop included.
+  LrExportMenuItems = {
     { title = '1. Watch selected photos: start', file = 'WatchStart.lua', enabledWhen = 'photosSelected' },
     { title = '2. Watch selected photos: stop', file = 'WatchStop.lua' },
     { title = '3. Add marker to log…', file = 'Marker.lua' },

@@ -2,13 +2,13 @@
 
 Supports [ADR 0011](../../docs/decisions/0011-lightroom-classic.md). The ADR rests on SDK behaviour that is unverified or contradicted by developer reports. This spike measures it on a real catalog, so the ADR can be revised from results instead of forum threads. It is throwaway code: it logs and measures, and does not talk to ImageFlow.
 
-**Status: written but not yet run.** Lightroom Classic was not available where it was written. The Lua parses as Lua 5.1 (checked with `luaparse`), and `server.mjs` and `analyze.mjs` were tested against synthetic input, but no plugin code has run inside Lightroom. Expect to fix SDK details on the first run (the first likely ones are marked below), and record what was fixed.
+**Status: experiments 3–8 ran in Lightroom Classic 16.0.1 on 2026-11-22 (see Results); experiment 1/2 still needs a manual run.**
 
 ## Contents
 
 | File | Purpose |
 | --- | --- |
-| `ImageFlowSpike.lrplugin/` | The plugin. Menu items appear under **Library → Plug-in Extras**. |
+| `ImageFlowSpike.lrplugin/` | The plugin. Menu items appear under **File → Plug-in Extras**, in every module. |
 | `server.mjs` | Loopback server for the HTTP tests: bearer token, `Host` check, long-poll endpoint. No dependencies. |
 | `analyze.mjs` | Summarizes the log as a Markdown table plus benchmark lines. |
 
@@ -60,14 +60,18 @@ The render benchmark logs `fullMatchesCropped`. Include photos with Upright, a s
 
 ## Results
 
-Fill in when run (date, Lightroom Classic version, macOS version):
+First run 2026-11-22, Lightroom Classic 16.0.1 (build 202611171809), macOS 27.2.1, on a real catalog of 40,308 photos (Sony ARW, 7008×4672). Experiments 3–7 ran unattended from a temporary init script; experiment 1/2 (watch while editing) still needs a manual run.
 
-- Q1/Q2 table: *(paste `analyze.mjs` output)*
-- Q3: *(batch times; UI stutter?)*
-- Q4/Q7: *(render times; byte-identical previews?; setting names that needed fixing)*
-- Q5: *(round trip; long poll under load)*
-- Q6: *(keys accepted; UUID survives catalog export?)*
-- Q8: *(cropped vs real sizes)*
+**Also fixed:** the watch compared `croppedDimensions` by reference (it is a table), so it logged a change on every poll; values are now compared encoded.
+
+**Fixed on the first run:** `pcall` around anything that yields (`batchGetRawMetadata`, exports, `LrTasks.sleep`) fails with *"Yielding is not allowed within a C or metamethod call"*. Every experiment failed before the first log line. All calls now use `LrTasks.pcall`. The `LR_*` export setting names worked unchanged, and `doExportOnCurrentTask` returns only once the file exists.
+
+- **Q1/Q2 (partial, no markers):** 5 photos watched for 4 min, edits in Develop: one global slider edit, two crops, a spot removal, an AI Sky mask then two adjustments to it. **`lastEditTime` changed on every edit**, detected within 0.1–1.0 s. **`editCount` changed only on the first edit of each photo** (1 → 2) and stayed at 2 through the later crop, spot removal and mask edits, so it cannot serve as a revision on its own. **`getDevelopSettings()` does include masks** in 16.0.1: the full `MaskGroupBasedCorrections` (mask type `"Sky 1"`, `MaskSubType`, a `MaskDigest`, every local adjustment), and its hash changed on every mask adjustment. `RetouchAreas` appeared with the spot removal. Crops changed `croppedDimensions` and `isCropped`. Polling 5 photos took 2.6 ms per tick on average. Second run, 25 photos: **two metadata-only edits bumped both `editCount` (2 → 3 → 4) and `lastEditTime`, with the develop hash unchanged**. A brush mask bumped `editCount` once, then `lastEditTime` only; it appears in `MaskGroupBasedCorrections`, and removing it changed the hash again. So a revision change with an unchanged develop hash is a metadata edit, and can be skipped without rendering. Polling 25 photos took 6 ms per tick. Not tested yet: radial, AI subject mask, presets, Sync. The watch now logs the changed develop keys (`changedSettings`), so markers are optional.
+- **Q3:** `batchGetRawMetadata` with `uuid, editCount, lastEditTime, croppedDimensions, isCropped`: 50 photos 1.3 ms, 500 photos 14 ms, 2,000 photos 67 ms, 10,000 photos 352 ms (median of 5), so about 35 µs per photo, linear. 500 single `getRawMetadata` calls take 45 ms, so the batch call is about 3× faster per photo. 200 back-to-back calls over 2,000 photos took 14.6 s (73 ms each). UI stutter was not observed (nobody was at the UI). Reading `fileFormat, isCropped, isVirtualCopy` for all 40,308 photos took 1.3 s.
+- **Q4/Q7:** a 1400 px preview takes 0.5–1.0 s per RAW (about 1 s on the first render of a photo, 0.5 s once Lightroom has it cached), and a full-resolution JPEG (q 0.95, 17–22 MB) takes about 1.5 s. Previews really are 1400×933. Rendering does not change `editCount`. **Re-renders are not byte-identical:** each export writes a new `xmp:ModifyDate`/`xmp:MetadataDate` and a random `xmpMM:DocumentID`, even with `LR_embeddedMetadataOption = 'copyrightOnly'`. The image data (the file without its APPn/COM segments) is identical on every photo tested (4 of 4), so a hash of it is stable. The spike now logs `imageMd5` and `identicalPreviewImageData`.
+- **Q5:** 20 loopback POSTs: median 0.6 ms, max 3.7 ms. A 10 s long poll did not block another plugin task (19 of 20 expected ticks). A wrong token got 401, so `LrHttp` headers reach the server. A long poll during a large user export was not tested.
+- **Q6:** Accepted keys: `uuid, editCount, lastEditTime, croppedDimensions, dimensions, isCropped, orientation, rating, pickStatus, fileSize, fileFormat, isVirtualCopy, countVirtualCopies, width, height`. Rejected: `Orientation` (the key is lower-case `orientation`, values such as `"AB"`), `copyName`, `aspectRatioCache`. **`croppedDimensions` is a table `{ width, height }`, not a string.** `findPhotoByUuid` resolves every photo tested, a virtual copy included (a virtual copy has its own UUID). UUIDs across *Export as Catalog* were not tested.
+- **Q8:** On 4 photos (one cropped to 6654×4436, three uncropped), `croppedDimensions` equals the real full-resolution size. Upright, straightened and Super Resolution photos were not tested.
 
 ## What each outcome changes in the ADR
 
