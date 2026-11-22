@@ -93,6 +93,9 @@ const commandFields = {
   reflow: z.boolean().optional().describe('Whether text flow may have moved on other spreads.'),
 };
 
+const revisionMoved = z.looseObject({ expectedRevision: z.string(), revision: z.string() }).optional()
+  .describe('Present when the book changed after expectedRevision and this dry run or draft was planned at the current revision instead.');
+
 const checkpointFields = {
   checkpointId: z.string().nullable().optional().describe('The book history checkpoint of this commit, or null when nothing changed.'),
   requestFingerprint: z.string().optional(),
@@ -155,11 +158,12 @@ export const mcpOutputSchemas = {
     draft: z.looseObject({ applied: z.boolean(), committed: z.literal(false), ...commandFields }).optional()
       .describe('Present when the check rendered unsaved draft operations.'),
     fixtures: z.looseObject({}).optional().describe('Fixture coverage matrix and findings, present when fixtures were requested.'),
+    revisionMoved, notice: z.string().optional(),
   }),
   apply_project_changes: z.looseObject({
     state, revision,
     committed: z.union([z.boolean(), z.literal('pending')]).describe('Whether the batch was saved. A failed check before planning returns false with diagnostics.'),
-    dryRun: z.boolean().optional(), ...commandFields,
+    dryRun: z.boolean().optional(), ...commandFields, revisionMoved,
     replayed: z.literal(true).optional().describe('This idempotencyKey was already applied; this is the original result.'),
     ...checkpointFields,
     diagnostics: z.array(diagnosticSchema).optional(), checks: checksSchema.optional(),

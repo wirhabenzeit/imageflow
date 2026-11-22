@@ -42,6 +42,20 @@ import { docTopics } from '../src/doc-topics';
 // Fixture checks share the bridge's two-minute call deadline with queueing, so they stop starting renders after this.
 const fixtureBudgetMs = 60_000;
 
+// Retries of calls whose inputs changed while they ran (API-007): each waits a little longer, and for the book to be
+// quiet, before the next attempt.
+const changedAttempts = 4;
+const changedBackoffMs = 150;
+const changedQuietMs = 400;
+const changedSettleMs = 3000;
+// No new attempt starts after this, so a slow call, such as a fixture check, stays within the bridge's call deadline.
+const changedBudgetMs = 30_000;
+const pause = (ms: number, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
+  const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve(); }, ms);
+  const abort = () => { clearTimeout(timer); reject(signal.reason); };
+  signal.addEventListener('abort', abort, { once: true });
+});
+
 const omitDefinition = <T extends { definition: string }>({ definition: _definition, ...rest }: T) => rest;
 
 export class AuthoringError extends Error {
@@ -521,7 +535,60 @@ export function createAuthoringService(hooks: Hooks) {
         (mcp.truncated ? ' The recorded change list was shortened.' : ''),
       history: session.history };
   };
-  return async (name: string, args: Record<string, any>, signal: AbortSignal, client: McpClientSession = unattached): Promise<Record<string, unknown>> => {
+  // Inputs that change while a call reads them, typically because the user is editing the book in the app, fail the
+  // attempt with SOURCE_CHANGED (thrown, or as a check's source-changed diagnostic). Nothing has been saved at that
+  // point, so the call is repeated once the book has been quiet for a moment (API-007). Only when the inputs keep
+  // changing does the caller see the error, with the inputs that changed.
+  const call = async (name: string, args: Record<string, any>, signal: AbortSignal, client: McpClientSession = unattached): Promise<Record<string, unknown>> => {
+    const started = Date.now();
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const result = await dispatch(name, args, signal, client);
+        const diagnostics = (result as { diagnostics?: AuthoringDiagnostic[] }).diagnostics;
+        if (!diagnostics?.some(({ code }) => code === 'source-changed')) return result;
+        if (attempt >= changedAttempts || Date.now() - started > changedBudgetMs) return annotateChanged(result, args.project, started);
+      } catch (error) {
+        if (!(error instanceof AuthoringError) || error.code !== 'SOURCE_CHANGED') throw error;
+        if (attempt >= changedAttempts || Date.now() - started > changedBudgetMs) {
+          const changed = changedInputs(args.project, started);
+          throw new AuthoringError('SOURCE_CHANGED', error.message.replace(/ ?(Check again|Retry for current context)\.$/, '') +
+            ' The book kept changing during ' + attempt + ' attempts' + (changed.length ? ' (' + changed.join(', ') + ')' : '') +
+            '. Retry when the edits in ImageFlow pause.', { attempts: attempt, ...(changed.length ? { changedInputs: changed } : {}) });
+        }
+      }
+      signal.throwIfAborted();
+      cachedCheck = undefined;
+      const inputs = hooks.session()?.inputs;
+      await pause(changedBackoffMs * attempt, signal);
+      await inputs?.settle(changedQuietMs, changedSettleMs, signal);
+    }
+  };
+  const changedInputs = (handle: unknown, since: number) => {
+    const session = hooks.session();
+    return session && session.handle === handle ? session.inputs.changedSince(since) : [];
+  };
+  const annotateChanged = (result: Record<string, unknown>, handle: unknown, since: number) => {
+    const changed = changedInputs(handle, since);
+    if (!changed.length) return result;
+    const diagnostics = (result.diagnostics as AuthoringDiagnostic[]).map((diagnostic) => diagnostic.code === 'source-changed'
+      ? { ...diagnostic, details: { ...diagnostic.details, changedInputs: changed.join(', ') } } : diagnostic);
+    return { ...result, diagnostics };
+  };
+  // The current revision when it differs from the one a dry run or draft names, with the reply fields that say so.
+  const movedRevision = async (session: ProjectSession, expected: string, signal: AbortSignal) => {
+    let current;
+    try { current = (await session.inputs.capture({ signal })).revision; }
+    catch (error) {
+      // Inputs that cannot be captured are reported by the check or command itself.
+      if (error instanceof ProjectRevisionError) return undefined;
+      throw error;
+    }
+    if (current === expected) return undefined;
+    return { current, reply: { revisionMoved: { expectedRevision: expected, revision: current },
+      notice: 'The book changed after expectedRevision, for example through an edit in ImageFlow, so this was planned at the current revision. ' +
+        'Review the result; to save, pass revision as expectedRevision.' } };
+  };
+  const dispatch = async (name: string, args: Record<string, any>, signal: AbortSignal, client: McpClientSession): Promise<Record<string, unknown>> => {
     if (name === 'list_projects') {
       const session = hooks.session();
       if (!session) return { projects: [] };
@@ -551,12 +618,19 @@ export function createAuthoringService(hooks: Hooks) {
     }
     if (name === 'check_book') {
       if (typeof args.preview?.target?.page === 'number' && !args.expectedRevision) throw new AuthoringError('REVISION_REQUIRED', 'Page-number previews require expectedRevision; spread IDs can be used without it.');
+      // Drafts follow the book like dry runs, except a page-number preview, whose page may now show another spread.
+      const movedDraftCheck = async () => {
+        const pageTarget = typeof args.preview?.target?.page === 'number' && !args.preview?.target?.spread;
+        const moved = pageTarget ? undefined : await movedRevision(session, args.expectedRevision, signal);
+        const result = await draftCheck(session, signal, moved?.current ?? args.expectedRevision, args.draft.operations, args.preview, args.inspect, args.typescript, args.cover);
+        return moved && result.revision === moved.current ? { ...result, ...moved.reply } : result;
+      };
       const report = args.fixtures
         ? await fixtureCheck(session, signal, args.fixtures, args.expectedRevision, args.typescript)
         : !args.draft
           ? await checked(session, signal, { expectedRevision: args.expectedRevision, preview: args.preview, ...(args.cover ? { cover: args.cover } : {}),
             ...(args.inspect ? { inspect: args.inspect } : {}), ...(args.typescript !== undefined ? { typescript: args.typescript } : {}) }, true)
-          : await draftCheck(session, signal, args.expectedRevision, args.draft.operations, args.preview, args.inspect, args.typescript, args.cover);
+          : await movedDraftCheck();
       if (args.includeTemplate) return report;
       // Keep full declarations in the internal check cache for planning and context, not in every agent reply.
       const { template: _template, render, ...compact } = report;
@@ -780,7 +854,10 @@ export function createAuthoringService(hooks: Hooks) {
         return { recovery: result };
       }
     };
-    const { inputs, report, fresh, template } = await prepareMutation(session, args.expectedRevision, signal);
+    // A dry run saves nothing, so a book changed since expectedRevision is planned at its current revision and the
+    // reply says so, instead of failing with REVISION_CONFLICT (API-007). A commit still requires the exact revision.
+    const moved = name === 'apply_project_changes' && args.dryRun ? await movedRevision(session, args.expectedRevision, signal) : undefined;
+    const { inputs, report, fresh, template } = await prepareMutation(session, moved?.current ?? args.expectedRevision, signal);
     if (!fresh || !inputs || !template) return { ...report, committed: false };
     signal.throwIfAborted();
     let result: Record<string, unknown>;
@@ -795,7 +872,7 @@ export function createAuthoringService(hooks: Hooks) {
         affectedSpreads: planned.affectedSpreads, references: planned.references, reflow: planned.reflow,
         ...(planned.affectedCover ? { affectedCover: true } : {}),
         committed: !args.dryRun, dryRun: !!args.dryRun };
-      if (args.dryRun) return result;
+      if (args.dryRun) return moved ? { ...result, ...moved.reply } : result;
       Object.assign(checkpoint.mcp!, { changes: planned.changes, affectedSpreads: planned.affectedSpreads, references: planned.references,
         ...(planned.affectedCover ? { affectedCover: true } : {}) });
       const saved = await commit(() => session.save(planned.files, args.label, fresh, checkpoint));
@@ -851,4 +928,5 @@ export function createAuthoringService(hooks: Hooks) {
     result.history = session.history;
     return result;
   };
+  return call;
 }

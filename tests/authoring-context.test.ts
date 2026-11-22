@@ -276,25 +276,45 @@ for (const tool of ['get_authoring_context', 'inspect_book']) {
     }
   });
 
-  test(tool + ' rejects files changed after checking and before inspection', async (t) => {
+  test(tool + ' rejects files that keep changing after checking and before inspection', async (t) => {
     const { folder, hooks, call } = await fixture(t);
     const check = hooks.check;
+    let checks = 0;
     hooks.check = async (...args) => {
       const report = await check(...args);
-      await rm(join(folder, 'photos.json'));
+      checks++;
+      if (checks % 2) await rm(join(folder, 'photos.json'));
+      else await writeFile(join(folder, 'photos.json'), '{}');
       return report;
     };
-    await assert.rejects(call(tool), (error) => error instanceof AuthoringError && error.code === 'SOURCE_CHANGED');
+    await assert.rejects(call(tool), (error) => error instanceof AuthoringError && error.code === 'SOURCE_CHANGED' &&
+      (error.details as { attempts?: number }).attempts === 4);
   });
 
-  test(tool + ' rejects a different unavailable input after checking', async (t) => {
+  test(tool + ' retries a file changed once after checking and reports the inputs as they are now', async (t) => {
+    const { folder, hooks, call } = await fixture(t);
+    const check = hooks.check;
+    let checks = 0;
+    hooks.check = async (...args) => {
+      const report = await check(...args);
+      if (!checks++) await rm(join(folder, 'photos.json'));
+      return report;
+    };
+    const result = await call(tool);
+    assert.ok(checks >= 2);
+    assert.ok((result.diagnostics as AuthoringDiagnostic[]).some((diagnostic) => diagnostic.location?.path === 'photos.json'));
+  });
+
+  test(tool + ' rejects unavailable inputs that keep changing after checking', async (t) => {
     const { folder, hooks, call } = await fixture(t);
     await rm(join(folder, 'project.json'));
     const check = hooks.check;
+    let checks = 0;
     hooks.check = async (...args) => {
       const report = await check(...args);
-      await writeFile(join(folder, 'project.json'), JSON.stringify(project));
-      await rm(join(folder, 'photos.json'));
+      const [missing, restored] = checks++ % 2 ? ['project.json', 'photos.json'] : ['photos.json', 'project.json'];
+      await writeFile(join(folder, restored), restored === 'project.json' ? JSON.stringify(project) : '{}');
+      await rm(join(folder, missing));
       return report;
     };
     await assert.rejects(call(tool), (error) => error instanceof AuthoringError && error.code === 'SOURCE_CHANGED');
@@ -358,8 +378,9 @@ test('context rejects a reverted source edit even when a missing manifest preven
 test('context rejects a changed readable manifest while another manifest remains unavailable', async (t) => {
   const { folder, docs, hooks, call } = await fixture(t);
   await rm(join(folder, 'photos.json'));
+  let edits = 0;
   Object.defineProperty(hooks, 'docs', { get: () => {
-    writeFileSync(join(folder, 'project.json'), JSON.stringify({ ...project, title: 'Changed during inspection' }));
+    writeFileSync(join(folder, 'project.json'), JSON.stringify({ ...project, title: 'Changed during inspection ' + ++edits }));
     return docs;
   } });
   await assert.rejects(call('get_authoring_context'), (error) => error instanceof AuthoringError && error.code === 'SOURCE_CHANGED');
@@ -394,10 +415,25 @@ test('cached checks cannot satisfy a conflicting expected revision', async (t) =
   const checks = countChecks(hooks);
   await call('inspect_book');
   session.book.readOnly = false;
+  session.save = async () => assert.fail('A conflicting revision must not save.');
   await assert.rejects(call('apply_project_changes', { expectedRevision: '0'.repeat(64), idempotencyKey: 'conflict',
-    label: 'Change title', dryRun: true, operations: [{ op: 'set_title', title: 'Changed' }] }),
+    label: 'Change title', operations: [{ op: 'set_title', title: 'Changed' }] }),
   (error) => error instanceof AuthoringError && error.code === 'REVISION_CONFLICT');
   assert.equal(checks(), 1);
+});
+
+test('a dry run against a revision that has since changed is planned at the current revision', async (t) => {
+  const { call, session } = await fixture(t);
+  session.book.readOnly = false;
+  session.save = async () => assert.fail('A dry run must not save.');
+  const current = (await session.inputs.capture()).revision;
+  const result = await call('apply_project_changes', { expectedRevision: '0'.repeat(64), idempotencyKey: 'moved',
+    label: 'Change title', dryRun: true, operations: [{ op: 'set_title', title: 'Changed' }] });
+  assert.equal(result.committed, false);
+  assert.equal(result.revision, current);
+  assert.deepEqual(result.revisionMoved, { expectedRevision: '0'.repeat(64), revision: current });
+  assert.match(result.notice as string, /planned at the current revision/);
+  assert.equal(session.receipts.size, 0);
 });
 
 test('metadata changes and watcher invalidation prevent stale check reuse', async (t) => {
@@ -491,7 +527,7 @@ test('a delayed watcher event gets one fresh attempt and preserves compiler diag
   assert.ok((result.diagnostics as AuthoringDiagnostic[]).some(({ code, location }) => code === 'template-compile-error' && location?.line === 1));
 });
 
-test('continued watcher churn is rejected after two full attempts', async (t) => {
+test('continued watcher churn is rejected after four calls of two full attempts, naming what changed', async (t) => {
   const { hooks, call, session } = await fixture(t);
   const check = hooks.check;
   let attempts = 0;
@@ -501,8 +537,24 @@ test('continued watcher churn is rejected after two full attempts', async (t) =>
     session.inputs.invalidate('template/index.tsx');
     return result;
   };
-  await assert.rejects(call('check_book'), (error) => error instanceof AuthoringError && error.code === 'SOURCE_CHANGED');
-  assert.equal(attempts, 2);
+  await assert.rejects(call('check_book'), (error) => error instanceof AuthoringError && error.code === 'SOURCE_CHANGED' &&
+    /template\/index\.tsx/.test(error.message) && (error.details as { changedInputs?: string[] }).changedInputs?.[0] === 'template/index.tsx');
+  assert.equal(attempts, 8);
+});
+
+test('a check that saw the book change while the user edits is repeated once the book is quiet', async (t) => {
+  const { hooks, call, session } = await fixture(t);
+  const check = hooks.check;
+  let attempts = 0;
+  hooks.check = async (...args) => {
+    const result = await check(...args);
+    // The app saves project.json a few times in a row, as while the user drags photos (API-007).
+    if (++attempts <= 3) session.inputs.invalidate('project.json');
+    return result;
+  };
+  const result = await call('check_book');
+  assert.equal(result.state, 'ready');
+  assert.equal(attempts, 4);
 });
 
 test('a watcher retry preserves the requested revision and preview target', async (t) => {
@@ -632,7 +684,8 @@ for (const operation of ['apply_project_changes', 'import_sources']) {
       : { kind: 'markdown', paths: ['inbox/note.md'] };
     await assert.rejects(call(operation, { ...args, expectedRevision, idempotencyKey: 'unstable-preparation' }),
       (error) => error instanceof AuthoringError && error.code === 'SOURCE_CHANGED');
-    assert.equal(checks(), 2);
+    // Each of the four attempts checks twice: once before the reload and once after it.
+    assert.equal(checks(), 8);
     assert.equal(writes, 0);
     assert.equal(session.receipts.size, 0);
     assert.equal(session.book.project.title, 'Context book');
