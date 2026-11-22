@@ -1,6 +1,6 @@
 # 0011: Lightroom Classic preview-first editing and on-demand export rendering
 
-Status: proposed, 2026-11-22 (revised after feasibility review: change detection, IPC and source-model prerequisites; revised again after the spike ran in Lightroom Classic 16.0.1: change detection, digest, `croppedDimensions`, batch rendering; then reframed around a general source-provider contract and render storage). Builds on [0004](0004-document-packages.md) (document packages), [0005](0005-linked-sources.md) (linked sources) and [0010](0010-sync-revisions-and-cloud-assets.md) (sync, revision tracking and cloud assets).
+Status: proposed, 2026-11-22 (revised after feasibility review: change detection, IPC and source-model prerequisites; revised again after the spike ran in Lightroom Classic 16.0.1: change detection, digest, `croppedDimensions`, batch rendering; then reframed around a general source-provider contract and render storage; then revised after that contract was checked against the code, see [the plan](../development/source-provider-plan.md)). Builds on [0004](0004-document-packages.md) (document packages), [0005](0005-linked-sources.md) (linked sources) and [0010](0010-sync-revisions-and-cloud-assets.md) (sync, revision tracking and cloud assets).
 
 The direction (a companion plugin that renders in Lightroom's own engine) is feasible. Several mechanisms first drafted here rested on SDK behaviour that was **unverified or contradicted by developer reports**. The spike in [Validation spike](#validation-spike) (`spikes/lightroom-classic/`) has since measured most of it on a real 40,000-photo catalog in Lightroom Classic 16.0.1; what it has not measured is still marked *unverified* below. The larger cost is not the Lua plugin but teaching ImageFlow's source model about photos that have no file ([Source providers](#source-providers)).
 
@@ -72,7 +72,7 @@ Consistent with [0005](0005-linked-sources.md) and [0010](0010-sync-revisions-an
   - **Changes in Lightroom flow in.** A metadata-only edit changes `lrRevision` but not the develop hash (section 3), so the host refreshes the provided values without rendering, and a template printing an inherited caption updates on the next reload. An override is not touched by a change in Lightroom.
   - **Editing.** The Inspector shows an inherited value as the field's placeholder, marks an overridden field, and offers **Revert to Lightroom**. `set_photo_metadata` keeps its meaning: a string writes an override, and `null` removes it, which now means "inherit" instead of "empty".
   - **No write-back.** ImageFlow never writes titles or captions into the Lightroom catalog. An explicit "Write captions to Lightroom" action through the plugin can be added later; it is not part of this ADR.
-  - **Import.** Import of a provider photo writes no title into `photos.json`, so the photo inherits its Lightroom title. The same rule lets the `local` provider later read IPTC/XMP titles and captions from files without changing the model.
+  - **Import.** Import of a provider photo writes no title into `photos.json`, so the photo inherits its Lightroom title. The same rule lets the file providers later read IPTC/XMP titles and captions from files without changing the model.
   - **Templates** see only the resolved values, as `Photo.title`, `caption`, `credit` and `altText` today.
 - **`digest` keeps its ADR 0010 meaning.** In `assets-meta.json`, `digest` is "SHA-256 of the original's bytes", and Locate Folder and the proxy store key on it. A Lightroom photo's `digest` is therefore the SHA-256 of the **stored preview bytes**, never a synthetic hash of Lightroom state. Lightroom writes a fresh `xmp:MetadataDate` and a random `xmpMM:DocumentID` into every export, whatever the metadata option, so two renders of the same edit differ in bytes. ImageFlow therefore removes the EXIF/XMP (APP1) and comment segments from a rendered preview, keeping the ICC profile, before storing and hashing it. The spike found the remaining image data identical across re-renders. The Lightroom revision that produced it (`lrRevision`) and the develop-settings hash go in a separate `lightroom` object on the fact. Two edits that render identically then share a digest, so downstream proxies and renditions are not invalidated.
 - **`croppedDimensions` is an estimate until a full-resolution render exists.** It matched the real export size on every photo the spike tested (cropped and uncropped), but it can still differ by a few pixels from the real export (Upright, Super Resolution, rotation crops). Whenever a full-resolution render is produced, its actual pixel size replaces the estimate in `assets-meta.json`, so the 300 DPI checks converge on the truth.
@@ -153,14 +153,18 @@ Almost everything in this ADR is generic. Previews before originals, full resolu
 | --- | --- | --- |
 | Identity | Stable `ph-...` IDs; locators never become IDs ([0005](0005-linked-sources.md)) | A portable locator schema (`{ provider: 'lightroom', catalog, uuid }`) and how to resolve it |
 | Facts | `assets-meta.json`, `Book check`, DPI checks | Dimensions, capture metadata, and a provider-specific `extra` object |
-| Revision | Stores tokens, compares them, decides what to re-render or reload | Two opaque tokens per photo: `revision` (any change; keys print) and an optional `contentRevision` (visual changes only; keys previews). Lightroom: `lrRevision` and the develop-settings hash. Local files: both are the file stamp. S3: the ETag. Immich: the checksum. |
+| Revision | Stores tokens, compares them, decides what to re-render or reload | Two opaque tokens per photo: `revision` (any change; keys print) and an optional `contentRevision` (visual changes only; keys previews). Lightroom: `lrRevision` and the develop-settings hash. Local files: the file stamp, for both. S3: the ETag. Immich: the checksum. The host hands the tokens it stored back in, so a provider reads a costly one (the develop hash) only when the other moved. |
 | Change events | Debounce, hot reload, aspect-ratio warnings | `watch(locators)`: filesystem watcher, Lightroom poll, cloud poll or webhook |
 | Previews | `ProxyStore`, digests, thumbnails, sync between Macs | `preview(locator)` when the provider has one (Lightroom render, Immich preview); otherwise the host derives it from the original |
-| Full resolution | Which photos are placed, the source cache, pinning into the export job, Copy into Book | `materialize(locators)` into a staging folder: render (Lightroom), download (cloud) or nothing (local files are read in place); in batches, with progress, cancellable between batches |
+| Full resolution | Which photos are placed, the source cache, pinning into the export job, Copy into Book | `materialize(locators)` into a staging folder: render (Lightroom), download (cloud) or copy (local files, which an export already reads from a private copy); in batches, with progress, cancellable between batches. Each result names the revision before and after, and one that changed is discarded |
 | Availability | One set of states and actions (`Retry`, `Locate`, proof-only export) | Maps its failures onto them: `offline` (Lightroom not running, no network), `needs-sign-in`, `missing` (deleted from the catalog or bucket) |
 | Trust | Approvals, credentials in local settings, loopback server, Electron main only | Declares what it needs (a local app, a network origin, an account) |
 
-The contract runs only in the Electron main process (`desktop/`); templates still see only `Photo` objects. The existing file behaviour becomes the `local` provider, so the contract is proven by two implementations instead of being designed for one. Before a cloud provider is built, its fit is checked on paper (Immich: previews, original download, checksum as revision), not implemented.
+The contract has two halves. Reading state, pixels and changes (`SourceProvider`, `desktop/source-provider.ts`) runs only in the Electron main process; templates still see only `Photo` objects. How a `photos.json` entry reads as a locator, and which part of it is portable (`LocatorKind`, `src/source-locator.ts`), is pure, because the book-state revision, sync snapshots and the renderer need it too.
+
+**A photo is either a file the host reads in place, or facts.** The file providers report a file, and the host treats it as it does today: it reads the facts with `sharp`, derives and keys renditions from the file, and hashes its bytes into the render-input revision (`desktop/revisions.ts`). A provider without a file reports facts; its pixels come from `preview` and `materialize`, and its `revision` token takes the place of the bytes in the input revision. In the editor such a photo is drawn like one whose original is missing on this Mac today: from its fact and its proxy.
+
+The contract covers photos. Texts and files stay files. Approvals stay inside `linked` (a grant is for one exact path), and import stays provider-specific until a second provider shows what the two share. The existing file behaviour becomes two providers that share how a file is read: `package`, a photo in the book's own `photos/` (the host's storage: no approval, synced as an original), and `linked`, a file elsewhere on this Mac (approved per path, watched where it is). Copy into Book changes any photo's provider to `package`. So the contract is proven by existing behaviour before it is designed for Lightroom. Before a cloud provider is built, its fit is checked on paper (Immich: previews, original download, checksum as revision), not implemented.
 
 ### Where renders are stored
 
@@ -173,9 +177,30 @@ The contract runs only in the Electron main process (`desktop/`); templates stil
 
 Full-resolution files go into the **source cache, not the rendition cache.** The rendition cache (`Cache/renditions`) is capped at 512 MB and pruned between sessions (`pruneRenditions`, `desktop/rendition-cache.ts`); at about 20 MB per 24 MP render, a 48-photo book alone would exceed it and re-render at every export. The source cache already has the retention a materialization needs (`pruneSourceCache`, `desktop/source-store.ts`): the most recently opened book keeps every snapshot it references whatever the limit, recent books are preferred, open books and running jobs pin theirs, and the 2 GB limit applies to the rest. A materialized Lightroom render is then the same kind of object as a snapshot of a linked file, and export pinning works unchanged. Settings shows the cache size and a **Clear** action, since a few large books reach several GB.
 
+### Sync between Macs
+
+Providers do not change how a book syncs ([0010](0010-sync-revisions-and-cloud-assets.md)); they generalise what a linked file already is there. Book state, facts and 1400 px proxies sync for every photo, whatever its provider. An original syncs only when its provider is `package`.
+
+**A Mac can print a photo if the photo is in the package, or if that Mac can reach the photo's provider.**
+
+| Reach | Providers | Full resolution on another Mac |
+| --- | --- | --- |
+| Travels with the book | `package` | Yes: the original is downloaded on demand |
+| Any Mac with access | Immich, S3 and other servers | Yes, once that Mac is signed in |
+| Bound to one Mac | `linked`, `lightroom` | Only if that Mac has the folder or the catalog |
+
+A book can therefore hold photos that no single Mac can print: one Mac adds Lightroom photos, another links a folder only it has. This is already possible with two linked folders, and each Mac shows the other's photos from their proxies. Only providers bound to one Mac cause it. There are three answers:
+
+1. **Copy into Book** on the Mac that has the source. The photo becomes a `package` photo and its original syncs. It no longer follows edits in Lightroom.
+2. **Say it before the export.** Book check lists the placed photos this Mac cannot print, with the reason (in Lightroom on another Mac, a linked folder not located here, not signed in), and the export is proof-only for them, as for a missing linked original today. Naming the other Mac needs a fact to record which Mac last read the original; today it records only when.
+3. **Syncing full-resolution renders of placed photos** (*deferred*). A materialization is a content-addressed file recorded against a revision, so the sync engine can upload it like an owned original, and another Mac can export from it while the photo stays a Lightroom photo. That Mac cannot ask Lightroom whether the render is current, so it prints the revision the render was made from and says so. This needs nothing from a provider and is decided when full-resolution export exists (phase 3).
+
+The provider contract needs nothing for this: the host asks whether a photo's provider is `package` (sync the original), and what `observe` returns on this Mac (can it print).
+
 ### Other prerequisites
 
-- **Older builds.** An entry without `path` is rejected or stripped by builds that predate it, so provider locators ship behind a `schemaVersion` bump (ADR 0009 and 0010's mixed-version rules).
+- **Older builds.** An entry without `path` is rejected by builds that predate it, so provider locators ship behind a `schemaVersion` bump (ADR 0009 and 0010's mixed-version rules). The format is derived from `project.json` alone today (`bookFormatOf`, `src/project.ts`), so it must come to depend on the photo index.
+- **Facts of older builds.** `assets-meta.json` is parsed with a schema that drops unknown fields, and a file with another `version` reads as empty and is written over. A build that predates the `provided` and `lightroom` objects removes them when it saves the book, so they need the same gate, or a fact schema that keeps unknown fields shipped a release earlier.
 - **Proxy stand-in.** Today a proxy stands in only for `missing` or `unapproved` originals (`desktop/project.ts`). A provider photo whose provider is offline needs the `offline` state. Print is blocked or proof-only for it, using the same source-diagnostic codes and `ORIGINAL UNAVAILABLE` marking as ADR 0005.
 - **Colour.** Materializations are 8-bit sRGB JPEGs for Lightroom, as ImageFlow's own pipeline produces (`withIccProfile('srgb')`), so there is no loss against today. Wide-gamut or 16-bit renders are out of scope.
 
@@ -203,7 +228,7 @@ Full-resolution files go into the **source cache, not the rendition cache.** The
 
 0. Spike (above); revise this ADR from the results. *Done for questions 1–5, 7, 9 and part of 8.*
 1. Minimal Publish Service plugin: previews and a sidecar to a folder, linked by ImageFlow as today. Ships without the provider contract.
-2. The provider contract, with today's file behaviour moved behind it as the `local` provider and no visible change; then the `lightroom` provider with the pull bridge and previews.
+2. The provider contract, with today's file behaviour moved behind it as the `package` and `linked` providers and no visible change; then the `lightroom` provider with the pull bridge and previews.
 3. Full-resolution rendering at export, collection and Copy into Book.
 
 ## Consequences
