@@ -124,6 +124,8 @@ body { margin: 0; }
 .book-frame { position: absolute; left: 0; top: 0; width: 100%; height: 0; border: 0; pointer-events: none; background: transparent; }
 /* Keep the candidate painted in Chromium so its first visible frame is ready when it is promoted. */
 .book-frame-pending { opacity: .01; }
+/* The previous revision, beneath the one just shown until that has painted. */
+.book-frame.book-frame-pending.book-frame-retiring { opacity: 1; visibility: visible; }
 
 /* Canvas: the whole book in one scrolling column */
 .canvas-wrap { position: relative; min-height: 0; }
@@ -524,11 +526,14 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .studio .toolbar-icon[aria-pressed="true"] { color: var(--text); }
 .toolbar .history { flex: none; margin-left: 8px; padding-left: 8px; border-left: 1px solid var(--edge); gap: 2px; }
 .toolbar button:disabled { opacity: .3; }
-/* Export keeps one fixed-size button while it runs, so neither it nor its neighbours move. */
+/* Export is one icon, which turns into a spinner that cancels while it runs, so nothing moves; a book with a cover adds a
+   small menu beside it for either PDF. */
 .export-area { flex: none; display: flex; align-items: center; }
-.studio .export-button { display: flex; align-items: center; justify-content: center; gap: 6px; width: 124px; height: 28px; min-height: 28px; font-size: 13px; white-space: nowrap; }
-.studio .export-button svg { color: var(--muted); }
-.export-button .status-spinner { display: inline-block; flex: none; }
+.export-button .status-spinner { display: inline-block; flex: none; margin: 0; }
+.studio .toolbar .export-menu .action-menu-trigger { display: grid; place-items: center; width: 16px; height: 30px; min-height: 30px; margin-left: -4px;
+  padding: 0; background: transparent; box-shadow: none; color: var(--icon-color); border-radius: 5px; }
+.studio .toolbar .export-menu .action-menu-trigger:hover:not(:disabled) { background: var(--subtle-hover); }
+.studio .toolbar .export-menu .action-menu-trigger svg { width: 12px; height: 12px; margin: 0; }
 
 /* Slide panels without squeezing their contents or discarding their editor state. */
 .workspace { min-width: 0; grid-template-columns: minmax(0, var(--left-panel, 232px)) var(--left-divider, 6px) minmax(240px, 1fr) var(--right-divider, 6px) minmax(0, var(--right-panel, 276px)); transition: grid-template-columns 220ms cubic-bezier(.2,.7,.2,1); }
@@ -943,7 +948,9 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .presentation-cover-hidden { opacity: 0; pointer-events: none; }
 .presentation-cover-hidden .book-frame { pointer-events: none !important; }
 .presentation-cover-sheet { position: relative; max-height: 100%; }
-.presentation .book-frame-pending { visibility: hidden; }
+/* Painted, not hidden, like the book view's candidate: a hidden frame showed nothing for a moment once promoted, and may
+   not get its size (F-038). It must not take the overview's clicks meanwhile. */
+.presentation .book-frame-pending { pointer-events: none !important; }
 .presentation-idle, .presentation-idle * { cursor: none; }
 .presentation-indicator { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 6px 12px;
   border-radius: 20px; background: #000b; color: #eee; font-size: 12px; opacity: 0; transition: opacity .25s; pointer-events: none; }
@@ -1060,14 +1067,13 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
    Push buttons and pull-down triggers share one look and size: 24px in panels, 28px in the window toolbar. A pull-down
    ends in a small muted chevron, centred with its label. Borderless icon buttons, segmented controls, thumbnails and
    links keep their own rules above. */
-.studio :is(button.primary, button.source-import, .export-button, .action-menu-trigger, .settings-buttons button, .start-actions > button) {
+.studio :is(button.primary, button.source-import, .action-menu-trigger, .settings-buttons button, .start-actions > button) {
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   min-height: 24px; height: auto; padding: 3px 10px;
   border: 0; border-radius: 6px; background: var(--button-fill); box-shadow: var(--button-shadow);
   color: var(--text); font: 400 12px/16px var(--ui-font); white-space: nowrap;
 }
-.studio :is(button.source-import, .export-button, .action-menu-trigger, .settings-buttons button, .start-actions > button):active:not(:disabled) { background: var(--button-pressed); filter: none; }
-.studio .toolbar .export-button { min-height: 28px; font-size: 13px; }
+.studio :is(button.source-import, .action-menu-trigger, .settings-buttons button, .start-actions > button):active:not(:disabled) { background: var(--button-pressed); filter: none; }
 .studio button.primary { background: var(--button-primary); color: #fff; box-shadow: 0 0 0 .5px #00000026, 0 .5px 1.5px #0000002e; font-weight: 500; }
 .studio button.primary:active:not(:disabled) { filter: brightness(.92); }
 .studio .action-menu-trigger svg:last-child:not(:first-child) { width: 10px; height: 10px; margin-right: -3px; color: var(--button-chevron); }

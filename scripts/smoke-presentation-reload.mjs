@@ -39,6 +39,21 @@ await copySample(join(root, 'sample/starter'), covered);
 
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
   env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: visible ? '' : '1' } });
+// A new revision's frame must show the spread on screen before it is swapped in, not the one the presentation started
+// on: else its photos load only after the swap and blink. Each frame notes when it first shows the third spread, and
+// the presentation when it swaps each frame in.
+await app.context().addInitScript(() => {
+  const observe = (check) => new MutationObserver(check).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['style', 'class'] });
+  if (location.search.includes('view=present')) observe(() => {
+    if (document.documentElement.dataset.thirdAt) return;
+    const crop = [...document.querySelectorAll('.if-present-crop')].find((node) => node.style.visibility !== 'hidden');
+    if (crop?.textContent.startsWith('c')) document.documentElement.dataset.thirdAt = String(Date.now());
+  });
+  else if (location.href.startsWith('imageflow://editor')) observe(() => {
+    window.shownAt ??= {};
+    for (const frame of document.querySelectorAll('.book-frame-present:not(.book-frame-pending)')) window.shownAt[frame.dataset.revision] ??= Date.now();
+  });
+});
 const throttling = (window) => window.evaluate((window) => window.webContents.getBackgroundThrottling());
 async function present(editor, start) {
   const opened = nextPresentation(app);
@@ -59,6 +74,9 @@ try {
   assert.equal(await throttling(editorWindow), false, 'The editor behind the presentation renders at full speed');
   assert.equal(await throttling(await app.browserWindow(presentation)), false, 'The presentation renders while another app covers it');
   let before = (await editor.evaluate(() => window.imageflow.currentProject())).value.id;
+  // Away from the spread the presentation started on.
+  await presentation.keyboard.press('ArrowRight');
+  await presentation.locator('.presentation-indicator').filter({ hasText: / 3 \/ / }).waitFor();
   for (let round = 0; round < 3; ++round) {
     const started = Date.now();
     await edit(round);
@@ -74,6 +92,12 @@ try {
     before = now;
     await presentation.waitForFunction((id) => document.querySelector('.book-frame-present[data-current][data-ready]')?.getAttribute('src')?.includes(id), now, { timeout: 30_000 });
     assert.deepEqual(await presentation.locator('.presentation-message, .presentation-notice').allTextContents(), []);
+    if (!book) {
+      const frame = presentation.frames().find((item) => item.url().includes(now) && item.url().includes('view=present'));
+      const third = Number(await frame.evaluate(() => document.documentElement.dataset.thirdAt));
+      const shown = await presentation.evaluate((id) => window.shownAt?.[id], now);
+      assert.ok(third && shown && third <= shown, 'The new frame showed the current spread before it was swapped in: ' + JSON.stringify({ third, shown }));
+    }
     assert.equal(await editor.getByText('Updating the book after its files changed').count(), 0, 'The editor reload settled');
     assert.ok(reloaded < 15_000, 'The editor reload finished while presenting (' + reloaded + ' ms)');
     console.log('Template edit ' + round + ' reached the editor in ' + reloaded + ' ms and the presentation.');

@@ -10,7 +10,7 @@
   {"id":"print-formats","title":"Print format","summary":"Trim, bleed, safe areas and pagination."},
   {"id":"template-library","title":"Template library","summary":"Import, previews and openingSpreads."},
   {"id":"switching-layouts","title":"Switching layouts","summary":"Content, crops and saved layout state."},
-  {"id":"layout-families","title":"Layout families","summary":"Variant tags and family pickers."},
+  {"id":"layout-families","title":"Layout families","summary":"Variant tags, and family pickers: a built-in choice or a component."},
   {"id":"dependencies","title":"Dependencies","summary":"npm bundles, licences and allowed sites."},
   {"id":"render-function","title":"Render function","summary":"render(ctx), caching and photo metadata."},
   {"id":"rendered-images","title":"Rendered images","summary":"Async artwork for previews and export."},

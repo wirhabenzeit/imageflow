@@ -233,6 +233,32 @@ test('layout families: declared variants load, and every family rule is checked 
   assert.ok(!parse({ four: grid(), nine: grid() }, { grid: { label: 'Photo grid', picker: { component: 'Picker' } } }).success);
 });
 
+test('layout families: a built-in choice picker names one option per variant by one tag', () => {
+  const render = () => null;
+  const grid = (size?: string) => ({ label: 'Grid', family: 'grid', render, ...(size ? { variant: { size } } : {}) });
+  const choice = (options: Record<string, string>, tag = 'size') => ({ grid: { label: 'Photo grid', picker: { label: 'Grid size', choice: { tag, options } } } });
+  const parse = (spreads: Record<string, unknown>, layoutFamilies: Record<string, unknown>) =>
+    templateSchema.safeParse({ id: 't', version: '1', contract: 1, format, layoutFamilies, spreads });
+  const problems = (result: ReturnType<typeof parse>) => result.success ? [] : result.error.issues.map(({ path, message }) => path.join('.') + ': ' + message);
+  const options = { '2x2': '2 × 2', '3x3': '3 × 3' };
+
+  const valid = parse({ four: grid('2x2'), nine: grid('3x3') }, choice(options));
+  assert.ok(valid.success, problems(valid).join('\n'));
+  assert.match(problems(parse({ four: grid('2x2'), nine: grid('4x4') }, choice(options))).join('\n'),
+    /^layoutFamilies\.grid\.picker\.choice\.options: Family grid's choice names no option for size: "4x4" \(layout nine\)/m);
+  assert.match(problems(parse({ four: grid('2x2'), nine: grid('4x4') }, choice(options))).join('\n'),
+    /^layoutFamilies\.grid\.picker\.choice\.options\.3x3: Family grid's choice offers "3x3", but no layout of the family has size: "3x3"/m);
+  assert.match(problems(parse({ four: grid('2x2'), nine: grid('3x3') }, choice(options, 'rows'))).join('\n'),
+    /^spreads\.four\.variant: Layout four of family grid has no tag rows, which the family's picker chooses by/m);
+  assert.match(problems(parse({ four: { ...grid(), variant: { size: '2x2', text: true } }, nine: { ...grid(), variant: { size: '2x2', text: false } } },
+    choice({ '2x2': '2 × 2', '3x3': '3 × 3' }))).join('\n'), /^spreads\.nine\.variant: Layouts four and nine of family grid have the same size \("2x2"\)/m);
+  assert.match(problems(parse({ four: grid('2x2'), nine: grid('3x3') }, choice({ '2x2': '2 × 2' }))).join('\n'), /A choice offers at least two options/);
+  assert.match(problems(parse({ four: grid('2x2'), nine: grid('3x3') },
+    { grid: { label: 'Photo grid', picker: { choice: { tag: 'size', options }, component: () => null } } })).join('\n'), /A picker has either a choice or a component/);
+  assert.match(problems(parse({ four: grid('2x2'), nine: grid('3x3') }, { grid: { label: 'Photo grid', picker: { label: 'Grid size' } } })).join('\n'),
+    /A picker has either a choice or a component/);
+});
+
 test('templateInfo reports families and each layout\'s family and tags, without the picker component', async () => {
   const { templateInfo } = await import('../src/template');
   const render = () => null;
@@ -247,6 +273,11 @@ test('templateInfo reports families and each layout\'s family and tags, without 
   assert.equal(info.spreads.nine.family, 'grid');
   assert.deepEqual(info.spreads.nine.variant, { size: 3 });
   assert.equal(JSON.stringify(info).includes('component'), false);
+  // A built-in choice is plain data, so the editor draws it itself.
+  const chosen = templateInfo(chooseFormat(templateSchema.parse({ id: 't', version: '1', contract: 1, format,
+    layoutFamilies: { grid: { label: 'Photo grid', picker: { label: 'Grid size', choice: { tag: 'size', options: { 2: '2 × 2', 3: '3 × 3' } } } } },
+    spreads: { four: { label: '2×2', family: 'grid', variant: { size: 2 }, render }, nine: { label: '3×3', family: 'grid', variant: { size: 3 }, render } } })));
+  assert.deepEqual(chosen.layoutFamilies, { grid: { label: 'Photo grid', picker: { label: 'Grid size', choice: { tag: 'size', options: { 2: '2 × 2', 3: '3 × 3' } } } } });
 });
 
 test('an element editor may edit declared layout parameters, each by one editor, without a generated control', () => {

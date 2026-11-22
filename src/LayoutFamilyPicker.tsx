@@ -6,6 +6,7 @@ import { scopeSpread } from './project';
 import type { PageSide, SpreadState, Values } from './project';
 import { familyLayouts } from './layouts';
 import { useEditorFrame } from './editor-frame';
+import { Choice } from './choice';
 
 // A family keeps one frame while choices save. Its context follows the book without resetting height or focus.
 export function LayoutFamilyPicker({ project, template, spread, params, family, readOnly, blocked, page, chooseLayout, onShowing }: {
@@ -47,18 +48,45 @@ export function LayoutFamilyPicker({ project, template, spread, params, family, 
   }, [ready, contextKey]);
   const showing = useRef(onShowing);
   showing.current = onShowing;
+  // The field shows once its frame has drawn the saved choice: before, the frame was an empty, white box for a moment.
+  // Nearly transparent, not hidden, so Chromium paints the frame meanwhile.
+  const [drawn, setDrawn] = useState(false);
   useEffect(() => {
     if (!ready && !failed) return;
     // The frame draws the state it was just sent in its next frame, and reports its new height after that.
     let second = 0;
-    const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => showing.current?.()); });
+    const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => { setDrawn(true); showing.current?.(); }); });
     return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); };
   }, [ready, failed]);
-  return <div className="field layout-family-field" role="region" aria-label={title} aria-disabled={disabled} aria-busy={!ready || undefined} title={blocked}>
+  return <div className="field layout-family-field" role="region" aria-label={title} aria-disabled={disabled} aria-busy={!ready || undefined} title={blocked}
+    style={drawn ? undefined : { opacity: .01 }}>
     <span className="field-name">{title}</span>
     <iframe ref={frame} className="element-editor-frame" inert={disabled} title={title} src={source} style={{ height }} />
     {stale && <p className="error-text" role="alert">Layouts changed. Reopen the picker.</p>}
     {error && !stale && <p className="error-text" role="alert">{error}</p>}
+  </div>;
+}
+
+// A family whose picker is a `choice`: the app's own segmented control, drawn at once, with no frame or template code.
+export function FamilyChoice({ template, spread, family, page, readOnly, blocked, chooseLayout }: {
+  template: TemplateInfo; spread: SpreadState; family: string; page?: PageSide; readOnly: boolean; blocked?: string; chooseLayout: (definition: string) => void;
+}) {
+  const declared = template.layoutFamilies?.[family];
+  const choice = declared?.picker?.choice;
+  const selected = scopeSpread(spread, page);
+  const current = spread.split && !page ? '' : selected?.definition ?? '';
+  if (!choice) return null;
+  const variants = familyLayouts(template.spreads, family);
+  const title = declared.picker?.label ?? declared.label;
+  // In the order the choice names them; the template check makes sure every variant has exactly one option.
+  const options = Object.entries(choice.options).flatMap(([value, label]) => {
+    const id = variants.find((variant) => String(template.spreads[variant].variant?.[choice.tag]) === value);
+    return id ? [{ value: id, label }] : [];
+  });
+  // The choice draws its own labelled field, spaced like the settings below it.
+  return <div className="layout-family-field" role="region" aria-label={title} title={blocked}>
+    <Choice label={title} value={current} options={options} disabled={readOnly || !!blocked}
+      onChange={(next) => { if (next !== current) chooseLayout(next); }} />
   </div>;
 }
 

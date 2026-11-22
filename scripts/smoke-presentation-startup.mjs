@@ -117,7 +117,12 @@ try {
   await checkHeader();
   if (!process.argv.includes('--measure')) {
     assert.equal(await proof.locator('body').evaluate(() => window.__heldProxyDecodes ?? 0), 0, 'Offscreen shaped photos never block startup on decode');
-    assert.equal(requests.find((source) => !source.startsWith('p15')), 'p30', 'The selected spread is the first ordinary photo requested');
+    // The first frame starts on its spread; only a later revision's frame waits to be told the spread on screen.
+    assert.equal((await page.locator('.presentation .book-frame-present[data-current]').getAttribute('src')).includes('replacement'), false,
+      'The presentation\'s first frame does not wait as a replacement');
+    assert.equal(requests.find((source) => !source.startsWith('p15'))?.split('/')[0], 'p30', 'The selected spread is the first ordinary photo requested');
+    // Screen-sized, never the camera original, also for the spread on screen (p15 is drawn in an SVG picture).
+    assert.ok(requests.filter((source) => !source.startsWith('p15')).every((source) => /\/\d+$/.test(source)), 'The presentation requests sized photos');
     assert.ok(started.length <= 3 && started.every(index => Math.abs(index - 30) <= 1), 'Only the current spread and neighbours draw artwork at startup');
     assert.ok(await page.evaluate(() => !!document.activeElement?.closest('.presentation')), 'Keyboard focus enters presentation without clicking the slide');
     let window = await app.browserWindow(page);
@@ -133,17 +138,19 @@ try {
     // --visible exercises the native input path, which requires a focused native window. Neither path clicks
     // the slide or manually focuses it after entry, since that would mask the reported focus failure.
     await nativeKey('Right');
-    await proof.locator('.if-present-crop:visible img[data-src][src$="/p31"]').waitFor({ timeout: 5000 });
+    await proof.locator('.if-present-crop:visible img[data-src][src*="/p31/"]').waitFor({ timeout: 5000 });
     await nativeKey('Left');
-    await proof.locator('.if-present-crop:visible img[data-src][src$="/p30"]').waitFor();
+    await proof.locator('.if-present-crop:visible img[data-src][src*="/p30/"]').waitFor();
     const current = proof.locator('.if-present-crop:visible');
     await current.locator('[data-rendered="ready"] img').waitFor();
-    assert.equal(await current.locator('img[data-src]').evaluate(image => image.naturalWidth), 1800);
+    // A rendition as wide as the screen needs, never wider than the 1800 px original.
+    assert.equal(await current.locator('img[data-src]').evaluate(image => image.naturalWidth),
+      Math.min(1800, Number((await current.locator('img[data-src]').getAttribute('src')).split('/').pop())));
     await page.keyboard.press('ArrowRight');
-    await proof.locator('.if-present-crop:visible img[data-src][src$="/p31"]').waitFor();
+    await proof.locator('.if-present-crop:visible img[data-src][src*="/p31/"]').waitFor();
     await proof.locator('.if-present-crop:visible [data-rendered="ready"]').waitFor();
     await page.keyboard.press('End');
-    await proof.locator('.if-present-crop:visible img[data-src][src$="/p39"]').waitFor();
+    await proof.locator('.if-present-crop:visible img[data-src][src*="/p39/"]').waitFor();
     await proof.locator('.if-present-crop:visible [data-rendered="ready"]').waitFor();
     await page.screenshot({ path: join(work, 'presentation.png') });
     const beforeOverview = requests.length;
@@ -157,9 +164,12 @@ try {
     assert.ok(await proof.locator('.if-present-crop img[data-src]').evaluateAll(images => images.filter(image => image.complete).every(image => image.naturalWidth <= 1024)));
     assert.ok(requests.slice(beforeOverview).every(source => /\/\d+$/.test(source)));
     await page.keyboard.press('Enter');
-    await proof.locator('.if-presentation:not(.overview) .if-present-crop:visible img[data-src][src$="/p39"]').waitFor();
+    await proof.locator('.if-presentation:not(.overview) .if-present-crop:visible img[data-src][src*="/p39/"]').waitFor();
     await proof.locator('.if-present-crop:visible img[data-src]').evaluate(image => image.decode());
-    assert.equal(await proof.locator('.if-present-crop:visible img[data-src]').evaluate(image => image.naturalWidth), 1800, 'Leaving overview restores original photo quality');
+    // Full quality for the screen again: the rendition the spread asks for, never wider than the 1800 px original.
+    assert.equal(await proof.locator('.if-present-crop:visible img[data-src]').evaluate(image => image.naturalWidth),
+      Math.min(1800, Number((await proof.locator('.if-present-crop:visible img[data-src]').getAttribute('src')).split('/').pop())),
+      'Leaving overview restores full photo quality');
     const closed = page.waitForEvent('close');
     await page.keyboard.press('Escape').catch((error) => { if (!page.isClosed()) throw error; });
     await closed;
@@ -171,7 +181,7 @@ try {
     window = await app.browserWindow(input);
     await input.locator('.presentation .book-frame-present[data-current][data-ready]').waitFor();
     await nativeKey('Home');
-    await input.frameLocator('.presentation .book-frame-present[data-current][data-ready]').locator('.if-present-crop:visible img[data-src][src$="/p0"]').waitFor();
+    await input.frameLocator('.presentation .book-frame-present[data-current][data-ready]').locator('.if-present-crop:visible img[data-src][src*="/p0/"]').waitFor();
     await input.keyboard.press('3');
     await input.keyboard.press('1');
     await input.keyboard.press('Enter');

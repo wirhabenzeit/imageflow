@@ -83,6 +83,26 @@ try {
     await ready(spread);
     assert.equal(await draws(), 0, 'Switching to ' + spread + ' reuses the map picture without drawing');
   }
+  // Back to the spread before while its previews are still kept beneath (A → B → A within their moment): they show
+  // again at once, as the same page, not hidden behind B's or loaded again. B's previews are laid out like A's.
+  const shownPreviews = (spread, timeout = 10_000) => page.waitForFunction((spread) => {
+    const frame = document.querySelector('iframe.book-frame-layouts:not(.book-frame-pending)');
+    return frame && new URL(frame.src).searchParams.get('spread') === spread;
+  }, spread, { timeout });
+  const keptFrame = () => page.frames().find((frame) => frame.url().includes('view=layouts') && new URL(frame.url()).searchParams.get('spread') === 'settlements');
+  const other = process.env.SMOKE_OTHER ?? 'last-notes';
+  await page.locator('.spread-thumb[data-spread="' + other + '"]').click();
+  await shownPreviews(other);
+  assert.equal(await page.locator('iframe.book-frame-layouts.book-frame-retiring').evaluate((frame) => new URL(frame.src).searchParams.get('spread')),
+    'settlements', 'The previous previews are kept beneath');
+  // Marks the page of the previews kept beneath: a reloaded frame would lose it.
+  await keptFrame().evaluate(() => { window.__kept = true; });
+  await page.locator('.spread-thumb[data-spread="settlements"]').click();
+  await shownPreviews('settlements', 400);
+  assert.equal(await keptFrame().evaluate(() => window.__kept ?? false), true, 'The previews shown again are the same page, not loaded again');
+  await page.waitForTimeout(800);
+  await shownPreviews('settlements');
+  await ready('settlements');
   const manifest = join(book, 'project.json');
   const project = JSON.parse(await readFile(manifest, 'utf8'));
   const spread = project.spreads.find(({ id }) => id === 'settlements');
@@ -155,6 +175,19 @@ try {
     window.__thumbMessages = [];
   });
   await page.locator('iframe.book-frame-thumbs[data-current][data-ready]').waitFor();
+  // A replacement draws the pictures of the spreads on screen before it shows, and every other one once it is ready.
+  // With the map's thumbnail scrolled out of sight, the sidebar's replacement draws it after it shows.
+  const scrolled = await page.locator('iframe.book-frame-thumbs[data-current]').evaluate((frame) => {
+    let view = frame.parentElement;
+    while (view && view.scrollHeight <= view.clientHeight) view = view.parentElement;
+    view.scrollTop = view.scrollHeight;
+    return view.scrollTop;
+  });
+  assert.ok(scrolled > 0, 'the sidebar scrolls');
+  const beforeScrolledEdit = await thumbUrl();
+  await page.getByRole('checkbox', { name: 'Page numbers', exact: true }).check();
+  await page.waitForFunction((before) => { const frame = document.querySelector('iframe.book-frame-thumbs[data-current][data-ready]'); return !!frame && frame.dataset.revision !== before; }, beforeScrolledEdit);
+  await thumbnails().locator(mapPage + '[data-rendered="ready"]').waitFor({ timeout: 30_000 });
   console.log('Picture cache passed: layout navigation, sidebar map stability through unrelated edits, input and template invalidation.');
 } catch (error) { console.error('Picture requests:', pictures); throw error; }
 finally { await closeApp(app); await rm(work, { recursive: true, force: true }); }

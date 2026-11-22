@@ -23,9 +23,16 @@ import './persistence-root';
 
 async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'if-linked-')));
-  // Background digests keep writing the source registry; let them finish before removing it.
-  t.after(async () => { await SourceStore.drain(); await rm(root, { recursive: true, force: true }); });
   const folder = join(root, 'Book.imageflow');
+  // Background digests keep writing the source registry, and an open book's asset facts flush on release. Hooks run in
+  // the order they were added, so this one runs before `writable`'s release: finish both writers here, then remove the
+  // folder, retrying a directory a late write still filled.
+  t.after(async () => {
+    await SourceStore.drain();
+    await AssetFacts.release(folder);
+    await SourceStore.drain();
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  });
   const external = join(root, 'external');
   const cache = join(root, 'cache');
   await Promise.all([mkdir(external), mkdir(cache)]);

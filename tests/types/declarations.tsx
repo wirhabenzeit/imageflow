@@ -192,6 +192,21 @@ defineTemplate({ id: 't', version: '1', contract: 1, format, layoutFamilies: { g
   four: { label: '2×2', family: 'grid', render: () => <Spread /> },
   nine: { label: '3×3', family: 'grids', render: () => <Spread /> },
 } });
+// A picker may instead be the app's own choice by one tag: plain data, and never both a choice and a component.
+defineTemplate({ id: 't', version: '1', contract: 1, format,
+  layoutFamilies: { grid: { label: 'Photo grid', picker: { label: 'Grid size', choice: { tag: 'size', options: { '2x2': '2 × 2', '3x3': '3 × 3' } } } } },
+  spreads: ({ spread }) => ({
+    four: spread({ label: '2×2', family: 'grid', variant: { size: '2x2' }, render: () => <Spread /> }),
+    nine: spread({ label: '3×3', family: 'grid', variant: { size: '3x3' }, render: () => <Spread /> }),
+  }) });
+defineTemplate({ id: 't', version: '1', contract: 1, format,
+  // @ts-expect-error
+  layoutFamilies: { grid: { label: 'Photo grid', picker: { choice: { tag: 'size', options: {} }, component: GridPicker } } },
+  spreads: ({ spread }) => ({ four: spread({ label: '2×2', family: 'grid', render: () => <Spread /> }) }) });
+defineTemplate({ id: 't', version: '1', contract: 1, format,
+  // @ts-expect-error
+  layoutFamilies: { grid: { label: 'Photo grid', picker: { choice: { tag: 'size', options: { a: 1 } } } } },
+  spreads: ({ spread }) => ({ four: spread({ label: '2×2', family: 'grid', render: () => <Spread /> }) }) });
 // Without layoutFamilies, no family can be named.
 // @ts-expect-error
 defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: ({ spread }) => ({

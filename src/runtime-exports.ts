@@ -13,7 +13,7 @@ export const contract1Capabilities = [
   'spread-builder', 'bound-geometry', 'text-component', 'format-helper', 'box-records',
   // `controls` on spreads, boxes and elements; `Control` and `importFile` in custom element editors.
   'editor-controls', 'editor-native-controls',
-  // `layoutFamilies`, with `family` and `variant` on layouts, and a family's own layout picker.
+  // `layoutFamilies`, with `family` and `variant` on layouts, and a family's picker: a built-in choice or a component.
   'layout-families',
   // `spread` on an element editor: layout parameters it edits together with the element's own.
   'editor-spread-parameters',

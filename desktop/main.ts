@@ -1776,7 +1776,10 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.sourceAction, (event, request: SourceAction) => fromBook(event, async (document) => {
     const owner = assetsOwner(event) ? assetsWindows.get(document)?.window ?? document.window : document.window;
     if (assetsOwner(event)) request = { ...request, accept: assetsWindows.get(document)?.accept };
-    const activate = (summary: ProjectSummary) => { if (assetsOwner(event)) document.notify({ value: summary }); return summary; };
+    // The editor window learns of a change the Assets window made; a request that changed nothing (an import of files the
+    // book holds already, F-046) tells it nothing, so it does not render the book again.
+    const shown = document.summary.id;
+    const activate = (summary: ProjectSummary) => { if (assetsOwner(event) && summary.id !== shown) document.notify({ value: summary }); return summary; };
     const keys = request.keys ?? (request.key ? [request.key] : undefined);
     if (keys && (!Array.isArray(keys) || keys.length > 1000 || !keys.every((key) => typeof key === 'string'))) throw new Error('Invalid asset selection.');
     const chosen = sourceEntries(document.book).filter(({ key }) => keys?.includes(key));

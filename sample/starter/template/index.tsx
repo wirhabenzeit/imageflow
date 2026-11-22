@@ -1,5 +1,5 @@
-import { box, Choice, defineTemplate, FormattedText, geometry, issue, mm, p, plainText, printFormat, pt, Page, Spread } from 'imageflow';
-import type { BookSpread, FlowPosition, ImageFlowNode, LayoutPickerProps, Photo, PhotoBoxState, PhotoRender, Rect, RenderContext, ResolvedFormat } from 'imageflow';
+import { box, defineTemplate, FormattedText, geometry, issue, mm, p, plainText, printFormat, pt, Page, Spread } from 'imageflow';
+import type { BookSpread, FlowPosition, ImageFlowNode, Photo, PhotoBoxState, PhotoRender, Rect, RenderContext, ResolvedFormat } from 'imageflow';
 import './styles.css';
 import { insetMapParameters, MapEditor, mapEditorParameters, mapOrigin, mapParameters, MapView, placesBeside } from './map';
 import { elevationOrigin, mapCredits } from './map-styles';
@@ -127,14 +127,6 @@ function ShapedPhoto(photo: PhotoRender, state: PhotoBoxState<string, { shape: k
     <image href={photo.src} x={photo.image.x} y={photo.image.y} width={photo.image.width} height={photo.image.height}
       preserveAspectRatio="none" clipPath={`url(#${state.uid})`} />
   </svg>;
-}
-
-// Layout families: a segmented choice between the variants, by one of their tags, beside the spread's other settings.
-function variantPicker(tag: string, label: string, names: Record<string, string>) {
-  return function VariantPicker({ variants, current, choose, readOnly }: LayoutPickerProps) {
-    return <Choice label={label} hideLabel value={current} onChange={choose} disabled={readOnly}
-      options={variants.map(({ id, variant }) => ({ value: id, label: names[String(variant[tag])] ?? String(variant[tag]) }))} />;
-  };
 }
 
 // The photo grid comes in two sizes in the `pageGrid` family. Their box IDs are fixed:
@@ -368,10 +360,11 @@ export default defineTemplate({
     { group: 'Look', controls: ['theme', 'headingFont'] },
     { group: 'Pages', controls: ['textSize', 'spacing', 'showPageNumbers'] },
   ],
-  // Layouts that are variants of one design. The sidebar shows each family once, and its picker chooses the variant.
+  // Layouts that are variants of one design. The sidebar shows each family once, and its picker, a segmented choice
+  // the app draws, chooses the variant by one of their tags.
   layoutFamilies: {
-    pagePhoto: { label: 'Photo', picker: { label: 'Photo style', component: variantPicker('style', 'Photo style', { bleed: 'Full bleed', framed: 'Framed', shaped: 'Shaped' }) } },
-    pageGrid: { label: 'Photo grid', picker: { label: 'Grid size', component: variantPicker('size', 'Grid size', { '2x2': '2 × 2', '3x3': '3 × 3' }) } },
+    pagePhoto: { label: 'Photo', picker: { label: 'Photo style', choice: { tag: 'style', options: { bleed: 'Full bleed', framed: 'Framed', shaped: 'Shaped' } } } },
+    pageGrid: { label: 'Photo grid', picker: { label: 'Grid size', choice: { tag: 'size', options: { '2x2': '2 × 2', '3x3': '3 × 3' } } } },
   },
   // The builders type each layout's context from its own declarations and the document parameters above.
   spreads: ({ spread, page: pageLayout }) => ({

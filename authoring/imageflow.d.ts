@@ -474,13 +474,22 @@ export type LayoutPickerProps = {
   cancel(): void;
 };
 /**
+ * A family's picker as ImageFlow's own segmented choice, drawn by the app at once: one option per variant, told apart by
+ * the variant tag `tag`, with `options` naming each tag value, in order. Every variant needs the tag, with a value of its
+ * own that `options` names, such as `{ tag: 'size', options: { '2x2': '2 × 2', '3x3': '3 × 3' } }`.
+ */
+export type VariantChoice = { tag: string; options: Record<string, string> };
+/**
  * Layouts that are variants of one design, such as a 2×2 and a 3×3 photo grid. Each variant is an ordinary layout
  * that names the family with `family`; variants must have the same `span`. With a `picker`, the sidebar shows the
- * family as one preview and its controls beside the selected spread's other settings; without one, it shows each variant.
+ * family as one preview and its controls first among the selected spread's settings; without one, it shows each
+ * variant. A picker is a `choice` (preferred: the app draws it) or, for choices one tag cannot express, a `component`.
  */
 export type LayoutFamily = {
   label: string;
-  picker?: { label?: string; component(props: LayoutPickerProps): ImageFlowNode };
+  picker?: { label?: string } & (
+    | { choice: VariantChoice; component?: never }
+    | { component(props: LayoutPickerProps): ImageFlowNode; choice?: never });
 };
 /** Rejects properties a declaration does not have, such as a misspelt `flowOrdr`, in object literals and helpers alike. */
 type Exact<T, Allowed> = { [X in Exclude<keyof T, keyof Allowed>]: never };
