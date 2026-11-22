@@ -124,6 +124,8 @@ body { margin: 0; }
 .book-frame { position: absolute; left: 0; top: 0; width: 100%; height: 0; border: 0; pointer-events: none; background: transparent; }
 /* Keep the candidate painted in Chromium so its first visible frame is ready when it is promoted. */
 .book-frame-pending { opacity: .01; }
+/* The previous revision, beneath the one just shown until that has painted. */
+.book-frame.book-frame-pending.book-frame-retiring { opacity: 1; }
 
 /* Canvas: the whole book in one scrolling column */
 .canvas-wrap { position: relative; min-height: 0; }

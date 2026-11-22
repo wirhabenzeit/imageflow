@@ -18,6 +18,9 @@ export type InlineEditing = ({ spread: string; element: string } | { spread: str
 // The unsaved placement of a crop gesture on a photo box with a render callback.
 export type CropPreview = { spread: string; box: string; page?: PageSide; placement: { centerX: number; centerY: number; zoom: number } };
 
+const sameSheets = (a?: BookGeometry, b?: BookGeometry) => !!a && !!b && a.sheets.length === b.sheets.length &&
+  a.sheets.every((sheet, i) => ['x', 'y', 'width', 'height'].every((key) => sheet[key as 'x'] === b.sheets[i][key as 'x']));
+
 // Keep the displayed frame and its geometry until the latest candidate has finished rendering successfully.
 export function BookFrame({ busy = false, provisional, project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept, inlineEditing, onInlineEditing, presentation, cropPreview, onPrepared, onShown, release }: {
   // Paired views reveal one revision together, on the shared animation clock.
@@ -54,11 +57,18 @@ export function BookFrame({ busy = false, provisional, project, view, query = ''
   const origin = view === 'thumbs' ? thumbsOrigin : renderOrigin;
   const target = hold ? undefined : origin + '/render/' + project + '?view=' + view + (query && '&' + query);
   const [shown, setShown] = useState<string>();
+  // The frame shown before `shown`, kept beneath it for a moment. Without it, a tall book's replacement frame showed
+  // nothing at all for a moment while Chromium painted it (F-042).
+  const [retiring, setRetiring] = useState<string>();
+  // The layout previews are kept too, where the new frame draws its previews in the same places: else the previous
+  // spread's previews would show between the new ones.
+  const keepsPrevious = (next: FrameState) => view === 'book' || view === 'thumbs' ||
+    (view === 'layouts' && !!shown && sameSheets(latest.current.get(shown)?.geometry, next.geometry));
   const [frames, setFrames] = useState<Record<string, FrameState>>({});
   const latest = useRef(new Map<string, FrameState>());
   const refs = useRef(new Map<string, HTMLIFrameElement>());
   const projectOf = (id: string) => new URL(id).pathname.split('/').at(-1)!;
-  const ids = [shown, shown === target ? undefined : target].filter((id): id is string => id !== undefined);
+  const ids = [...new Set([retiring, shown, target].filter((id): id is string => id !== undefined))];
 
   function storeFrame(id: string, frame: FrameState) {
     latest.current = new Map(ids.map((key) => [key, key === id ? frame : latest.current.get(key) ?? {}]));
@@ -80,6 +90,7 @@ export function BookFrame({ busy = false, provisional, project, view, query = ''
     // A revision this view failed to render must not hold back the other view, which waits to show it together.
     if (frame.status?.state === 'error') onShown?.(project);
     if (frame.status?.state === 'ready') {
+      if (shown && shown !== id && frame.reorder !== 'ready' && keepsPrevious(frame)) setRetiring(shown);
       setShown(id);
       onGeometry?.(frame.geometry, frame.reorder !== 'skipped', frame.start, project);
       onShown?.(project);
@@ -164,6 +175,13 @@ export function BookFrame({ busy = false, provisional, project, view, query = ''
     }
     storeFrame(id, frame);
   });
+  // The frame itself cannot tell when the window shows its pixels (its animation frames run before), so the previous
+  // one stays for a fixed time. It is drawn over by the new frame wherever that has artwork.
+  useEffect(() => {
+    if (!retiring) return;
+    const timer = setTimeout(() => setRetiring((current) => current === retiring ? undefined : current), 600);
+    return () => clearTimeout(timer);
+  }, [retiring]);
   const latestEditing = useRef(inlineEditing);
   latestEditing.current = inlineEditing;
   const editingKey = JSON.stringify(inlineEditing ?? null);
@@ -237,10 +255,11 @@ export function BookFrame({ busy = false, provisional, project, view, query = ''
 
   return ids.map((id) => {
     const frame = frames[id];
+    const previous = id === retiring && id !== shown && id !== target;
     return <iframe key={id} title={title} tabIndex={-1}
-      className={'book-frame book-frame-' + view + (id === shown ? '' : ' book-frame-pending')}
+      className={'book-frame book-frame-' + view + (id === shown ? '' : ' book-frame-pending') + (previous ? ' book-frame-retiring' : '')}
       data-current={id === target || undefined} data-revision={projectOf(id)}
-      data-ready={frame?.status?.state === 'ready' && frame.published ? '' : undefined}
+      data-ready={frame?.status?.state === 'ready' && frame.published && !previous ? '' : undefined}
       aria-hidden={id !== shown || undefined}
       style={{ height: frame?.geometry?.height }}
       ref={(element) => {
