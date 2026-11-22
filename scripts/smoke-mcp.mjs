@@ -102,12 +102,15 @@ try {
   assert.equal(context.apiReference,undefined);
   assert.deepEqual(context.sources,{});
   assert.ok(context.topics.some(t=>t.id==='authoring-workflow'));
-  context=await good('get_authoring_context',{project,docs:['declaration','project-commands'],includeExamples:['minimal'],includeSource:['template/index.tsx']});
-  assert.ok(context.docs.declaration.includes('defineTemplate'));
-  assert.ok(context.docs['project-commands'].includes('"op":"select_format"'));
-  assert.ok(context.examples.find(e=>e.name==='minimal').source.includes('defineTemplate'));
-  assert.equal(context.examples.find(e=>e.name==='grid-bleed').source,undefined);
-  assert.ok(context.sources['template/index.tsx'].text.includes('NEW_LAYOUT'));
+  const requested=await good('get_authoring_context',{project,docs:['declaration','project-commands'],includeExamples:['minimal'],includeSource:['template/index.tsx']});
+  assert.ok(requested.docs.declaration.includes('defineTemplate'));
+  assert.ok(requested.docs['project-commands'].includes('"op":"select_format"'));
+  assert.ok(requested.examples.find(e=>e.name==='minimal').source.includes('defineTemplate'));
+  // A call for topics, examples and sources returns just those (API-001).
+  assert.deepEqual(requested.examples.map(e=>e.name),['minimal']);
+  assert.equal(requested.template,undefined);
+  assert.equal(requested.topics,undefined);
+  assert.ok(requested.sources['template/index.tsx'].text.includes('NEW_LAYOUT'));
   // Every tool has a title, a short description, a described argument tree and an output schema.
   for(const tool of tools.tools){
     assert.ok(tool.title && tool.annotations.title===tool.title,tool.name);
