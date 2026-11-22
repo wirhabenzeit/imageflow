@@ -47,14 +47,18 @@ export function LayoutFamilyPicker({ project, template, spread, params, family, 
   }, [ready, contextKey]);
   const showing = useRef(onShowing);
   showing.current = onShowing;
+  // The field shows once its frame has drawn the saved choice: before, the frame was an empty, white box for a moment.
+  // Nearly transparent, not hidden, so Chromium paints the frame meanwhile.
+  const [drawn, setDrawn] = useState(false);
   useEffect(() => {
     if (!ready && !failed) return;
     // The frame draws the state it was just sent in its next frame, and reports its new height after that.
     let second = 0;
-    const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => showing.current?.()); });
+    const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => { setDrawn(true); showing.current?.(); }); });
     return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); };
   }, [ready, failed]);
-  return <div className="field layout-family-field" role="region" aria-label={title} aria-disabled={disabled} aria-busy={!ready || undefined} title={blocked}>
+  return <div className="field layout-family-field" role="region" aria-label={title} aria-disabled={disabled} aria-busy={!ready || undefined} title={blocked}
+    style={drawn ? undefined : { opacity: .01 }}>
     <span className="field-name">{title}</span>
     <iframe ref={frame} className="element-editor-frame" inert={disabled} title={title} src={source} style={{ height }} />
     {stale && <p className="error-text" role="alert">Layouts changed. Reopen the picker.</p>}

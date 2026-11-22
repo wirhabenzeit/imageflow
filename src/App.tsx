@@ -201,7 +201,12 @@ export function App() {
     // and the effect below takes the snapshot when it arrives.
     if (revision) shownRevision.current = revision;
     if (revision === summary?.id && template) adoptCanvasLabels();
+    if (revision === summary?.id && summary) shownLayouts.current = Object.fromEntries(summary.project.spreads.map((item) => [item.id, layoutOf(item)]));
   }
+  // The layouts of the spreads as the book view shows them, so the Inspector knows when its targets are another
+  // layout's (F-035): right after a layout change, until the change has rendered.
+  const shownLayouts = useRef<Record<string, string>>({});
+  const layoutOf = (item: SpreadState) => JSON.stringify([item.definition, item.pages?.left?.definition, item.pages?.right?.definition]);
   const shownRevision = useRef<string>(undefined);
   const adoptCanvasLabels = () => setCanvasLabels(Object.fromEntries(spreads.map(({ id }, i) => [id, pagesLabel(i) + ' · ' + label(i)])));
   // A book's first frame usually shows before its template loads. Without this, its labels would keep following the
@@ -2065,6 +2070,7 @@ export function App() {
   const placeInspector = useLiveCallback((from: KeptItem, to: ContentTarget) => { if (spread) place(spread.id, from, to); });
   const targetsKey = JSON.stringify(inspectorTargets(geometry?.targets ?? [], spread?.id, selectedPage));
   const panelTargets: InspectorTarget[] = useMemo(() => JSON.parse(targetsKey), [targetsKey]);
+  const targetsStale = !!spread && shownLayouts.current[spread.id] !== layoutOf(spread);
   const sourcesPanel = useMemo(() => (summary && <Sources view={sourcesView} summary={summary} tab={sourceTab} setTab={setSourceTab}
           selected={selectedSource ? { [selectedSource.kind]: selectedSource.id } : {}} choose={chooseSource}
           failure={setError} changed={adoptSource} usage={usage} writable={writable} busy={!!busy} importSources={importSources} quickLook={setQuick}
@@ -2076,7 +2082,7 @@ export function App() {
         targets={panelTargets}
         open={openInspectorOwner}
         openTarget={openInspectorTarget} place={placeInspector} chooseLayout={chooseInspectorLayout}
-        holdPreviews={!render && !!lastReady}
+        holdPreviews={!render && !!lastReady} targetsStale={targetsStale}
         familyPicker={template && layoutFamily && <HeldPicker
           id={JSON.stringify([summary.handle, spread.id, selectedPage, layoutFamily, summary.templateHash, template.format, summary.network])}>
           {(showing) => <LayoutFamilyPicker
@@ -2084,7 +2090,7 @@ export function App() {
             readOnly={!writable} blocked={previewNotice || undefined} onShowing={showing} />}
         </HeldPicker>}
         edit={editFromPanel} highlight={setHighlight} select={selectFromPanel} />),
-    [summary, spread, selectedSide, selectedPage, sequence, index, writable, selectedSource, template, render, lastReady, usage, focusBox, panelTargets, layoutFamily, previewNotice, quickSource, openInspectorOwner, openInspectorTarget, placeInspector, chooseInspectorLayout, editFromPanel, selectFromPanel]);
+    [summary, spread, selectedSide, selectedPage, sequence, index, writable, selectedSource, template, render, lastReady, usage, focusBox, panelTargets, targetsStale, layoutFamily, previewNotice, quickSource, openInspectorOwner, openInspectorTarget, placeInspector, chooseInspectorLayout, editFromPanel, selectFromPanel]);
 
   const nativeDocumentTitle = navigator.platform.includes('Mac');
   return <ProjectFilesContext.Provider value={projectFiles}><div className={(nativeDocumentTitle ? 'studio mac-studio' : 'studio') + (busyCursor ? ' is-busy' : '')}>
