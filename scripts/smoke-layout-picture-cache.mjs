@@ -84,21 +84,22 @@ try {
     assert.equal(await draws(), 0, 'Switching to ' + spread + ' reuses the map picture without drawing');
   }
   // Back to the spread before while its previews are still kept beneath (A → B → A within their moment): they show
-  // again at once, not hidden behind B's until the frame kept beneath is released and reloads.
-  await page.evaluate(() => {
-    window.__retired = false;
-    new MutationObserver(() => { if (document.querySelector('iframe.book-frame-layouts.book-frame-retiring')) window.__retired = true; })
-      .observe(document, { subtree: true, attributes: true, attributeFilter: ['class'], childList: true });
-  });
+  // again at once, as the same page, not hidden behind B's or loaded again. B's previews are laid out like A's.
   const shownPreviews = (spread, timeout = 10_000) => page.waitForFunction((spread) => {
     const frame = document.querySelector('iframe.book-frame-layouts:not(.book-frame-pending)');
     return frame && new URL(frame.src).searchParams.get('spread') === spread;
   }, spread, { timeout });
-  await page.locator('.spread-thumb[data-spread="arriving"]').click();
-  await shownPreviews('arriving');
+  const keptFrame = () => page.frames().find((frame) => frame.url().includes('view=layouts') && new URL(frame.url()).searchParams.get('spread') === 'settlements');
+  const other = process.env.SMOKE_OTHER ?? 'last-notes';
+  await page.locator('.spread-thumb[data-spread="' + other + '"]').click();
+  await shownPreviews(other);
+  assert.equal(await page.locator('iframe.book-frame-layouts.book-frame-retiring').evaluate((frame) => new URL(frame.src).searchParams.get('spread')),
+    'settlements', 'The previous previews are kept beneath');
+  // Marks the page of the previews kept beneath: a reloaded frame would lose it.
+  await keptFrame().evaluate(() => { window.__kept = true; });
   await page.locator('.spread-thumb[data-spread="settlements"]').click();
-  assert.equal(await page.evaluate(() => window.__retired), true, 'The previous previews were kept beneath');
   await shownPreviews('settlements', 400);
+  assert.equal(await keptFrame().evaluate(() => window.__kept ?? false), true, 'The previews shown again are the same page, not loaded again');
   await page.waitForTimeout(800);
   await shownPreviews('settlements');
   await ready('settlements');

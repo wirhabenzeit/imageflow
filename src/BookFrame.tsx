@@ -190,12 +190,14 @@ export function BookFrame({ busy = false, provisional, project, view, query = ''
     storeFrame(id, frame);
   });
   // Going back to the frame kept beneath (A → B → A within its moment, such as the layout previews of two spreads):
-  // it has loaded and reports nothing new, so it is shown again at once, or it would stay hidden behind B for good.
+  // it has loaded and reports nothing new, so it is shown again at once, or it would stay hidden behind B for good. It
+  // was on show a moment ago, so B is not kept beneath it: B goes, and A keeps its place in the page, since moving an
+  // iframe makes Chromium load it again.
   useEffect(() => {
     if (!target || target !== retiring || target === shown) return;
-    setRetiring(undefined);
     const frame = latest.current.get(target);
     if (frame?.status?.state === 'ready' && frame.geometry) publish(target, frame);
+    setRetiring(undefined);
   }, [target]);
   // The frame itself cannot tell when the window shows its pixels (its animation frames run before), so the previous
   // one stays for a fixed time. It is drawn over by the new frame wherever that has artwork.
