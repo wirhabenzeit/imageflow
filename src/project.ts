@@ -229,6 +229,8 @@ export type RenderProject = {
   template: { script: string; css?: string; assets: Record<string, string>; warnings?: string[]; fonts?: Record<string, [number, number][]>; hash?: string;
     pictureScopes?: Record<string, string> };
   mode: 'edit' | 'export';
+  // The design proof's scale (proof-sheet): photos load at the size they show on its sheet, not at print resolution.
+  proofScale?: number;
   // Where this render is shown, set by the render frame from its URL before rendering (never saved or sent).
   view?: RenderView;
   // A synthetic authoring fixture book. Its artwork carries a banner and fixture labels so it is never mistaken for the book.

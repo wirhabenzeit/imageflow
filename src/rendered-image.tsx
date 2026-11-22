@@ -48,7 +48,9 @@ type Settings = { mode: RenderMode; pixelRatio: number; concurrency: number; tim
   // The cache scope of each template file's pictures, and the template's hash for a picture of no known file.
   pictureScopes?: Record<string, string>; templateHash?: string;
   // Layout previews: a picture not in the cache shows a stand-in instead of being drawn.
-  standIns?: boolean };
+  standIns?: boolean;
+  // Time pictures by the clock even with a preview cache: the design proof's hidden window may draw no frames.
+  wallClock?: boolean };
 export type RenderedImageFailure = { label: string; message: string; spread?: string; element?: string; page?: PageSide; timedOut: boolean };
 // Something worth changing about a picture that was drawn: it is pixels without saying so, or has far more of them
 // than the output asks for.
@@ -433,7 +435,7 @@ export function RenderedImage({ draw, inputs, output, label = 'Picture', alt = '
           const expire = () => { controller.abort(); reject(Object.assign(new Error(label + ' did not finish rendering within ' +
             Math.round(timeoutMs / 1000) + ' s.'), { timedOut: true })); };
           // In the editor and the presentation, only time the window draws counts (frameTimer).
-          stop = previewCache && mode === 'preview' ? frameTimer(expire, timeoutMs) : (() => {
+          stop = previewCache && mode === 'preview' && !settings.wallClock ? frameTimer(expire, timeoutMs) : (() => {
             const timer = setTimeout(expire, timeoutMs);
             return () => clearTimeout(timer);
           })();

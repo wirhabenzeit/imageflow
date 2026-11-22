@@ -11,6 +11,7 @@ export const commandRegistry = {
   redo: { label: s => s.history?.redo ? 'Redo ' + s.history.redo : 'Redo', accelerator: 'CmdOrCtrl+Shift+Z', enabled: s => writable(s) && !!s.history?.redo },
   export: { label: s => s.view === 'cover' ? 'Export Cover PDF…' : s.view === 'content' ? 'Export Content PDF…' : 'Export PDF…',
     accelerator: 'CmdOrCtrl+E', enabled: s => book(s) && s.canExport },
+  'export-proof': { label: 'Export Proof…', accelerator: 'CmdOrCtrl+Alt+E', enabled: s => book(s) && !!s.canProof },
   'save-copy': { label: 'Duplicate…', accelerator: 'CmdOrCtrl+Shift+S', enabled: writable },
   'rename-book': { label: 'Rename…', enabled: writable },
   'move-book': { label: 'Move To…', enabled: writable },

@@ -23,7 +23,9 @@ import type { AgentLeaseReply, BookMenuState, CanvasLayout, ImportRequest, Issue
 import { coverInstance, identifier } from '../src/project';
 import { parseActiveEditor } from '../src/mcp-results';
 import type { RenderProject } from '../src/project';
-import { printBook, savePdf } from './export';
+import { printBook, printProof, savePdf } from './export';
+import { isProofDensity, proofDensities } from '../src/proof-sheet';
+import type { ProofDensity } from '../src/proof-sheet';
 import { approveNetwork, approvedNetwork, bookTrusted, trustBook } from './source-access';
 import { importIntoProject, loadProject, projectSummary, readProjectManifest } from './project';
 import type { ImportProgress } from './project';
@@ -946,12 +948,64 @@ export class DocumentSession {
   }
 
 
-  async exportBook(owner: BrowserWindow, projectId: string, surface?: 'cover') {
+  async exportBook(owner: BrowserWindow, projectId: string, surface?: 'cover' | 'proof') {
     this.currentBook(projectId);
     // Cancel works from the moment the export starts, while it prepares the book and asks for a destination too.
     const job = new AbortController();
     this.exportJob = job;
-    try { return await this.runExport(owner, job, surface); } finally { if (this.exportJob === job) this.exportJob = undefined; }
+    try { return await (surface === 'proof' ? this.runProof(owner, job) : this.runExport(owner, job, surface)); }
+    finally { if (this.exportJob === job) this.exportJob = undefined; }
+  }
+
+  // The density chosen last, for the next proof of any book.
+  static proofDensity: ProofDensity = 4;
+  /**
+   * A design proof (src/proof-sheet): the open book as it is on screen, spreads kept together, several to an A4 sheet.
+   * It renders the editor's revision with the editor's photo renditions and pictures, so it takes seconds where the
+   * print PDF prepares every original; it has none of the print checks and nothing in it is for print.
+   */
+  private async runProof(owner: BrowserWindow, job: AbortController) {
+    const opened = this.book;
+    const { response } = await dialog.showMessageBox(owner, { type: 'question', message: 'Export Proof',
+      detail: 'A quick PDF of the spreads for reading and sharing, on A4 sheets. It uses screen-sized photos and is not for print.\n\nSpreads per sheet:',
+      buttons: [...proofDensities.map((n) => n + (n === 1 ? ' Spread' : ' Spreads')), 'Cancel'],
+      defaultId: proofDensities.indexOf(DocumentSession.proofDensity), cancelId: proofDensities.length });
+    const perPage = proofDensities[response];
+    if (!isProofDensity(perPage) || owner.isDestroyed() || job.signal.aborted) return null;
+    DocumentSession.proofDensity = perPage;
+    const name = bookName(opened.folder).normalize('NFC');
+    const fileName = name.replace(/[^\p{L}\p{M}\p{N} _-]/gu, '-').slice(0, 80) + ' - Proof.pdf';
+    const { canceled, filePath } = await dialog.showSaveDialog(owner, {
+      title: 'Export Proof', defaultPath: join(app.getPath('documents'), fileName), filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    });
+    if (canceled || !filePath || owner.isDestroyed() || job.signal.aborted) return null;
+    // The book as it is now: an agent's save or a reload may have come in while the dialogs were open. It must not
+    // change again until the proof is saved, or the proof would show a revision that no longer exists.
+    const book = this.book;
+    const before = await this.projectSession.inputs.capture();
+    const moved = async () => {
+      const after = await this.projectSession.inputs.capture({ signal: job.signal });
+      return this.book !== book || before.revision !== after.revision || before.observation !== after.observation;
+    };
+    const id = randomUUID();
+    this.renders.set(id, { book: this.marked(book), mode: 'export', network: () => this.originsFor(book), pictures: this.previewPictures });
+    const progress = (stage: string) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage); };
+    try {
+      const query = new URLSearchParams({ view: 'proof', per: String(perPage), title: book.project.title || name,
+        date: new Date().toLocaleDateString(app.getLocale(), { dateStyle: 'medium' }) });
+      const { bytes, warnings, errors } = await printProof(renderOrigin + '/render/' + id + '?' + query, job.signal, progress);
+      if (await moved()) throw new Error('The book changed while the proof was made. No proof was saved; export it again.');
+      progress('Saving PDF…');
+      await savePdf(filePath, bytes, job.signal);
+      return { warnings, errors };
+    } catch (error) {
+      if ((job.signal.reason as { networkWithdrawn?: boolean })?.networkWithdrawn) throw job.signal.reason;
+      if (job.signal.aborted) return null;
+      throw error;
+    } finally {
+      progress('');
+      this.renders.delete(id);
+    }
   }
 
   private async runExport(owner: BrowserWindow, job: AbortController, surface?: 'cover') {

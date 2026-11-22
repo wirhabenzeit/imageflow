@@ -184,7 +184,8 @@ async function serve(request: Request) {
   const picture = renderHost && /^\/render\/([a-f0-9-]{36})\/(picture|place)\/([a-f0-9]{64})$/.exec(pathname);
   if (picture) {
     const session = sessions.get(picture[1]);
-    if (session?.mode !== 'edit' || !session.pictures || !session.book.templateHash) return new Response(null, { status: 404 });
+    // The editor's frames, and the design proof, which renders the editor's revision and shares its pictures.
+    if (!session?.pictures || !session.book.templateHash) return new Response(null, { status: 404 });
     // Pictures are scoped by the template file that draws them (desktop/picture-scopes.ts, in the frame's cache key), so
     // an edit elsewhere in the template keeps them; here only by the sites the book may reach now.
     const scope = JSON.stringify(['pictures-2', session.network?.() ?? []]);
@@ -1167,7 +1168,7 @@ function installMenu() {
       { label: 'Revert To', submenu: [registered('revert-opened'), registered('reload')] },
       { type: 'separator' },
       registered('import'),
-      registered('export'), { type: 'separator' },
+      registered('export'), registered('export-proof'), { type: 'separator' },
       { id: 'open-sync-folder', label: 'Open from Sync Folder…', click: (_item, owner) => {
         const window = owner ? BrowserWindow.fromId(owner.id) ?? undefined : undefined;
         void openFromSyncFolder(window).catch((error) => report(window ?? startWindow, error));
@@ -1231,7 +1232,7 @@ function updateMenus() {
   const inBook = !!document && owner === document.window;
   const state: BookMenuState = { ...emptyMenuState, ...document?.menuState, document: !!document && !document.closing,
     sidebar: document?.sidebar, inspector: document?.inspector, sources: document?.sources, guides: document?.guides, layout: document?.layout };
-  if (!inBook) { state.editing = true; state.canExport = false; }
+  if (!inBook) { state.editing = true; state.canExport = false; state.canProof = false; }
   const menu = Menu.getApplicationMenu();
   for (const id of Object.keys(commandRegistry) as RegisteredCommand[]) {
     const item = menu?.getMenuItemById(id);
@@ -2071,7 +2072,7 @@ void app.whenReady().then(async () => {
     catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.handle(channels.export, (event, id: string, surface?: unknown) =>
-    fromEditor(event, (document) => document.exportBook(document.window, id, surface === 'cover' ? 'cover' : undefined)));
+    fromEditor(event, (document) => document.exportBook(document.window, id, surface === 'cover' || surface === 'proof' ? surface : undefined)));
   ipcMain.handle(channels.cancel, (event) => { editorOwner(event)?.cancelExport(); });
   ipcMain.handle(channels.check, (event, id: string, request: AuthoringCheckRequest) => fromEditor(event, (document) => document.checkOpenBook(document.currentBook(id), request)));
   ipcMain.handle(channels.cancelCheck, (event) => { editorOwner(event)?.cancelCheck(); });

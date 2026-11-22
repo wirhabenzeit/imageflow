@@ -82,11 +82,13 @@ export type ActiveBookEditor = { label: string; spread?: string; page?: PageSide
 // (an import, a reload after files changed, a drag), which ends by itself.
 export type AgentLeaseReply = boolean | ActiveBookEditor | { busy: string };
 export type BookMenuState = { document: boolean; enabled: Record<SpreadCommand, boolean>; editing: boolean; textEditing: boolean;
-  writable: boolean; busy: boolean; history?: HistoryState; canExport: boolean; canSwapPages?: boolean; activeEditor?: ActiveBookEditor;
+  writable: boolean; busy: boolean; history?: HistoryState; canExport: boolean;
+  // The design proof leaves the cover out: it needs only a rendered book with spreads, in either view.
+  canProof?: boolean; canSwapPages?: boolean; activeEditor?: ActiveBookEditor;
   sidebar?: boolean; inspector?: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout; zoom?: number; photoView?: PhotoView;
   selectionCount?: number; selectedSpread?: string; saving?: boolean; importMode?: ImportMode; pageLabels?: Record<string, string>;
   view?: 'content' | 'cover'; coverBoxIds?: string[] };
-export type Command = PhotoViewCommand | SpreadCommand | 'swap-pages' | 'book-check' | OpenAction | 'toggle-project' | 'toggle-inspector' | 'toggle-sources' | 'toggle-guides' | LayoutCommand | 'export' | 'import' | 'copy-assets' | 'presentation' | 'presentation-start' | 'manage-sources' | 'save-copy' | 'undo' | 'redo' | 'zoom-in' | 'zoom-out' | 'zoom-actual' | 'zoom-fit' | 'revert-opened';
+export type Command = PhotoViewCommand | SpreadCommand | 'swap-pages' | 'book-check' | OpenAction | 'toggle-project' | 'toggle-inspector' | 'toggle-sources' | 'toggle-guides' | LayoutCommand | 'export' | 'export-proof' | 'import' | 'copy-assets' | 'presentation' | 'presentation-start' | 'manage-sources' | 'save-copy' | 'undo' | 'redo' | 'zoom-in' | 'zoom-out' | 'zoom-actual' | 'zoom-fit' | 'revert-opened';
 export type ProjectSummary = ProjectFiles & {
   id: string; folder: string;
   handle?: string; history?: HistoryState; viewKey?: string;
@@ -218,7 +220,7 @@ export type DesktopApi = {
   // summary to render when that changed what the frames may reach.
   editorNetwork(id: string, origins: string[]): Promise<Result<{ origins: string[]; summary?: ProjectSummary }>>;
   pathsForFiles(files: File[]): string[];
-  exportBook(id: string, surface?: 'cover'): Promise<Result<{ warnings: Issue[]; errors: Issue[] } | null>>;
+  exportBook(id: string, surface?: 'cover' | 'proof'): Promise<Result<{ warnings: Issue[]; errors: Issue[] } | null>>;
   cancelExport(): Promise<void>;
   checkBook(id: string, request: AuthoringCheckRequest): Promise<Result<AuthoringCheckResult>>;
   cancelCheck(): Promise<void>;

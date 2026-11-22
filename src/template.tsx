@@ -9,6 +9,8 @@ import type { CSSProperties, ReactElement, ReactNode } from 'react';
 import { z } from 'zod';
 import { cssMM, formatSchema, hasFacingPages, hasSingleEnds, inch, mm, pageSequence, printFormat, pt, resolveFormat, spanAllowedAt, spanFits, spanRequiredAt } from './format';
 import type { PrintFormat, ResolvedFormat, Span, UnitPages } from './format';
+import { presentationPhotoSource } from './presentation-model';
+import { proofPhotoPixels } from './proof-sheet';
 import { coverInstance, identifier, pageSides, renderView, scopeSpread, values } from './project';
 import type { CoverState, PageSide, Photo, ProjectFile, RenderProject, RenderView, SpreadState, Values } from './project';
 import { coverFormatSchema, coverLayoutsFor, printSpecificationSchema } from './cover';
@@ -792,7 +794,9 @@ function Sheet({ format, className, style, children, ...marker }: Styling & Issu
 // Pixel width the export needs for a photo drawn `cssWidth` CSS pixels wide (uncropped), capped at the format's
 // maximum resolution. Rounded up to 16 px so nearby placements share a cached rendition.
 const exportCap = 300;
-function exportSource(photo: Photo & { src: string }, cssWidth: number, format: ResolvedFormat) {
+function exportSource(photo: Photo & { src: string }, cssWidth: number, format: ResolvedFormat, proofScale?: number) {
+  // The design proof asks for the size the photo shows on its sheet, in the presentation's rendition steps.
+  if (proofScale) return presentationPhotoSource(photo.src, proofPhotoPixels(cssWidth * 25.4 / 96, proofScale), false);
   const ppi = format.resolution?.maximum ?? exportCap;
   const width = Math.ceil(cssWidth / 96 * ppi / 16) * 16;
   return width < photo.width ? photo.src + '/' + width : photo.src;
@@ -945,7 +949,7 @@ export function PhotoBox({ id, className, style, rect, children, decorative, 'da
         return;
       }
       if (!img) return;
-      if (book.mode !== 'edit' && !lazyPhotos && !img.getAttribute('src')) img.src = exportSource(photo, w / crop.width, format);
+      if (book.mode !== 'edit' && !lazyPhotos && !img.getAttribute('src')) img.src = exportSource(photo, w / crop.width, format, book.proofScale);
       img.style.width = 100 / crop.width + '%';
       img.style.height = 100 / crop.height + '%';
       img.style.left = -100 * crop.x / crop.width + '%';
@@ -969,7 +973,7 @@ export function PhotoBox({ id, className, style, rect, children, decorative, 'da
   if (photo && renderPhotos && render && size && near) {
     const shown = photoRender(photo, placement, size, '');
     // Export loads a rendition sized for the saved crop at print resolution; the editor its preview or thumbnail.
-    shown.src = book.mode === 'edit' ? photo.src : exportSource(photo, size.width / getCrop(photo, saved, size.width / size.height).width, format);
+    shown.src = book.mode === 'edit' ? photo.src : exportSource(photo, size.width / getCrop(photo, saved, size.width / size.height).width, format, book.proofScale);
     const resolved = values.boxes[id];
     const state = { id, uid: photoBoxUid(spread.id, id, page), params: resolved?.params ?? {}, photo: resolved?.photo ?? null };
     content = <PhotoRenderCall render={render} photo={shown} state={state} spread={spread.id} />;
