@@ -826,6 +826,10 @@ export function App() {
     else if ('error' in change) {
       if (!reloading.current) beginReload();
       failReload(change.error);
+    } else if (!reloading.current && change.value.id === current.current?.id) {
+      // The revision on show already: adopting it again would wait for a render that never comes (F-046), say after an
+      // import from the Assets window that added nothing while the book changed during its dialog.
+      return;
     } else if (!reloading.current && agentLocked.current && !quitLock.current) {
       // An agent's save is a new revision like the editor's own saves, not a reload after the book's files changed:
       // an editor it leaves alone stays open and usable, with its caret, selection and typing (F-042).
@@ -1346,7 +1350,8 @@ export function App() {
     }
   }
   function changeFormat(format: string) {
-    if (!canChangeBook || !template || !Object.hasOwn(template.formats, format)) return;
+    // Like the other book settings, the format may change during an agent's save beside the editor: the edit waits for it.
+    if (!(settingsWritable && !busy && !exporting) || !template || !Object.hasOwn(template.formats, format)) return;
     if (!template.coverFormats || !Object.hasOwn(template.coverFormats, format)) setBookView('content');
     edit(({ project }) => { project.format = format; }, 'Format changed to ' + template.formats[format]);
   }
