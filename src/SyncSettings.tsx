@@ -81,10 +81,13 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
     if ('error' in answer) { setSetup({ ...setup, saving: false, error: answer.error }); return; }
     const count = setup.books.filter(({ id }) => setup.chosen[id]).length;
     setSetup(undefined);
+    setState((current) => current && { ...current, booksUnchosen: undefined });
     setResult({ text: count ? (count === 1 ? '1 book syncs' : count + ' books sync') + ' from the next time it opens, or now if it is open.' : 'No book syncs until you choose File → Sync → Start Syncing in it.' });
   }
-  // Sync was off before this save: the save is the first configuration.
-  const first = !settings?.sync;
+  // The main process says when books wait to be chosen (a backend was set up or changed); the sheet shows until it is
+  // answered, also after Settings was closed or the app quit.
+  const unchosen = !!state?.booksUnchosen;
+  useEffect(() => { if (unchosen && !setup) void offerBooks(); }, [unchosen]);
 
   const set = (name: keyof Fields) => (event: { target: { value: string } }) => { setFields({ ...fields, [name]: event.target.value }); setResult(undefined); };
   /**
@@ -116,7 +119,6 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
     try {
       const answer = await api.chooseSyncFolder();
       if ('error' in answer) setResult({ text: answer.error, error: true });
-      else if (first && answer.value?.sync) await offerBooks();
     } catch {
       setResult({ text: 'ImageFlow could not complete the request.', error: true });
     } finally { setBusy(''); }
@@ -131,7 +133,6 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
       if ('error' in answer) { setResult({ text: answer.error, error: true }); return; }
       setState(answer.value);
       setResult({ text: 'Saved.' });
-      if (first) await offerBooks();
     } catch {
       setResult({ text: 'ImageFlow could not complete the request.', error: true });
     } finally { setBusy(''); }
@@ -154,7 +155,7 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
       setFields((current) => ({ ...current, accessKeyId: '', secretAccessKey: '' }));
       if (action === 'off') { setKind(''); setSetup(undefined); }
       setResult({ text: action === 'off' ? 'Sync is off on this Mac.' : 'Saved.' });
-      if (action === 'save' && first) await offerBooks();
+
     } catch {
       setResult({ text: 'ImageFlow could not complete the request.', error: true });
     } finally { setBusy(''); }

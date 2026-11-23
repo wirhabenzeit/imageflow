@@ -54,11 +54,12 @@ export interface SyncRemote {
   /** The books on this remote, from one listing of prefixes. A deleted book is reported as such. */
   listBooks(): Promise<RemoteBook[]>;
   /**
-   * Prepares a sync of a book, so that it asks about no blob the remote has with a request of its own (`hasBlob`):
-   * over a store without a change feed, one listing of the book; over one with a feed, nothing, since the key index
-   * already answers. Optional: a remote without it asks per blob.
+   * Starts a sync of a book; the function it returns ends it. Over a store without a change feed, the first listing the
+   * sync needs (its commits) lists the whole book once, and that one listing answers the sync's other questions
+   * (`hasBlob`, the book's originals) until the sync ends, so nothing is listed twice and no blob is asked about with a
+   * request of its own. Over a store with a feed the key index answers already, and this does nothing. Optional.
    */
-  prepareSync?(bookId: string): Promise<void>;
+  prepareSync?(bookId: string): Promise<() => void>;
   /** The remote's identity, a UUID written at first use. Two Macs that initialize an empty remote at once agree on it. */
   remoteId(): Promise<string>;
   /** The tombstone of a book deleted from sync, or undefined. Throws `NewerSyncFormatError` for one a newer version wrote. */
@@ -174,20 +175,25 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     return this.indexes.get((this.identity ?? '') + '/' + bookId);
   }
   /**
-   * Keeps what a listing of a book found, over a store without a change feed, in place of what an earlier listing of
-   * the same prefix found: a sync lists its book once (`syncBook`), and `hasBlob` then answers from it, so a push over
-   * a bucket sends no request per content file or preview that is there already.
+   * The syncs running over a store without a change feed, by book: the listing of the whole book each takes at its
+   * first need, which lives only as long as the sync (`prepareSync`), so nothing later acts on what it found.
    */
-  private noteListed(bookId: string, prefix: string, listed: readonly StoreEntry[]) {
-    const slot = (this.identity ?? '') + '/' + bookId;
-    const entries = new Map([...this.indexes.get(slot)?.entries ?? []].filter(([key]) => !key.startsWith(prefix)));
-    for (const entry of listed) entries.set(entry.key, entry);
-    this.indexes.set(slot, { entries });
+  private readonly sessions = new Map<string, { count: number; listing?: Promise<Map<string, StoreEntry>> }>();
+  /** The listing of a book for the sync running, taken now if it was not yet; undefined outside a sync. */
+  private sessionListing(bookId: string) {
+    const session = this.sessions.get(bookId);
+    if (!session) return undefined;
+    const listing = session.listing ??= this.store.list(bookPrefix(bookId)).then((entries) => new Map(entries.map((entry) => [entry.key, entry])));
+    // A listing that failed is not kept: the next question lists again.
+    listing.catch(() => { if (session.listing === listing) session.listing = undefined; });
+    return listing;
   }
   /** Notes an object this remote stored, so a check later in the same sync needs no request. */
   private noteStored(key: string, size: number) {
+    const entry = { key, size, lastModified: new Date() };
     const index = this.indexOf(key);
-    if (index && !index.entries.has(key)) index.entries.set(key, { key, size, lastModified: new Date() });
+    if (index && !index.entries.has(key)) index.entries.set(key, entry);
+    void this.sessions.get(key.split('/')[1])?.listing?.then((listed) => { if (!listed.has(key)) listed.set(key, entry); }, () => {});
   }
 
   /** A small JSON object as stored, or undefined for one that is missing or not whole JSON. */
@@ -213,7 +219,9 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     // Anything a sync service put beside the headers (its conflict copy `<id> (1).json` holds an immutable header too)
     // is read like one; the engine decides what it is.
     const prefix = snapshotsPrefix(bookId);
-    const listed = (this.store.changes ? (await this.bookKeys(bookId)).filter(({ key }) => key.startsWith(prefix)) : await this.store.list(prefix))
+    const session = this.store.changes ? undefined : this.sessionListing(bookId);
+    const listed = (this.store.changes ? (await this.bookKeys(bookId)).filter(({ key }) => key.startsWith(prefix))
+      : session ? [...(await session).values()].filter(({ key }) => key.startsWith(prefix)) : await this.store.list(prefix))
       .filter(({ key }) => key.endsWith('.json'));
     const cache = this.options.headerCache;
     // Cached by the remote's identity; a remote without one yet is read whole, and none is written by reading.
@@ -248,6 +256,7 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     // store without a change feed, one the last listing of the book had). One it lacks may have arrived since, so the
     // store is asked.
     if (this.indexOf(requireBlobKey(key))?.entries.has(key)) return true;
+    if (await this.sessionListing(key.split('/')[1])?.then((listed) => listed.has(key), () => false)) return true;
     return !!await this.store.head(key);
   }
   async putBlob(key: string, source: StoreSource, options?: PutOptions) {
@@ -268,9 +277,10 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
   async listBook(bookId: string, folder?: BookFolder, { full = false }: { full?: boolean } = {}) {
     const prefix = bookPrefix(bookId) + (folder ? folder + '/' : '');
     if (full || !this.store.changes) {
-      const listed = await this.store.list(prefix);
-      if (!this.store.changes) this.noteListed(bookId, prefix, listed);
-      return listed;
+      // Within a sync, from its one listing of the book.
+      const session = full ? undefined : this.sessionListing(bookId);
+      if (session) return [...(await session).values()].filter(({ key }) => key.startsWith(prefix)).sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+      return this.store.list(prefix);
     }
     const entries = (await this.bookKeys(bookId)).filter(({ key }) => key.startsWith(prefix));
     // The feed leaves the tombstone out (it outlives the book's objects); a listing of the whole book has it.
@@ -279,7 +289,16 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
   }
   async prepareSync(bookId: string) {
     // Over a change feed the key index is brought up to date when the commits are listed, and answers `hasBlob`.
-    if (!this.store.changes) await this.listBook(bookId);
+    if (this.store.changes) return () => {};
+    const session = this.sessions.get(bookId) ?? { count: 0 };
+    session.count++;
+    this.sessions.set(bookId, session);
+    let ended = false;
+    return () => {
+      if (ended) return;
+      ended = true;
+      if (--session.count === 0 && this.sessions.get(bookId) === session) this.sessions.delete(bookId);
+    };
   }
   async usage() {
     const books: { bookId: string; bytes: number }[] = [];

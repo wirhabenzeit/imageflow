@@ -49,7 +49,9 @@ import { chooseSyncTip, DocumentSession } from './document-session';
 import { cloneFromRemote, ownedOriginalsSize } from './sync-engine';
 import { remoteBooks } from './sync-remote';
 import { SyncElsewhereError } from './sync-pull';
-import { insideBook, SyncService, UntrustedBookError } from './sync-service';
+import { insideBook, pendingUploadsText, SyncService, UntrustedBookError } from './sync-service';
+import { syncExcludedBook as excludedFrom } from './sync-start';
+import { chooseBooksPatch } from './sync-settings';
 import { configureMacHeader, setToolbarDragRegions } from './mac-header';
 import type { RenderSessions } from './document-session';
 import { AssetFacts } from './asset-facts';
@@ -139,7 +141,8 @@ const syncOffered = syncFlag();
 // touches CloudKit there.
 let cloudKitNative: CloudKitNative | undefined | null = null;
 const cloudKit = () => (cloudKitNative === null ? (cloudKitNative = loadCloudKitNative()) : cloudKitNative);
-const syncService = new SyncService(() => (syncOffered ? settings?.value.sync : undefined), { credentials: () => syncCredentials(), cacheFolder: () => app.getPath('userData'), cloudKit });
+const syncService = new SyncService(() => (syncOffered ? settings?.value.sync : undefined), { credentials: () => syncCredentials(), cacheFolder: () => app.getPath('userData'), cloudKit,
+  booksUnchosen: () => !!settings?.value.syncBooksUnchosen });
 let recents: RecentDocuments;
 let library: TemplateLibrary;
 let trust: TemplateTrust;
@@ -340,10 +343,12 @@ function report(owner: BrowserWindow | null | undefined, error: unknown) {
  * books a template preview renders, which are staged in the app's cache. Read-only opens and untrusted books are told
  * apart by the sync service.
  */
-async function syncExcludedBook(folder: string) {
-  const roots = await Promise.all([sampleFolder(''), cache].filter(Boolean).map((root) => realpath(root).catch(() => root)));
-  const resolved = await realpath(folder).catch(() => folder);
-  return roots.some((root) => resolved === root || resolved.startsWith(root.replace(/\/$/, '') + sep));
+const syncExcludedBook = (folder: string) => excludedFrom(folder, [sampleFolder(''), cache]);
+/** The recent books the first-configuration sheet lists: those on this Mac, without the sample and preview books. */
+async function booksToChoose() {
+  const entries = (await recents.list()).filter(({ available }) => available);
+  const excluded = await Promise.all(entries.map(({ path }) => syncExcludedBook(path)));
+  return entries.filter((_, index) => !excluded[index]);
 }
 function sampleFolder(name: string) {
   return sampleRoot ? join(sampleRoot, name) : app.isPackaged ? join(process.resourcesPath, 'sample', name) : join(app.getAppPath(), 'sample', name);
@@ -1717,12 +1722,10 @@ void app.whenReady().then(async () => {
       // Source editors flush pending keystrokes and retain their existing cancel/failure prompts.
       for (const document of documents.values()) if (!await markdownWindows.closeFor(document)) return;
       // Quitting while originals upload is allowed: the books have synced, and what is left resumes when they open again.
-      const uploading = syncService.pendingUploads().filter(({ left }) => left > 0);
-      if (uploading.length) {
+      const uploading = pendingUploadsText(syncService.pendingUploads(), bookName);
+      if (uploading) {
         const { response } = await dialog.showMessageBox({ type: 'question', buttons: ['Quit', 'Keep Uploading'], defaultId: 0, cancelId: 1,
-          message: 'Originals are still uploading.',
-          detail: uploading.map(({ folder, left }) => '“' + bookName(folder) + '”: ' + left + (left === 1 ? ' original' : ' originals')).join('\n') +
-            '\n\nThe books themselves have synced. Their originals continue uploading the next time you open them.' });
+          message: 'Originals are still uploading.', detail: uploading });
         if (response !== 0) return;
       }
       await Promise.allSettled([...opening.values()]);
@@ -2173,6 +2176,7 @@ void app.whenReady().then(async () => {
   // A bucket and its key are saved in Settings → Sync; every open book then looks at the remote again, also when only
   // the key changed (a corrected key clears "Sign-in needed" without a restart).
   registerSyncSettings({ ipcMain, owner: settingsOwner, settings, credentials: syncCredentials, cloudKit: async () => cloudKit()?.status(),
+    booksToChoose: async () => (await booksToChoose()).length,
     usage: async () => (await syncService.connect()).remote.usage(),
     changed: (value) => { syncBackendChanged(); for (const owner of appWindows()) if (!owner.isDestroyed()) owner.webContents.send(channels.settingsChanged, value); } });
   ipcMain.handle(channels.settings, (event) => appOwner(event) ? { value: settings.value } : { error: 'Request is only available to an app window.' });
@@ -2207,13 +2211,16 @@ void app.whenReady().then(async () => {
     if (!settingsOwner(event)) return { error: 'Request is only available to Settings.' };
     if (!syncOffered || !syncService.configured) return { error: 'Sync is off on this Mac.' };
     try {
-      const books: SyncSetupBook[] = [];
-      for (const entry of await recents.list()) {
-        if (!entry.available || await syncExcludedBook(entry.path)) continue;
-        const standing = await syncService.standing(entry.path);
-        books.push({ id: entry.id, title: entry.title, bytes: await ownedOriginalsSize(entry.path).catch(() => 0),
-          trusted: await bookTrusted(entry.path).catch(() => false), syncing: standing.sync === 'syncing' });
+      const entries = await booksToChoose();
+      // With no book to list there is nothing to answer.
+      if (!entries.length) {
+        if (settings.value.syncBooksUnchosen) await settings.update({ syncBooksUnchosen: null });
+        return { value: [] };
       }
+      // One connection for all of them; each book's files are read side by side.
+      const standings = await syncService.standings(entries.map(({ path }) => path));
+      const books: SyncSetupBook[] = await Promise.all(entries.map(async (entry, index) => ({ id: entry.id, title: entry.title,
+        bytes: await ownedOriginalsSize(entry.path).catch(() => 0), trusted: await bookTrusted(entry.path).catch(() => false), syncing: standings[index] === 'syncing' })));
       return { value: books };
     } catch (error) { return { error: errorMessage(error) }; }
   });
@@ -2229,6 +2236,8 @@ void app.whenReady().then(async () => {
         chosen.push({ folder: (await documentIdentity(entry.path)).folder, sync });
       }
       await syncService.chooseBooks(chosen);
+      // Answered: books may start by themselves again.
+      await settings.update({ syncBooksUnchosen: null });
       // Open books look again: one chosen to sync starts now, as it would at its next open.
       for (const document of documents.values()) {
         if (document.closing || !chosen.some(({ folder }) => folder === document.book.folder)) continue;
@@ -2251,7 +2260,8 @@ void app.whenReady().then(async () => {
       // A book's own files are no place for the sync of every book (and a sync folder inside one is refused per book).
       if (insideBook(await realpath(path).catch(() => path)) || insideBook(path)) throw new Error('Choose a folder outside every book.');
       const previous = settings.value.sync;
-      const value = await settings.update({ sync: { kind: 'folder', path } });
+      const next = { kind: 'folder' as const, path };
+      const value = await settings.update({ sync: next, ...await chooseBooksPatch(previous, next, async () => (await booksToChoose()).length) });
       // One backend at a time: a bucket the folder replaces has its key forgotten.
       await forgetOtherCredentials(syncCredentials(), previous, value.sync).catch((error) => console.warn('ImageFlow could not forget the key of the former sync bucket', error));
       if (JSON.stringify(value.sync) !== JSON.stringify(previous)) syncBackendChanged();

@@ -55,6 +55,7 @@ import type { SyncOptions, SyncOutcome } from './sync-engine';
 import type { SyncRemote } from './sync-remote';
 import { bookSync, readSyncState, startSyncing, SyncElsewhereError, syncedElsewhere, takeAbandonedAtOpen } from './sync-pull';
 import type { SyncService, SyncStanding } from './sync-service';
+import { FirstSync } from './sync-start';
 import type { CommitHeader } from '../src/sync-snapshot';
 import type { SyncView } from '../src/desktop';
 import { acquireProjectLock, CommittedProjectSaveError } from './persistence';
@@ -385,11 +386,7 @@ export class DocumentSession {
   private scheduleSyncRefresh() {
     // A book whose first sync by itself did not happen (busy, offline) tries again after the next save, through the
     // same checks as at open: exclusions, trust, opt-out, and a book synced elsewhere is asked about, never started.
-    if (this.startPending && !this.syncing && !this.closing) {
-      this.startPending = false;
-      clearTimeout(this.startTimer);
-      this.startTimer = setTimeout(() => void this.syncOnOpen().catch((error) => console.warn('ImageFlow could not start syncing the book', error)), 1500);
-    }
+    if (!this.syncing && !this.closing) this.firstSync.saved();
     if (!this.syncView?.status?.remote || this.syncing) return;
     clearTimeout(this.syncTimer);
     this.syncTimer = setTimeout(() => void this.refreshLocalSync().catch(() => {}), 1500);
@@ -420,7 +417,7 @@ export class DocumentSession {
       const manage = this.syncService?.kind === 'icloud' ? { manage: true as const } : {};
       const full = this.storageFull ?? (uploads.full && { message: uploads.full.message, notUploaded: uploads.full.left, ...manage });
       view = { ...rest, ...(this.downloading ? { downloading: this.downloading } : {}), ...(uploads.uploading?.total ? { uploading: uploads.uploading } : {}),
-        ...(full ? { storageFull: full } : {}), ...(!uploads.uploading && uploads.failed?.left ? { uploadFailed: uploads.failed } : {}) };
+        ...(full ? { storageFull: full } : {}), ...(!uploads.uploading && uploads.failed && uploads.failed.left !== 0 ? { uploadFailed: uploads.failed } : {}) };
     }
     this.syncView = view;
     if (!this.closing && !this.window.isDestroyed()) this.window.webContents.send(channels.syncChanged, view ?? null);
@@ -434,8 +431,20 @@ export class DocumentSession {
    */
   syncExcluded = false;
   private stopUploads?: () => void;
-  private startPending = false;
-  private startTimer?: ReturnType<typeof setTimeout>;
+  /** The first sync by itself, tried again after the next save when it did not happen (`FirstSync`). */
+  private readonly firstSync = new FirstSync(() => this.startByItself());
+  /** Whether the book's first sync by itself ran, which uploads its originals after the commit. */
+  private startedByItself = false;
+  private async startByItself() {
+    const service = this.syncService;
+    if (!service || this.closing) return;
+    if (!await service.startsOnOpen(this.book.folder, { excluded: this.syncExcluded, readOnly: this.book.readOnly })) return;
+    // Waits for the book while a reload or the first save holds it.
+    for (let attempt = 0; attempt < 50 && this.busy && !this.closing; attempt++) await new Promise((resolve) => setTimeout(resolve, 200));
+    if (this.closing) return;
+    await this.syncNow({ start: true, auto: true });
+    this.startedByItself = true;
+  }
   /**
    * Starts what sync does by itself when the book opens, outside the open path so opening is not slower: a trusted book
    * with no sync state for this remote starts syncing (its first sync), and a book that syncs here resumes uploading
@@ -445,15 +454,10 @@ export class DocumentSession {
     const service = this.syncService;
     if (!service || this.closing) return;
     this.stopUploads ??= service.onUploads((folder) => { if (folder === this.book.folder && this.syncView && !this.closing) this.publishSync(this.syncView); });
-    if (await service.startsOnOpen(this.book.folder, { excluded: this.syncExcluded, readOnly: this.book.readOnly }).catch(() => false)) {
-      // Waits for the book while a reload or the first save holds it.
-      for (let attempt = 0; attempt < 50 && this.busy && !this.closing; attempt++) await new Promise((resolve) => setTimeout(resolve, 200));
-      if (this.closing) return;
-      try { await this.syncNow({ start: true, auto: true }); }
-      catch (error) { this.startPending = true; throw error; }
-      return;
-    }
-    if (this.bookSync === 'syncing') this.uploadOriginals();
+    this.startedByItself = false;
+    await this.firstSync.run();
+    // A sync by itself uploads after its commit; a book that synced before resumes its upload.
+    if (!this.startedByItself && this.bookSync === 'syncing') this.uploadOriginals();
   }
   /** Uploads the originals the last commits named, in the background (`SyncService.upload`). */
   private uploadOriginals() {
@@ -524,7 +528,16 @@ export class DocumentSession {
    * anything is written or pushed, for a book that last synced somewhere else, so the app asks first. The book's record
    * changes only once the sync holds the book. The originals the commit names upload after it, in the background.
    */
-  async syncNow({ start = false, auto = false, trust = false }: { start?: boolean; auto?: boolean; trust?: boolean } = {}) {
+  syncNow(options: { start?: boolean; auto?: boolean; trust?: boolean } = {}) {
+    // A second request while a sync runs (Start Syncing during the first sync by itself, a click on the status) joins
+    // it before it touches anything, so only the request that set the syncing state clears it.
+    if (this.syncTask) return this.syncTask;
+    const task = this.runSync(options).finally(() => { if (this.syncTask === task) this.syncTask = undefined; });
+    this.syncTask = task;
+    return task;
+  }
+  private syncTask?: Promise<SyncOutcome | undefined>;
+  private async runSync({ start = false, auto = false, trust = false }: { start?: boolean; auto?: boolean; trust?: boolean }) {
     if (!this.syncService) throw new Error('Sync is not available.');
     const connection = await this.syncService.connect(this.book.folder);
     const state = await readSyncState(this.book.folder);
@@ -738,7 +751,7 @@ export class DocumentSession {
     this.stopWatch();
     clearTimeout(this.linkedRetry);
     clearTimeout(this.syncTimer);
-    clearTimeout(this.startTimer);
+    this.firstSync.stop();
     // A background upload goes on after the book closes: it needs no writer lock, and Quit cancels it.
     this.stopUploads?.();
     this.linkedWatch?.stop();

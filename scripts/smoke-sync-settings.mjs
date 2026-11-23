@@ -47,7 +47,9 @@ const savedSettings = async () => JSON.parse(await readFile(join(profile, 'setti
 let app;
 try {
   app = await launch(true);
-  const { start, settings } = await openSettings(app, 'sync');
+  const opened = await openSettings(app, 'sync');
+  const start = opened.start;
+  let settings = opened.settings;
   const errors = [];
   settings.on('pageerror', (error) => errors.push(error.message));
   await settings.getByRole('tab', { name: 'Sync', selected: true }).waitFor();
@@ -185,7 +187,18 @@ try {
   const commits = () => stored().filter((key) => key.includes('/snapshots/')).length;
   const before = commits();
   await settings.getByRole('button', { name: 'Save' }).click();
-  const sheet = settings.getByRole('group', { name: 'Books to sync' });
+  let sheet = settings.getByRole('group', { name: 'Books to sync' });
+  await sheet.waitFor();
+  // Closing Settings leaves the sheet unanswered: it is the main process's record, so Settings → Sync shows it again.
+  await closeSettings(app);
+  for (let attempt = 0; app.windows().some((page) => page.url() === 'imageflow://editor/settings'); attempt++) {
+    assert.ok(attempt < 400, 'Settings closes');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal((await savedSettings()).syncBooksUnchosen, true, 'kept in settings.json, so a restart asks again');
+  settings = (await openSettings(app, 'sync')).settings;
+  settings.on('pageerror', (error) => errors.push(error.message));
+  sheet = settings.getByRole('group', { name: 'Books to sync' });
   await sheet.waitFor();
   const choice = sheet.getByRole('checkbox', { name: /Edited before Sync Now/ });
   assert.equal(await choice.isChecked(), true, 'a book that syncs with the bucket is chosen');
@@ -199,6 +212,7 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.equal(commits(), before, 'nothing was pushed');
+  assert.equal((await savedSettings()).syncBooksUnchosen, undefined, 'answered');
   await settings.getByRole('button', { name: 'Turn Off' }).click();
   await settings.getByText('Sync is off on this Mac.', { exact: true }).waitFor();
   assert.deepEqual(errors, []);

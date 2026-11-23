@@ -46,7 +46,9 @@ export function SyncStatus({ api, notice }: { api?: DesktopApi; notice: (message
   const uploadingHere = left > 0 ? left + (left === 1 ? ' original is' : ' originals are') + ' still uploading from this Mac.' : '';
   // The last background upload failed: the book synced, these originals of this Mac did not go up yet.
   const failed = !view.syncing && view.uploadFailed;
-  const failedText = failed ? failed.left + (failed.left === 1 ? ' original' : ' originals') + ' not uploaded: ' + failed.message.replace(/\.?$/, '.') : '';
+  // Without a count when the upload failed before it could read the remote.
+  const failedCount = failed ? (failed.left === undefined ? 'Originals' : failed.left + (failed.left === 1 ? ' original' : ' originals')) + ' not uploaded' : '';
+  const failedText = failed ? failedCount + ': ' + failed.message.replace(/\.?$/, '.') : '';
   const title = view.syncing ? 'Syncing with ' + view.folder : settings ? [status!.detail ?? '', 'Click to open Settings → Sync.'].filter(Boolean).join('\n')
     : [status ? explanations[status.state] : '', status?.detail ?? '', uploadingHere, failedText, pending.trim(), elsewhere, 'Click to sync with ' + view.folder + '.'].filter(Boolean).join('\n');
   // Originals downloading in the background: how far, with Cancel, beside the status.
@@ -67,7 +69,7 @@ export function SyncStatus({ api, notice }: { api?: DesktopApi; notice: (message
       .then((chosen) => (chosen === 'stop' ? api.syncAction('stop') : undefined)).then((result) => { if (result && 'error' in result) notice(result.error); });
   };
   const notUploaded = failed && <span className="sync-download sync-full sync-upload-failed" role="status" title={failedText}>
-    <span>{failed.left + (failed.left === 1 ? ' original' : ' originals') + ' not uploaded'}</span></span>;
+    <span>{failedCount}</span></span>;
   return <>{download}{upload}{full}{notUploaded}<button type="button" className={'sync-status' + (status && !view.syncing ? ' sync-' + status.state : '')} title={title} aria-label={label + '. ' + title}
     disabled={view.syncing} data-state={view.syncing ? 'syncing' : status?.state} data-uploading={left > 0 ? left : undefined} onContextMenu={menu}
     onClick={() => void (settings ? api.showSettings('sync') : api.syncAction('sync').then((result) => { if ('error' in result) notice(result.error); }))}>

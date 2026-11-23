@@ -102,7 +102,9 @@ type Context = { root: string; remote: SyncRemote; book: OpenProject; stale: boo
    * digest, or, for a photo without a file (ADR 0011), the digest of the preview stored for the fact its provider
    * reported and `key`, a key of the content the provider shows now. A photo has one of `path` and `key`.
    */
-  here: Record<string, { path?: string; key?: string; digest: string }> };
+  here: Record<string, { path?: string; key?: string; digest: string }>;
+  /** Ends what `SyncRemote.prepareSync` started for this sync. */
+  endSync?: () => void };
 
 /**
  * The path in the book of a photo whose original syncs (reach `book`, ADR 0012); undefined for any other photo, whose
@@ -327,7 +329,9 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
     createdAt: (context.options.now?.() ?? new Date()).toISOString(), title: state.project.title.slice(0, 400), stateDigest });
   await remote.putCommit(header);
   await recordSynced(root, { commitId: header.commitId, bookId, bookStateRevision: header.bookStateRevision, stateDigest, photoDigests: digestsOf(assets),
-    localDigests: Object.fromEntries(Object.entries(context.here).filter(([id, { path, digest }]) => path !== undefined && assets[id]?.digest === digest).map(([id, { digest }]) => [id, digest])),
+    // What this Mac has: originals at the snapshot's digest, and older versions a pull kept until their new ones arrive.
+    localDigests: Object.fromEntries(Object.entries(context.here).filter(([id, { path, digest }]) => path !== undefined &&
+      (assets[id]?.digest === digest || synced?.localDigests?.[id] === digest)).map(([id, { digest }]) => [id, digest])),
     localKeys: syncedKeys(context, synced, state.photos) });
   return { header, blob };
 }
@@ -423,6 +427,10 @@ async function stagePull(context: Context, tip: CommitHeader) {
   const proxies = await fetchProxies(remote, tip.bookId, await missingProxies(blob, projected, here, keepLocal));
   const staleOriginals: PullMarker['staleOriginals'] = {};
   const localDigests: PullMarker['localDigests'] = {};
+  // The originals the remote has, listed only when an original here is replaced by the snapshot.
+  let uploaded: Promise<Set<string>> | undefined;
+  const onRemote = async (original: StateBlob['originals'][string]) =>
+    (await (uploaded ??= remote.listBook(tip.bookId, 'originals').then((entries) => new Set(entries.map(({ key }) => key))))).has(originalBlobKey(tip.bookId, original.digest, original.ext));
   for (const [id, photo] of Object.entries(projected)) {
     const path = syncedOriginalPath(photo);
     const owned = !!path?.startsWith('photos/');
@@ -443,7 +451,12 @@ async function stagePull(context: Context, tip: CommitHeader) {
     // A kept local fact stays unrecorded, so it counts as ahead until a push carries it.
     if (!local || keepLocal.has(id)) continue;
     // An owned original the snapshot replaced goes, so the photo shows the new proxy until its new original is downloaded.
-    if (path !== undefined && original && original.digest !== local.digest && local.path === target) { staleOriginals[path] = local.digest; continue; }
+    // An owned original the snapshot replaced goes, so the photo shows the new proxy until its new original is downloaded,
+    // but only once the remote has the new one: a commit names its originals before they upload, and until then this
+    // file may be the only copy of the photo besides the remote's old one. Kept, it is recorded as what this Mac has
+    // (`localDigests`), so it is neither pushed back as a change made here nor uploaded as this Mac's own, and the new
+    // one replaces it once it has arrived (`missingOriginals`, `replaces`).
+    if (path !== undefined && original && original.digest !== local.digest && local.path === target && await onRemote(original)) { staleOriginals[path] = local.digest; continue; }
     // A photo without a file leaves no original behind: what this Mac saw of it is recorded as `localKeys`.
     if (local.path !== undefined) localDigests[id] = local.digest;
   }
@@ -520,7 +533,12 @@ export async function syncBook(options: SyncOptions): Promise<SyncOutcome> {
   const registered = AssetFacts.registered(root);
   const context: Context = { root, remote: options.remote, book: options.book, stale: false, options, here: {} };
   try {
-    const outcome = await decideAndSync(context);
+    const decided = await decideAndSync(context);
+    // Older originals a pull kept until their new versions arrived are replaced once they have, whether or not this Mac
+    // keeps originals: the book had the file. Never fails the sync, which has succeeded by then.
+    const replaced = decided.action === 'diverged' && !decided.pulled ? [] : await fetchOriginals(root, options.remote, undefined, { keptOnly: true })
+      .then(({ downloaded }) => downloaded, (error) => { console.warn('ImageFlow could not replace an original that changed on another Mac', error); return [] as string[]; });
+    const outcome = replaced.length ? { ...decided, changed: true } : decided;
     // The sync has succeeded; originals kept on this Mac come after it and never fail it.
     if (!options.fetchOriginals || (outcome.action === 'diverged' && !outcome.pulled)) return outcome;
     try {
@@ -530,6 +548,7 @@ export async function syncBook(options: SyncOptions): Promise<SyncOutcome> {
       return { ...outcome, originals: { downloaded: [], pending: error instanceof Error ? error.message : String(error) } };
     }
   } finally {
+    context.endSync?.();
     // Facts this sync loaded for a book no session holds are written and dropped again.
     if (!registered) await AssetFacts.release(root).catch(() => {});
   }
@@ -550,9 +569,9 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
   const local = await captureBookState(root);
   const bookId = local.project.bookId;
   if (!bookId) throw new Error('This book has no lineage ID yet. Make an edit, then sync.');
-  // The push below asks about no content file or preview that the remote already has with a request of its own: over
-  // a bucket, one listing of the book answers all of them.
-  await options.remote.prepareSync?.(bookId);
+  // One listing of the book answers this sync's questions over a bucket: its commits, the content files and previews a
+  // push would ask about, and the originals. It ends with the sync (`syncBook`).
+  context.endSync = await options.remote.prepareSync?.(bookId);
   const commits = await remoteCommits(options.remote, bookId);
   const tips = deriveTips(commits);
   const synced = state.lastSynced;
@@ -631,19 +650,33 @@ export async function downloadOriginals({ remote, book, ids }: { remote: SyncRem
 }
 
 /**
- * The owned originals of the last synced snapshot that photos/ lacks, each with whether the remote has it (`uploaded`):
- * a commit names its originals before they upload (`uploadOriginals`), so one the remote lacks is still uploading
- * from another Mac, which is no error. A file at the path is never replaced: it is this Mac's own original (one
- * replaced by the snapshot was removed by the pull), and its fact wins until it syncs.
+ * An original a pull kept because the snapshot replaced it while the new one was not on the remote yet: the sync
+ * record names the old digest as what this Mac has (`localDigests`), and the snapshot another.
  */
-async function missingOriginals(root: string, remote: SyncRemote, bookId: string, blob: StateBlob, ids?: readonly string[]) {
+const keptDigest = (synced: SyncedCommit | undefined, id: string, original: StateBlob['originals'][string]) => {
+  const kept = synced?.localDigests?.[id];
+  return kept !== undefined && kept !== original.digest ? kept : undefined;
+};
+
+/**
+ * The owned originals of the last synced snapshot that are not on this Mac, each with whether the remote has it
+ * (`uploaded`): a commit names its originals before they upload (`uploadOriginals`), so one the remote lacks is still
+ * uploading from another Mac, which is no error. Those photos/ lacks, and those a pull kept at an older version
+ * (`replaces`, the digest it has: the new one replaces it once it is there). Any other file at the path is never
+ * replaced: it is this Mac's own original, and its fact wins until it syncs.
+ */
+async function missingOriginals(root: string, remote: SyncRemote, bookId: string, blob: StateBlob, ids?: readonly string[], synced?: SyncedCommit) {
   const photos = photoIndexSchema.parse(JSON.parse(await readFile(join(root, 'photos.json'), 'utf8')));
-  const missing: { id: string; path: string; original: StateBlob['originals'][string]; uploaded: boolean }[] = [];
+  const missing: { id: string; path: string; original: StateBlob['originals'][string]; uploaded: boolean; replaces?: string }[] = [];
   for (const [id, original] of Object.entries(blob.originals)) {
     const photo = photos[id];
     const path = photo && syncedOriginalPath(photo);
     if ((ids && !ids.includes(id)) || !path?.startsWith('photos/')) continue;
-    if (await lstat(await bookPath(root, path, { checking: true })).catch(() => undefined)) continue;
+    if (await lstat(await bookPath(root, path, { checking: true })).catch(() => undefined)) {
+      const replaces = keptDigest(synced, id, original);
+      if (replaces) missing.push({ id, path, original, uploaded: false, replaces });
+      continue;
+    }
     missing.push({ id, path, original, uploaded: false });
   }
   if (!missing.length) return missing;
@@ -663,7 +696,9 @@ async function syncedBookId(root: string, synced: SyncedCommit) {
 }
 
 /** An original downloaded into the book's root and checked, waiting to go to its place in photos/. */
-export type StagedOriginal = { id: string; path: string; staging: string };
+export type StagedOriginal = { id: string; path: string; staging: string; digest?: string;
+  /** The digest of the kept older version this one replaces (`missingOriginals`). */
+  replaces?: string };
 
 /**
  * The first half of a download that leaves the book usable: the owned originals photos/ lacks are downloaded one by one
@@ -678,13 +713,14 @@ export async function stageOriginals({ remote, folder, signal, progress, notUplo
   const synced = (await readSyncState(root)).lastSynced;
   if (!synced) return [];
   const bookId = await syncedBookId(root, synced);
-  const all = await missingOriginals(root, remote, bookId, await fetchState(remote, bookId, synced.stateDigest));
+  const all = await missingOriginals(root, remote, bookId, await fetchState(remote, bookId, synced.stateDigest), undefined, synced);
   const missing = all.filter(({ uploaded }) => uploaded);
-  let away = all.length - missing.length;
+  // A kept older version whose new one is not there yet is no original away: the photo has its file.
+  let away = all.filter(({ uploaded, replaces }) => !uploaded && !replaces).length;
   const staged: StagedOriginal[] = [];
   progress?.(0, missing.length);
   try {
-    for (const { id, path, original } of missing) {
+    for (const { id, path, original, replaces } of missing) {
       if (signal?.aborted) break;
       const staging = join(root, '.imageflow-write-' + randomUUID() + '.tmp');
       const downloaded = await remote.downloadBlob(originalBlobKey(bookId, original.digest, original.ext), staging);
@@ -694,7 +730,7 @@ export async function stageOriginals({ remote, folder, signal, progress, notUplo
         await rm(staging, { force: true });
         throw new RemoteSyncingError('an original photo has not fully arrived yet.');
       }
-      staged.push({ id, path, staging });
+      staged.push({ id, path, staging, digest: original.digest, ...(replaces ? { replaces } : {}) });
       progress?.(staged.length, missing.length);
     }
     notUploaded?.(away);
@@ -713,15 +749,38 @@ export async function placeOriginals(folder: string, staged: readonly StagedOrig
   const root = await realpath(folder);
   const photos = photoIndexSchema.parse(JSON.parse(await readFile(join(root, 'photos.json'), 'utf8')));
   const placed: string[] = [];
-  for (const { id, path, staging } of staged) {
+  const replaced: Record<string, string> = {};
+  for (const { id, path, staging, digest, replaces } of staged) {
     try {
       const photo = photos[id];
-      if (!photo || packagePath(photo) !== path || await lstat(await bookPath(root, path, { checking: true })).catch(() => undefined)) continue;
+      if (!photo || packagePath(photo) !== path) continue;
+      const target = await bookPath(root, path, { checking: true });
+      if (await lstat(target).catch(() => undefined)) {
+        // Only the kept older version is replaced, as it still is: a file changed here since is this Mac's own.
+        if (!replaces || !digest || await fileDigest(target).catch(() => undefined) !== replaces) continue;
+        replaced[id] = digest;
+      }
       await rename(staging, await bookPath(root, path));
       placed.push(id);
     } finally { await rm(staging, { force: true }); }
   }
+  await recordReplaced(root, replaced);
   return placed;
+}
+
+/**
+ * Records that kept older originals were replaced by the versions the last synced snapshot names, so they count as what
+ * this Mac has, unchanged here, from now on.
+ */
+async function recordReplaced(root: string, replaced: Record<string, string>) {
+  if (!Object.keys(replaced).length) return;
+  await updateSyncState(root, (state) => {
+    const synced = state.lastSynced;
+    if (!synced) return state;
+    const localDigests = { ...synced.localDigests };
+    for (const [id, digest] of Object.entries(replaced)) if (synced.photoDigests[id] === digest) localDigests[id] = digest;
+    return { ...state, lastSynced: { ...synced, localDigests } };
+  });
 }
 
 /**
@@ -735,7 +794,8 @@ export async function originalsNotHere(folder: string, remote: SyncRemote): Prom
   const bookId = await syncedBookId(root, synced).catch(() => undefined);
   const blob = bookId && await fetchState(remote, bookId, synced.stateDigest).catch(() => undefined);
   if (!bookId || !blob) return { ids: [], notUploaded: [] };
-  const missing = await missingOriginals(root, remote, bookId, blob);
+  // A kept older version is here: the photo has its file, which the new one replaces once it is there.
+  const missing = (await missingOriginals(root, remote, bookId, blob)).filter(({ replaces }) => !replaces);
   return { ids: missing.map(({ id }) => id), notUploaded: missing.filter(({ uploaded }) => !uploaded).map(({ id }) => id) };
 }
 
@@ -744,26 +804,32 @@ export async function pendingOriginals(folder: string, remote: SyncRemote) {
   return (await originalsNotHere(folder, remote).catch(() => ({ ids: [] as string[] }))).ids;
 }
 
-async function fetchOriginals(root: string, remote: SyncRemote, ids?: readonly string[]) {
+async function fetchOriginals(root: string, remote: SyncRemote, ids?: readonly string[], { keptOnly = false }: { keptOnly?: boolean } = {}) {
   const synced = (await readSyncState(root)).lastSynced;
   if (!synced) return { downloaded: [], notUploaded: 0 };
   const bookId = await syncedBookId(root, synced);
   const blob = await fetchState(remote, bookId, synced.stateDigest);
   const downloaded: string[] = [];
+  const replaced: Record<string, string> = {};
   let notUploaded = 0;
-  for (const { id, path, original, uploaded } of await missingOriginals(root, remote, bookId, blob, ids)) {
-    // Still uploading from another Mac: downloaded once it has arrived.
-    if (!uploaded) { notUploaded++; continue; }
+  for (const { id, path, original, uploaded, replaces } of await missingOriginals(root, remote, bookId, blob, ids, synced)) {
+    if (keptOnly && !replaces) continue;
+    // Still uploading from another Mac: downloaded once it has arrived. A kept older version stays until then.
+    if (!uploaded) { if (!replaces) notUploaded++; continue; }
     const target = await bookPath(root, path);
     // Staged beside its target, so a transport on the same volume can clone it, and removed whatever happens.
     const staging = join(dirname(target), '.imageflow-write-' + randomUUID() + '.tmp');
     try {
-      if (!await remote.downloadBlob(originalBlobKey(bookId, original.digest, original.ext), staging)) { notUploaded++; continue; }
+      if (!await remote.downloadBlob(originalBlobKey(bookId, original.digest, original.ext), staging)) { if (!replaces) notUploaded++; continue; }
       if (await fileDigest(staging) !== original.digest) throw new RemoteSyncingError('an original photo has not fully arrived yet.');
+      // Only the kept older version is replaced, as it still is: a file changed here since is this Mac's own.
+      if (replaces && await fileDigest(target).catch(() => undefined) !== replaces) continue;
       await rename(staging, target);
+      if (replaces) replaced[id] = original.digest;
     } finally { await rm(staging, { force: true }); }
     downloaded.push(id);
   }
+  await recordReplaced(root, replaced);
   return { downloaded, notUploaded };
 }
 
@@ -802,6 +868,8 @@ export async function pendingUploads(folder: string, remote: SyncRemote): Promis
   const named = Object.entries(blob.originals).flatMap(([id, original]) => {
     const photo = photos[id];
     const path = photo && syncedOriginalPath(photo);
+    // An older version a pull kept is not the original the snapshot names: another Mac uploads that one.
+    if (keptDigest(synced, id, original)) return [];
     return path?.startsWith('photos/') ? [{ id, path, key: originalBlobKey(bookId, original.digest, original.ext), digest: original.digest }] : [];
   });
   if (!named.length) return [];

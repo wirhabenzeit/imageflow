@@ -25,6 +25,8 @@ export const syncFlag = () => process.env.IMAGEFLOW_SYNC === '1';
  * from a window and keep their backend.
  */
 export function syncPatchError(patch: unknown, enabled = syncFlag()) {
+  // Whether books wait to be chosen for a backend is the main process's to say (`syncBooksUnchosen`), never a window's.
+  if (patch && typeof patch === 'object' && 'syncBooksUnchosen' in patch) return 'Choose the books to sync in Settings → Sync.';
   if (!patch || typeof patch !== 'object' || !('sync' in patch)) return undefined;
   const value = (patch as { sync?: unknown }).sync;
   return enabled && (value === null || value === undefined) ? undefined : 'Choose the sync backend in Settings → Sync.';
@@ -59,7 +61,17 @@ function parseRequest(request: unknown): { backend: S3SyncBackend; credentials?:
  * main process once, when it is entered, and is kept by `credentials` alone: never in `settings.json`, never in an
  * answer, an error or the log.
  */
-export function registerSyncSettings({ ipcMain, owner, settings, credentials, cloudKit, usage, changed }: {
+/**
+ * The part of a settings patch that says whether books wait to be chosen, for a backend that replaces `previous`:
+ * another backend (or the first one) waits when there are books to list (`booksToChoose`); one that stays the same (only
+ * its key changed) keeps what it had.
+ */
+export async function chooseBooksPatch(previous: SyncBackend | undefined, next: SyncBackend, booksToChoose?: () => Promise<number>) {
+  if (JSON.stringify(previous) === JSON.stringify(next)) return {};
+  return { syncBooksUnchosen: (await booksToChoose?.().catch(() => 1) ?? 0) > 0 ? true as const : null };
+}
+
+export function registerSyncSettings({ ipcMain, owner, settings, credentials, cloudKit, usage, changed, booksToChoose }: {
   ipcMain: IpcMain;
   /** What the CloudKit addon says about this build and account; undefined where there is no addon (#292). */
   cloudKit?: () => Promise<CloudKitStatus | undefined>;
@@ -70,11 +82,13 @@ export function registerSyncSettings({ ipcMain, owner, settings, credentials, cl
   credentials: () => CredentialStore;
   /** Called with the new settings after the backend changed, to tell every window. */
   changed: (value: AppSettings) => void;
+  /** How many recent books the first-configuration sheet would list; none means there is nothing to choose. */
+  booksToChoose?: () => Promise<number>;
 }) {
   const state = async (): Promise<SyncBackendState> => {
     const backend = settings.value.sync;
     const stored = backend?.kind === 's3' ? credentialHint(await credentials().read(credentialScope(backend)).catch(() => undefined)) : undefined;
-    return { available: true, ...(stored ? { credentials: stored } : {}), ...await icloud() };
+    return { available: true, ...(stored ? { credentials: stored } : {}), ...(settings.value.syncBooksUnchosen ? { booksUnchosen: true as const } : {}), ...await icloud() };
   };
   // iCloud is offered only by a build entitled to it; whether the account can use it now is asked each time.
   const icloud = async (): Promise<Pick<SyncBackendState, 'icloud'>> => {
@@ -107,7 +121,7 @@ export function registerSyncSettings({ ipcMain, owner, settings, credentials, cl
       const offered = (await icloud()).icloud;
       if (!offered) throw new Error('iCloud sync is not available in this build of ImageFlow.');
       if (!offered.available) throw new Error(offered.message);
-      const value = await settings.update({ sync: { kind: 'icloud' } });
+      const value = await settings.update({ sync: { kind: 'icloud' }, ...await chooseBooksPatch(previous, { kind: 'icloud' }, booksToChoose) });
       await forgetOtherCredentials(credentials(), previous, value.sync);
       changed(value);
       return state();
@@ -116,7 +130,7 @@ export function registerSyncSettings({ ipcMain, owner, settings, credentials, cl
     const scope = credentialScope(backend);
     if (entered) await credentials().write(scope, entered);
     else if (!await credentials().read(scope)) throw new Error('Enter the access key ID and the secret access key for this bucket.');
-    const value = await settings.update({ sync: backend });
+    const value = await settings.update({ sync: backend, ...await chooseBooksPatch(previous, backend, booksToChoose) });
     await forgetOtherCredentials(credentials(), previous, value.sync);
     // Told also when only the key changed: the books look at the bucket again with it.
     changed(value);

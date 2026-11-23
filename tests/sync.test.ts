@@ -37,7 +37,10 @@ import { MemoryHeaderCache } from '../desktop/sync-header-cache';
 import { readCommitHeaderV1 } from './sync-v1-reader';
 import { bookTrusted, distrustBook, trustBook } from '../desktop/source-access';
 import { readSyncState, SyncElsewhereError, SyncHalfPulledError, takeAbandonedAtOpen, updateSyncState } from '../desktop/sync-pull';
-import { insideBook, SyncService, UntrustedBookError } from '../desktop/sync-service';
+import { insideBook, pendingUploadsText, SyncService, UntrustedBookError } from '../desktop/sync-service';
+import { FirstSync, syncExcludedBook } from '../desktop/sync-start';
+import { SettingsStore } from '../desktop/settings';
+import { chooseBooksPatch, syncPatchError } from '../desktop/sync-settings';
 import type { FolderSyncBackend, S3SyncBackend, SyncBackend } from '../src/settings';
 import { blobKeyPattern, commitKey, contentBlobKey, coverBlobKey, decideSync, readBookTombstone, readCommitHeader, readRemoteIdentity, NewerSyncFormatError, deriveTips, isUnlocatedPath, originalBlobKey, portableManifests,
   projectManifests, proxyBlobKey, stateBlobSchema, tombstoneKey } from '../src/sync-snapshot';
@@ -2625,4 +2628,186 @@ test('a sync over iCloud asks the change feed once and lists nothing besides; ov
   native.calls.length = 0;
   assert.equal((await on(a, (book) => service.sync({ book }))).action, 'push');
   assert.equal(native.calls.filter((call) => call === 'changes').length, 1, 'a push: one feed request, ' + native.calls.join(', '));
+});
+
+// Second review of #282.
+
+each('a pull keeps this Mac’s original until the remote has the one that replaces it, pushes nothing back, and replaces it once it has arrived', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  const before = sha(await readFile(join(b.folder, 'photos/shore.jpg')));
+  // The desktop replaces the photo's file and syncs, then sleeps before its background upload.
+  await image(join(a.folder, 'photos/shore.jpg'), '#aa3300', 160, 100);
+  const replaced = sha(await readFile(join(a.folder, 'photos/shore.jpg')));
+  assert.equal((await commitOnly(a, remote)).action, 'push');
+  const [tip] = await tips(remote, a);
+  assert.equal((await stateOf(remote, tip)).originals.shore.digest, replaced);
+  assert.equal(await remote.hasBlob(originalBlobKey(tip.bookId, replaced, '.jpg')), false);
+  // The laptop pulls: its file stays, as the only copy of the photo besides the remote's old one.
+  const pulled = await sync(b, remote);
+  assert.equal(pulled.action, 'fast-forward');
+  assert.deepEqual(pulled.pushed, [], 'nothing is pushed back');
+  assert.equal(sha(await readFile(join(b.folder, 'photos/shore.jpg'))), before, 'the old file stays');
+  assert.equal((await describeSync(b.folder, remote)).state, 'in-sync');
+  assert.deepEqual((await pendingUploads(b.folder, remote)).map(({ id }) => id), [], 'it is not uploaded as the laptop’s own');
+  // An edit on the laptop syncs without carrying its old original as a change made there.
+  await edit(b, caption('segla', 'From the laptop'));
+  const pushed = await sync(b, remote);
+  assert.equal(pushed.action, 'push');
+  const [next] = await tips(remote, b);
+  const state = await stateOf(remote, next);
+  assert.equal(state.originals.shore.digest, replaced);
+  assert.equal(state.assetsMeta.assets.shore.digest, replaced, 'the snapshot keeps the desktop’s version');
+  assert.equal((await sync(b, remote)).action, 'in-sync');
+  // Once the desktop has uploaded it, the laptop's next sync replaces the old file, and then nothing changes.
+  await commitOnly(a, remote);
+  await uploadAll(a, remote);
+  assert.equal((await sync(b, remote)).action, 'in-sync');
+  assert.equal(sha(await readFile(join(b.folder, 'photos/shore.jpg'))), replaced);
+  assert.equal((await sync(b, remote)).action, 'in-sync');
+  assert.equal((await tips(remote, b)).length, 1);
+});
+
+test('an unanswered first-configuration sheet starts no book by itself, also one opened while it shows and after a restart, until it is answered', async (t) => {
+  const { root, a } = await world(t);
+  const backend = await folderBackend(root, 'Sync');
+  const settingsFile = join(root, 'settings.json');
+  const store = new SettingsStore(settingsFile);
+  // Saving a backend where sync was off: books wait to be chosen when there are books to list.
+  assert.deepEqual(await chooseBooksPatch(undefined, backend, async () => 2), { syncBooksUnchosen: true });
+  assert.deepEqual(await chooseBooksPatch(undefined, backend, async () => 0), { syncBooksUnchosen: null }, 'with no book to list there is nothing to answer');
+  assert.deepEqual(await chooseBooksPatch(backend, { ...backend }, async () => 2), {}, 'the same backend (a key changed) keeps what it had');
+  assert.deepEqual(await chooseBooksPatch({ kind: 'icloud' }, backend, async () => 2), { syncBooksUnchosen: true }, 'another backend asks again');
+  await store.update({ sync: backend, ...await chooseBooksPatch(undefined, backend, async () => 1) });
+  assert.equal(store.value.syncBooksUnchosen, true);
+  // Never from the generic patch of a window.
+  assert.match(syncPatchError({ syncBooksUnchosen: null }, true)!, /Settings → Sync/);
+  const service = new SyncService(() => store.value.sync, { booksUnchosen: () => !!store.value.syncBooksUnchosen });
+  await ownBook(a);
+  assert.equal(await service.startsOnOpen(a.folder), false, 'a trusted book opened while the sheet shows does not start');
+  // Start Syncing, chosen by the user, still works, and its originals upload.
+  await on(a, () => service.start(a.folder));
+  await syncWith(a, service);
+  assert.deepEqual(await pendingUploads(a.folder, (await service.connect()).remote), []);
+  // After a restart it still waits.
+  const restarted = new SettingsStore(settingsFile);
+  await restarted.load();
+  assert.equal(restarted.value.syncBooksUnchosen, true);
+  const after = new SyncService(() => restarted.value.sync, { booksUnchosen: () => !!restarted.value.syncBooksUnchosen });
+  const other: Mac = { ...a, folder: join(a.base, 'Other.imageflow') };
+  await copySample(resolve('sample/starter'), other.folder);
+  await trustBook(other.folder);
+  assert.equal(await after.startsOnOpen(other.folder), false);
+  // Answered: books start again.
+  await restarted.update({ syncBooksUnchosen: null });
+  assert.equal(await after.startsOnOpen(other.folder), true);
+  // Turning sync off clears it.
+  await restarted.update({ syncBooksUnchosen: true });
+  await restarted.update({ sync: null });
+  assert.equal(restarted.value.syncBooksUnchosen, undefined);
+});
+
+test('the sample books and template preview books are excluded by where they lie', async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'if-excluded-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const sample = join(root, 'Resources', 'sample');
+  const cache = join(root, 'Cache');
+  await mkdir(join(sample, 'starter'), { recursive: true });
+  await mkdir(join(cache, 'template-preview-1'), { recursive: true });
+  await mkdir(join(root, 'Books', 'Mine.imageflow'), { recursive: true });
+  await mkdir(join(root, 'Resources', 'sample-like'), { recursive: true });
+  assert.equal(await syncExcludedBook(join(sample, 'starter'), [sample, cache]), true);
+  assert.equal(await syncExcludedBook(join(cache, 'template-preview-1'), [sample, cache]), true);
+  assert.equal(await syncExcludedBook(join(root, 'Books', 'Mine.imageflow'), [sample, cache]), false);
+  assert.equal(await syncExcludedBook(join(root, 'Resources', 'sample-like'), [sample + '/', cache]), false, 'a sibling whose name starts the same is not inside');
+  assert.equal(await syncExcludedBook(join(root, 'Books', 'Mine.imageflow'), [undefined]), false);
+});
+
+test('a first sync by itself that failed is tried again after the next save, and still not while books wait to be chosen', async (t) => {
+  const { root, a } = await world(t);
+  const path = join(root, 'Later');
+  let unchosen = false;
+  const service = new SyncService(() => ({ kind: 'folder', path }), { booksUnchosen: () => unchosen });
+  await ownBook(a);
+  let synced = 0;
+  const first = new FirstSync(async () => {
+    if (!await service.startsOnOpen(a.folder)) return;
+    await syncWith(a, service);
+    synced++;
+  }, 10, () => {});
+  // The sync folder is not there when the book opens: nothing synced, and it waits for a save.
+  await assert.rejects(first.run());
+  assert.equal(first.waiting, true);
+  await mkdir(path);
+  first.saved();
+  for (let attempt = 0; first.waiting && attempt < 500; attempt++) await new Promise((resolve) => setTimeout(resolve, 10));
+  await first.run();
+  assert.equal(synced, 1, 'the save started it');
+  assert.equal((await service.standing(a.folder)).sync, 'syncing');
+  // A save after it worked starts nothing again.
+  first.saved();
+  assert.equal(first.waiting, false);
+  // While books wait to be chosen the retry starts nothing.
+  const b: Mac = { ...a, folder: join(a.base, 'Second.imageflow') };
+  await copySample(resolve('sample/starter'), b.folder);
+  await trustBook(b.folder);
+  unchosen = true;
+  let started = false;
+  const second = new FirstSync(async () => { if (await service.startsOnOpen(b.folder)) started = true; }, 10, () => {});
+  await second.run();
+  second.saved();
+  assert.equal(started, false);
+  first.stop(); second.stop();
+});
+
+test('Quit names the books whose originals are still uploading, and an upload that fails before it could read the remote still shows', async (t) => {
+  const { a } = await world(t);
+  const native = new FakeCloudKit();
+  let backend: SyncBackend = { kind: 'icloud' };
+  const service = new SyncService(() => backend, { cloudKit: () => native });
+  await ownBook(a);
+  await on(a, (book) => service.sync({ book }));
+  assert.equal(pendingUploadsText([], () => ''), undefined);
+  assert.equal(pendingUploadsText([{ folder: a.folder, left: 0 }], () => ''), undefined);
+  const running = service.upload(a.folder);
+  const listed = service.pendingUploads();
+  assert.deepEqual(listed.map(({ folder }) => folder), [a.folder]);
+  assert.match(pendingUploadsText([{ folder: a.folder, left: 3 }], () => 'Book') ?? '', /^“Book”: 3 originals\n\nThe books themselves have synced/);
+  await running;
+  // The remote cannot be read when the upload starts: what is left is not known, and the status says so without a count.
+  native.fail('changes', 'serverRejectedRequest', { times: Infinity });
+  await edit(a, caption('shore', 'Again'));
+  await assert.rejects(service.upload(a.folder));
+  const failed = service.uploadState(a.folder).failed;
+  assert.ok(failed && failed.left === undefined, JSON.stringify(failed));
+  native.recover();
+  // Another backend: what the former left says nothing about it.
+  backend = { kind: 'folder', path: join(a.base, 'Elsewhere') };
+  assert.equal(service.configured, true);
+  assert.deepEqual(service.uploadState(a.folder), {});
+});
+
+test('one listing per sync over a bucket answers its commits, its blobs and its originals, and is gone after it', async (t) => {
+  const { root, a } = await world(t);
+  const { fake, backend } = await bucketWorld(t, root);
+  const credentials = new MemoryCredentialStore();
+  await credentials.write(credentialScope(backend), fakeCredentials);
+  const service = new SyncService(() => backend, { credentials: () => credentials, cacheFolder: () => join(root, 'Support'), s3: { retryDelay: 1 } });
+  await ownBook(a);
+  await syncWith(a, service);
+  await service.connect();
+  const lists = () => fake.requests.filter(({ method, query }) => method === 'GET' && query.has('list-type')).length;
+  fake.requests.length = 0;
+  assert.equal((await on(a, (book) => service.sync({ book, fetchOriginals: true }))).action, 'in-sync');
+  assert.equal(lists(), 1, 'an unchanged book: one listing, ' + fake.requests.map(({ method, key, query }) => method + ' ' + key + '?' + query).join(', '));
+  await edit(a, caption('shore', 'A caption'));
+  fake.requests.length = 0;
+  assert.equal((await on(a, (book) => service.sync({ book, fetchOriginals: true }))).action, 'push');
+  assert.equal(lists(), 1, 'a push: one listing');
+  // Outside a sync, a listing asks the bucket again.
+  fake.requests.length = 0;
+  await (await service.connect()).remote.listBook(await bookId(a), 'originals');
+  assert.equal(lists(), 1);
 });

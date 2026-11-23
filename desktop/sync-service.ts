@@ -55,7 +55,20 @@ export class UntrustedBookError extends Error {
  * pending while it runs (`uploading`), and after it, why originals are left: the remote is full (`full`, paused until a
  * later sync finds room) or the upload failed (`failed`).
  */
-export type UploadState = { uploading?: { done: number; total: number }; full?: { message: string; left: number }; failed?: { message: string; left: number } };
+export type UploadState = { uploading?: { done: number; total: number }; full?: { message: string; left: number };
+  /** `left` is undefined when the upload failed before it knew how many were pending (the remote could not be read). */
+  failed?: { message: string; left?: number } };
+
+/**
+ * What Quit says about uploads still running (`SyncService.pendingUploads`): each book by name with the originals left,
+ * or undefined when none is uploading.
+ */
+export function pendingUploadsText(pending: readonly { folder: string; left: number }[], name: (folder: string) => string) {
+  const uploading = pending.filter(({ left }) => left > 0);
+  if (!uploading.length) return undefined;
+  return uploading.map(({ folder, left }) => '“' + name(folder) + '”: ' + left + (left === 1 ? ' original' : ' originals')).join('\n') +
+    '\n\nThe books themselves have synced. Their originals continue uploading the next time you open them.';
+}
 
 /** Whether a folder is, or lies inside, a book package. */
 export const insideBook = (path: string) => path.split(sep).some((part) => /\.imageflow$/i.test(part));
@@ -64,7 +77,12 @@ export const insideBook = (path: string) => path.split(sep).some((part) => /\.im
  * What the service needs besides the setting: for a bucket, the credential store, and where the commit headers it read
  * are kept (`<userData>/Sync Cache`). Functions, so the app can make them once it is ready.
  */
-export type SyncServiceDependencies = { credentials?: () => SyncRemoteDependencies['credentials']; cacheFolder?: () => string } & Pick<SyncRemoteDependencies, 'headerCache' | 'keyIndex' | 'cloudKit' | 's3'>;
+export type SyncServiceDependencies = { credentials?: () => SyncRemoteDependencies['credentials']; cacheFolder?: () => string;
+  /**
+   * Whether the sheet that asks which recent books sync waits for an answer (`AppSettings.syncBooksUnchosen`): until it
+   * is answered, no book starts syncing by itself.
+   */
+  booksUnchosen?: () => boolean } & Pick<SyncRemoteDependencies, 'headerCache' | 'keyIndex' | 'cloudKit' | 's3'>;
 
 /** The remote a backend setting names. Each kind of backend is one case here. */
 function openBackend(backend: SyncBackend, dependencies: SyncServiceDependencies): Backend {
@@ -111,10 +129,19 @@ export class SyncService {
 
   private backend() {
     const setting = this.setting();
-    if (!setting) { this.current = undefined; return undefined; }
+    if (!setting) { this.current = undefined; this.forgetUploads(); return undefined; }
     const key = JSON.stringify(setting);
-    if (this.current?.key !== key) this.current = { key, backend: openBackend(setting, this.dependencies) };
+    if (this.current?.key !== key) { this.current = { key, backend: openBackend(setting, this.dependencies) }; this.forgetUploads(); }
     return this.current;
+  }
+  /** The identity the remote had at the last `connect`; another one makes the upload results of the former go. */
+  private lastIdentity?: string;
+  /** What uploads to another remote left (storage full, a failure) says nothing about this one. */
+  private forgetUploads() {
+    if (!this.settled.size) return;
+    const folders = [...this.settled.keys()];
+    this.settled.clear();
+    for (const folder of folders) this.tell(folder);
   }
 
   /** Whether a backend is configured. */
@@ -136,7 +163,10 @@ export class SyncService {
     const remote = await current.backend.open();
     // Read at every use, never kept (see above); only uses that run at once share the read.
     const identity = current.identity ??= remote.remoteId().finally(() => { if (current.identity === identity) current.identity = undefined; });
-    return { remote, remoteId: await identity, name };
+    const remoteId = await identity;
+    if (this.lastIdentity !== undefined && this.lastIdentity !== remoteId) this.forgetUploads();
+    this.lastIdentity = remoteId;
+    return { remote, remoteId, name };
   }
 
   /** How a book stands with the configured remote. Never throws: a remote that cannot be read is reported. */
@@ -181,10 +211,13 @@ export class SyncService {
    * with a backend configured, a trusted book that has no sync state for this remote, or one that was chosen to sync
    * here and never synced yet. Never a book the caller `excluded` (the sample book, template previews, read-only opens),
    * an untrusted one, one stopped on this Mac (`enabled: false`, also by the first-configuration sheet) or one that last
-   * synced somewhere else (asked about instead). Writes nothing; the caller syncs, which records the start.
+   * synced somewhere else (asked about instead), and none while the first-configuration sheet waits for an answer.
+   * Writes nothing; the caller syncs, which records the start. Throws when the remote cannot be read.
    */
   async startsOnOpen(folder: string, { excluded = false, readOnly = false }: { excluded?: boolean; readOnly?: boolean } = {}) {
     if (excluded || readOnly || !this.configured) return false;
+    // The sheet that asks which books sync is not answered yet: nothing starts by itself until it is.
+    if (this.dependencies.booksUnchosen?.()) return false;
     if (!await bookTrusted(folder)) return false;
     const state = await readSyncState(folder);
     if (state.enabled === false) return false;
@@ -216,6 +249,15 @@ export class SyncService {
           : state.enabled === false && state.remoteId === remoteId ? state : { ...state, remoteId, enabled: false }));
       }
     }
+  }
+
+  /**
+   * How each of `folders` stands with the configured remote, from one connection (the first-configuration sheet lists
+   * up to 20 books; on iCloud each connection reads the account). Records are read side by side.
+   */
+  async standings(folders: readonly string[]) {
+    const { remoteId } = await this.connect();
+    return Promise.all(folders.map(async (folder) => bookSync(await readSyncState(folder), remoteId)));
   }
 
   /** Stops syncing a book on this Mac, and its upload of originals; the remote is left as it is. */
@@ -274,7 +316,8 @@ export class SyncService {
         } while (entry.again && !job.signal.aborted && !outcome.full && !outcome.stopped);
       } catch (error) {
         if (job.signal.aborted) return undefined;
-        this.settled.set(key, { failed: { message: message(error), left: Math.max(0, entry.progress.total - entry.progress.done) } });
+        // Failed before it knew what was pending (the remote could not be read): what is left is not known, but not none.
+        this.settled.set(key, { failed: { message: message(error), ...(entry.progress.total ? { left: Math.max(0, entry.progress.total - entry.progress.done) } : {}) } });
         throw error;
       }
       this.settled.set(key, outcome.full ? { full: { message: outcome.full.message, left: outcome.left } } : {});

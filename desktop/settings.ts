@@ -28,7 +28,7 @@ function syncBackend(value: unknown): SyncBackend {
 
 function applyPatch(current: AppSettings, patch: unknown): AppSettings {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch) ||
-      Object.keys(patch).some((key) => key !== 'appearance' && key !== 'newBookSize' && key !== 'automaticUpdates' && key !== 'updateChannel' && key !== 'agentAccess' && key !== 'keepOriginals' && key !== 'sync')) throw new Error('Invalid app settings.');
+      Object.keys(patch).some((key) => key !== 'appearance' && key !== 'newBookSize' && key !== 'automaticUpdates' && key !== 'updateChannel' && key !== 'agentAccess' && key !== 'keepOriginals' && key !== 'sync' && key !== 'syncBooksUnchosen')) throw new Error('Invalid app settings.');
   const appearance = 'appearance' in patch ? patch.appearance : current.appearance;
   if (appearance !== 'light' && appearance !== 'dark' && appearance !== 'system') throw new Error('Invalid appearance setting.');
   const newBookSize = 'newBookSize' in patch ? patch.newBookSize as { width?: unknown; height?: unknown } : current.newBookSize;
@@ -43,8 +43,13 @@ function applyPatch(current: AppSettings, patch: unknown): AppSettings {
   const keepOriginals = 'keepOriginals' in patch ? patch.keepOriginals : current.keepOriginals;
   if (keepOriginals !== undefined && typeof keepOriginals !== 'boolean') throw new Error('Invalid keep originals setting.');
   const sync = 'sync' in patch ? patch.sync : current.sync;
+  const unchosen = 'syncBooksUnchosen' in patch ? patch.syncBooksUnchosen : current.syncBooksUnchosen;
+  if (unchosen !== undefined && unchosen !== null && unchosen !== true) throw new Error('Invalid sync setting.');
+  const backend = sync !== undefined && sync !== null ? syncBackend(sync) : undefined;
   return { appearance, automaticUpdates, updateChannel, ...(newBookSize ? { newBookSize: newBookSize as {width:number;height:number} } : {}),
-    ...(agentAccess ? { agentAccess: true } : {}), ...(keepOriginals === false ? { keepOriginals: false } : {}), ...(sync !== undefined && sync !== null ? { sync: syncBackend(sync) } : {}) };
+    ...(agentAccess ? { agentAccess: true } : {}), ...(keepOriginals === false ? { keepOriginals: false } : {}), ...(backend ? { sync: backend } : {}),
+    // Books wait to be chosen only for a backend: turning sync off answers the sheet too.
+    ...(backend && unchosen === true ? { syncBooksUnchosen: true as const } : {}) };
 }
 
 export class SettingsStore {
@@ -56,11 +61,11 @@ export class SettingsStore {
     try {
       // The former development-only app default does not override a book's own future-import policy. Faster book
       // updates (beta.12 to beta.15) was removed: rendering each edit in new frames measured as fast.
-      const { importMode: _legacy, fasterBookUpdates: _removed, sync, ...saved } = JSON.parse(await readFile(this.file, 'utf8'));
+      const { importMode: _legacy, fasterBookUpdates: _removed, sync, syncBooksUnchosen, ...saved } = JSON.parse(await readFile(this.file, 'utf8'));
       this.value = applyPatch(this.value, saved);
       // A sync backend this version cannot read (a kind a newer version added) leaves sync off here; it does not cost
-      // the other settings their values.
-      try { this.value = applyPatch(this.value, { sync }); }
+      // the other settings their values. Books that wait to be chosen keep waiting after a restart.
+      try { this.value = applyPatch(this.value, { sync, ...(syncBooksUnchosen === true ? { syncBooksUnchosen } : {}) }); }
       catch (error) { console.warn('ImageFlow could not read its sync setting; sync is off.', error); }
     }
     catch (error) {

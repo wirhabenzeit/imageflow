@@ -97,9 +97,10 @@ export type SyncView = { folder: string; status?: SyncStatus; syncing?: boolean;
   storageFull?: { message: string; notUploaded?: number; manage?: true };
   /**
    * The last background upload of this book's originals failed (offline, a refused request): how many of this Mac's
-   * originals are not uploaded, and why. Shown until an upload ends without; the next sync tries again.
+   * originals are not uploaded (`left`; unknown when it failed before it could read the remote), and why. Shown until an
+   * upload ends without; the next sync tries again.
    */
-  uploadFailed?: { message: string; left: number } };
+  uploadFailed?: { message: string; left?: number } };
 /** `start` makes the book sync on this Mac (asking first when it last synced somewhere else), `stop` stops that. */
 export type SyncAction = 'sync' | 'download' | 'cancel-download' | 'start' | 'stop' | 'manage-storage';
 // The main canvas shows spreads in one vertical column, or a row-by-row grid with this many columns.
@@ -151,7 +152,8 @@ export type Result<T> = { value: T } | { error: string; code?: 'BOOK_BUSY' };
  * `icloud` is there only in a build entitled to iCloud (#292): whether this Mac can use it now, and why not (signed
  * out, iCloud off for ImageFlow, restricted) when it cannot.
  */
-export type SyncBackendState = { available: boolean; credentials?: { stored: true; accessKeyEnd: string }; icloud?: { available: boolean; message?: string } };
+/** `booksUnchosen`: the sheet that asks which recent books sync waits for an answer (`AppSettings.syncBooksUnchosen`). */
+export type SyncBackendState = { available: boolean; credentials?: { stored: true; accessKeyEnd: string }; icloud?: { available: boolean; message?: string }; booksUnchosen?: true };
 export type SyncCredentialsInput = { accessKeyId: string; secretAccessKey: string };
 export type SyncBackendRequest = { backend: S3SyncBackend; credentials?: SyncCredentialsInput } | { backend: ICloudSyncBackend };
 /** What Test Connection found: see `ConnectionReport` in desktop/sync-store-s3.ts. */
