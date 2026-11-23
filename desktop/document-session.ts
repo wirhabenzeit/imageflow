@@ -53,7 +53,7 @@ import { describeLocalChange, describeSync, pendingOriginals, placeOriginals, st
 import type { SyncOptions, SyncOutcome } from './sync-engine';
 import { remoteCommits } from './sync-remote';
 import type { SyncRemote } from './sync-remote';
-import { FolderRemote } from './sync-remote-folder';
+import { folderRemote } from './sync-store-folder';
 import { readSyncState, takeAbandonedAtOpen, updateSyncState } from './sync-pull';
 import type { CommitHeader } from '../src/sync-snapshot';
 import type { SyncView } from '../src/desktop';
@@ -403,7 +403,7 @@ export class DocumentSession {
     const folder = await this.syncFolder();
     if (!folder) throw new Error('This book does not sync with a folder on this Mac. Choose File → Sync → Sync with Folder… first.');
     if (!(await lstat(folder).catch(() => undefined))?.isDirectory()) throw new Error('The sync folder “' + basename(folder) + '” is not available. Connect its drive, or choose it again with Sync with Folder….');
-    return new FolderRemote(folder);
+    return folderRemote(folder);
   }
   /**
    * Looks at the remote again and publishes the status, with `message` for the editor to show once. A pull that was
@@ -423,9 +423,9 @@ export class DocumentSession {
     }
     if (this.syncing) { this.publishSync({ ...this.syncView, folder, syncing: true, message: notice }); return; }
     const status = (await lstat(folder).catch(() => undefined))?.isDirectory()
-      ? await describeSync(this.book.folder, new FolderRemote(folder))
+      ? await describeSync(this.book.folder, folderRemote(folder))
       : { state: 'unavailable' as const, detail: 'The sync folder is not available.', pendingOriginals: 0 };
-    const ids = status.pendingOriginals ? await pendingOriginals(this.book.folder, new FolderRemote(folder)).catch(() => [] as string[]) : [];
+    const ids = status.pendingOriginals ? await pendingOriginals(this.book.folder, folderRemote(folder)).catch(() => [] as string[]) : [];
     if (ids.join() !== [...this.notDownloaded].join()) {
       this.notDownloaded = new Set(ids);
       // The book check and the asset statuses say so at once: the book renders again with the new statuses. While
@@ -438,7 +438,7 @@ export class DocumentSession {
   async syncNow() {
     const remote = await this.folderRemote();
     this.syncing = true;
-    this.publishSync({ ...this.syncView, folder: remote.root, syncing: true, message: undefined });
+    this.publishSync({ ...this.syncView, folder: remote.store.root, syncing: true, message: undefined });
     let message: string | undefined;
     try {
       // Originals come after the sync, in the background (`downloadSyncedOriginals`), so the book stays usable.
@@ -455,7 +455,7 @@ export class DocumentSession {
   /** Makes the book sync through `folder` on this Mac. The record of the last sync stays only if the folder has it. */
   async linkSync(folder: string) {
     const result = await this.run(async () => {
-      const remote = new FolderRemote(folder);
+      const remote = folderRemote(folder);
       const bookId = this.book.project.bookId;
       const commits = bookId ? await remoteCommits(remote, bookId) : [];
       await updateSyncState(this.book.folder, ({ lastSynced, ...state }) => ({ ...state, folder,
@@ -470,7 +470,7 @@ export class DocumentSession {
    */
   async startsHistory(folder: string) {
     const bookId = this.book.project.bookId;
-    return !bookId || !(await remoteCommits(new FolderRemote(folder), bookId)).length;
+    return !bookId || !(await remoteCommits(folderRemote(folder), bookId)).length;
   }
   /** Stops syncing on this Mac; the sync folder and the book are left as they are. */
   async unlinkSync() {

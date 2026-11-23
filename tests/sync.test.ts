@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test as runTest } from 'node:test';
+import type { TestContext } from 'node:test';
 import { createHash } from 'node:crypto';
 import { cp, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -15,14 +16,19 @@ import { importIntoProject, loadProject, updateProject } from '../desktop/projec
 import type { OpenProject } from '../desktop/project';
 import { collectSources, relinkFolder } from '../desktop/source-actions';
 import { captureBookStateRevision } from '../desktop/revisions';
-import { cloneFromRemote, describeLocalChange, describeSync, downloadOriginals, placeOriginals, RemoteSyncingError, stageOriginals, stageSyncPull, syncBook } from '../desktop/sync-engine';
+import { cloneFromRemote, describeLocalChange, describeSync, downloadOriginals, pendingOriginals, placeOriginals, RemoteSyncingError, stageOriginals, stageSyncPull, syncBook } from '../desktop/sync-engine';
 import type { SyncOptions } from '../desktop/sync-engine';
-import { MemoryRemote, remoteBooks, remoteTips } from '../desktop/sync-remote';
+import { memoryRemote, remoteBooks, remoteTips, StoreRemote } from '../desktop/sync-remote';
 import type { SyncRemote } from '../desktop/sync-remote';
-import { FolderRemote } from '../desktop/sync-remote-folder';
+import { FolderStore, folderRemote } from '../desktop/sync-store-folder';
+import { MemoryStore } from '../desktop/sync-store';
+import type { SyncStore } from '../desktop/sync-store';
+import { storeConformance } from './sync-store-conformance';
+import { readCommitHeaderV1 } from './sync-v1-reader';
 import { bookTrusted } from '../desktop/source-access';
 import { readSyncState, takeAbandonedAtOpen, updateSyncState } from '../desktop/sync-pull';
-import { contentBlobKey, decideSync, readCommitHeader, NewerSyncFormatError, deriveTips, isUnlocatedPath, originalBlobKey, portableManifests, projectManifests, proxyBlobKey, stateBlobSchema } from '../src/sync-snapshot';
+import { blobKeyPattern, commitKey, contentBlobKey, coverBlobKey, decideSync, readBookTombstone, readCommitHeader, readRemoteIdentity, NewerSyncFormatError, deriveTips, isUnlocatedPath, originalBlobKey, portableManifests,
+  projectManifests, proxyBlobKey, stateBlobSchema, tombstoneKey } from '../src/sync-snapshot';
 import type { CommitHeader, StateBlob } from '../src/sync-snapshot';
 import type { ProjectFiles } from '../src/project';
 import { copySample } from '../desktop/sample-book.mjs';
@@ -50,8 +56,30 @@ async function world(t: { after: (fn: () => Promise<void>) => void }) {
   const a = await mac('desktop');
   const b = await mac('laptop');
   await copySample(resolve('sample/starter'), a.folder);
-  return { root, a, b, remote: new MemoryRemote() };
+  return { root, a, b, remote: await newRemote(root) };
 }
+
+// The engine tests (`each`) run against every store behind the same `StoreRemote`: the memory store here, and the
+// folder store in a process of its own (tests/sync-folder-store.test.ts), so the two runs go side by side. Every other
+// test (`test`) runs once, here.
+type Remote = StoreRemote;
+const store = process.env.IMAGEFLOW_SYNC_TEST_STORE === 'folder' ? 'folder' : 'memory';
+const test: typeof runTest = store === 'memory' ? runTest : ((() => {}) as unknown as typeof runTest);
+const each = (name: string, run: (t: TestContext) => Promise<void>) => runTest(name + ' (' + store + ' store)', run);
+async function newRemote(root: string, name = 'Remote'): Promise<Remote> {
+  if (store === 'memory') return memoryRemote();
+  await mkdir(join(root, name), { recursive: true });
+  return folderRemote(join(root, name));
+}
+// What another Mac, another version or a damaged transfer leaves on a remote, written through the store alone.
+const stored = async (remote: Remote, key: string) => (await remote.store.get(key))!;
+const remove = (remote: Remote, key: string) => remote.store.delete([key]);
+const replace = async (remote: Remote, key: string, bytes: Uint8Array) => { await remove(remote, key); await remote.store.putIfAbsent(key, bytes); };
+const headerKey = (bookId: string, name: string) => 'books/' + bookId + '/snapshots/' + name + '.json';
+const putHeader = (remote: Remote, bookId: string, name: string, value: unknown) => replace(remote, headerKey(bookId, name), new TextEncoder().encode(JSON.stringify(value)));
+const commitCount = async (remote: Remote) => (await remote.store.list('books/')).filter(({ key }) => key.includes('/snapshots/')).length;
+/** Delivers every object one remote has and the other lacks, as a sync service does with immutable files. */
+const copyObjects = async (from: Remote, to: Remote) => { for (const { key } of await from.store.list('')) await to.store.putIfAbsent(key, await stored(from, key)); };
 async function use(mac: Mac) {
   await SourceStore.drain();
   configureSourceStore(join(mac.base, 'source-cache'));
@@ -76,8 +104,8 @@ const caption = (id: string, text: string) => (files: ProjectFiles) => { files.p
 const manifests = async (mac: Mac) => ({ project: JSON.parse(await readFile(join(mac.folder, 'project.json'), 'utf8')), photos: JSON.parse(await readFile(join(mac.folder, 'photos.json'), 'utf8')) });
 const bookId = async (mac: Mac) => (await manifests(mac)).project.bookId as string;
 const tips = async (remote: SyncRemote, mac: Mac) => remoteTips(remote, await bookId(mac));
-const stateOf = (remote: MemoryRemote, header: CommitHeader): StateBlob =>
-  stateBlobSchema.parse(JSON.parse(Buffer.from(remote.blobs.get(contentBlobKey(header.stateDigest))!).toString('utf8')));
+const stateOf = async (remote: Remote, header: CommitHeader): Promise<StateBlob> =>
+  stateBlobSchema.parse(JSON.parse(Buffer.from(await stored(remote, contentBlobKey(header.bookId, header.stateDigest))).toString('utf8')));
 const commit = async (remote: SyncRemote, mac: Mac, id: string) => readCommitHeader(await remote.getCommit(await bookId(mac), id))!;
 const proxyFile = async (mac: Mac, digest: string) => {
   for (const ext of ['.jpg', '.png']) {
@@ -90,7 +118,7 @@ const proxyFile = async (mac: Mac, digest: string) => {
 const copyBook = (from: Mac, to: Mac) => cp(from.folder, to.folder, { recursive: true });
 
 test('the decision table: fast-forward or keep both, and facts never diverge', () => {
-  const header = (commitId: string, bookStateRevision: string, parents: string[] = []): CommitHeader => ({ version: 1, commitId, bookId: '00000000-0000-4000-8000-000000000000',
+  const header = (commitId: string, bookStateRevision: string, parents: string[] = []): CommitHeader => ({ version: 2, commitId, bookId: '00000000-0000-4000-8000-000000000000',
     parents, bookStateRevision, createdAt: '2026-11-21T10:00:00.000Z', title: 'Book', stateDigest: 'f'.repeat(64) });
   const [r1, r2, r3] = ['1', '2', '3'].map((digit) => digit.repeat(64));
   const c1 = header('00000000-0000-4000-8000-000000000001', r1);
@@ -131,7 +159,7 @@ test('a snapshot carries linked paths as file names, and a pull keeps this Mac�
   assert.ok(isUnlocatedPath(((pulled.project.texts as Record<string, { path: string }>).a).path));
 });
 
-test('desktop and laptop: adopt, push after import, proxies first, originals on demand, linked paths stay per Mac', async (t) => {
+each('desktop and laptop: adopt, push after import, proxies first, originals on demand, linked paths stay per Mac', async (t) => {
   const { a, b, remote } = await world(t);
   // Desktop: the first push gives the book its lineage ID and uploads everything.
   const first = await sync(a, remote);
@@ -140,8 +168,8 @@ test('desktop and laptop: adopt, push after import, proxies first, originals on 
   const [c1] = await tips(remote, a);
   assert.deepEqual(c1.parents, []);
   assert.equal(c1.bookStateRevision, await captureBookStateRevision(a.folder));
-  const s1 = stateOf(remote, c1);
-  assert.ok(s1.originals.shore && remote.blobs.has(originalBlobKey(s1.originals.shore.digest, s1.originals.shore.ext)));
+  const s1 = (await stateOf(remote, c1));
+  assert.ok(s1.originals.shore && await remote.hasBlob(originalBlobKey(c1.bookId, s1.originals.shore.digest, s1.originals.shore.ext)));
   assert.equal(s1.originals.shore.digest, sha(await readFile(join(a.folder, 'photos/shore.jpg'))));
 
   // Laptop: an AirDropped copy with the same book state adopts the tip.
@@ -159,14 +187,14 @@ test('desktop and laptop: adopt, push after import, proxies first, originals on 
   assert.equal(pushed.action, 'push');
   const c2 = await commit(remote, a, pushed.pushed[0]);
   assert.deepEqual(c2.parents, [c1.commitId]);
-  const s2 = stateOf(remote, c2);
+  const s2 = (await stateOf(remote, c2));
   assert.deepEqual(s2.photos[linked], { path: 'harbour.jpg', linked: true, title: 'harbour' }, 'the desktop’s folder layout never leaves it');
   const linkedDigest = sha(await readFile(linkedPhoto));
   assert.equal(s2.assetsMeta.assets[linked].digest, linkedDigest, 'a push right after an import waits for the digest');
   assert.equal(s2.originals[linked], undefined, 'linked originals stay where they are');
   const proxyEntry = s2.proxies[linkedDigest];
   assert.ok(proxyEntry, 'the proxy goes along');
-  assert.equal(sha(remote.blobs.get(proxyBlobKey(linkedDigest, proxyEntry.ext))!), proxyEntry.sha256, 'with its own SHA-256');
+  assert.equal(sha(await stored(remote, proxyBlobKey(c2.bookId, linkedDigest, proxyEntry.ext))), proxyEntry.sha256, 'with its own SHA-256');
 
   // Laptop: the linked photo arrives unlocated and is drawn from its proxy.
   const pulled = await sync(b, remote);
@@ -198,7 +226,7 @@ test('desktop and laptop: adopt, push after import, proxies first, originals on 
   await edit(b, caption('shore', 'From the laptop'));
   const fromLaptop = await sync(b, remote);
   assert.equal(fromLaptop.action, 'push');
-  const s3 = stateOf(remote, await commit(remote, b, fromLaptop.pushed[0]));
+  const s3 = (await stateOf(remote, await commit(remote, b, fromLaptop.pushed[0])));
   const ownedDigest = sha(await readFile(laptopPhoto));
   assert.deepEqual(s3.originals[owned], { digest: ownedDigest, ext: '.jpg' });
   assert.equal(s3.photos[linked] && (s3.photos[linked] as { path: string }).path, 'harbour.jpg');
@@ -219,7 +247,7 @@ test('desktop and laptop: adopt, push after import, proxies first, originals on 
   await edit(a, caption('segla', 'From the desktop'));
   const carried = await sync(a, remote);
   assert.equal(carried.action, 'push');
-  const s4 = stateOf(remote, await commit(remote, a, carried.pushed[0]));
+  const s4 = (await stateOf(remote, await commit(remote, a, carried.pushed[0])));
   assert.deepEqual(s4.originals[owned], s3.originals[owned]);
   assert.deepEqual(s4.proxies[ownedDigest], s3.proxies[ownedDigest]);
   assert.equal(s4.assetsMeta.assets[owned].digest, ownedDigest);
@@ -242,7 +270,7 @@ test('desktop and laptop: adopt, push after import, proxies first, originals on 
   assert.ok(await proxyFile(b, linkedDigest), 'the proxy is back');
 });
 
-test('an in-place re-export and a caption edit elsewhere fast-forward, merge facts and push, with no conflict copy', async (t) => {
+each('an in-place re-export and a caption edit elsewhere fast-forward, merge facts and push, with no conflict copy', async (t) => {
   const { root, a, b, remote } = await world(t);
   const linkedPhoto = join(a.external, 'export.jpg');
   await image(linkedPhoto, '#225522');
@@ -262,7 +290,7 @@ test('an in-place re-export and a caption edit elsewhere fast-forward, merge fac
   assert.equal((await manifests(a)).photos.shore.caption, 'Laptop caption');
   const [tip] = await tips(remote, a);
   assert.equal(tip.commitId, outcome.pushed[0]);
-  const state = stateOf(remote, tip);
+  const state = (await stateOf(remote, tip));
   assert.equal(state.assetsMeta.assets[linked].digest, digest);
   assert.deepEqual([state.assetsMeta.assets[linked].width, state.assetsMeta.assets[linked].height], [160, 90]);
   assert.ok(state.proxies[digest]);
@@ -273,7 +301,7 @@ test('an in-place re-export and a caption edit elsewhere fast-forward, merge fac
   assert.equal((await readAssetFacts(b.folder))[linked].digest, digest);
 });
 
-test('a pull deletes template files the snapshot no longer has, and asks again about network sites', async (t) => {
+each('a pull deletes template files the snapshot no longer has, and asks again about network sites', async (t) => {
   const { a, b, remote } = await world(t);
   await sync(a, remote);
   await copyBook(a, b);
@@ -297,7 +325,7 @@ test('a pull deletes template files the snapshot no longer has, and asks again a
   assert.equal((await readSyncState(b.folder)).networkReview, undefined);
 });
 
-test('an incomplete or corrupted remote fails as still syncing and leaves the book untouched', async (t) => {
+each('an incomplete or corrupted remote fails as still syncing and leaves the book untouched', async (t) => {
   const { a, b, remote } = await world(t);
   await sync(a, remote);
   await copyBook(a, b);
@@ -308,10 +336,10 @@ test('an incomplete or corrupted remote fails as still syncing and leaves the bo
   await writeFile(join(a.folder, 'template', 'notes.txt'), 'new');
   await edit(a, caption('shore', 'Remote edit'));
   await sync(a, remote);
-  const state = stateOf(remote, (await tips(remote, a))[0]);
+  const state = (await stateOf(remote, (await tips(remote, a))[0]));
   const digest = sha(await readFile(photo));
-  const proxyKey = proxyBlobKey(digest, state.proxies[digest].ext);
-  const goodProxy = remote.blobs.get(proxyKey)!;
+  const proxyKey = proxyBlobKey(await bookId(a), digest, state.proxies[digest].ext);
+  const goodProxy = await stored(remote, proxyKey);
   const before = { files: await manifests(b), ledger: (await readSaveLedger(b.folder)).records.length, synced: (await readSyncState(b.folder)).lastSynced };
   const untouched = async () => {
     assert.deepEqual(await manifests(b), before.files);
@@ -322,29 +350,29 @@ test('an incomplete or corrupted remote fails as still syncing and leaves the bo
     assert.deepEqual(now.lastSynced, before.synced);
   };
   // A proxy whose bytes fail its own SHA-256.
-  remote.blobs.set(proxyKey, goodProxy.slice(0, goodProxy.length - 10));
+  await replace(remote, proxyKey, goodProxy.slice(0, goodProxy.length - 10));
   await assert.rejects(sync(b, remote), RemoteSyncingError);
   await untouched();
-  remote.blobs.set(proxyKey, goodProxy);
+  await replace(remote, proxyKey, goodProxy);
   // A content blob that has not arrived.
-  const notes = contentBlobKey(state.content['template/notes.txt']);
-  const notesBytes = remote.blobs.get(notes)!;
-  remote.blobs.delete(notes);
+  const notes = contentBlobKey(await bookId(a), state.content['template/notes.txt']);
+  const notesBytes = await stored(remote, notes);
+  await remove(remote, notes);
   await assert.rejects(sync(b, remote), /Remote still syncing/);
   await untouched();
-  remote.blobs.set(notes, notesBytes);
+  await replace(remote, notes, notesBytes);
   // A state blob that does not match its commit.
   const [tip] = await tips(remote, a);
-  const stateBytes = remote.blobs.get(contentBlobKey(tip.stateDigest))!;
-  remote.blobs.set(contentBlobKey(tip.stateDigest), new TextEncoder().encode('{}'));
+  const stateBytes = await stored(remote, contentBlobKey(tip.bookId, tip.stateDigest));
+  await replace(remote, contentBlobKey(tip.bookId, tip.stateDigest), new TextEncoder().encode('{}'));
   await assert.rejects(sync(b, remote), RemoteSyncingError);
   await untouched();
-  remote.blobs.set(contentBlobKey(tip.stateDigest), stateBytes);
+  await replace(remote, contentBlobKey(tip.bookId, tip.stateDigest), stateBytes);
   assert.equal((await sync(b, remote)).action, 'fast-forward');
   assert.equal((await manifests(b)).photos.shore.caption, 'Remote edit');
 });
 
-test('a pull interrupted after it was staged is finished when the book opens', async (t) => {
+each('a pull interrupted after it was staged is finished when the book opens', async (t) => {
   const { a, b, remote } = await world(t);
   await sync(a, remote);
   await copyBook(a, b);
@@ -371,7 +399,7 @@ test('a pull interrupted after it was staged is finished when the book opens', a
   await assert.rejects(loadProject(b.folder, b.cache, true), /interrupted sync/);
 });
 
-test('an AirDropped book edited before its first sync keeps both versions', async (t) => {
+each('an AirDropped book edited before its first sync keeps both versions', async (t) => {
   const { a, b, remote } = await world(t);
   await sync(a, remote);
   await copyBook(a, b);
@@ -389,21 +417,19 @@ test('an AirDropped book edited before its first sync keeps both versions', asyn
   assert.equal((await sync(b, remote)).action, 'in-sync');
 });
 
-test('two tips stay until the user picks one, which closes the fork with both as parents', async (t) => {
-  const { a, b, remote } = await world(t);
+each('two tips stay until the user picks one, which closes the fork with both as parents', async (t) => {
+  const { root, a, b, remote } = await world(t);
   await sync(a, remote);
   await copyBook(a, b);
   await sync(b, remote);
   // Both Macs edit offline; their pushes reach the remote independently.
-  const offline = new MemoryRemote();
-  for (const [key, value] of remote.commits) offline.commits.set(key, value);
-  for (const [key, value] of remote.blobs) offline.blobs.set(key, value);
+  const offline = await newRemote(root, 'Offline');
+  await copyObjects(remote, offline);
   await edit(a, caption('shore', 'Desktop'));
   const [cA] = (await sync(a, remote)).pushed;
   await edit(b, caption('shore', 'Laptop'));
   const [cB] = (await sync(b, offline)).pushed;
-  for (const [key, value] of offline.commits) remote.commits.set(key, value);
-  for (const [key, value] of offline.blobs) if (!remote.blobs.has(key)) remote.blobs.set(key, value);
+  await copyObjects(offline, remote);
   assert.equal((await tips(remote, a)).length, 2);
   // Without a choice nothing changes.
   const waiting = await sync(a, remote, { chooseTip: async () => undefined });
@@ -428,7 +454,7 @@ test('two tips stay until the user picks one, which closes the fork with both as
   assert.equal((await sync(b, remote)).action, 'in-sync');
 });
 
-test('an original left at an older digest never overrides a re-export from another Mac, and is not pushed back', async (t) => {
+each('an original left at an older digest never overrides a re-export from another Mac, and is not pushed back', async (t) => {
   const { a, b, remote } = await world(t);
   // Both Macs have the owned photo `shore` and a linked photo, each in their own folder, at the same digest.
   const desktopPhoto = join(a.external, 'shared.jpg');
@@ -450,8 +476,8 @@ test('an original left at an older digest never overrides a re-export from anoth
   const fromDesktop = await sync(a, remote);
   assert.equal(fromDesktop.action, 'push', 'the desktop’s re-exports go up');
   const tip = (await tips(remote, a))[0];
-  assert.equal(stateOf(remote, tip).assetsMeta.assets.shore.digest, shoreDigest);
-  assert.equal(stateOf(remote, tip).assetsMeta.assets[linked].digest, linkedDigest);
+  assert.equal((await stateOf(remote, tip)).assetsMeta.assets.shore.digest, shoreDigest);
+  assert.equal((await stateOf(remote, tip)).assetsMeta.assets[linked].digest, linkedDigest);
   // The laptop still has the old bytes of both. It takes the new facts and proxies and pushes nothing back.
   const pulled = await sync(b, remote);
   assert.equal(pulled.action, 'fast-forward');
@@ -475,30 +501,30 @@ test('an original left at an older digest never overrides a re-export from anoth
   const laptopDigest = sha(await readFile(join(laptopFolder, 'shared.jpg')));
   const fromLaptop = await sync(b, remote);
   assert.equal(fromLaptop.action, 'push');
-  assert.equal(stateOf(remote, (await tips(remote, a))[0]).assetsMeta.assets[linked].digest, laptopDigest);
+  assert.equal((await stateOf(remote, (await tips(remote, a))[0])).assetsMeta.assets[linked].digest, laptopDigest);
 });
 
-test('keep both leaves no conflict copy behind while the remote is still syncing', async (t) => {
+each('keep both leaves no conflict copy behind while the remote is still syncing', async (t) => {
   const { b, a, remote } = await world(t);
   await writeFile(join(a.folder, 'template', 'notes.txt'), 'remote');
   await sync(a, remote);
   await copyBook(a, b);
   await edit(b, caption('shore', 'Laptop, never synced'));
   const [tip] = await tips(remote, a);
-  const notes = contentBlobKey(stateOf(remote, tip).content['template/notes.txt']);
-  const bytes = remote.blobs.get(notes)!;
-  remote.blobs.delete(notes);
+  const notes = contentBlobKey(tip.bookId, (await stateOf(remote, tip)).content['template/notes.txt']);
+  const bytes = await stored(remote, notes);
+  await remove(remote, notes);
   for (let attempt = 0; attempt < 2; attempt++) await assert.rejects(sync(b, remote), RemoteSyncingError);
   const conflicts = async () => (await readdir(b.base)).filter((name) => name.includes('Conflict'));
   assert.deepEqual(await conflicts(), []);
   assert.equal((await manifests(b)).photos.shore.caption, 'Laptop, never synced');
-  remote.blobs.set(notes, bytes);
+  await replace(remote, notes, bytes);
   const outcome = await sync(b, remote);
   assert.ok(outcome.conflictCopy);
   assert.equal((await conflicts()).length, 1);
 });
 
-test('a sync finishes an interrupted pull first, also for a book that still needs its lineage ID', async (t) => {
+each('a sync finishes an interrupted pull first, also for a book that still needs its lineage ID', async (t) => {
   const { a, b, remote } = await world(t);
   await sync(a, remote);
   await copyBook(a, b);
@@ -524,7 +550,7 @@ test('a sync finishes an interrupted pull first, also for a book that still need
   assert.equal((await manifests(b)).project.bookId, await bookId(a));
 });
 
-test('a push refuses a proxy another Mac has not finished writing, and a failed download leaves no staging file', async (t) => {
+each('a push refuses a proxy another Mac has not finished writing, and a failed download leaves no staging file', async (t) => {
   const { a, b, remote } = await world(t);
   const photo = join(a.external, 'both.jpg');
   await image(photo, '#778899');
@@ -533,40 +559,40 @@ test('a push refuses a proxy another Mac has not finished writing, and a failed 
   await copyBook(a, b);
   await sync(b, remote);
   const [tip] = await tips(remote, a);
-  const state = stateOf(remote, tip);
+  const state = (await stateOf(remote, tip));
   const digest = sha(await readFile(photo));
-  const key = proxyBlobKey(digest, state.proxies[digest].ext);
-  const proxy = remote.blobs.get(key)!;
+  const key = proxyBlobKey(tip.bookId, digest, state.proxies[digest].ext);
+  const proxy = await stored(remote, key);
   // A snapshot from a Mac that had no proxy for this photo, then the remote's proxy is cut short: the laptop's next
   // push finds that proxy on the remote and would record it.
   await forge(remote, tip, (next) => { delete next.proxies[digest]; });
   assert.equal((await sync(b, remote)).action, 'fast-forward');
-  remote.blobs.set(key, proxy.slice(0, 200));
+  await replace(remote, key, proxy.slice(0, 200));
   await edit(b, caption(id, 'Laptop'));
   await on(b, async () => {});
-  const before = remote.commits.size;
+  const before = await commitCount(remote);
   await assert.rejects(sync(b, remote), RemoteSyncingError);
-  assert.equal(remote.commits.size, before, 'no commit records a damaged proxy');
-  remote.blobs.set(key, proxy);
+  assert.equal(await commitCount(remote), before, 'no commit records a damaged proxy');
+  await replace(remote, key, proxy);
   assert.equal((await sync(b, remote)).action, 'push');
   // The desktop lost its copy of the photo; a damaged original download stops without leaving files in the book.
   await rm(join(a.folder, (await manifests(a)).photos[id].path));
   await sync(a, remote);
-  const original = originalBlobKey(state.originals[id].digest, state.originals[id].ext);
-  const good = remote.blobs.get(original)!;
-  remote.blobs.set(original, good.slice(0, 100));
+  const original = originalBlobKey(tip.bookId, state.originals[id].digest, state.originals[id].ext);
+  const good = await stored(remote, original);
+  await replace(remote, original, good.slice(0, 100));
   await assert.rejects(on(a, (book) => downloadOriginals({ remote, book })), RemoteSyncingError);
   assert.deepEqual((await readdir(join(a.folder, 'photos'))).filter((name) => name.startsWith('.imageflow-write-')), []);
-  remote.blobs.set(original, good);
+  await replace(remote, original, good);
   await on(a, async (book) => assert.deepEqual(await downloadOriginals({ remote, book }), [id]));
   // In the background: downloaded into the book's root and checked without holding the book, then placed. A damaged
   // download leaves nothing behind; a cancelled one before it started downloads nothing.
   const path = join(a.folder, (await manifests(a)).photos[id].path);
   await rm(path);
-  remote.blobs.set(original, good.slice(0, 100));
+  await replace(remote, original, good.slice(0, 100));
   await assert.rejects(stageOriginals({ remote, folder: a.folder }), RemoteSyncingError);
   assert.deepEqual((await readdir(a.folder)).filter((name) => name.startsWith('.imageflow-write-')), []);
-  remote.blobs.set(original, good);
+  await replace(remote, original, good);
   const cancelled = new AbortController();
   cancelled.abort();
   assert.deepEqual(await stageOriginals({ remote, folder: a.folder, signal: cancelled.signal }), []);
@@ -581,27 +607,27 @@ test('a push refuses a proxy another Mac has not finished writing, and a failed 
 });
 
 /** A commit on top of `tip` whose state blob is `change`d by hand, as another version or a hostile remote might write. */
-async function forge(remote: MemoryRemote, tip: CommitHeader, change: (state: Record<string, any>) => void) {
-  const state = JSON.parse(Buffer.from(remote.blobs.get(contentBlobKey(tip.stateDigest))!).toString('utf8'));
+async function forge(remote: Remote, tip: CommitHeader, change: (state: Record<string, any>) => void) {
+  const state = JSON.parse(Buffer.from(await stored(remote, contentBlobKey(tip.bookId, tip.stateDigest))).toString('utf8'));
   change(state);
   const bytes = new TextEncoder().encode(canonicalJson(state));
   const stateDigest = sha(bytes);
-  remote.blobs.set(contentBlobKey(stateDigest), bytes);
+  await replace(remote, contentBlobKey(tip.bookId, stateDigest), bytes);
   const bookStateRevision = await computeBookStateRevision({ project: projectSchema.parse(state.project), photos: photoIndexSchema.parse(state.photos), contentDigests: state.content });
   const header: CommitHeader = { ...tip, commitId: crypto.randomUUID(), parents: [tip.commitId], stateDigest, bookStateRevision, createdAt: new Date().toISOString() };
   await remote.putCommit(header);
   return header;
 }
 
-test('a remote that lists nothing, or not this Mac’s last commit yet, is still syncing', async (t) => {
-  const { a, remote } = await world(t);
+each('a remote that lists nothing, or not this Mac’s last commit yet, is still syncing', async (t) => {
+  const { root, a, remote } = await world(t);
   await sync(a, remote);
-  const empty = new MemoryRemote();
+  const empty = await newRemote(root, 'Empty');
   await assert.rejects(sync(a, empty), RemoteSyncingError);
-  assert.equal(empty.commits.size, 0, 'no second root commit');
+  assert.equal(await commitCount(empty), 0, 'no second root commit');
 });
 
-test('a pull stages the snapshot as stored, so facts a newer version added never break it', async (t) => {
+each('a pull stages the snapshot as stored, so facts a newer version added never break it', async (t) => {
   const { a, b, remote } = await world(t);
   await sync(a, remote);
   await copyBook(a, b);
@@ -615,7 +641,7 @@ test('a pull stages the snapshot as stored, so facts a newer version added never
   assert.equal((await readSyncState(b.folder)).pull, undefined);
 });
 
-test('a pull that cannot be written is refused before it is marked, and one that fails later is given up, not retried at every open', async (t) => {
+each('a pull that cannot be written is refused before it is marked, and one that fails later is given up, not retried at every open', async (t) => {
   const { a, b, remote } = await world(t);
   await sync(a, remote);
   await copyBook(a, b);
@@ -658,35 +684,35 @@ test('a pull that cannot be written is refused before it is marked, and one that
   assert.equal((await sync(b, remote)).action, 'in-sync');
 });
 
-test('commits and snapshots from a newer version stop sync with a request to update', async (t) => {
+each('commits and snapshots from a newer version stop sync with a request to update', async (t) => {
   const { a, remote } = await world(t);
   await sync(a, remote);
   const [tip] = await tips(remote, a);
   const id = await bookId(a);
-  remote.commits.set(id + '/future', { ...tip, version: 2, commitId: crypto.randomUUID(), parents: [tip.commitId] });
+  await putHeader(remote, id, 'future', { ...tip, version: 3, commitId: crypto.randomUUID(), parents: [tip.commitId] });
   await assert.rejects(sync(a, remote), NewerSyncFormatError);
-  remote.commits.delete(id + '/future');
-  remote.commits.set(id + '/extra', { ...tip, commitId: crypto.randomUUID(), parents: [tip.commitId], signature: 'x' });
+  await remove(remote, headerKey(id, 'future'));
+  await putHeader(remote, id, 'extra', { ...tip, commitId: crypto.randomUUID(), parents: [tip.commitId], signature: 'x' });
   await assert.rejects(sync(a, remote), NewerSyncFormatError);
-  remote.commits.delete(id + '/extra');
+  await remove(remote, headerKey(id, 'extra'));
   await forge(remote, tip, (state) => { state.future = true; });
   await assert.rejects(sync(a, remote), NewerSyncFormatError);
 });
 
-test('a pull refuses template folders a book never carries', async (t) => {
+each('a pull refuses template folders a book never carries', async (t) => {
   const { a, b, remote } = await world(t);
   await sync(a, remote);
   await copyBook(a, b);
   await sync(b, remote);
   const [tip] = await tips(remote, a);
   const bytes = new TextEncoder().encode('module.exports = 1');
-  remote.blobs.set(contentBlobKey(sha(bytes)), bytes);
+  await replace(remote, contentBlobKey(tip.bookId, sha(bytes)), bytes);
   await forge(remote, tip, (state) => { state.content['template/node_modules/evil/index.js'] = sha(bytes); });
   await assert.rejects(sync(b, remote), /stay inside the book/);
   assert.equal(await lstat(join(b.folder, 'template', 'node_modules')).catch(() => undefined), undefined);
 });
 
-test('pushes reuse recorded proxies, and a pull reuses local bytes for a photo copied into the book elsewhere', async (t) => {
+each('pushes reuse recorded proxies, and a pull reuses local bytes for a photo copied into the book elsewhere', async (t) => {
   const { a, b, remote } = await world(t);
   const photo = join(a.external, 'moved.jpg');
   await image(photo, '#665544');
@@ -702,7 +728,7 @@ test('pushes reuse recorded proxies, and a pull reuses local bytes for a photo c
   remote.getBlob = async (key) => { read.push(key); return getBlob(key); };
   await edit(a, caption('shore', 'Edited'));
   assert.equal((await sync(a, remote)).action, 'push');
-  assert.deepEqual(read.filter((key) => key.startsWith('blobs/proxies/')), []);
+  assert.deepEqual(read.filter((key) => key.includes('/proxies/')), []);
   remote.getBlob = getBlob;
   // The desktop copies the linked photo into the book; the laptop has the same bytes in its own folder.
   await on(a, async (book) => { await collectSources(book, ['photo:' + id]); });
@@ -717,7 +743,7 @@ test('pushes reuse recorded proxies, and a pull reuses local bytes for a photo c
 
 const conflictCopies = async (mac: Mac) => (await readdir(mac.base)).filter((name) => name.includes('(Conflict '));
 
-test('a Keep Both that keeps failing makes one conflict copy, not one per sync', async (t) => {
+each('a Keep Both that keeps failing makes one conflict copy, not one per sync', async (t) => {
   const { a, b, remote } = await world(t);
   await sync(a, remote);
   await copyBook(a, b);
@@ -768,9 +794,9 @@ test('a Keep Both that keeps failing makes one conflict copy, not one per sync',
 async function syncFolder(root: string, name = 'Sync') {
   const path = join(root, name);
   await mkdir(path, { recursive: true });
-  return new FolderRemote(path);
+  return folderRemote(path);
 }
-const remoteFiles = async (remote: FolderRemote) => (await readdir(remote.root, { recursive: true })).map(String);
+const remoteFiles = async (remote: StoreRemote<FolderStore>) => (await readdir(remote.store.root, { recursive: true })).map(String);
 
 test('a sync folder: push from the desktop, Open from Sync Folder on the laptop, then edits both ways', async (t) => {
   const { root, a, b } = await world(t);
@@ -779,8 +805,11 @@ test('a sync folder: push from the desktop, Open from Sync Folder on the laptop,
   const id = await bookId(a);
   const files = await remoteFiles(remote);
   assert.ok(files.some((path) => path.startsWith(join('books', id, 'snapshots')) && path.endsWith('.json')));
-  assert.ok(files.some((path) => path.startsWith(join('blobs', 'originals'))));
-  assert.ok(files.some((path) => path.startsWith(join('blobs', 'proxies'))));
+  // The layout of ADR 0012, section 4: everything the book needs is under its own prefix.
+  for (const part of ['content', 'originals', 'proxies']) assert.ok(files.some((path) => path.startsWith(join('books', id, part) + '/')), part);
+  assert.deepEqual((await readdir(remote.store.root)).filter((name) => !name.startsWith('.')), ['books']);
+  assert.deepEqual((await readdir(join(remote.store.root, 'books'))).filter((name) => !name.startsWith('.')), [id]);
+  assert.deepEqual((await readdir(join(remote.store.root, 'books', id))).filter((name) => !name.startsWith('.')).sort(), ['content', 'originals', 'proxies', 'snapshots']);
   assert.equal(files.some((path) => path.split('/').at(-1)!.startsWith('.sync-')), false, 'no temporary files stay');
 
   // Laptop: the book is listed by the title in its tip header and opened into a new, untrusted package.
@@ -789,12 +818,12 @@ test('a sync folder: push from the desktop, Open from Sync Folder on the laptop,
   assert.equal(others.length, 0);
   assert.equal(listed.bookId, id);
   assert.equal(listed.title, (await manifests(a)).project.title);
-  const created = await cloneFromRemote({ remote, tip: listed.tips[0], destination: join(b.base, 'Book'), syncFolder: remote.root });
+  const created = await cloneFromRemote({ remote, tip: listed.tips[0], destination: join(b.base, 'Book'), syncFolder: remote.store.root });
   assert.equal(created, b.folder, 'the .imageflow extension is added');
   assert.equal(await bookTrusted(b.folder), false, 'a template from a sync folder is not trusted');
   assert.equal(await captureBookStateRevision(b.folder), listed.tips[0].bookStateRevision);
   const record = await readSyncState(b.folder);
-  assert.equal(record.folder, remote.root);
+  assert.equal(record.folder, remote.store.root);
   assert.equal(record.lastSynced?.commitId, listed.tips[0].commitId);
   assert.deepEqual((await readdir(b.base)).filter((name) => name.startsWith('.imageflow-create')), []);
   const shoreDigest = sha(await readFile(join(a.folder, 'photos/shore.jpg')));
@@ -826,7 +855,7 @@ test('a sync folder: push from the desktop, Open from Sync Folder on the laptop,
   // with originals pending, and the next sync retries it.
   await edit(a, caption('segla', 'From the desktop'));
   await sync(a, remote);
-  const originals = join(remote.root, 'blobs', 'originals');
+  const originals = join(remote.store.root, 'books', id, 'originals');
   await rename(originals, originals + '-away');
   const pulled = await sync(b, remote, { fetchOriginals: true });
   assert.equal(pulled.action, 'fast-forward');
@@ -851,7 +880,7 @@ test('two offline Macs push to a sync folder: two tips, Keep Both, and a commit 
   await sync(a, desktop);
   // The laptop's copy of the sync folder, which the sync daemon delivers to and from later.
   const laptop = await syncFolder(root, 'Laptop Sync');
-  await cp(desktop.root, laptop.root, { recursive: true });
+  await cp(desktop.store.root, laptop.store.root, { recursive: true });
   await copyBook(a, b);
   assert.equal((await sync(b, laptop)).action, 'adopt');
   await edit(a, caption('shore', 'Desktop, offline'));
@@ -859,8 +888,8 @@ test('two offline Macs push to a sync folder: two tips, Keep Both, and a commit 
   await sync(a, desktop);
   await sync(b, laptop);
   // Both come back online: every file is immutable, so the folders simply merge.
-  await cp(laptop.root, desktop.root, { recursive: true });
-  await cp(desktop.root, laptop.root, { recursive: true });
+  await cp(laptop.store.root, desktop.store.root, { recursive: true });
+  await cp(desktop.store.root, laptop.store.root, { recursive: true });
   const forked = await tips(desktop, a);
   assert.equal(forked.length, 2);
   assert.equal((await describeSync(a.folder, desktop)).state, 'diverged');
@@ -879,7 +908,7 @@ test('two offline Macs push to a sync folder: two tips, Keep Both, and a commit 
   assert.equal(closing.bookStateRevision, (await commit(desktop, a, chosen)).bookStateRevision);
   assert.equal((await manifests(a)).photos.shore.caption, 'Laptop, offline');
   // The closing commit reaches the laptop, which only has to record it.
-  await cp(desktop.root, laptop.root, { recursive: true });
+  await cp(desktop.store.root, laptop.store.root, { recursive: true });
   assert.equal((await describeSync(b.folder, laptop)).state, 'behind');
   assert.equal((await sync(b, laptop)).action, 'fast-forward');
   assert.equal((await sync(b, laptop)).action, 'in-sync');
@@ -904,12 +933,12 @@ test('an incomplete sync folder is still syncing: the book is not changed and no
     assert.equal((await readSyncState(b.folder)).pull, undefined);
   };
   // A header that is still being written is not a commit yet.
-  const snapshots = join(remote.root, 'books', tip.bookId, 'snapshots');
-  await writeFile(join(snapshots, crypto.randomUUID() + '.json'), '{"version":1,"commitId":');
+  const snapshots = join(remote.store.root, 'books', tip.bookId, 'snapshots');
+  await writeFile(join(snapshots, crypto.randomUUID() + '.json'), '{"version":2,"commitId":');
   await writeFile(join(snapshots, '.' + crypto.randomUUID() + '.json.icloud'), 'placeholder');
   assert.deepEqual((await tips(remote, a)).map(({ commitId }) => commitId), [tip.commitId]);
   // The header arrived before its state blob.
-  const state = join(remote.root, 'blobs', 'content', tip.stateDigest);
+  const state = join(remote.store.root, ...contentBlobKey(tip.bookId, tip.stateDigest).split('/'));
   await rename(state, state + '-away');
   await assert.rejects(sync(b, remote), RemoteSyncingError);
   await unchanged();
@@ -921,7 +950,7 @@ test('an incomplete sync folder is still syncing: the book is not changed and no
   // A preview another Mac has only half written.
   const blob = stateBlobSchema.parse(JSON.parse(await readFile(state, 'utf8')));
   const [digest, entry] = Object.entries(blob.proxies).find(([digest]) => digest === blob.assetsMeta.assets[Object.keys(blob.photos).find((id) => (blob.photos[id] as { linked?: boolean }).linked)!].digest)!;
-  const proxy = join(remote.root, ...proxyBlobKey(digest, entry.ext).split('/'));
+  const proxy = join(remote.store.root, ...proxyBlobKey(tip.bookId, digest, entry.ext).split('/'));
   const whole = await readFile(proxy);
   await rm((await proxyFile(b, digest))!, { force: true });
   await writeFile(proxy, whole.subarray(0, 64));
@@ -940,7 +969,8 @@ test('a folder remote keeps files immutable, writes them whole, and clones blobs
   t.after(() => rm(root, { recursive: true, force: true }));
   const remote = await syncFolder(root);
   const bytes = new TextEncoder().encode('content');
-  const key = contentBlobKey(sha(bytes));
+  const book = crypto.randomUUID();
+  const key = contentBlobKey(book, sha(bytes));
   assert.equal(await remote.hasBlob(key), false);
   assert.equal(await remote.getBlob(key), undefined);
   assert.equal(await remote.downloadBlob(key, join(root, 'nothing')), false);
@@ -954,31 +984,32 @@ test('a folder remote keeps files immutable, writes them whole, and clones blobs
   const original = join(root, 'original.jpg');
   await image(original, '#123456');
   const originalBytes = await readFile(original);
-  const originalKey = originalBlobKey(sha(originalBytes), '.jpg');
+  const originalKey = originalBlobKey(book, sha(originalBytes), '.jpg');
   await remote.putBlob(originalKey, { file: original });
   const downloaded = join(root, 'downloaded.jpg');
   await writeFile(downloaded, 'replaced whole');
   assert.equal(await remote.downloadBlob(originalKey, downloaded), true);
   assert.deepEqual(await readFile(downloaded), originalBytes);
-  await assert.rejects(remote.putBlob('blobs/../escape', bytes), /Not a sync blob key/);
+  await assert.rejects(remote.putBlob('books/../escape', bytes), /Not a sync blob key/);
+  await assert.rejects(remote.putBlob('blobs/content/' + sha(bytes), bytes), /Not a sync blob key/, 'the layout before per-book keys');
   await assert.rejects(remote.getCommit('../books', crypto.randomUUID()), /Not a sync book ID/);
   // Commit headers: one ID, one header.
-  const header: CommitHeader = { version: 1, commitId: crypto.randomUUID(), bookId: crypto.randomUUID(), parents: [], bookStateRevision: 'a'.repeat(64),
+  const header: CommitHeader = { version: 2, commitId: crypto.randomUUID(), bookId: book, parents: [], bookStateRevision: 'a'.repeat(64),
     createdAt: '2026-11-21T10:00:00.000Z', title: 'Book', stateDigest: sha(bytes) };
   await remote.putCommit(header);
   await remote.putCommit(structuredClone(header));
   await assert.rejects(remote.putCommit({ ...header, title: 'Other' }), /different commit/);
   assert.deepEqual(readCommitHeader(await remote.getCommit(header.bookId, header.commitId)), header);
-  assert.deepEqual(await remote.listBooks(), [header.bookId]);
+  assert.deepEqual(await remote.listBooks(), [{ bookId: header.bookId }]);
   assert.deepEqual((await remoteTips(remote, header.bookId)).map(({ commitId }) => commitId), [header.commitId]);
   // A sync daemon's conflict copy of a header holds the same immutable header and changes nothing.
-  await cp(join(remote.root, 'books', header.bookId, 'snapshots', header.commitId + '.json'), join(remote.root, 'books', header.bookId, 'snapshots', header.commitId + ' (1).json'));
+  await cp(join(remote.store.root, 'books', header.bookId, 'snapshots', header.commitId + '.json'), join(remote.store.root, 'books', header.bookId, 'snapshots', header.commitId + ' (1).json'));
   assert.equal((await remoteTips(remote, header.bookId)).length, 1);
   assert.deepEqual((await remoteFiles(remote)).filter((path) => path.split('/').at(-1)!.startsWith('.')), [], 'no temporary files stay');
   assert.deepEqual((await readdir(root)).filter((name) => name.startsWith('.')), []);
 });
 
-test('after an edit the status follows the local revision against what the remote last showed', async (t) => {
+each('after an edit the status follows the local revision against what the remote last showed', async (t) => {
   const { a, b, remote } = await world(t);
   await sync(a, remote);
   await copyBook(a, b);
@@ -1009,12 +1040,298 @@ test('changes to a sync record are serialized, so none is lost', async (t) => {
   assert.equal(state.networkReview, true);
 });
 
-test('a book a newer version synced is listed as such and hides no other book', async (t) => {
+each('a book a newer version synced is listed as such and hides no other book', async (t) => {
   const { a, remote } = await world(t);
   await sync(a, remote);
   const [tip] = await tips(remote, a);
   const other = crypto.randomUUID();
-  remote.commits.set(other + '/' + crypto.randomUUID(), { ...tip, bookId: other, commitId: crypto.randomUUID(), version: 2 });
+  await putHeader(remote, other, crypto.randomUUID(), { ...tip, bookId: other, commitId: crypto.randomUUID(), version: 3 });
   const books = await remoteBooks(remote);
   assert.deepEqual(books.map(({ bookId, newer }) => [bookId, !!newer]), [[tip.bookId, false], [other, true]]);
+});
+
+// The store contract (tests/sync-store-conformance.ts), which the S3 store runs against itself later.
+if (store === 'memory') {
+  storeConformance('memory', async () => new MemoryStore());
+  storeConformance('folder', async (t) => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'if-store-')));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    return new FolderStore(root);
+  }, { sha256: 'ignored' });
+}
+
+test('a folder store leaves no temporary files and no empty folders, and never lists hidden files', async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'if-store-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const folder = new FolderStore(root);
+  const hidden = async () => (await readdir(root, { recursive: true })).map(String).filter((path) => path.split('/').at(-1)!.startsWith('.'));
+  await folder.putIfAbsent('books/a/content/one', new TextEncoder().encode('one'));
+  await folder.putIfAbsent('books/a/content/one', new TextEncoder().encode('other'));
+  await folder.copy('books/a/content/one', 'books/b/content/one');
+  const aborted = new AbortController();
+  aborted.abort();
+  await assert.rejects(folder.putIfAbsent('books/c/content/one', new TextEncoder().encode('one'), { signal: aborted.signal }));
+  assert.deepEqual(await hidden(), []);
+  // A sync service's placeholder or a temporary file of another writer is not an object, and a folder with nothing else is no prefix.
+  await mkdir(join(root, 'books', 'd', 'content'), { recursive: true });
+  await writeFile(join(root, 'books', 'd', 'content', '.two.icloud'), 'placeholder');
+  await writeFile(join(root, 'books', 'a', 'content', '.sync-other.tmp'), 'partial');
+  assert.deepEqual((await folder.list('')).map(({ key }) => key), ['books/a/content/one', 'books/b/content/one']);
+  assert.deepEqual(await folder.listPrefixes('books/'), ['books/a/', 'books/b/']);
+  assert.equal(await folder.head('books/a/content/.sync-other.tmp').catch(() => 'refused'), 'refused');
+  // Deleting the last object of a prefix removes its folders, but never the root.
+  await folder.delete(['books/b/content/one']);
+  assert.equal(await lstat(join(root, 'books', 'b')).catch(() => undefined), undefined);
+  await folder.delete(['books/a/content/one']);
+  await rm(join(root, 'books'), { recursive: true });
+  await folder.delete(['books/a/content/one']);
+  assert.ok(await lstat(root));
+});
+
+each('every blob of a book lives under its prefix, and two books never share one', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  // The laptop's book is another book (a new lineage) with the same photos.
+  await copyBook(a, b);
+  const project = JSON.parse(await readFile(join(b.folder, 'project.json'), 'utf8'));
+  await writeFile(join(b.folder, 'project.json'), JSON.stringify({ ...project, bookId: crypto.randomUUID() }, null, 2) + '\n');
+  assert.equal((await sync(b, remote)).action, 'initial-push');
+  const ids = [await bookId(a), await bookId(b)];
+  assert.notEqual(ids[0], ids[1]);
+  const keys = (await remote.store.list('')).map(({ key }) => key);
+  for (const key of keys) assert.ok(ids.some((id) => key.startsWith('books/' + id + '/')), key);
+  for (const key of keys.filter((key) => !key.includes('/snapshots/'))) assert.match(key, blobKeyPattern);
+  const digest = sha(await readFile(join(a.folder, 'photos/shore.jpg')));
+  for (const id of ids) assert.ok(await remote.hasBlob(originalBlobKey(id, digest, '.jpg')), 'each book stores its own copy');
+  // A book's listing is its own, by part, with sizes and times.
+  const originals = await remote.listBook(ids[0], 'originals');
+  assert.ok(originals.length > 0 && originals.every(({ key, size, lastModified }) => key.startsWith('books/' + ids[0] + '/originals/') && size > 0 && lastModified instanceof Date));
+  assert.equal((await remote.listBook(ids[0])).length, keys.filter((key) => key.startsWith('books/' + ids[0] + '/')).length);
+  assert.equal((await remote.listBook(ids[0], 'covers')).length, 0);
+  assert.deepEqual((await remote.listBooks()).map((book) => book.bookId).sort(), [...ids].sort());
+  // A blob is copied inside the remote, as a duplicated book's first push will do, and only between blob keys.
+  const copy = crypto.randomUUID();
+  assert.equal(await remote.copyBlob(originalBlobKey(ids[0], digest, '.jpg'), originalBlobKey(copy, digest, '.jpg')), true);
+  assert.equal(sha(await stored(remote, originalBlobKey(copy, digest, '.jpg'))), digest);
+  assert.equal(await remote.copyBlob(originalBlobKey(ids[0], 'f'.repeat(64), '.jpg'), originalBlobKey(copy, 'f'.repeat(64), '.jpg')), false);
+  await assert.rejects(remote.copyBlob(originalBlobKey(ids[0], digest, '.jpg'), 'remote.json'), /Not a sync blob key/);
+  assert.match(coverBlobKey(copy, digest), blobKeyPattern);
+});
+
+each('a remote has one identity, also when two Macs initialize it at once', async (t) => {
+  const { root, a, remote } = await world(t);
+  const [first, second] = await Promise.all([remote.remoteId(), new StoreRemote(remote.store).remoteId()]);
+  assert.equal(first, second);
+  assert.equal(await remote.remoteId(), first);
+  assert.deepEqual(readRemoteIdentity(JSON.parse(Buffer.from(await stored(remote, 'remote.json')).toString('utf8'))), { version: 1, remoteId: first });
+  assert.notEqual(await (await newRemote(root, 'Other')).remoteId(), first);
+  // The identity is no book and no blob: syncing beside it works, and the listing does not show it.
+  await sync(a, remote);
+  assert.deepEqual((await remoteBooks(remote)).map((book) => book.bookId), [await bookId(a)]);
+  // One a newer version wrote is refused, never replaced.
+  await replace(remote, 'remote.json', new TextEncoder().encode(JSON.stringify({ version: 2, remoteId: first })));
+  await assert.rejects(remote.remoteId(), NewerSyncFormatError);
+  await replace(remote, 'remote.json', new TextEncoder().encode('{"version":1,"remo'));
+  await assert.rejects(remote.remoteId(), /cannot be read/);
+});
+
+each('a book deleted from sync leaves only its tombstone and is listed as deleted', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  const project = JSON.parse(await readFile(join(b.folder, 'project.json'), 'utf8'));
+  await writeFile(join(b.folder, 'project.json'), JSON.stringify({ ...project, bookId: crypto.randomUUID(), title: 'Kept' }, null, 2) + '\n');
+  await sync(b, remote);
+  const [deleted, kept] = [await bookId(a), await bookId(b)];
+  assert.equal(await remote.bookTombstone(deleted), undefined);
+  const tombstone = await remote.deleteBook(deleted, new Date('2026-11-23T10:00:00.000Z'));
+  assert.deepEqual(tombstone, { version: 1, bookId: deleted, deletedAt: '2026-11-23T10:00:00.000Z' });
+  assert.deepEqual((await remote.listBook(deleted)).map(({ key }) => key), [tombstoneKey(deleted)]);
+  assert.deepEqual(readBookTombstone(JSON.parse(Buffer.from(await stored(remote, tombstoneKey(deleted))).toString('utf8'))), tombstone);
+  assert.deepEqual(await remote.bookTombstone(deleted), tombstone);
+  // Deleting again keeps the first tombstone, and the other book is untouched.
+  assert.deepEqual(await remote.deleteBook(deleted, new Date('2027-01-01T00:00:00.000Z')), tombstone);
+  assert.ok((await remote.listBook(kept)).length > 3);
+  assert.deepEqual((await remote.listBooks()).sort((x, y) => Number(!!x.deleted) - Number(!!y.deleted)), [{ bookId: kept }, { bookId: deleted, deleted: tombstone }]);
+  const books = await remoteBooks(remote);
+  assert.deepEqual(books.map(({ bookId, title, deleted }) => [bookId, title, deleted?.deletedAt]), [[kept, 'Kept', undefined], [deleted, '', tombstone.deletedAt]]);
+  assert.deepEqual(books[1].tips, []);
+  // Commits that reach the prefix later (a Mac that had not seen the tombstone) do not bring the book back.
+  await putHeader(remote, deleted, crypto.randomUUID(), { version: 2, commitId: crypto.randomUUID(), bookId: deleted, parents: [], bookStateRevision: 'a'.repeat(64),
+    createdAt: '2026-11-24T10:00:00.000Z', title: 'Back', stateDigest: 'b'.repeat(64) });
+  assert.equal((await remoteBooks(remote)).find((book) => book.bookId === deleted)?.deleted?.deletedAt, tombstone.deletedAt);
+  // A tombstone a newer version wrote marks the book as needing an update, and hides no other book.
+  await replace(remote, tombstoneKey(kept), new TextEncoder().encode(JSON.stringify({ version: 2, bookId: kept, deletedAt: tombstone.deletedAt, by: 'x' })));
+  await assert.rejects(remote.bookTombstone(kept), NewerSyncFormatError);
+  assert.deepEqual((await remoteBooks(remote)).map(({ bookId, newer, deleted }) => [bookId, !!newer, !!deleted]), [[kept, true, false], [deleted, false, true]]);
+});
+
+each('a commit header is version 2 with an optional cover, and a version 1 reader refuses it', async (t) => {
+  const { a, remote } = await world(t);
+  await sync(a, remote);
+  const [tip] = await tips(remote, a);
+  assert.equal(tip.version, 2);
+  assert.equal(tip.coverDigest, undefined, 'no push writes a cover yet');
+  const raw = JSON.parse(Buffer.from(await stored(remote, commitKey(tip.bookId, tip.commitId))).toString('utf8'));
+  // The reader as it shipped before the per-book layout (tests/sync-v1-reader.ts): it asks for an update instead of
+  // taking the header for one that is still arriving, or parsing it and looking for blobs where they no longer are.
+  assert.throws(() => readCommitHeaderV1(raw), (error: Error & { code?: string }) => error.name === 'NewerSyncFormatError' && error.code === 'SYNC_FORMAT_NEWER');
+  const covered = { ...raw, commitId: crypto.randomUUID(), parents: [tip.commitId], coverDigest: 'c'.repeat(64) };
+  assert.throws(() => readCommitHeaderV1(covered), { name: 'NewerSyncFormatError' });
+  assert.equal(readCommitHeaderV1({ ...raw, version: 1 })?.commitId, tip.commitId, 'the reader is the real one: it reads its own format');
+  // This version reads the cover, and a header of the old format is no commit to it.
+  assert.equal(readCommitHeader(covered)?.coverDigest, 'c'.repeat(64));
+  assert.equal(readCommitHeader({ ...raw, version: 1 }), undefined);
+  assert.throws(() => readCommitHeader({ ...raw, version: 3 }), NewerSyncFormatError);
+  // A commit that closes a fork carries the chosen tip's cover on.
+  await remote.putCommit(covered);
+  await remote.putCommit({ ...covered, commitId: crypto.randomUUID(), createdAt: new Date(Date.parse(tip.createdAt) + 1000).toISOString(), coverDigest: 'd'.repeat(64) });
+  const forked = await tips(remote, a);
+  assert.equal(forked.length, 2);
+  const outcome = await sync(a, remote, { chooseTip: async () => forked[0].commitId });
+  assert.equal((await commit(remote, a, outcome.pushed[0])).coverDigest, forked[0].coverDigest);
+});
+
+test('a remote over a store without a server-side copy copies nothing, so the caller uploads', async () => {
+  const store: SyncStore = new MemoryStore();
+  store.copy = undefined;
+  const remote = new StoreRemote(store);
+  const [from, to] = [crypto.randomUUID(), crypto.randomUUID()].map((book) => originalBlobKey(book, 'a'.repeat(64), '.jpg'));
+  await remote.putBlob(from, new TextEncoder().encode('original'));
+  assert.equal(await remote.copyBlob(from, to), false);
+  assert.equal(await remote.hasBlob(to), false);
+  await assert.rejects(remote.copyBlob(from, 'remote.json'), /Not a sync blob key/);
+});
+
+const failing = (code: string) => Object.assign(new Error(code + ': injected'), { code });
+
+test('a folder store on a volume without hard links renames into place, and still never replaces an object', async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'if-store-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  for (const code of ['EPERM', 'ENOTSUP', 'EXDEV']) {
+    let links = 0;
+    const folder = new FolderStore(join(root, code), { link: async () => { links++; throw failing(code); } });
+    const one = new TextEncoder().encode('one');
+    assert.deepEqual(await folder.putIfAbsent('books/a/content/one', one), { existed: false });
+    assert.equal(links, 1, 'the link was tried first');
+    assert.deepEqual(await folder.get('books/a/content/one'), one);
+    // One that is there is found by the look before the write.
+    assert.deepEqual(await folder.putIfAbsent('books/a/content/one', new TextEncoder().encode('other')), { existed: true });
+    // One that arrives while this writer copies is found by the look before the rename.
+    const late = new FolderStore(join(root, code), { link: async (_from, to) => { await writeFile(to, 'theirs'); throw failing(code); } });
+    assert.deepEqual(await late.putIfAbsent('books/a/content/two', new TextEncoder().encode('mine')), { existed: true });
+    assert.deepEqual(await folder.get('books/a/content/two'), new TextEncoder().encode('theirs'));
+    // From a file, with the time it was stored.
+    const file = join(root, 'source-' + code + '.jpg');
+    await image(file, '#445566');
+    assert.deepEqual(await folder.putIfAbsent('books/a/originals/three.jpg', { file }), { existed: false });
+    assert.deepEqual(await folder.get('books/a/originals/three.jpg'), new Uint8Array(await readFile(file)));
+    assert.deepEqual((await folder.list('')).map(({ key }) => key), ['books/a/content/one', 'books/a/content/two', 'books/a/originals/three.jpg']);
+    assert.deepEqual((await readdir(join(root, code), { recursive: true })).map(String).filter((path) => path.split('/').at(-1)!.startsWith('.')), [], 'no temporary files stay');
+  }
+  // Any other failure of the link is an error, and leaves nothing.
+  const refused = new FolderStore(join(root, 'refused'), { link: async () => { throw failing('EACCES'); } });
+  await assert.rejects(refused.putIfAbsent('books/a/content/one', new TextEncoder().encode('one')), /EACCES/);
+  assert.deepEqual(await refused.list(''), []);
+  assert.deepEqual(await readdir(join(root, 'refused', 'books', 'a', 'content')), []);
+});
+
+test('a folder store put or copy whose folder a delete removes meanwhile makes it again', async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'if-store-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  // What `delete` does when it empties a folder, at the worst moment: right after a writer made that folder.
+  let removals = 0;
+  const racing = (times: number) => new FolderStore(root, { mkdir: (async (path: string, options: object) => {
+    const made = await mkdir(path, options);
+    if (removals < times) { removals++; await rm(path, { recursive: true }); }
+    return made;
+  }) as typeof mkdir });
+  const one = new TextEncoder().encode('one');
+  assert.deepEqual(await racing(1).putIfAbsent('books/a/content/one', one), { existed: false });
+  assert.equal(removals, 1);
+  assert.deepEqual(await new FolderStore(root).get('books/a/content/one'), one);
+  const file = join(root, 'source.jpg');
+  await image(file, '#445566');
+  removals = 0;
+  assert.deepEqual(await racing(1).putIfAbsent('books/b/originals/two.jpg', { file }), { existed: false });
+  removals = 0;
+  assert.equal(await racing(1).copy('books/b/originals/two.jpg', 'books/c/originals/two.jpg'), true);
+  assert.deepEqual(await new FolderStore(root).get('books/c/originals/two.jpg'), new Uint8Array(await readFile(file)));
+  assert.equal(removals, 1);
+  const folder = new FolderStore(root);
+  // It is tried once more, not for ever: a folder that keeps going away is an error.
+  removals = 0;
+  await assert.rejects(racing(2).putIfAbsent('books/e/content/one', one), /ENOENT/);
+  // A source that is not there is still just that.
+  await assert.rejects(folder.putIfAbsent('books/e/originals/missing.jpg', { file: join(root, 'missing.jpg') }), /ENOENT/);
+  assert.equal(await folder.copy('books/e/originals/missing.jpg', 'books/f/originals/missing.jpg'), false);
+  assert.deepEqual((await readdir(root, { recursive: true })).map(String).filter((path) => path.split('/').at(-1)!.startsWith('.')), []);
+});
+
+each('a blob is copied only to its own key in another book, and never over a blob that is there', async (t) => {
+  const { remote } = await world(t);
+  const [from, to, other] = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+  const bytes = new TextEncoder().encode('original');
+  const digest = sha(bytes);
+  await remote.putBlob(originalBlobKey(from, digest, '.jpg'), bytes);
+  // Another blob, another part or another extension is not a copy of this one.
+  await assert.rejects(remote.copyBlob(originalBlobKey(from, digest, '.jpg'), originalBlobKey(to, 'f'.repeat(64), '.jpg')), /only copied to its own key/);
+  await assert.rejects(remote.copyBlob(originalBlobKey(from, digest, '.jpg'), originalBlobKey(to, digest, '.png')), /only copied to its own key/);
+  await assert.rejects(remote.copyBlob(originalBlobKey(from, digest, '.jpg'), proxyBlobKey(to, digest, '.jpg')), /only copied to its own key/);
+  await assert.rejects(remote.copyBlob(contentBlobKey(from, digest), coverBlobKey(to, digest)), /only copied to its own key/);
+  assert.deepEqual((await remote.store.list('')).map(({ key }) => key), [originalBlobKey(from, digest, '.jpg')]);
+  // A blob the target book has is left as it is, and the copy counts as done.
+  const theirs = new TextEncoder().encode('already there');
+  await remote.store.putIfAbsent(originalBlobKey(to, digest, '.jpg'), theirs);
+  const before = await remote.store.head(originalBlobKey(to, digest, '.jpg'));
+  assert.equal(await remote.copyBlob(originalBlobKey(from, digest, '.jpg'), originalBlobKey(to, digest, '.jpg')), true);
+  assert.deepEqual(await stored(remote, originalBlobKey(to, digest, '.jpg')), theirs);
+  assert.deepEqual(await remote.store.head(originalBlobKey(to, digest, '.jpg')), before);
+  // Also when the source is not there, and a blob copied onto itself stays.
+  assert.equal(await remote.copyBlob(originalBlobKey(other, digest, '.jpg'), originalBlobKey(to, digest, '.jpg')), true);
+  assert.equal(await remote.copyBlob(originalBlobKey(from, digest, '.jpg'), originalBlobKey(from, digest, '.jpg')), true);
+  assert.equal(await remote.copyBlob(originalBlobKey(from, digest, '.jpg'), originalBlobKey(other, digest, '.jpg')), true);
+  assert.deepEqual(await stored(remote, originalBlobKey(other, digest, '.jpg')), bytes);
+});
+
+each('a sync record names the book its commit belongs to, and originals are found there whatever project.json says later', async (t) => {
+  const { a, b, remote } = await world(t);
+  // Push, adopt, pull and clone all record it.
+  await sync(a, remote);
+  const id = await bookId(a);
+  assert.equal((await readSyncState(a.folder)).lastSynced?.bookId, id, 'a push');
+  await copyBook(a, b);
+  assert.equal((await sync(b, remote)).action, 'adopt');
+  assert.equal((await readSyncState(b.folder)).lastSynced?.bookId, id, 'an adopted tip');
+  await edit(a, caption('shore', 'Edited'));
+  await sync(a, remote);
+  assert.equal((await sync(b, remote)).action, 'fast-forward');
+  assert.equal((await readSyncState(b.folder)).lastSynced?.bookId, id, 'a pull');
+  await rm(b.folder, { recursive: true });
+  await use(b);
+  const [tip] = await tips(remote, a);
+  await cloneFromRemote({ remote, tip, destination: b.folder });
+  assert.equal((await readSyncState(b.folder)).lastSynced?.bookId, id, 'a book made from the remote');
+  const pending = await pendingOriginals(b.folder, remote);
+  assert.ok(pending.includes('shore'));
+  // The book gets another lineage ID, as one that syncs again as a new history does, before its record is reset.
+  const writeBookId = async (bookId: string) => {
+    const project = JSON.parse(await readFile(join(b.folder, 'project.json'), 'utf8'));
+    await writeFile(join(b.folder, 'project.json'), JSON.stringify({ ...project, bookId }, null, 2) + '\n');
+  };
+  await writeBookId(crypto.randomUUID());
+  assert.deepEqual(await pendingOriginals(b.folder, remote), pending, 'still read from the book the commit belongs to');
+  const staged = await stageOriginals({ remote, folder: b.folder });
+  assert.deepEqual(staged.map((original) => original.id).sort(), [...pending].sort());
+  await Promise.all(staged.map(({ staging }) => rm(staging, { force: true })));
+  await on(b, async (book) => assert.deepEqual(await downloadOriginals({ remote, book, ids: ['shore'] }), ['shore']));
+  assert.equal(sha(await readFile(join(b.folder, 'photos/shore.jpg'))), sha(await readFile(join(a.folder, 'photos/shore.jpg'))));
+  // A record from before the ID was kept loads, and falls back to project.json.
+  await rm(join(b.folder, 'photos/shore.jpg'));
+  await updateSyncState(b.folder, ({ lastSynced, ...state }) => { const { bookId: _, ...rest } = lastSynced!; return { ...state, lastSynced: rest }; });
+  assert.equal((await readSyncState(b.folder)).lastSynced?.bookId, undefined);
+  assert.deepEqual(await pendingOriginals(b.folder, remote), [], 'the other ID in project.json has no such snapshot');
+  await writeBookId(id);
+  assert.deepEqual(await pendingOriginals(b.folder, remote), pending);
+  await on(b, async (book) => assert.deepEqual(await downloadOriginals({ remote, book, ids: ['shore'] }), ['shore']));
 });

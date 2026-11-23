@@ -22,7 +22,7 @@ import { captureBookStateRevision, ignoredName } from './revisions';
  * before the editor can edit a half-pulled book.
  */
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
-const syncedSchema = z.object({ commitId: z.uuid(), bookStateRevision: sha256, stateDigest: sha256, photoDigests: z.record(z.string(), sha256),
+const syncedSchema = z.object({ commitId: z.uuid(), bookId: z.uuid().optional(), bookStateRevision: sha256, stateDigest: sha256, photoDigests: z.record(z.string(), sha256),
   localDigests: z.record(z.string(), sha256).optional() }).strict();
 const syncStateSchema = z.object({
   version: z.literal(1),
@@ -289,7 +289,7 @@ export async function applyStagedPull(folder: string, marker: PullMarker) {
   }
   const photoDigests = Object.fromEntries(Object.entries(blob.assetsMeta.assets).filter(([id]) => photos[id]).map(([id, fact]) => [id, fact.digest]));
   await updateSyncState(root, ({ abandoned: _, ...state }) => ({ ...state, pull: undefined,
-    lastSynced: { commitId: marker.targetCommit, bookStateRevision: marker.bookStateRevision, stateDigest: marker.stateDigest, photoDigests,
+    lastSynced: { commitId: marker.targetCommit, ...(project.bookId ? { bookId: project.bookId } : {}), bookStateRevision: marker.bookStateRevision, stateDigest: marker.stateDigest, photoDigests,
       localDigests: Object.fromEntries(Object.entries(marker.localDigests).filter(([id]) => photos[id])) },
     ...(marker.templateChanged || state.networkReview ? { networkReview: true as const } : {}) }));
   await rm(await stagingFolder(root), { recursive: true, force: true });
