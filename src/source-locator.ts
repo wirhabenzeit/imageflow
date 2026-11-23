@@ -10,8 +10,19 @@ export type Locator = { provider: string };
 /** The fields of a `photos.json` entry. A provider reads and writes the keys it names in `fields`; the rest are the host's. */
 export type LocatorFields = Readonly<Record<string, unknown>>;
 
+/**
+ * How far a photo's source reaches, which decides what of it syncs (ADR 0012, Sync by reach). Facts and a preview sync
+ * for every photo, whatever its reach.
+ * - `book`: the book holds the original. Its locator syncs whole, and so does the original.
+ * - `mac`: the original is on this Mac only. The portable part of its locator syncs (`shared`), the original never.
+ * - `online`: every Mac reads the original from its origin. Its locator syncs whole, the original never.
+ */
+export type Reach = 'book' | 'mac' | 'online';
+
 export interface LocatorKind<L extends Locator> {
   provider: L['provider'];
+  /** What of a photo of this provider syncs. Sync reads this, never the provider's name. */
+  reach: Reach;
   /** The entry keys this provider writes. Changing a photo's provider removes them first (Copy into Book). */
   fields: readonly string[];
   /** The locator of an entry, or undefined when the entry is not this provider's. */
@@ -23,9 +34,12 @@ export interface LocatorKind<L extends Locator> {
    * book state, so without anything machine-local.
    */
   portable(locator: L): Record<string, unknown>;
-  /** The locator as a sync snapshot carries it to other Macs. */
+  /** The locator as a sync snapshot carries it to other Macs, for a kind of reach `mac`; any other syncs whole. */
   shared(locator: L): L;
-  /** The locator a pull writes: this Mac's own (`here`) when it has one, so a pull never overwrites a local location. */
+  /**
+   * The locator a pull writes, for a kind of reach `mac`: this Mac's own (`here`) when it has one, so a pull never
+   * overwrites a local location. Any other kind takes the snapshot's as it is.
+   */
   adopt(shared: L, here: L | undefined): L;
   /** Tells two locators of this provider apart: import dedupe, the machine-local source index, approvals. */
   key(locator: L): string;
@@ -53,6 +67,7 @@ export const isUnlocatedPath = (path: string) => path.startsWith(unlocatedRoot);
 // Both read the entry's `path`; `linked` decides whose entry it is, as it does in photos.json today.
 export const packageLocator: LocatorKind<PackageLocator> = {
   provider: 'package',
+  reach: 'book',
   // `linked: false` is a package entry too, so the key goes with the entry when its provider changes.
   fields: ['path', 'linked'],
   read: (entry) => typeof entry.path === 'string' && entry.linked !== true ? { provider: 'package', path: entry.path } : undefined,
@@ -66,6 +81,7 @@ export const packageLocator: LocatorKind<PackageLocator> = {
 
 export const linkedLocator: LocatorKind<LinkedLocator> = {
   provider: 'linked',
+  reach: 'mac',
   fields: ['path', 'linked'],
   read: (entry) => typeof entry.path === 'string' && entry.linked === true ? { provider: 'linked', path: entry.path } : undefined,
   write: ({ path }) => ({ path, linked: true }),
@@ -92,6 +108,8 @@ export const isLightroomIdentifier = (value: unknown): value is string => typeof
 const lightroomName = (value: unknown) => typeof value === 'string' && value && value.length <= 255 && !/[\x00-\x1f/\\]/.test(value) ? value : undefined;
 export const lightroomLocator: LocatorKind<LightroomLocator> = {
   provider: 'lightroom',
+  // The catalog is on this Mac: another Mac prints the photo only where it has the catalog too (ADR 0011).
+  reach: 'mac',
   fields: ['lightroom'],
   read: (entry) => {
     const value = entry.lightroom as Partial<Record<keyof LightroomLocator, unknown>> | null | undefined;
@@ -156,6 +174,10 @@ export const fileLocatorOf = (entry: LocatorFields): FileLocator | undefined => 
 export const namesFile = (entry: LocatorFields) => typeof entry.path === 'string';
 /** A readable name of a photo without a title, from its locator; its ID when the locator offers none. */
 export const locatorName = (id: string, locator: Locator) => kindOf(locator).name(locator) || id;
+/** The reach of a locator's kind. */
+export const locatorReach = (locator: Locator): Reach => kindOf(locator).reach;
+/** The reach of an entry's source, or undefined for an entry no provider of this version reads. */
+export const entryReach = (entry: LocatorFields): Reach | undefined => { const locator = readLocator(entry); return locator && kindOf(locator).reach; };
 /** The path of a photo the book package holds, relative to the book; undefined for any other photo. */
 export const packagePath = (entry: LocatorFields) => { const locator = fileLocatorOf(entry); return locator?.provider === 'package' ? locator.path : undefined; };
 
@@ -170,10 +192,11 @@ function rewritten(entry: LocatorFields, fields: (kind: LocatorKind<Locator>, lo
 }
 /** An entry as the portable book-state revision counts it. */
 export const portableEntry = (entry: LocatorFields) => rewritten(entry, (kind, locator) => kind.portable(locator));
-/** An entry as a sync snapshot carries it. */
-export const sharedEntry = (entry: LocatorFields) => rewritten(entry, (kind, locator) => kind.write(kind.shared(locator)));
+/** An entry as a sync snapshot carries it: only a locator that reaches no further than this Mac leaves a part behind. */
+export const sharedEntry = (entry: LocatorFields) => rewritten(entry, (kind, locator) => kind.write(kind.reach === 'mac' ? kind.shared(locator) : locator));
 /** A snapshot's entry as a pull writes it, given the entry this Mac has for the photo. */
 export const adoptedEntry = (shared: LocatorFields, here: LocatorFields | undefined) => rewritten(shared, (kind, locator) => {
+  if (kind.reach !== 'mac') return kind.write(locator);
   const mine = here && readLocator(here);
   return kind.write(kind.adopt(locator, mine?.provider === locator.provider ? mine : undefined));
 });

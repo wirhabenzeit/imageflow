@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { portablePhotos } from '../src/book-revision';
 import { parseDocument, photoIndexSchema, projectSchema } from '../src/project';
-import { sourceEntries, sourceFile } from '../src/source-locations';
-import { linkedLocator, packageLocator } from '../src/source-locator';
-import type { LocatorFields } from '../src/source-locator';
+import { sourceEntries, sourceFile, sourceReach } from '../src/source-locations';
+import { adoptedEntry, entryReach, lightroomLocator, linkedLocator, packageLocator, registerLocatorKind, sharedEntry } from '../src/source-locator';
+import type { LocatorFields, LocatorKind, Reach } from '../src/source-locator';
 import { portableManifests, projectManifests } from '../src/sync-snapshot';
 
 // The `package` and `linked` locators must describe today's photos.json entries exactly as the code that reads `path` and `linked`
@@ -69,4 +69,23 @@ test('the shared and adopted forms are what a sync snapshot carries and a pull w
       assert.equal(kind.adopt(kind.shared(locator), mine ? kind.read(mine) : undefined).path, pulled[id].path);
     }
   }
+});
+
+test('a kind declares its reach, and only a kind of reach mac leaves part of its locator on its Mac', () => {
+  assert.deepEqual([packageLocator.reach, linkedLocator.reach, lightroomLocator.reach], ['book', 'mac', 'mac']);
+  assert.deepEqual(Object.values(photos).map(entryReach), ['book', 'mac']);
+  assert.deepEqual(sourceEntries({ project: { ...project, texts: { own: 'texts/a.md', far: { path: '/Users/me/a.md', linked: true } } }, photoIndex: photos }).map(sourceReach), ['book', 'mac', 'book', 'mac']);
+  // A kind whose `shared` and `adopt` would change the locator: they are asked only where the reach is `mac`.
+  const kind = (provider: 'near' | 'far', reach: Reach): LocatorKind<{ provider: 'near' | 'far'; at: string }> => ({ provider, reach, fields: [provider],
+    read: (entry) => typeof entry[provider] === 'string' ? { provider, at: entry[provider] } : undefined, write: ({ at }) => ({ [provider]: at }),
+    portable: () => ({ [provider]: true }), shared: (locator) => ({ ...locator, at: 'shared' }), adopt: (shared, here) => here ?? { ...shared, at: 'unlocated' },
+    key: ({ at }) => at, name: ({ at }) => at });
+  const unregister = [registerLocatorKind(kind('near', 'mac')), registerLocatorKind(kind('far', 'online'))];
+  try {
+    assert.deepEqual(sharedEntry({ near: '/here', title: 'T' }), { near: 'shared', title: 'T' });
+    assert.deepEqual(sharedEntry({ far: 'https://there', title: 'T' }), { far: 'https://there', title: 'T' });
+    assert.deepEqual(adoptedEntry({ near: 'shared' }, { near: '/mine' }), { near: '/mine' });
+    assert.deepEqual(adoptedEntry({ near: 'shared' }, undefined), { near: 'unlocated' });
+    assert.deepEqual(adoptedEntry({ far: 'https://there' }, { far: 'https://elsewhere' }), { far: 'https://there' }, 'the snapshot’s, whole');
+  } finally { unregister.forEach((remove) => remove()); }
 });

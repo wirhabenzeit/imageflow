@@ -211,7 +211,13 @@ export function deriveTips(headers: readonly CommitHeader[]) {
  * found under that prefix whatever project.json says later; records from before it was kept lack it.
  */
 export type SyncedCommit = { commitId: string; bookId?: string; bookStateRevision: string; stateDigest: string; photoDigests: Record<string, string>;
-  localDigests?: Record<string, string> };
+  localDigests?: Record<string, string>;
+  /**
+   * For photos without a file: a key of the content this Mac's own provider showed for the photo when this Mac last
+   * synced while it could read it. A pull replaces such a photo's fact, so only this tells whether the photo changed
+   * here since, or merely under this Mac.
+   */
+  localKeys?: Record<string, string> };
 
 export type SyncDecision =
   | { action: 'resume' }
@@ -229,16 +235,25 @@ export type SyncDecision =
  * is merely stale (another Mac re-exported or replaced the photo) and loses. `here` holds the digests of the originals
  * readable on this Mac; without a sync record every one of them counts as changed.
  */
-export function changedOriginals(here: Record<string, string>, synced?: Pick<SyncedCommit, 'photoDigests' | 'localDigests'>) {
+export function changedOriginals(here: Record<string, string>, synced?: Pick<SyncedCommit, 'photoDigests' | 'localDigests' | 'localKeys'>, keys: Record<string, string> = {}) {
   return new Set(Object.entries(here).filter(([id, digest]) => {
+    // A photo without a file (`keys`) changed here when its provider shows other content than at the last sync: its
+    // fact differing from the snapshot's says nothing, since another Mac may see another version of it for good. One
+    // this Mac reads for the first time is only new where the snapshot lacks it; what it shows then is where this Mac
+    // starts counting from. Provider revisions have no order, so one case stays: a Mac whose view moved while it
+    // could not sync (to a version the remote has passed by then) pushes that version, once.
+    if (keys[id] !== undefined) {
+      const seen = synced?.localKeys?.[id];
+      return seen !== undefined ? keys[id] !== seen : synced?.photoDigests[id] === undefined;
+    }
     const baseline = synced?.localDigests?.[id] ?? synced?.photoDigests[id];
     return baseline === undefined || digest !== baseline;
   }).map(([id]) => id));
 }
 
 /** Whether this Mac knows a photo fact the last synced snapshot lacks, which a push has to carry: an in-place re-export. */
-export function factsAhead(here: Record<string, string>, synced: Pick<SyncedCommit, 'photoDigests' | 'localDigests'>) {
-  return [...changedOriginals(here, synced)].some((id) => here[id] !== synced.photoDigests[id]);
+export function factsAhead(here: Record<string, string>, synced: Pick<SyncedCommit, 'photoDigests' | 'localDigests' | 'localKeys'>, keys: Record<string, string> = {}) {
+  return [...changedOriginals(here, synced, keys)].some((id) => here[id] !== synced.photoDigests[id]);
 }
 
 /**

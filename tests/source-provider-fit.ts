@@ -17,6 +17,8 @@ declare const bridge: LightroomPort;
 type ImmichLocator = { provider: 'immich'; server: string; asset: string; name?: string };
 export const immichLocator: LocatorKind<ImmichLocator> = {
   provider: 'immich',
+  // Every Mac reads the server itself: the locator syncs whole, the original never (ADR 0012).
+  reach: 'online',
   fields: ['immich'],
   read: (entry) => {
     const value = entry.immich as Partial<ImmichLocator> | undefined;
