@@ -1,0 +1,12 @@
+{"size":20,"upload":39}
+{"size":20,"upload":77}
+{"size":20,"uploadSeconds":4.834508834,"uploadMBps":4.136924905244676,"downloadSeconds":0.6100783750000001,"downloadMBps":32.782673209815044,"verified":true}
+{"size":50,"upload":28}
+{"size":50,"upload":60}
+{"size":50,"upload":86}
+{"size":50,"uploadSeconds":7.17854175,"uploadMBps":6.96520292578921,"downloadSeconds":1.0033128340000004,"downloadMBps":49.83490523156208,"verified":true}
+{"size":100,"upload":28}
+{"size":100,"upload":56}
+{"size":100,"upload":83}
+{"size":100,"uploadSeconds":10.487433,"uploadMBps":9.5352218221561,"downloadSeconds":1.3274278750000013,"downloadMBps":75.33365984197063,"verified":true}
+{"done":true,"task":"sizes","seconds":26.390266042,"result":{"results":[{"size":20,"uploadSeconds":4.834508834,"uploadMBps":4.136924905244676,"downloadSeconds":0.6100783750000001,"downloadMBps":32.782673209815044,"verified":true},{"size":50,"uploadSeconds":7.17854175,"uploadMBps":6.96520292578921,"downloadSeconds":1.0033128340000004,"downloadMBps":49.83490523156208,"verified":true},{"size":100,"uploadSeconds":10.487433,"uploadMBps":9.5352218221561,"downloadSeconds":1.3274278750000013,"downloadMBps":75.33365984197063,"verified":true}],"retries":[]}}

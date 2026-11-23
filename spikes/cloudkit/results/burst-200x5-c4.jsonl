@@ -1,0 +1,9 @@
+{"uploaded":25,"elapsed":18.984292832999998}
+{"uploaded":50,"elapsed":33.59425675}
+{"uploaded":75,"elapsed":48.798463000000005}
+{"uploaded":100,"elapsed":63.879180833}
+{"uploaded":125,"elapsed":78.929052583}
+{"uploaded":150,"elapsed":93.719525083}
+{"uploaded":175,"elapsed":108.678685083}
+{"uploaded":200,"elapsed":122.638352416}
+{"done":true,"task":"burst","seconds":144.763287,"result":{"count":200,"size":5,"concurrency":4,"listed":200,"uploadSeconds":122.638547416,"uploadMBps":8.154043088980156,"perUploadMedian":2.3481918749999897,"perUploadP95":2.662432000000001,"downloadSeconds":20.185346208000002,"downloadMBps":49.54088920227055,"listSeconds":1.1519446249999892,"retries":[]}}

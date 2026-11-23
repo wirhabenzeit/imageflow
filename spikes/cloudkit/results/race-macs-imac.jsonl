@@ -1,0 +1,11 @@
+{"round":0,"firedLateMs":27,"created":true}
+{"round":1,"firedLateMs":2,"created":false}
+{"round":2,"firedLateMs":2,"created":true}
+{"round":3,"firedLateMs":3,"created":false}
+{"round":4,"firedLateMs":3,"created":true}
+{"round":5,"firedLateMs":5,"created":false}
+{"round":6,"firedLateMs":4,"created":false}
+{"round":7,"firedLateMs":2,"created":false}
+{"round":8,"firedLateMs":2,"created":true}
+{"round":9,"firedLateMs":7,"created":true}
+{"done":true,"task":"racemany","seconds":1313.8061611670003,"result":{"label":"iMac","created":[0,2,4,8,9],"winners":["iMac","MacBook","iMac","MacBook","iMac","MacBook","MacBook","MacBook","iMac","iMac"]}}
