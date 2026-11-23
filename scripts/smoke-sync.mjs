@@ -368,7 +368,8 @@ try {
   assert.equal(await stat(join(otherFolder, 'books', bookId, 'deleted.json')).catch(() => undefined), undefined, 'Cancel deletes nothing');
   await answer(question, { button: 'Delete from Sync' });
   assert.deepEqual(await start.evaluate((id) => window.imageflow.libraryAction({ action: 'delete', bookId: id }), bookId), { value: null });
-  assert.deepEqual((await readdir(join(otherFolder, 'books', bookId))).sort(), ['deleted.json'], 'only the tombstone is left');
+  const left = await readdir(join(otherFolder, 'books', bookId), { recursive: true });
+  assert.deepEqual(left.sort(), ['deleted.json'], 'only the tombstone is left');
   assert.ok(await stat(join(desktopBook, 'project.json')), 'the copy on this Mac stays');
   assert.ok((await start.evaluate(() => window.imageflow.libraryRemote())).value.books.some((book) => book.bookId === bookId && book.deleted));
   // The desktop's book stopped syncing here; Start Syncing finds the tombstone, pushes nothing, and asks. Sync Again

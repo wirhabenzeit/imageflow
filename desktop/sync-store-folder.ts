@@ -64,7 +64,13 @@ export class FolderStore implements SyncStore {
     signal?.throwIfAborted();
     // Looked at first, so a large original that is there already is not copied to find that out.
     if (await this.head(key)) return { existed: true };
-    return again(() => this.write(key, destination, source, sha256, signal, onProgress));
+    try { return await again(() => this.write(key, destination, source, sha256, signal, onProgress)); }
+    catch (error) {
+      // A put that stored nothing (cancelled, or refused) leaves no folder it made behind: a book deleted meanwhile
+      // keeps only its tombstone.
+      await this.prune(dirname(destination));
+      throw error;
+    }
   }
 
   private async write(key: string, destination: string, source: StoreSource, sha256: string | undefined, signal: AbortSignal | undefined, onProgress: PutOptions['onProgress']) {
@@ -174,10 +180,13 @@ export class FolderStore implements SyncStore {
     for (const key of keys) {
       const path = this.path(key);
       await rm(path, { force: true });
-      // Folders that end up empty go too, so a deleted book leaves no prefix behind.
-      for (let folder = dirname(path); folder.startsWith(this.root + sep); folder = dirname(folder)) {
-        try { await rmdir(folder); } catch { break; }
-      }
+      await this.prune(dirname(path));
+    }
+  }
+  /** Removes `folder` and the folders above it while they are empty, so a deleted book leaves no prefix behind. */
+  private async prune(folder: string) {
+    for (; folder.startsWith(this.root + sep); folder = dirname(folder)) {
+      try { await rmdir(folder); } catch { break; }
     }
   }
 }

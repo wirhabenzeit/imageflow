@@ -1686,7 +1686,7 @@ test('a folder store on a volume without hard links renames into place, and stil
   const refused = new FolderStore(join(root, 'refused'), { link: async () => { throw failing('EACCES'); } });
   await assert.rejects(refused.putIfAbsent('books/a/content/one', new TextEncoder().encode('one')), /EACCES/);
   assert.deepEqual(await refused.list(''), []);
-  assert.deepEqual(await readdir(join(root, 'refused', 'books', 'a', 'content')), []);
+  assert.equal(await lstat(join(root, 'refused', 'books')).catch(() => undefined), undefined, 'not even the folders it made');
 });
 
 test('a folder store put or copy whose folder a delete removes meanwhile makes it again', async (t) => {
@@ -3115,4 +3115,17 @@ test('the actions on a missing photo leave a kept older original on disk, and Re
   // Remove: the photo leaves the book, its files stay for Undo.
   await on(b, (book) => removeSources(book, ['photo:shore']));
   assert.equal(sha(await readFile(kept)), before, 'Remove leaves the kept file');
+});
+
+test('a folder store put that is cancelled leaves no folder it made behind', async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'if-folder-cancel-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const store = new FolderStore(root);
+  const job = new AbortController();
+  job.abort(new Error('cancelled'));
+  await store.putIfAbsent('books/a/content/kept', new Uint8Array([1]));
+  await assert.rejects(store.putIfAbsent('books/a/originals/x.jpg', new Uint8Array([1, 2]), { sha256: 'f'.repeat(64) }));
+  assert.deepEqual((await readdir(join(root, 'books', 'a'))).sort(), ['content'], 'the originals folder it made is gone');
+  await assert.rejects(store.putIfAbsent('books/a/originals/y.jpg', new Uint8Array([1]), { signal: job.signal }));
+  assert.deepEqual((await readdir(join(root, 'books', 'a'))).sort(), ['content']);
 });
