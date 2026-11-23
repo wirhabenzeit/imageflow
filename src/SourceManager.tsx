@@ -9,7 +9,7 @@ import { SourceBadge, sourceOrigin } from './SourceBadge';
 import { TaskStatus, taskProgress } from './TaskStatus';
 import type { TaskProgress } from './desktop';
 import { sourceList } from './source-items';
-import { sourceEntries, sourceFile, sourceFolderName, sourceProvider } from './source-locations';
+import { sourceEntries, sourceFile, sourceFolderName, sourceReach } from './source-locations';
 import { useListSelection } from './list-selection';
 import { fileExtensionMime, fileMime, photoMime, textMime } from './source-items';
 import type { SourceRef } from './source-items';
@@ -59,7 +59,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const documentIcon = useFileIcons(embedded ? entries.map((entry) => fileExtension(entry.name)) : []);
   const placements = (entry: typeof entries[number]) => usage[entry.kind === 'markdown' ? 'text' : entry.kind][entry.id] ?? [];
   const unavailable = (key: string) => !!summary.sources?.[key] && summary.sources[key].state !== 'available';
-  const linked = entries.filter((entry) => sourceProvider(entry) !== 'package').length;
+  const linked = entries.filter((entry) => sourceReach(entry) !== 'book').length;
   // Locate Folder… finds files; a photo of an app that is not running is brought back by opening the app instead.
   const offers = (key: string, repair: SourceRepair) => unavailable(key) && (summary.sources![key].repairs ?? ['locate', 'locate-folder']).includes(repair);
   const missing = entries.filter((entry) => offers(entry.key, 'locate-folder')).length;
@@ -99,7 +99,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const shown = entries.filter((entry) => (kind === 'all' || kind === entry.kind) &&
     (used === 'all' || (used === 'used') === !!placements(entry).length) &&
     // Linked: anything not stored in the book, whether a file elsewhere or a photo of another provider.
-    (storage === 'all' || (storage === 'linked') === (sourceProvider(entry) !== 'package')) && (!attention || unavailable(entry.key)) &&
+    (storage === 'all' || (storage === 'linked') === (sourceReach(entry) !== 'book')) && (!attention || unavailable(entry.key)) &&
     entry.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
   const groups = photoGroups(summary, shown.filter((entry) => entry.kind === 'photo').map(({ id }) => id), view.value);
   const headers = new Map(groups.filter((group) => group.label).map((group) => [group.ids[0], group]));
@@ -107,7 +107,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const chosen = entries.filter(({ key }) => list.selected.includes(key));
   // Copy into Book takes whatever the package does not own: a linked file is copied, a photo without a file is
   // materialized by its provider first (as in asset-menu.ts).
-  const copyable = (entry: typeof entries[number]) => sourceProvider(entry) !== 'package';
+  const copyable = (entry: typeof entries[number]) => sourceReach(entry) !== 'book';
   const copyCount = chosen.filter(copyable).length;
   // With nothing selected, the buttons act on every asset of the list; the embedded list holds only files.
   const everyKey = embedded ? (keep: (entry: typeof entries[number]) => boolean) => entries.filter(keep).map(({ key }) => key) : () => undefined;

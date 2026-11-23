@@ -34,6 +34,8 @@ import './persistence-root';
 type MemoryLocator = { provider: 'memory'; asset: string; name?: string };
 const memoryLocator: LocatorKind<MemoryLocator> = {
   provider: 'memory',
+  // An app on this Mac, like Lightroom Classic.
+  reach: 'mac',
   fields: ['memory'],
   read: (entry) => {
     const value = entry.memory as Partial<MemoryLocator> | undefined;

@@ -36,6 +36,11 @@ import { canonicalJson } from '../src/canonical-json';
 import { computeBookStateRevision } from '../src/book-revision';
 import { photoIndexSchema, projectSchema } from '../src/project';
 import { persistenceRoot } from './persistence-root';
+import { pendingOriginals } from '../desktop/sync-engine';
+import { registerProvider } from '../desktop/providers';
+import type { Materialized, MaterializeOptions, Observed, Revisions, SourceProvider, SourceRef, Unavailable } from '../desktop/source-provider';
+import { registerLocatorKind } from '../src/source-locator';
+import type { LocatorKind } from '../src/source-locator';
 
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const image = (path: string, color: string, width = 120, height = 80) =>
@@ -739,6 +744,200 @@ each('pushes reuse recorded proxies, and a pull reuses local bytes for a photo c
   assert.equal(sha(await readFile(join(b.folder, owned.path))), sha(await readFile(photo)));
   await on(b, async (book) => assert.equal(book.sources!['photo:' + id].state, 'available'));
   assert.equal((await sync(b, remote)).action, 'in-sync');
+});
+
+// --- Sync by reach (ADR 0012): a provider of reach `online` that exists only here ---------------------------------------
+// A photo on a server every Mac reads itself. Its locator has nothing of one Mac's in it, so it syncs whole; `shared`
+// and `adopt` are for kinds of reach `mac` and would show in a snapshot or a pulled book if they were applied.
+type OnlineLocator = { provider: 'online'; url: string; name?: string };
+const onlineLocator: LocatorKind<OnlineLocator> = {
+  provider: 'online',
+  reach: 'online',
+  fields: ['online'],
+  read: (entry) => {
+    const value = entry.online as Partial<OnlineLocator> | undefined;
+    return typeof value?.url === 'string' ? { provider: 'online', url: value.url, ...(value.name ? { name: value.name } : {}) } : undefined;
+  },
+  write: ({ provider: _provider, ...online }) => ({ online }),
+  portable: ({ url }) => ({ online: { url } }),
+  shared: (locator) => ({ ...locator, url: 'reduced-for-another-mac' }),
+  adopt: (shared) => ({ ...shared, url: 'adopted-on-this-mac' }),
+  key: ({ url }) => url,
+  name: ({ name }) => name,
+};
+type OnlineAsset = { revision: string; content: string; width: number; height: number; color: string; title: string };
+class OnlineServer implements SourceProvider<OnlineLocator> {
+  readonly provider = 'online' as const;
+  readonly assets = new Map<string, OnlineAsset>();
+  // Whether the Mac in use is signed in to the server; one that is not still lays out the book from synced previews.
+  signedIn = true;
+  // What a Mac behind a cache still sees of the server, when set.
+  lagging?: Map<string, OnlineAsset>;
+  // Originals asked for; sync never asks for one.
+  materialized: string[] = [];
+  private asset = (url: string) => (this.lagging ?? this.assets).get(url);
+  private revisions = (asset: OnlineAsset): Revisions => ({ revision: asset.revision, contentRevision: asset.content });
+  private unavailable = (url: string) => !this.signedIn ? { state: 'needs-sign-in' as const, problem: 'Sign in to the photo server' }
+    : !this.asset(url) ? { state: 'missing' as const, problem: 'No longer on the photo server' } : undefined;
+  async observe(_book: string, refs: readonly SourceRef<OnlineLocator>[]): Promise<Observed[]> {
+    return refs.map(({ locator }) => {
+      const asset = this.asset(locator.url);
+      return this.unavailable(locator.url) ?? { state: 'available', revisions: this.revisions(asset!), facts: { width: asset!.width, height: asset!.height, provided: { title: asset!.title } } };
+    });
+  }
+  async *preview(_book: string, refs: readonly SourceRef<OnlineLocator>[], { staging, signal }: MaterializeOptions): AsyncGenerator<Materialized> {
+    for (const { id, locator } of refs) {
+      if (signal.aborted) return;
+      const failure = this.unavailable(locator.url);
+      if (failure) { yield { id, ...failure }; continue; }
+      const asset = this.asset(locator.url)!;
+      const file = join(staging, id + '-' + asset.revision + '.jpg');
+      await image(file, asset.color, asset.width / 25, asset.height / 25);
+      yield { id, file, before: this.revisions(asset), after: this.revisions(asset) };
+    }
+  }
+  async *materialize(_book: string, refs: readonly SourceRef<OnlineLocator>[]): AsyncGenerator<Materialized> {
+    for (const { id } of refs) { this.materialized.push(id); yield { id, state: 'unreadable', problem: 'This test never downloads an original.' }; }
+  }
+  watch() { return () => {}; }
+  repairs(state: Unavailable) { return state === 'needs-sign-in' ? ['sign-in'] as const : []; }
+}
+function onlineServer(t: { after: (fn: () => void) => void }) {
+  const server = new OnlineServer();
+  const unregister = [registerLocatorKind(onlineLocator), registerProvider(server)];
+  t.after(() => unregister.forEach((remove) => remove()));
+  return server;
+}
+// The keys of a remote's blobs of one kind (`originals`, `proxies`), optionally of one digest.
+const blobKeys = (remote: MemoryRemote, kind: string, digest = '') => [...remote.blobs.keys()].filter((key) => key.includes(kind + '/' + digest)).sort();
+const harbour = 'https://photos.example/albums/7/harbour';
+const dawn: OnlineAsset = { revision: 'r1', content: 'c1', width: 3000, height: 2000, color: '#cc8844', title: 'Harbour at dawn' };
+
+test('an online photo syncs its locator whole with facts and a preview, never an original, and its changes sync with every push', async (t) => {
+  const { a, b, remote } = await world(t);
+  const server = onlineServer(t);
+  server.assets.set(harbour, dawn);
+  await sync(a, remote);
+  await copyBook(a, b);
+  assert.equal((await sync(b, remote)).action, 'adopt');
+  const originals = blobKeys(remote, 'originals');
+  assert.ok(originals.length, 'the book’s own photos synced their originals');
+
+  // Desktop adds a photo from the server and pushes.
+  const entry = { online: { url: harbour, name: 'harbour.jpg' } };
+  await edit(a, (files) => { files.photoIndex.web = entry as never; });
+  const pushed = await sync(a, remote);
+  assert.equal(pushed.action, 'push');
+  const c1 = await commit(remote, a, pushed.pushed[0]);
+  const s1 = stateOf(remote, c1);
+  assert.deepEqual(s1.photos.web, entry, 'the locator syncs whole: nothing in it is one Mac’s');
+  const fact1 = s1.assetsMeta.assets.web;
+  assert.deepEqual([fact1.width, fact1.height, fact1.provided?.title], [3000, 2000, 'Harbour at dawn'], 'with the facts its provider reported');
+  assert.ok(s1.proxies[fact1.digest], 'and its preview');
+  const [proxy1] = blobKeys(remote, 'proxies', fact1.digest);
+  assert.equal(sha(remote.blobs.get(proxy1)!), s1.proxies[fact1.digest].sha256, 'which was uploaded');
+  assert.equal(s1.originals.web, undefined, 'no original is recorded for it');
+  assert.deepEqual(blobKeys(remote, 'originals'), originals, 'and none was uploaded');
+  assert.deepEqual(server.materialized, [], 'or even asked for');
+  await use(a);
+  assert.deepEqual(await pendingOriginals(a.folder, remote), []);
+
+  // Laptop, not signed in to the server: the pull writes the same locator and expects no original.
+  server.signedIn = false;
+  const pulled = await sync(b, remote, { fetchOriginals: true });
+  assert.equal(pulled.action, 'fast-forward');
+  assert.deepEqual(pulled.originals, { downloaded: [] }, 'keeping originals downloads none for it');
+  assert.deepEqual((await manifests(b)).photos.web, entry);
+  assert.deepEqual(await pendingOriginals(b.folder, remote), [], 'and none is pending');
+  // It cannot read the photo itself, and shows the synced preview with the synced facts.
+  await on(b, async (book) => {
+    assert.equal(book.sources!['photo:web'].state, 'needs-sign-in');
+    assert.equal(book.sources!['photo:web'].cached, true);
+    const photo = book.photos.get('web')!;
+    assert.equal(photo.original, await proxyFile(b, fact1.digest));
+    assert.deepEqual([photo.width, photo.height, photo.title], [3000, 2000, 'Harbour at dawn']);
+  });
+  assert.equal((await sync(b, remote)).action, 'in-sync');
+
+  // The photo changes on the server. Nothing in the book's own state does, so only `factsAhead` can see it.
+  server.signedIn = true;
+  server.assets.set(harbour, { ...dawn, revision: 'r2', content: 'c2', color: '#223366', title: 'Harbour at dusk' });
+  const second = await sync(a, remote);
+  assert.equal(second.action, 'push', 'the new fact is ahead of the last snapshot');
+  const c2 = await commit(remote, a, second.pushed[0]);
+  assert.equal(c2.bookStateRevision, c1.bookStateRevision, 'with the same book state');
+  const s2 = stateOf(remote, c2);
+  const fact2 = s2.assetsMeta.assets.web;
+  assert.notEqual(fact2.digest, fact1.digest);
+  assert.equal(fact2.provided?.title, 'Harbour at dusk', 'the changed fact is in the snapshot, not the one carried forward');
+  assert.equal(sha(remote.blobs.get(blobKeys(remote, 'proxies', fact2.digest)[0])!), s2.proxies[fact2.digest].sha256, 'with its new preview');
+  assert.equal(s2.originals.web, undefined);
+  assert.equal((await sync(a, remote)).action, 'in-sync', 'a fact that was pushed is no longer ahead');
+
+  // Laptop, still not signed in: the change reaches it.
+  server.signedIn = false;
+  assert.equal((await sync(b, remote)).action, 'fast-forward');
+  await on(b, async (book) => {
+    const photo = book.photos.get('web')!;
+    assert.equal(photo.original, await proxyFile(b, fact2.digest));
+    assert.equal(photo.title, 'Harbour at dusk');
+  });
+
+  // And again, also with an edit of the book in the same push: every later push carries the fact of then.
+  server.signedIn = true;
+  server.assets.set(harbour, { ...dawn, revision: 'r3', content: 'c3', color: '#114422', width: 2000, height: 3000, title: 'Harbour at night' });
+  await edit(a, caption('shore', 'Edited with the third version'));
+  const third = await sync(a, remote);
+  assert.equal(third.action, 'push');
+  const fact3 = stateOf(remote, await commit(remote, a, third.pushed[0])).assetsMeta.assets.web;
+  assert.deepEqual([fact3.width, fact3.height, fact3.provided?.title], [2000, 3000, 'Harbour at night']);
+  server.signedIn = false;
+  assert.equal((await sync(b, remote)).action, 'fast-forward');
+  assert.deepEqual((await readAssetFacts(b.folder)).web, fact3);
+  assert.ok(await proxyFile(b, fact3.digest));
+  assert.deepEqual(blobKeys(remote, 'originals'), originals, 'no push uploaded an original for it');
+  assert.deepEqual(server.materialized, []);
+});
+
+test('two Macs that both read an online photo agree: a change both see is not pushed back, and an older view never overrides a newer fact', async (t) => {
+  const { a, b, remote } = await world(t);
+  const server = onlineServer(t);
+  server.assets.set(harbour, dawn);
+  await edit(a, (files) => { files.photoIndex.web = { online: { url: harbour } } as never; });
+  await sync(a, remote);
+  const digest = async (mac: Mac) => (await readAssetFacts(mac.folder)).web.digest;
+  const d1 = await digest(a);
+  // Laptop: a copy of the book that reads the server itself and makes the same preview.
+  await copyBook(a, b);
+  assert.deepEqual(await sync(b, remote).then(({ action, pushed }) => ({ action, pushed })), { action: 'adopt', pushed: [] });
+  assert.equal(await digest(b), d1);
+
+  // The photo changes and the desktop pushes it. The laptop still sees the version before, behind a cache.
+  const dusk = { ...dawn, revision: 'r2', content: 'c2', color: '#223366', title: 'Harbour at dusk' };
+  server.assets.set(harbour, dusk);
+  assert.equal((await sync(a, remote)).action, 'push');
+  const d2 = await digest(a);
+  server.lagging = new Map([[harbour, dawn]]);
+  assert.deepEqual(await sync(b, remote).then(({ action, pushed }) => ({ action, pushed })), { action: 'fast-forward', pushed: [] }, 'a fact unchanged here since the last sync is not ahead');
+  assert.equal(await digest(b), d2, 'the snapshot’s fact replaces it');
+  assert.equal((await readSyncState(b.folder)).lastSynced?.localDigests?.web, d2, 'and is what this Mac holds from now on');
+  // Once the laptop sees the change too, it has nothing to add.
+  server.lagging = undefined;
+  assert.deepEqual(await sync(b, remote).then(({ action, pushed }) => ({ action, pushed })), { action: 'in-sync', pushed: [] });
+  assert.equal(await digest(b), d2);
+
+  // A third version, which the laptop again sees late: its fact of the second is merely older, and loses.
+  server.assets.set(harbour, { ...dawn, revision: 'r3', content: 'c3', color: '#114422', title: 'Harbour at night' });
+  assert.equal((await sync(a, remote)).action, 'push');
+  const d3 = await digest(a);
+  server.lagging = new Map([[harbour, dusk]]);
+  assert.deepEqual(await sync(b, remote).then(({ action, pushed }) => ({ action, pushed })), { action: 'fast-forward', pushed: [] }, 'the second version is not pushed back over the third');
+  assert.equal(await digest(b), d3);
+  server.lagging = undefined;
+  assert.equal((await sync(a, remote)).action, 'in-sync');
+  assert.equal((await sync(b, remote)).action, 'in-sync');
+  assert.equal((await tips(remote, a)).length, 1);
+  assert.equal(await digest(a), d3);
 });
 
 const conflictCopies = async (mac: Mac) => (await readdir(mac.base)).filter((name) => name.includes('(Conflict '));

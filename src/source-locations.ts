@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import type { PhotoIndex, ProjectFiles } from './project';
 import type { ProvidedMetadata } from './asset-facts';
-import { isFileLocator, locatorName, locatorOf, readableFileName, readLocator } from './source-locator';
-import type { Locator } from './source-locator';
+import { isFileLocator, locatorName, locatorOf, locatorReach, readableFileName, readLocator } from './source-locator';
+import type { Locator, Reach } from './source-locator';
 
 // Like the objects of project.json: unknown keys survive a load and save (ADR 0010), but the type strips them.
 const looseObject = <S extends z.ZodRawShape>(shape: S) => z.looseObject(shape) as unknown as z.ZodObject<S, z.core.$strip>;
@@ -67,6 +67,11 @@ export const fileSourceOf = (source: SourceEntry): FileSource | undefined => {
 };
 /** Whose storage a source is in: `package` for the book's own, `linked` for a file elsewhere, or a provider. */
 export const sourceProvider = (source: SourceEntry) => source.kind === 'photo' ? source.locator.provider : source.linked ? 'linked' : 'package';
+/**
+ * How far a source reaches (ADR 0012): `book` for what the package holds, anything else for what Copy into Book can
+ * take into it. A photo's is its locator kind's; a text or a file is in the book or a linked file on this Mac.
+ */
+export const sourceReach = (source: SourceEntry): Reach => source.kind === 'photo' ? locatorReach(source.locator) : source.linked ? 'mac' : 'book';
 /** The folder a file source is in, for display; undefined for a photo that is not a file. */
 export const sourceFolderName = (source: SourceEntry) => sourceFile(source)?.path.split(/[\\/]/).slice(-2, -1)[0];
 /**

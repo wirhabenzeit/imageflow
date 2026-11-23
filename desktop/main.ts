@@ -21,7 +21,7 @@ async function sourceOriginal(folder: string, entry: SourceEntry) {
   if (!file) throw new Error(entry.name + ' is not a file on this Mac.');
   return originalPath(folder, file);
 }
-import { fileSourceOf, sourceEntries, sourceProvider } from '../src/source-locations';
+import { fileSourceOf, sourceEntries, sourceProvider, sourceReach } from '../src/source-locations';
 import type { SourceEntry } from '../src/source-locations';
 import { assetPageLabels, assetUsage, usageLabel } from '../src/asset-usage';
 import { importFeedback } from '../src/import-feedback';
@@ -330,7 +330,7 @@ function sampleFolder(name: string) {
  * unavailable the copy fails anyway, so it does not ask.
  */
 async function confirmCopy(owner: BrowserWindow, document: DocumentSession, entries: SourceEntry[]) {
-  const copied = entries.filter((entry) => sourceProvider(entry) !== 'package');
+  const copied = entries.filter((entry) => sourceReach(entry) !== 'book');
   if (!copied.length || copied.some(({ key }) => document.book.sources?.[key] && document.book.sources[key].state !== 'available')) return true;
   const lightroom = copied.filter((entry) => sourceProvider(entry) === 'lightroom').length;
   const files = copied.length - lightroom;
@@ -2020,7 +2020,7 @@ void app.whenReady().then(async () => {
       // A linked file, or a photo without a file; one in the package is in the book already.
       if (request.action === 'copy') {
         if (!await confirmCopy(owner, document, chosen)) return { summary: document.summary };
-        next = await collect(chosen.filter((entry) => sourceProvider(entry) !== 'package').map(({ key }) => key)); message = unproducedMessage();
+        next = await collect(chosen.filter((entry) => sourceReach(entry) !== 'book').map(({ key }) => key)); message = unproducedMessage();
       }
       else if (request.action === 'locate' || request.action === 'replace') {
         // Locate is offered where the photo's provider offers it (`SourceProvider.repairs`); Replace is always a file.
@@ -2050,7 +2050,7 @@ void app.whenReady().then(async () => {
     if (includeAssets === undefined) {
       const answer = await dialog.showMessageBox(document.window, { type: 'question', message: 'Duplicate this book?',
         buttons: ['Duplicate', 'Cancel'], defaultId: 0, cancelId: 1, checkboxLabel: 'Include all files', checkboxChecked: true,
-        detail: sourceEntries(document.book).some((entry) => sourceProvider(entry) !== 'package') ? 'Unchecked: linked files keep their full paths, and photos from other sources stay linked to them.' : undefined });
+        detail: sourceEntries(document.book).some((entry) => sourceReach(entry) !== 'book') ? 'Unchecked: linked files keep their full paths, and photos from other sources stay linked to them.' : undefined });
       if (answer.response !== 0) return null;
       includeAssets = answer.checkboxChecked;
     }
