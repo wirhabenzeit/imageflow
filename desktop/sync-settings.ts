@@ -12,21 +12,24 @@ import type { Result, SyncBackendState, SyncConnectionReport, SyncCredentialsInp
 import type { AppSettings, S3SyncBackend, SyncBackend } from '../src/settings';
 
 /**
- * Sync through an S3-compatible bucket ships (#283). iCloud keeps a flag of its own until the checks #292 still owes are
- * done: Settings → Sync lists it, and a setting that names it syncs, only when ImageFlow starts with
- * `IMAGEFLOW_SYNC_ICLOUD=1` (`IMAGEFLOW_SYNC_ICLOUD=1 /Applications/ImageFlow.app/Contents/MacOS/ImageFlow`).
+ * Sync through an S3-compatible bucket and through iCloud ship (#283, #292). iCloud needs a build entitled to it (a
+ * release signed with the provisioning profile, `docs/signing.md`): the app says once at startup whether this build is
+ * (`setICloudEntitled`, from the CloudKit addon's status), and until it does, or in a build that is not, iCloud is
+ * neither offered nor used.
  */
-export const icloudSyncFlag = () => process.env.IMAGEFLOW_SYNC_ICLOUD === '1';
+let icloudEntitled = false;
+export const setICloudEntitled = (entitled: boolean) => { icloudEntitled = entitled; };
 /**
  * The folder backend is for tests and development (ADR 0012): Settings → Sync offers it, and its request answers, only
  * when ImageFlow starts with `IMAGEFLOW_SYNC_FOLDER=1`. A settings file that names a folder is used as it is.
  */
 export const folderSyncFlag = () => process.env.IMAGEFLOW_SYNC_FOLDER === '1';
 /**
- * The backend this Mac syncs through, as this build may use it: one that names iCloud without its flag leaves sync off,
- * neither failing nor syncing; the setting stays for a build that has it.
+ * The backend this Mac syncs through, as this build may use it: one that names iCloud in a build without the
+ * entitlements (a development or ad-hoc build) leaves sync off, neither failing nor syncing; the setting stays for a
+ * build that has them.
  */
-export function usableBackend(backend: SyncBackend | undefined, icloud = icloudSyncFlag()) {
+export function usableBackend(backend: SyncBackend | undefined, icloud = icloudEntitled) {
   return backend?.kind === 'icloud' && !icloud ? undefined : backend;
 }
 
@@ -102,15 +105,14 @@ export function registerSyncSettings({ ipcMain, owner, settings, credentials, cl
   const state = async (): Promise<SyncBackendState> => {
     const backend = settings.value.sync;
     const stored = backend?.kind === 's3' ? credentialHint(await credentials().read(credentialScope(backend)).catch(() => undefined)) : undefined;
-    // A setting that names iCloud in a build without it leaves sync off, and the pane says so.
+    // A setting that names iCloud in a build without the entitlements leaves sync off, and the pane says so.
     const unusable = !!backend && !usableBackend(backend);
     return { available: true, ...(stored ? { credentials: stored } : {}), ...(settings.value.syncBooksUnchosen && !unusable ? { booksUnchosen: true as const } : {}),
-      ...(unusable ? { unusable: 'iCloud sync is not available in this version of ImageFlow, so sync is off on this Mac.' } : {}),
+      ...(unusable ? { unusable: 'iCloud sync is not available in this build of ImageFlow, so sync is off on this Mac.' } : {}),
       ...(folderSyncFlag() ? { folder: true as const } : {}), ...await icloud() };
   };
-  // iCloud is offered only with its flag, by a build entitled to it; whether the account can use it now is asked each time.
+  // iCloud is offered only by a build entitled to it; whether the account can use it now is asked each time.
   const icloud = async (): Promise<Pick<SyncBackendState, 'icloud'>> => {
-    if (!icloudSyncFlag()) return {};
     const status = await cloudKit?.().catch(() => undefined);
     if (!status?.entitled) return {};
     const availability = cloudKitAvailability(status);
