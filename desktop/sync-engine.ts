@@ -717,15 +717,15 @@ async function fetchOriginals(root: string, remote: SyncRemote, ids?: readonly s
 }
 
 /**
- * Open from Sync Folder (#251): makes a new local book at `destination` from a commit on the remote, for a Mac that
+ * Open Synced Book (#251): makes a new local book at `destination` from a commit on the remote, for a Mac that
  * has no copy of it yet. Content, the manifests (linked sources unlocated, as on any Mac that has not located them)
  * and the snapshot's facts are written into a staging folder and checked against the commit's revision before the
  * book appears under its name; proxies go to the proxy store, and owned originals stay on the remote until downloaded.
- * The new book records the commit as synced and, with `syncFolder`, syncs through that folder.
+ * The new book records the commit as synced and, with `remoteId`, syncs on this Mac with that remote.
  *
- * It is not trusted (ADR 0006): its template comes from an unauthenticated folder, so it asks before reaching any site.
+ * It is not trusted (ADR 0006): its template comes from an unauthenticated remote, so it asks before reaching any site.
  */
-export async function cloneFromRemote({ remote, tip, destination, syncFolder }: { remote: SyncRemote; tip: CommitHeader; destination: string; syncFolder?: string }) {
+export async function cloneFromRemote({ remote, tip, destination, remoteId }: { remote: SyncRemote; tip: CommitHeader; destination: string; remoteId?: string }) {
   const folder = join(await realpath(dirname(destination)), basename(documentPath(destination)));
   const { blob } = await fetchStateBytes(remote, tip.bookId, tip.stateDigest, tip);
   const staging = join(dirname(folder), '.imageflow-create-' + randomUUID());
@@ -764,7 +764,7 @@ export async function cloneFromRemote({ remote, tip, destination, syncFolder }: 
     await rm(staging, { recursive: true, force: true });
     if (reserved) await rmdir(folder).catch(() => {});
   }
-  await updateSyncState(folder, () => ({ version: 1, ...(syncFolder ? { folder: syncFolder } : {}),
+  await updateSyncState(folder, () => ({ version: 1, ...(remoteId ? { remoteId, enabled: true } : {}),
     lastSynced: { commitId: tip.commitId, bookId: tip.bookId, bookStateRevision: tip.bookStateRevision, stateDigest: tip.stateDigest, photoDigests: digestsOf(facts), localDigests: {} } }));
   return folder;
 }

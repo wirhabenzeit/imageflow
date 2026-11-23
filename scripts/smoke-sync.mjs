@@ -1,7 +1,8 @@
-// Manual sync through a sync folder (#251), end to end in the app: Sync with Folder…, Open from Sync Folder (an
-// untrusted copy on "another Mac"), a normal sync that reloads the editor, a sync that fails after its pull and still
-// reloads it, the tip chooser with five tips including Cancel, and the network question after a pulled template
-// change in a trusted book. Both "Macs" are windows of one app, each with its own book and the same sync folder.
+// Manual sync through the Mac's sync backend (#251, #280), end to end in the app with the development flag: the folder
+// backend chosen in Settings, Start Syncing, Open Synced Book (an untrusted copy on "another Mac"), a normal sync that
+// reloads the editor, a sync that fails after its pull and still reloads it, the tip chooser with five tips including
+// Cancel, the network question after a pulled template change in a trusted book, and a changed backend, which asks
+// once before a synced book starts a new history there. Both "Macs" are windows of one app with one backend.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -18,14 +19,17 @@ const work = await realpath(await mkdtemp(join(root, '.build/sync-smoke-')));
 const desktopBook = join(work, 'Desktop', 'Sync Book.imageflow');
 const laptopBook = join(work, 'Laptop', 'Sync Book.imageflow');
 const folder = join(work, 'Sync Folder');
+const otherFolder = join(work, 'Other Sync Folder');
 await mkdir(join(work, 'Desktop'));
 await mkdir(join(work, 'Laptop'));
 await mkdir(folder);
+await mkdir(otherFolder);
 const trustQuestion = 'Trust this book’s template?';
 const tipQuestion = 'This book was changed on two Macs.';
+const elsewhereQuestion = 'This book last synced somewhere else.';
 
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
-  env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
+  env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1', IMAGEFLOW_SYNC: '1' } });
 const stderr = [];
 app.process().stderr.on('data', (bytes) => stderr.push(String(bytes)));
 const windowId = (page) => app.browserWindow(page).then((window) => window.evaluate((window) => window.id));
@@ -62,6 +66,8 @@ async function waitForPrompt(match, timeout = 30000) {
 }
 const answer = (message, response) => app.evaluate((_, { message, response }) => { globalThis.syncAnswers[message] = response; }, { message, response });
 const choosePaths = (paths) => app.evaluate((_, paths) => { globalThis.syncPaths = paths; }, paths);
+const menuEnabled = (id) => app.evaluate(({ Menu }, id) => Menu.getApplicationMenu().getMenuItemById(id)?.enabled, id);
+const timesAsked = async (message, window) => (await prompts()).filter((prompt) => prompt.message === message && prompt.window === window).length;
 const snapshots = async (bookId) => join(folder, 'books', bookId, 'snapshots');
 async function tips(bookId) {
   const directory = await snapshots(bookId);
@@ -95,25 +101,34 @@ try {
   const desktopWindow = await windowId(desktop);
   await waitForPrompt((prompt) => prompt.message === trustQuestion && prompt.window === desktopWindow);
   assert.equal(await desktop.locator('.sync-status').count(), 0, 'a book that does not sync shows no status');
+  assert.equal(await menuEnabled('sync-setup'), true, 'without a backend, File → Sync offers Set Up Sync…');
+  assert.equal(await menuEnabled('sync-start'), false);
 
-  // Sync with Folder… links the book and pushes it.
+  // The backend is the Mac's: one folder, chosen in Settings. Then Start Syncing pushes the book, with no question.
   await choosePaths({ open: folder });
-  assert.deepEqual(await sync(desktop, 'link'), { value: undefined });
-  // An empty folder might still be downloading another Mac's copy: starting the book's history there is confirmed.
-  await waitForPrompt((prompt) => prompt.message.startsWith('Start syncing') && prompt.window === desktopWindow);
+  const configured = await desktop.evaluate(() => window.imageflow.chooseSyncFolder());
+  assert.deepEqual(configured.value?.sync, { kind: 'folder', path: folder });
+  for (let attempt = 0; !await menuEnabled('sync-start'); attempt++) {
+    assert.ok(attempt < 400, 'a configured backend offers Start Syncing');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal(await menuEnabled('sync-setup'), false);
+  assert.deepEqual(await sync(desktop, 'start'), { value: undefined });
   await statusIs(desktop, 'in-sync');
+  assert.equal(await desktop.locator('.sync-status').getAttribute('title').then((title) => title.includes('Sync Folder')), true, 'the status names the backend');
   const bookId = (await current(desktop)).project.bookId;
   assert.ok(bookId, 'the first sync gave the book its lineage ID');
   assert.equal((await tips(bookId)).length, 1);
 
-  // Open from Sync Folder on the "laptop": an untrusted copy, which asks before reaching the template's sites.
+  // Open Synced Book on the "laptop": it lists the configured backend, and makes an untrusted copy, which asks before
+  // reaching the template's sites.
   await answer(trustQuestion, 1);
-  await choosePaths({ open: folder, save: laptopBook });
+  await choosePaths({ open: '/nonexistent', save: laptopBook });
   const beforeLaptop = new Set(app.windows());
   await app.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('open-sync-folder').click());
   let laptop;
   for (let attempt = 0; !(laptop = app.windows().find((page) => !beforeLaptop.has(page) && page.url() === 'imageflow://editor/')); attempt++) {
-    assert.ok(attempt < 400, 'Open from Sync Folder opens the new book');
+    assert.ok(attempt < 400, 'Open Synced Book opens the new book');
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   await ready(laptop);
@@ -121,9 +136,9 @@ try {
   await waitForPrompt((prompt) => prompt.message === trustQuestion && prompt.window === laptopWindow);
   assert.equal((await current(laptop)).project.bookId, bookId);
   await statusIs(laptop, 'in-sync');
-  // Owned originals download in the background after Open from Sync Folder (the default), and the book then shows them.
+  // Owned originals download in the background after Open Synced Book (the default), and the book then shows them.
   for (let attempt = 0; (await current(laptop)).sources['photo:shore'].state !== 'available'; attempt++) {
-    assert.ok(attempt < 400, 'owned originals download after Open from Sync Folder');
+    assert.ok(attempt < 400, 'owned originals download after Open Synced Book');
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   await stat(join(laptopBook, (await current(laptop)).photoIndex.shore.path));
@@ -188,6 +203,34 @@ try {
   await statusIs(desktop, 'in-sync');
   assert.equal(await syncState(desktop), 'in-sync');
   assert.deepEqual((await readdir(join(work, 'Desktop'))).filter((name) => name.includes('(Conflict')), [], 'this Mac’s version was on the remote: no copy');
-  console.log('Sync with Folder, Open from Sync Folder, reloads after sync and after a failed push, the five-tip chooser and the pulled-template network question passed.');
+
+  // Another backend: each synced book asks once whether it starts a new history there, and pushes nothing by itself.
+  await answer(elsewhereQuestion, 1);
+  await choosePaths({ open: otherFolder });
+  assert.deepEqual((await desktop.evaluate(() => window.imageflow.chooseSyncFolder())).value?.sync, { kind: 'folder', path: otherFolder });
+  await waitForPrompt((prompt) => prompt.message === elsewhereQuestion && prompt.window === desktopWindow);
+  await waitForPrompt((prompt) => prompt.message === elsewhereQuestion && prompt.window === laptopWindow);
+  await waitForPage(desktop, () => !document.querySelector('.sync-status'));
+  for (let attempt = 0; !await menuEnabled('sync-start'); attempt++) {
+    assert.ok(attempt < 400, 'a declined book offers Start Syncing');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.deepEqual((await readdir(otherFolder)).filter((name) => name === 'books'), [], 'nothing was pushed');
+  // Declining is remembered: looking at the backend again (turned off and on) does not ask again.
+  assert.deepEqual((await desktop.evaluate(() => window.imageflow.updateSettings({ sync: undefined }))).value?.sync, undefined);
+  await choosePaths({ open: otherFolder });
+  await desktop.evaluate(() => window.imageflow.chooseSyncFolder());
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  assert.equal(await timesAsked(elsewhereQuestion, desktopWindow), 1, 'the desktop asked once');
+  assert.equal(await timesAsked(elsewhereQuestion, laptopWindow), 1, 'the laptop asked once');
+  // Start Syncing asks again, and accepting starts the book's history on the other backend.
+  await answer(elsewhereQuestion, 0);
+  assert.deepEqual(await sync(desktop, 'start'), { value: undefined });
+  assert.equal(await timesAsked(elsewhereQuestion, desktopWindow), 2);
+  await statusIs(desktop, 'in-sync');
+  const otherTips = await readdir(join(otherFolder, 'books', bookId, 'snapshots'));
+  assert.equal(otherTips.filter((name) => name.endsWith('.json')).length, 1, 'a new history on the other backend');
+  assert.ok(JSON.parse(await readFile(join(otherFolder, 'remote.json'), 'utf8')).remoteId, 'the backend has its identity');
+  console.log('The folder backend in Settings, Start Syncing, Open Synced Book, reloads after sync and after a failed push, the five-tip chooser, the pulled-template network question and a changed backend passed.');
 } catch (error) { console.error(stderr.join('\n')); throw error; }
 finally { await closeApp(app); await rm(work, { recursive: true, force: true }); }

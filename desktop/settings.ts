@@ -1,12 +1,23 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, isAbsolute } from 'node:path';
 import { isUpdateChannel } from '../src/update-feed';
 import { defaultSettings } from '../src/settings';
-import type { AppSettings } from '../src/settings';
+import type { AppSettings, SyncBackend } from '../src/settings';
+
+/** A sync backend as stored, checked per kind (ADR 0012). */
+function syncBackend(value: unknown): SyncBackend {
+  const backend = value as Partial<SyncBackend> | null;
+  switch (backend && typeof backend === 'object' ? backend.kind : undefined) {
+    case 'folder':
+      if (Object.keys(backend!).length === 2 && typeof backend!.path === 'string' && isAbsolute(backend!.path) && backend!.path.length <= 4096) return { kind: 'folder', path: backend!.path };
+      break;
+  }
+  throw new Error('Invalid sync setting.');
+}
 
 function applyPatch(current: AppSettings, patch: unknown): AppSettings {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch) ||
-      Object.keys(patch).some((key) => key !== 'appearance' && key !== 'newBookSize' && key !== 'automaticUpdates' && key !== 'updateChannel' && key !== 'agentAccess' && key !== 'keepOriginals')) throw new Error('Invalid app settings.');
+      Object.keys(patch).some((key) => key !== 'appearance' && key !== 'newBookSize' && key !== 'automaticUpdates' && key !== 'updateChannel' && key !== 'agentAccess' && key !== 'keepOriginals' && key !== 'sync')) throw new Error('Invalid app settings.');
   const appearance = 'appearance' in patch ? patch.appearance : current.appearance;
   if (appearance !== 'light' && appearance !== 'dark' && appearance !== 'system') throw new Error('Invalid appearance setting.');
   const newBookSize = 'newBookSize' in patch ? patch.newBookSize as { width?: unknown; height?: unknown } : current.newBookSize;
@@ -20,8 +31,9 @@ function applyPatch(current: AppSettings, patch: unknown): AppSettings {
   if (agentAccess !== undefined && typeof agentAccess !== 'boolean') throw new Error('Invalid agent access setting.');
   const keepOriginals = 'keepOriginals' in patch ? patch.keepOriginals : current.keepOriginals;
   if (keepOriginals !== undefined && typeof keepOriginals !== 'boolean') throw new Error('Invalid keep originals setting.');
+  const sync = 'sync' in patch ? patch.sync : current.sync;
   return { appearance, automaticUpdates, updateChannel, ...(newBookSize ? { newBookSize: newBookSize as {width:number;height:number} } : {}),
-    ...(agentAccess ? { agentAccess: true } : {}), ...(keepOriginals === false ? { keepOriginals: false } : {}) };
+    ...(agentAccess ? { agentAccess: true } : {}), ...(keepOriginals === false ? { keepOriginals: false } : {}), ...(sync !== undefined && sync !== null ? { sync: syncBackend(sync) } : {}) };
 }
 
 export class SettingsStore {

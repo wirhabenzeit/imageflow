@@ -11,7 +11,7 @@ import { configureSourceAccess } from '../desktop/source-access';
 import { configureRenditionCache } from '../desktop/rendition-cache';
 import { configureProxyStore } from '../desktop/proxy-store';
 import { AssetFacts, readAssetFacts } from '../desktop/asset-facts';
-import { acquireProjectLock, readSaveLedger } from '../desktop/persistence';
+import { acquireProjectLock, bookStateFolder, readSaveLedger } from '../desktop/persistence';
 import { importIntoProject, loadProject, updateProject } from '../desktop/project';
 import type { OpenProject } from '../desktop/project';
 import { collectSources, relinkFolder } from '../desktop/source-actions';
@@ -26,7 +26,9 @@ import type { SyncStore } from '../desktop/sync-store';
 import { storeConformance } from './sync-store-conformance';
 import { readCommitHeaderV1 } from './sync-v1-reader';
 import { bookTrusted } from '../desktop/source-access';
-import { readSyncState, takeAbandonedAtOpen, updateSyncState } from '../desktop/sync-pull';
+import { readSyncState, SyncElsewhereError, takeAbandonedAtOpen, updateSyncState } from '../desktop/sync-pull';
+import { SyncService } from '../desktop/sync-service';
+import type { SyncBackend } from '../src/settings';
 import { blobKeyPattern, commitKey, contentBlobKey, coverBlobKey, decideSync, readBookTombstone, readCommitHeader, readRemoteIdentity, NewerSyncFormatError, deriveTips, isUnlocatedPath, originalBlobKey, portableManifests,
   projectManifests, proxyBlobKey, stateBlobSchema, tombstoneKey } from '../src/sync-snapshot';
 import type { CommitHeader, StateBlob } from '../src/sync-snapshot';
@@ -1232,12 +1234,13 @@ test('a sync folder: push from the desktop, Open from Sync Folder on the laptop,
   assert.equal(others.length, 0);
   assert.equal(listed.bookId, id);
   assert.equal(listed.title, (await manifests(a)).project.title);
-  const created = await cloneFromRemote({ remote, tip: listed.tips[0], destination: join(b.base, 'Book'), syncFolder: remote.store.root });
+  const created = await cloneFromRemote({ remote, tip: listed.tips[0], destination: join(b.base, 'Book'), remoteId: await remote.remoteId() });
   assert.equal(created, b.folder, 'the .imageflow extension is added');
   assert.equal(await bookTrusted(b.folder), false, 'a template from a sync folder is not trusted');
   assert.equal(await captureBookStateRevision(b.folder), listed.tips[0].bookStateRevision);
   const record = await readSyncState(b.folder);
-  assert.equal(record.folder, remote.store.root);
+  assert.equal(record.remoteId, await remote.remoteId());
+  assert.equal(record.enabled, true);
   assert.equal(record.lastSynced?.commitId, listed.tips[0].commitId);
   assert.deepEqual((await readdir(b.base)).filter((name) => name.startsWith('.imageflow-create')), []);
   const shoreDigest = sha(await readFile(join(a.folder, 'photos/shore.jpg')));
@@ -1445,12 +1448,12 @@ each('after an edit the status follows the local revision against what the remot
 test('changes to a sync record are serialized, so none is lost', async (t) => {
   const { a } = await world(t);
   await Promise.all([
-    updateSyncState(a.folder, (state) => ({ ...state, folder: '/Sync' })),
+    updateSyncState(a.folder, (state) => ({ ...state, enabled: false })),
     updateSyncState(a.folder, (state) => ({ ...state, networkReview: true })),
     ...Array.from({ length: 8 }, () => updateSyncState(a.folder, (state) => state)),
   ]);
   const state = await readSyncState(a.folder);
-  assert.equal(state.folder, '/Sync');
+  assert.equal(state.enabled, false);
   assert.equal(state.networkReview, true);
 });
 
@@ -1748,4 +1751,136 @@ each('a sync record names the book its commit belongs to, and originals are foun
   await writeBookId(id);
   assert.deepEqual(await pendingOriginals(b.folder, remote), pending);
   await on(b, async (book) => assert.deepEqual(await downloadOriginals({ remote, book, ids: ['shore'] }), ['shore']));
+});
+
+// The sync backend is a setting of the Mac (ADR 0012, #280): the service builds the remote from it, and a book records
+// only whether it syncs here and which remote it last synced with.
+async function folderBackend(root: string, name: string): Promise<SyncBackend> {
+  const path = join(root, name);
+  await mkdir(path, { recursive: true });
+  return { kind: 'folder', path };
+}
+async function syncPath(mac: Mac) {
+  const folder = join((await bookStateFolder(mac.folder, true))!, 'sync');
+  await mkdir(folder, { recursive: true, mode: 0o700 });
+  return join(folder, 'sync.json');
+}
+const syncWith = (mac: Mac, service: SyncService) => on(mac, (book) => service.sync({ book }));
+
+test('two books sync through the one configured remote, without any setup of their own', async (t) => {
+  const { root, a, b } = await world(t);
+  const backend = await folderBackend(root, 'Sync');
+  const service = new SyncService(() => backend);
+  const other: Mac = { ...a, folder: join(a.base, 'Other.imageflow') };
+  await copySample(resolve('sample/starter'), other.folder);
+  assert.equal((await service.standing(a.folder)).sync, 'off');
+  assert.equal((await syncWith(a, service)).action, 'initial-push');
+  assert.equal((await syncWith(other, service)).action, 'initial-push');
+  const { remote, remoteId } = await service.connect();
+  assert.deepEqual((await remoteBooks(remote)).map((book) => book.bookId).sort(), [await bookId(a), await bookId(other)].sort());
+  for (const mac of [a, other]) {
+    assert.equal((await service.standing(mac.folder)).sync, 'syncing');
+    // The record holds no location: only the remote's identity, that the book syncs, and what it last synced.
+    const record = JSON.parse(await readFile(await syncPath(mac), 'utf8'));
+    assert.deepEqual(Object.keys(record).sort(), ['enabled', 'lastSynced', 'remoteId', 'version']);
+    assert.equal(record.remoteId, remoteId);
+    assert.equal(JSON.stringify(record).includes(backend.path), false);
+  }
+  // Another Mac with the same backend opens the book from it and syncs it with nothing to set up per book.
+  await use(b);
+  const laptop = new SyncService(() => ({ ...backend }));
+  const connection = await laptop.connect();
+  assert.equal(connection.remoteId, remoteId);
+  const id = await bookId(a);
+  const listed = (await remoteBooks(connection.remote)).find((book) => book.bookId === id);
+  assert.ok(listed);
+  await cloneFromRemote({ remote: connection.remote, tip: listed.tips[0], destination: b.folder, remoteId: connection.remoteId });
+  assert.equal((await laptop.standing(b.folder)).sync, 'syncing');
+  await edit(b, caption('shore', 'From the laptop'));
+  assert.equal((await syncWith(b, laptop)).action, 'push');
+  assert.equal((await syncWith(a, service)).action, 'fast-forward');
+  assert.equal((await manifests(a)).photos.shore.caption, 'From the laptop');
+});
+
+test('two Macs that initialize an empty remote at once adopt the identity that won, also where a store cannot tell', async (t) => {
+  const { root, a, b } = await world(t);
+  const backend = await folderBackend(root, 'Sync');
+  const [desktop, laptop] = [new SyncService(() => backend), new SyncService(() => backend)];
+  const [first, second] = await Promise.all([desktop.connect(), laptop.connect()]);
+  assert.equal(first.remoteId, second.remoteId);
+  await copyBook(a, b);
+  await Promise.all([syncWith(a, desktop), syncWith(b, laptop)].map((step) => step.catch(() => undefined)));
+  assert.equal((await readSyncState(a.folder)).remoteId, first.remoteId);
+  assert.equal((await readSyncState(b.folder)).remoteId, first.remoteId);
+  // A store that falls back to looking, then putting, may say an object was new when another Mac's write won: the
+  // identity is read back, never taken from what this Mac wrote.
+  class Unsure extends MemoryStore {
+    override async putIfAbsent(...args: Parameters<MemoryStore['putIfAbsent']>) { await super.putIfAbsent(...args); return { existed: false }; }
+  }
+  const store = new Unsure();
+  const ids = await Promise.all(Array.from({ length: 4 }, () => new StoreRemote(store).remoteId()));
+  assert.equal(new Set(ids).size, 1);
+  assert.equal(readRemoteIdentity(JSON.parse(Buffer.from((await store.get('remote.json'))!).toString('utf8')))?.remoteId, ids[0]);
+});
+
+test('changing the backend: a synced book asks before it starts a new history, pushes nothing by itself, and declining stops asking', async (t) => {
+  const { root, a } = await world(t);
+  const first = await folderBackend(root, 'First');
+  const second = await folderBackend(root, 'Second');
+  let backend = first;
+  const service = new SyncService(() => backend);
+  await syncWith(a, service);
+  const synced = (await readSyncState(a.folder)).lastSynced;
+  backend = second;
+  const { remote } = await service.connect();
+  assert.equal((await service.standing(a.folder)).sync, 'elsewhere', 'the book last synced with another remote');
+  await assert.rejects(syncWith(a, service), SyncElsewhereError);
+  assert.deepEqual(await remote.listBooks(), [], 'nothing was pushed');
+  assert.deepEqual((await readSyncState(a.folder)).lastSynced, synced, 'and nothing changed');
+  // Declining stops syncing on this Mac: the book no longer counts as one to ask about.
+  await service.stop(a.folder);
+  assert.equal((await service.standing(a.folder)).sync, 'stopped');
+  await assert.rejects(syncWith(a, service), SyncElsewhereError, 'Start Syncing asks again');
+  assert.deepEqual(await remote.listBooks(), []);
+  // Accepting starts a new history here: the record names this remote and forgets what it synced with the other.
+  await on(a, () => service.start(a.folder, { newHistory: true }));
+  const record = await readSyncState(a.folder);
+  assert.equal(record.remoteId, (await service.connect()).remoteId);
+  assert.equal(record.enabled, true);
+  assert.equal(record.lastSynced, undefined);
+  assert.equal((await syncWith(a, service)).action, 'initial-push');
+  assert.deepEqual((await remote.listBooks()).map((book) => book.bookId), [await bookId(a)]);
+  // Back on the first backend, the book has moved on: it asks again rather than syncing with a record of the other.
+  backend = first;
+  assert.equal((await service.standing(a.folder)).sync, 'elsewhere');
+  // Stopped on its own remote, it starts again with the history it had.
+  backend = second;
+  await service.stop(a.folder);
+  await on(a, () => service.start(a.folder));
+  assert.equal((await syncWith(a, service)).action, 'in-sync');
+});
+
+test('an old sync record that names a folder loads, reads as not syncing, and a book stuck on the old layout starts again', async (t) => {
+  const { root, a } = await world(t);
+  const backend = await folderBackend(root, 'Sync');
+  const service = new SyncService(() => backend);
+  const { remote } = await service.connect();
+  // A record from before ADR 0012 with no last sync: it reads without its folder, and the book does not sync.
+  await writeFile(await syncPath(a), JSON.stringify({ version: 1, folder: backend.path, networkReview: true }) + '\n');
+  assert.deepEqual(await readSyncState(a.folder), { version: 1, networkReview: true });
+  assert.equal((await service.standing(a.folder)).sync, 'off');
+  // A book that synced on the layout before #288: the commit it last synced is no commit on this remote, so it showed
+  // "remote still syncing" for good. It reads as synced somewhere else, and a new history brings it back.
+  await syncWith(a, service);
+  const { lastSynced } = await readSyncState(a.folder);
+  await writeFile(await syncPath(a), JSON.stringify({ version: 1, folder: backend.path, lastSynced: { ...lastSynced, commitId: crypto.randomUUID() } }) + '\n');
+  assert.equal((await readSyncState(a.folder)).lastSynced?.bookStateRevision, lastSynced!.bookStateRevision);
+  assert.equal((await describeSync(a.folder, remote)).state, 'remote-syncing', 'the record alone keeps it stuck');
+  assert.equal((await service.standing(a.folder)).sync, 'elsewhere');
+  await assert.rejects(syncWith(a, service), SyncElsewhereError);
+  await on(a, () => service.start(a.folder, { newHistory: true }));
+  assert.equal((await syncWith(a, service)).action, 'adopt', 'the version on the remote is this book: no copy');
+  assert.equal((await describeSync(a.folder, remote)).state, 'in-sync');
+  // Writing the record never writes a folder again.
+  assert.equal('folder' in JSON.parse(await readFile(await syncPath(a), 'utf8')), false);
 });
