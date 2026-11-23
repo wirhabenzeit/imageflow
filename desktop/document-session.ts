@@ -129,7 +129,10 @@ export function describeOutcome(outcome: SyncOutcome) {
     : 'Synced: the book is up to date.';
   const originals = outcome.originals?.pending ? ' Originals are still to be downloaded: ' + outcome.originals.pending
     : outcome.originals?.downloaded.length ? ' Downloaded ' + outcome.originals.downloaded.length + (outcome.originals.downloaded.length === 1 ? ' original.' : ' originals.') : '';
-  return text + originals;
+  // iCloud storage full: the book synced, its originals wait for room.
+  const full = outcome.notUploaded ? ' ' + outcome.notUploaded.message.replace(/\.$/, '') + ': ' + outcome.notUploaded.count +
+    (outcome.notUploaded.count === 1 ? ' original not uploaded.' : ' originals not uploaded.') : '';
+  return text + full + originals;
 }
 
 export class DocumentSession {

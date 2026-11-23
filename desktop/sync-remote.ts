@@ -5,7 +5,8 @@ import { blobKeyPattern, bookIdOfPrefix, bookPrefix, booksPrefix, bookTombstoneS
 import type { BookTombstone, CommitHeader } from '../src/sync-snapshot';
 import { entryTag } from './sync-header-cache';
 import type { CachedHeader, CommitHeaderCache } from './sync-header-cache';
-import { MemoryStore } from './sync-store';
+import type { KeyIndexCache } from './sync-key-index';
+import { ChangeTokenExpiredError, MemoryStore } from './sync-store';
 import type { PutOptions, StoreEntry, StoreSource, SyncStore, TransferOptions } from './sync-store';
 
 /** The parts of a book's prefix (ADR 0012, section 4). */
@@ -39,8 +40,12 @@ export interface SyncRemote {
    * again; a blob already there is kept. Both keys name the same blob (part, digest and extension);
    * false when the remote does not have it or its store cannot copy, and the caller then uploads the blob. */
   copyBlob(from: string, to: string): Promise<boolean>;
-  /** What a book stores, with sizes and times of last change: everything under its prefix, or one part of it. */
-  listBook(bookId: string, folder?: BookFolder): Promise<StoreEntry[]>;
+  /**
+   * What a book stores, with sizes and times of last change: everything under its prefix, or one part of it. Over a
+   * store with a change feed this comes from the key index; `full` lists the store itself, for what deletes on the
+   * strength of a listing (Clean Up).
+   */
+  listBook(bookId: string, folder?: BookFolder, options?: { full?: boolean }): Promise<StoreEntry[]>;
   /** The books on this remote, from one listing of prefixes. A deleted book is reported as such. */
   listBooks(): Promise<RemoteBook[]>;
   /** The remote's identity, a UUID written at first use. Two Macs that initialize an empty remote at once agree on it. */
@@ -97,9 +102,69 @@ const encode = (value: unknown) => new TextEncoder().encode(canonicalJson(value)
  * transport implements only `SyncStore`.
  */
 export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRemote {
-  /** `headerCache` keeps the commit headers read, per remote and book, so `listCommits` fetches only new ones. */
-  constructor(readonly store: Store, private readonly options: { headerCache?: CommitHeaderCache } = {}) {}
+  /**
+   * `headerCache` keeps the commit headers read, per remote and book, so `listCommits` fetches only new ones.
+   * `keyIndex` keeps the key index of each book over a store with a change feed, so it outlives the app.
+   */
+  constructor(readonly store: Store, private readonly options: { headerCache?: CommitHeaderCache; keyIndex?: KeyIndexCache } = {}) {}
   private identity?: string;
+  /** The key indexes read or kept up to date while this remote is used, by remote identity and book. */
+  private readonly indexes = new Map<string, { token?: string; entries: Map<string, StoreEntry> }>();
+  private readonly indexing = new Map<string, Promise<StoreEntry[]>>();
+
+  /**
+   * Every key of a book but its tombstone. Over a store with a change feed (#292): the key index, brought up to date
+   * with what changed since its token, and made again from a full listing when there is none or the store no longer
+   * accepts it. A book the store holds nothing for (its zone deleted on the server) has no keys and its index goes.
+   */
+  private async bookKeys(bookId: string): Promise<StoreEntry[]> {
+    const changes = this.store.changes?.bind(this.store);
+    if (!changes) return (await this.store.list(bookPrefix(bookId))).filter(({ key }) => key !== tombstoneKey(bookId));
+    const remoteId = await this.knownRemoteId();
+    const slot = (remoteId ?? '') + '/' + bookId;
+    // One refresh at a time per book; callers that come while it runs wait for the next one.
+    const previous = this.indexing.get(slot) ?? Promise.resolve([]);
+    const refresh = previous.catch(() => []).then(async () => {
+      let index = this.indexes.get(slot);
+      if (!index && remoteId) {
+        const kept = await this.options.keyIndex?.read(remoteId, bookId).catch(() => undefined);
+        if (kept) index = { token: kept.token, entries: new Map(Object.entries(kept.entries).map(([key, { size, lastModified }]) => [key, { key, size, lastModified: new Date(lastModified) }])) };
+      }
+      const result = await changes(bookId, index?.token).catch(async (error) => {
+        if (!(error instanceof ChangeTokenExpiredError)) throw error;
+        index = undefined;
+        return changes(bookId);
+      });
+      if (!result) {
+        this.indexes.delete(slot);
+        if (remoteId) await this.options.keyIndex?.write(remoteId, bookId, undefined).catch(() => {});
+        return [];
+      }
+      // Without a token the answer is everything: it replaces the index.
+      const entries = index?.token ? new Map(index.entries) : new Map<string, StoreEntry>();
+      for (const key of result.deleted) entries.delete(key);
+      for (const entry of result.changed) entries.set(entry.key, entry);
+      this.indexes.set(slot, { token: result.token, entries });
+      if (remoteId) {
+        await this.options.keyIndex?.write(remoteId, bookId, { token: result.token, entries: Object.fromEntries([...entries.values()].map(({ key, size, lastModified }) => [key, { size, lastModified: lastModified.getTime() }])) })
+          .catch((error) => console.warn('ImageFlow could not keep the keys it read', error));
+      }
+      return [...entries.values()].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    });
+    this.indexing.set(slot, refresh);
+    try { return await refresh; }
+    finally { if (this.indexing.get(slot) === refresh) this.indexing.delete(slot); }
+  }
+  /** The key index of a book as last read, without asking the store; undefined where there is none. */
+  private indexOf(key: string) {
+    const bookId = key.split('/')[1];
+    return this.indexes.get((this.identity ?? '') + '/' + bookId);
+  }
+  /** Notes an object this remote stored, so a check later in the same sync needs no request. */
+  private noteStored(key: string, size: number) {
+    const index = this.indexOf(key);
+    if (index && !index.entries.has(key)) index.entries.set(key, { key, size, lastModified: new Date() });
+  }
 
   /** A small JSON object as stored, or undefined for one that is missing or not whole JSON. */
   private async json(key: string): Promise<unknown> {
@@ -110,8 +175,9 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
 
   async putCommit(header: CommitHeader) {
     const parsed = commitHeaderSchema.parse(header);
-    const { existed } = await this.store.putIfAbsent(commitKey(parsed.bookId, parsed.commitId), encode(parsed));
-    if (!existed) return;
+    const bytes = encode(parsed);
+    const { existed } = await this.store.putIfAbsent(commitKey(parsed.bookId, parsed.commitId), bytes);
+    if (!existed) { this.noteStored(commitKey(parsed.bookId, parsed.commitId), bytes.length); return; }
     const existing = await this.getCommit(parsed.bookId, parsed.commitId);
     if (existing === undefined || canonicalJson(existing) !== canonicalJson(parsed)) throw new Error('A different commit with this ID exists.');
   }
@@ -121,7 +187,9 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
   async listCommits(bookId: string) {
     // Anything a sync service put beside the headers (its conflict copy `<id> (1).json` holds an immutable header too)
     // is read like one; the engine decides what it is.
-    const listed = (await this.store.list(snapshotsPrefix(bookId))).filter(({ key }) => key.endsWith('.json'));
+    const prefix = snapshotsPrefix(bookId);
+    const listed = (this.store.changes ? (await this.bookKeys(bookId)).filter(({ key }) => key.startsWith(prefix)) : await this.store.list(prefix))
+      .filter(({ key }) => key.endsWith('.json'));
     const cache = this.options.headerCache;
     // Cached by the remote's identity; a remote without one yet is read whole, and none is written by reading.
     const remoteId = cache && listed.length ? await this.knownRemoteId() : undefined;
@@ -142,14 +210,25 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     }
     return values.filter((value) => value !== undefined);
   }
+  /** The identity this remote last read, without asking the store; undefined before the first read. */
+  async knownIdentity() { return this.identity; }
   /** The remote's identity if it has one, without writing it. */
   private async knownRemoteId() {
     this.identity ??= readRemoteIdentity(await this.json(remoteIdentityKey))?.remoteId;
     return this.identity;
   }
 
-  async hasBlob(key: string) { return !!await this.store.head(requireBlobKey(key)); }
-  async putBlob(key: string, source: StoreSource, options?: PutOptions) { await this.store.putIfAbsent(requireBlobKey(key), source, options); }
+  async hasBlob(key: string) {
+    // Blobs are immutable and only Clean Up or deleting the book removes them: one the key index has is there. One it
+    // lacks may have arrived since, so the store is asked.
+    if (this.indexOf(requireBlobKey(key))?.entries.has(key)) return true;
+    return !!await this.store.head(key);
+  }
+  async putBlob(key: string, source: StoreSource, options?: PutOptions) {
+    let size = 0;
+    await this.store.putIfAbsent(requireBlobKey(key), source, { ...options, onProgress: (done, total) => { size = total ?? done; options?.onProgress?.(done, total); } });
+    this.noteStored(key, size);
+  }
   async getBlob(key: string) { return this.store.get(requireBlobKey(key)); }
   async downloadBlob(key: string, destination: string, options?: TransferOptions) { return this.store.download(requireBlobKey(key), destination, options); }
   async copyBlob(from: string, to: string) {
@@ -160,8 +239,13 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     return await this.store.copy?.(from, to) ?? false;
   }
 
-  async listBook(bookId: string, folder?: BookFolder) {
-    return this.store.list(bookPrefix(bookId) + (folder ? folder + '/' : ''));
+  async listBook(bookId: string, folder?: BookFolder, { full = false }: { full?: boolean } = {}) {
+    const prefix = bookPrefix(bookId) + (folder ? folder + '/' : '');
+    if (full || !this.store.changes) return this.store.list(prefix);
+    const entries = (await this.bookKeys(bookId)).filter(({ key }) => key.startsWith(prefix));
+    // The feed leaves the tombstone out (it outlives the book's objects); a listing of the whole book has it.
+    const tombstone = folder ? undefined : await this.store.head(tombstoneKey(bookId));
+    return tombstone ? [...entries, { key: tombstoneKey(bookId), ...tombstone }].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)) : entries;
   }
   async listBooks() {
     const ids = (await this.store.listPrefixes(booksPrefix)).map(bookIdOfPrefix).filter((id) => id !== undefined);
@@ -199,6 +283,8 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     const tombstone = await this.bookTombstone(bookId);
     if (!tombstone) throw new Error('The book could not be marked as deleted on the remote.');
     await this.store.delete((await this.store.list(bookPrefix(bookId))).map((entry) => entry.key).filter((other) => other !== key));
+    this.indexes.delete((this.identity ?? '') + '/' + bookId);
+    if (this.identity) await this.options.keyIndex?.write(this.identity, bookId, undefined).catch(() => {});
     return tombstone;
   }
 }

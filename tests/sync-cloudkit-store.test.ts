@@ -8,9 +8,18 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { ChangeTokenExpiredError } from '../desktop/sync-store';
 import { CloudKitAccessError, CloudKitError, CloudKitStore, cloudKitAvailability, cloudKitReason, isCloudKitError } from '../desktop/sync-store-cloudkit';
-import { StoreAccessError } from '../desktop/sync-store';
-import type { CloudKitNative } from '../desktop/sync-store-cloudkit';
+import { StoreAccessError, StoreFullError } from '../desktop/sync-store';
+import type { CloudKitNative, CloudKitStatus } from '../desktop/sync-store-cloudkit';
+import type { IpcMain } from 'electron';
+import { SettingsStore } from '../desktop/settings';
+import { registerSyncSettings } from '../desktop/sync-settings';
+import { credentialScope, MemoryCredentialStore } from '../desktop/sync-credentials';
+import { channels } from '../src/desktop';
+import type { SyncBackendState } from '../src/desktop';
 import { StoreRemote } from '../desktop/sync-remote';
+import { MemoryKeyIndexCache } from '../desktop/sync-key-index';
+import { commitHeaderVersion, contentBlobKey } from '../src/sync-snapshot';
+import type { CommitHeader } from '../src/sync-snapshot';
 import { FakeCloudKit } from './cloudkit-fake';
 import { storeConformance } from './sync-store-conformance';
 
@@ -104,7 +113,7 @@ test('cloudkit store: iCloud storage full is an error of its own, and nothing is
   await store.putIfAbsent('books/' + book + '/content/one', bytes('1'));
   native.fail('putIfAbsent', 'quotaExceeded');
   await assert.rejects(store.putIfAbsent('books/' + book + '/originals/big.jpg', bytes('x'.repeat(300_000))),
-    (error: unknown) => error instanceof CloudKitError && !(error instanceof StoreAccessError) && error.cloudKitReason === 'quota' && error.message === 'iCloud storage full.');
+    (error: unknown) => error instanceof StoreFullError && isCloudKitError(error) && error.cloudKitReason === 'quota' && error.message === 'iCloud storage full.');
   assert.deepEqual((await store.list('books/')).map(({ key }) => key), ['books/' + book + '/content/one']);
   assert.deepEqual(await readdir(tmpdir()).then((names) => names.filter((name) => name.startsWith('imageflow-icloud-'))), [], 'no staging file stays');
 });
@@ -178,4 +187,105 @@ test('cloudkit addon: an unentitled process reports CloudKit as unavailable inst
   assert.deepEqual(await native.status(), { entitled: false });
   assert.throws(() => native.saveZone('anything'), /not available in this build/);
   assert.equal(native.cancel(1), false);
+});
+
+// StoreRemote over a store with a change feed (#292): listings come from the key index, brought up to date by the feed.
+const header = (commitId: string, parents: string[] = []): CommitHeader => ({ version: commitHeaderVersion, commitId, bookId: book, parents,
+  bookStateRevision: 'a'.repeat(64), createdAt: '2026-11-23T00:00:00.000Z', title: 'Book', stateDigest: 'b'.repeat(64) });
+const ids = (headers: unknown[]) => headers.map((value) => (value as { commitId: string }).commitId).sort();
+const feedCalls = (native: FakeCloudKit) => native.calls.filter((call) => call === 'changes').length;
+
+test('key index: a sync asks only for what changed, and checks no blob the index has', async () => {
+  const { native, store } = make();
+  const keyIndex = new MemoryKeyIndexCache();
+  const remote = new StoreRemote(store, { keyIndex });
+  const remoteId = await remote.remoteId();
+  const [first, second] = [crypto.randomUUID(), crypto.randomUUID()];
+  await remote.putCommit(header(first));
+  const blob = contentBlobKey(book, 'c'.repeat(64));
+  await remote.putBlob(blob, bytes('content'));
+  assert.deepEqual(ids(await remote.listCommits(book)), [first]);
+  assert.ok(keyIndex.books.get(remoteId + '/' + book)?.token, 'the index is kept with its token');
+  // Another Mac pushes.
+  await new StoreRemote(store).putCommit(header(second, [first]));
+  native.calls.length = 0;
+  assert.deepEqual(ids(await remote.listCommits(book)), [first, second].sort());
+  assert.deepEqual(native.calls.filter((call) => !['status', 'fetch'].includes(call)), ['changes'], 'one request for the changes, no listing of the zone');
+  native.calls.length = 0;
+  assert.equal(await remote.hasBlob(blob), true);
+  assert.deepEqual(native.calls.filter((call) => call !== 'status'), [], 'a blob the index has needs no request');
+  assert.equal(await remote.hasBlob(contentBlobKey(book, 'd'.repeat(64))), false, 'one it lacks is looked up');
+  // A remote made again later (the app started again) begins from the kept index.
+  const again = new StoreRemote(store, { keyIndex });
+  await again.remoteId();
+  native.calls.length = 0;
+  assert.deepEqual(ids(await again.listCommits(book)), [first, second].sort());
+  assert.equal(feedCalls(native), 1);
+  // Clean Up lists the zone itself.
+  assert.deepEqual((await remote.listBook(book, 'content', { full: true })).map(({ key }) => key), [blob]);
+});
+
+test('key index: an expired token lists the book in full once, and a book deleted on the server has no keys', async () => {
+  const { native, store } = make();
+  const keyIndex = new MemoryKeyIndexCache();
+  const remote = new StoreRemote(store, { keyIndex });
+  const remoteId = await remote.remoteId();
+  const first = crypto.randomUUID();
+  await remote.putCommit(header(first));
+  await remote.listCommits(book);
+  native.expiredBefore = Infinity;
+  const second = crypto.randomUUID();
+  await remote.putCommit(header(second, [first]));
+  assert.deepEqual(ids(await remote.listCommits(book)), [first, second].sort());
+  native.expiredBefore = 0;
+  // Deleted in System Settings → iCloud → Manage Storage: every zone goes, the index zone too.
+  native.zones.clear();
+  assert.deepEqual(await remote.listCommits(book), []);
+  assert.equal(keyIndex.books.has(remoteId + '/' + book), false, 'the index is dropped');
+  assert.deepEqual(await remote.listBook(book), []);
+});
+
+test('settings: iCloud is a backend of its own kind, with nothing else in it', async (t) => {
+  const folder = await mkdtemp(join(tmpdir(), 'if-icloud-settings-'));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  const settings = new SettingsStore(join(folder, 'settings.json'));
+  await settings.update({ sync: { kind: 'icloud' } });
+  assert.deepEqual(settings.value.sync, { kind: 'icloud' });
+  await assert.rejects(settings.update({ sync: { kind: 'icloud', container: 'iCloud.other' } }), /Invalid sync setting/);
+  const reloaded = new SettingsStore(join(folder, 'settings.json'));
+  await reloaded.load();
+  assert.deepEqual(reloaded.value.sync, { kind: 'icloud' });
+});
+
+test('Settings → Sync offers iCloud only in an entitled build, and saves it only for an account that can use it', async (t) => {
+  const folder = await mkdtemp(join(tmpdir(), 'if-icloud-settings-'));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  const flag = process.env.IMAGEFLOW_SYNC;
+  process.env.IMAGEFLOW_SYNC = '1';
+  t.after(() => { if (flag === undefined) delete process.env.IMAGEFLOW_SYNC; else process.env.IMAGEFLOW_SYNC = flag; });
+  const handlers = new Map<string, (event: unknown, request?: unknown) => Promise<{ value?: SyncBackendState; error?: string }>>();
+  const ipcMain = { handle: (channel: string, handler: never) => { handlers.set(channel, handler); } } as unknown as IpcMain;
+  const settings = new SettingsStore(join(folder, 'settings.json'));
+  const credentials = new MemoryCredentialStore();
+  let status: CloudKitStatus | undefined = { entitled: false };
+  const changed: unknown[] = [];
+  registerSyncSettings({ ipcMain, owner: () => true, settings, credentials: () => credentials, cloudKit: async () => status, changed: (value) => changed.push(value.sync) });
+  const state = () => handlers.get(channels.syncBackend)!({});
+  const save = (request: unknown) => handlers.get(channels.saveSyncBackend)!({}, request);
+  assert.deepEqual((await state()).value, { available: true }, 'not offered by a build without the entitlements');
+  assert.equal((await save({ backend: { kind: 'icloud' } })).error, 'iCloud sync is not available in this build of ImageFlow.');
+  status = { entitled: true, container: 'iCloud.test', environment: 'Production', accountStatus: 'noAccount' };
+  assert.deepEqual((await state()).value?.icloud, { available: false, message: 'Sign in to iCloud, or turn on iCloud for ImageFlow.' });
+  assert.equal((await save({ backend: { kind: 'icloud' } })).error, 'Sign in to iCloud, or turn on iCloud for ImageFlow.');
+  assert.equal(settings.value.sync, undefined, 'nothing is preselected or saved');
+  status = { ...status, accountStatus: 'available' };
+  // Switching from a bucket forgets its key, as switching to any other backend does.
+  const bucket = { kind: 's3' as const, endpoint: 'https://s3.example.com', region: 'auto', bucket: 'books' };
+  await credentials.write(credentialScope(bucket), { accessKeyId: 'AKIAEXAMPLE', secretAccessKey: 'secret' });
+  await settings.update({ sync: bucket });
+  assert.deepEqual((await save({ backend: { kind: 'icloud' } })).value?.icloud, { available: true });
+  assert.deepEqual(settings.value.sync, { kind: 'icloud' });
+  assert.deepEqual(changed, [{ kind: 'icloud' }]);
+  assert.equal(await credentials.read(credentialScope(bucket)), undefined);
+  assert.match((await save({ backend: { kind: 'icloud', extra: true } })).error ?? '', /Invalid sync setting/);
 });

@@ -29,9 +29,11 @@ import { FakeS3, fakeCredentials } from './s3-fake';
 import { credentialScope, MemoryCredentialStore } from '../desktop/sync-credentials';
 import { unavailableStatus } from '../desktop/sync-engine';
 import { S3Store } from '../desktop/sync-store-s3';
-import { StoreAccessError } from '../desktop/sync-store';
+import { StoreAccessError, StoreFullError } from '../desktop/sync-store';
 import { FakeCloudKit } from './cloudkit-fake';
 import { CloudKitStore } from '../desktop/sync-store-cloudkit';
+import { MemoryKeyIndexCache } from '../desktop/sync-key-index';
+import { MemoryHeaderCache } from '../desktop/sync-header-cache';
 import { readCommitHeaderV1 } from './sync-v1-reader';
 import { bookTrusted } from '../desktop/source-access';
 import { readSyncState, SyncElsewhereError, SyncHalfPulledError, takeAbandonedAtOpen, updateSyncState } from '../desktop/sync-pull';
@@ -2114,4 +2116,80 @@ test('a bucket emptied and set up again while the app runs gets a new identity a
   await fake.bucket('books').delete('ImageFlow/remote.json');
   const third = await (await mac('Third')).service.connect();
   assert.equal((await desktop.service.connect()).remoteId, third.remoteId);
+});
+
+test('iCloud: a Mac signed in to iCloud syncs with nothing to set up, and another Apple ID is another remote that asks first', async (t) => {
+  const { a } = await world(t);
+  const native = new FakeCloudKit();
+  const keyIndex = new MemoryKeyIndexCache();
+  const backend: SyncBackend = { kind: 'icloud' };
+  const service = new SyncService(() => backend, { cloudKit: () => native, keyIndex, headerCache: new MemoryHeaderCache() });
+  assert.equal(service.name, 'iCloud');
+  assert.equal((await syncWith(a, service)).action, 'initial-push');
+  const first = await service.connect();
+  assert.equal((await service.standing(a.folder)).sync, 'syncing');
+  // The first push found no zone for the book; the next listing makes the index from the feed.
+  assert.equal((await remoteTips(first.remote, await bookId(a))).length, 1);
+  assert.ok([...keyIndex.books.keys()].some((key) => key.startsWith(first.remoteId + '/')), 'the key index is kept');
+  // The account-change event also comes without a change (seen around Wi-Fi reconnecting): nothing changes.
+  native.signIn(native.user);
+  assert.equal((await service.connect()).remoteId, first.remoteId);
+  assert.equal((await service.standing(a.folder)).sync, 'syncing');
+  // Another Apple ID signs in: its database is another remote, the book is asked about, and nothing goes up.
+  await edit(a, caption('shore', 'After the switch'));
+  native.signIn('_user-two');
+  const second = await service.connect();
+  assert.notEqual(second.remoteId, first.remoteId);
+  assert.equal((await service.standing(a.folder)).sync, 'elsewhere');
+  await assert.rejects(syncWith(a, service), SyncElsewhereError);
+  assert.deepEqual(await remoteBooks(second.remote), [], 'the other account’s database gets no book without asking');
+  assert.equal([...keyIndex.books.keys()].some((key) => key.startsWith(first.remoteId + '/')), false, 'the former account’s key indexes are forgotten');
+  // Back to the first Apple ID: its remote again, and the book syncs as before.
+  native.signIn('_user-one');
+  assert.equal((await service.connect()).remoteId, first.remoteId);
+  assert.equal((await syncWith(a, service)).action, 'push');
+});
+
+test('iCloud: an account or build that cannot use it reads as unavailable, with the reason the status shows', async (t) => {
+  const { a } = await world(t);
+  const native = new FakeCloudKit();
+  const service = new SyncService(() => ({ kind: 'icloud' }), { cloudKit: () => native });
+  await syncWith(a, service);
+  native.statusValue = { entitled: true, container: 'iCloud.test', environment: 'Production', accountStatus: 'noAccount' };
+  assert.deepEqual(await service.standing(a.folder).then(({ sync, error, access }) => ({ sync, error, access })),
+    { sync: 'unavailable', error: 'Sign in to iCloud, or turn on iCloud for ImageFlow.', access: 'sign-in' });
+  native.statusValue = { entitled: false };
+  assert.deepEqual(await service.standing(a.folder).then(({ sync, access }) => ({ sync, access })), { sync: 'unavailable', access: 'unavailable' });
+  // No addon at all (not a Mac, or not staged).
+  const without = new SyncService(() => ({ kind: 'icloud' }), { cloudKit: () => undefined });
+  assert.equal((await without.standing(a.folder)).error, 'iCloud sync is not available in this build of ImageFlow.');
+});
+
+test('iCloud storage full: the book and its previews sync, its originals wait for room, and a full commit fails the sync', async (t) => {
+  const { a } = await world(t);
+  const native = new FakeCloudKit();
+  const service = new SyncService(() => ({ kind: 'icloud' }), { cloudKit: () => native });
+  native.fail('putIfAbsent', 'quotaExceeded', { times: Infinity, name: (name) => name.startsWith('originals/') });
+  const first = await syncWith(a, service);
+  assert.equal(first.action, 'initial-push');
+  assert.ok(first.notUploaded && first.notUploaded.count > 0);
+  assert.equal(first.notUploaded.message, 'iCloud storage full.');
+  const remote = (await service.connect()).remote as Remote;
+  const [tip] = await tips(remote, a);
+  const state = await stateOf(remote, tip);
+  assert.deepEqual(state.originals, {}, 'the snapshot leaves out what did not go up, so no Mac waits for it');
+  assert.ok(Object.keys(state.proxies).length > 0, 'the previews went up');
+  // Room again: the next sync derives the pending uploads and sends them.
+  native.recover();
+  await edit(a, caption('shore', 'Room again'));
+  const second = await syncWith(a, service);
+  assert.equal(second.notUploaded, undefined);
+  const [next] = await tips(remote, a);
+  const shore = (await stateOf(remote, next)).originals.shore;
+  assert.ok(shore && await remote.hasBlob(originalBlobKey(next.bookId, shore.digest, shore.ext)));
+  // When the book's own state does not fit, the sync fails with the same words and the remote keeps its tip.
+  await edit(a, caption('shore', 'Full again'));
+  native.fail('putIfAbsent', 'quotaExceeded', { times: Infinity });
+  await assert.rejects(syncWith(a, service), (error: unknown) => error instanceof StoreFullError && error.message === 'iCloud storage full.');
+  assert.deepEqual((await tips(remote, a)).map(({ commitId }) => commitId), [next.commitId]);
 });

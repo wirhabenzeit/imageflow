@@ -85,6 +85,14 @@ export class StoreAccessError extends Error {
   }
 }
 
+/**
+ * The store has no room for what was put (iCloud storage full). An ordinary state, not a failure of the store: a push
+ * leaves originals that do not fit for a later sync, and fails only when the book's own state does not fit.
+ */
+export class StoreFullError extends Error {
+  constructor(message: string, options?: ErrorOptions) { super(message, options); this.name = 'StoreFullError'; }
+}
+
 const segmentOk = (part: string) => !!part && !part.startsWith('.') && !/[\\\0]/.test(part);
 /** Whether a string is a store key: `/`-separated parts that are not empty, not hidden (`.`, `..`, `.name`), without `\`. */
 export const isStoreKey = (key: string) => typeof key === 'string' && key.length <= 1024 && key.split('/').every(segmentOk);

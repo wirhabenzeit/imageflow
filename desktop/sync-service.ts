@@ -1,7 +1,7 @@
 import { lstat, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, relative, sep } from 'node:path';
 import type { SyncBackend } from '../src/settings';
-import { s3Opener } from './sync-backend';
+import { cloudKitOpener, s3Opener } from './sync-backend';
 import type { SyncRemoteDependencies } from './sync-backend';
 import { syncBook } from './sync-engine';
 import type { SyncOptions } from './sync-engine';
@@ -44,7 +44,7 @@ export const insideBook = (path: string) => path.split(sep).some((part) => /\.im
  * What the service needs besides the setting: for a bucket, the credential store, and where the commit headers it read
  * are kept (`<userData>/Sync Cache`). Functions, so the app can make them once it is ready.
  */
-export type SyncServiceDependencies = { credentials?: () => SyncRemoteDependencies['credentials']; cacheFolder?: () => string } & Pick<SyncRemoteDependencies, 'headerCache' | 's3'>;
+export type SyncServiceDependencies = { credentials?: () => SyncRemoteDependencies['credentials']; cacheFolder?: () => string } & Pick<SyncRemoteDependencies, 'headerCache' | 'keyIndex' | 'cloudKit' | 's3'>;
 
 /** The remote a backend setting names. Each kind of backend is one case here. */
 function openBackend(backend: SyncBackend, dependencies: SyncServiceDependencies): Backend {
@@ -62,6 +62,11 @@ function openBackend(backend: SyncBackend, dependencies: SyncServiceDependencies
       // The credentials are read at every use (a file, no request), so a key saved in Settings counts at once.
       const open = s3Opener(backend, { credentials: () => dependencies.credentials?.(), cacheFolder: dependencies.cacheFolder, headerCache: dependencies.headerCache, s3: dependencies.s3 });
       return { name: backend.bucket, open, inside: async () => false };
+    }
+    case 'icloud': {
+      // The account is checked at every use; another Apple ID is another remote (`cloudKitOpener`).
+      const open = cloudKitOpener({ cloudKit: dependencies.cloudKit, cacheFolder: dependencies.cacheFolder, headerCache: dependencies.headerCache, keyIndex: dependencies.keyIndex });
+      return { name: 'iCloud', open, inside: async () => false };
     }
   }
 }

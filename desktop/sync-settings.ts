@@ -4,9 +4,11 @@ import { credentialHint, credentialScope, credentialsError } from './sync-creden
 import type { CredentialStore } from './sync-credentials';
 import type { S3Credentials } from './sync-s3-signer';
 import { S3Store } from './sync-store-s3';
+import { cloudKitAvailability } from './sync-store-cloudkit';
+import type { CloudKitStatus } from './sync-store-cloudkit';
 import type { SettingsStore } from './settings';
 import { channels } from '../src/desktop';
-import type { Result, SyncBackendRequest, SyncBackendState, SyncConnectionReport } from '../src/desktop';
+import type { Result, SyncBackendState, SyncConnectionReport, SyncCredentialsInput } from '../src/desktop';
 import type { AppSettings, S3SyncBackend, SyncBackend } from '../src/settings';
 
 /**
@@ -42,7 +44,7 @@ const message = (error: unknown) => (error instanceof Error ? error.message : 'I
 
 /** Validates a request from Settings; credentials, when given, are checked but never echoed in a message. */
 function parseRequest(request: unknown): { backend: S3SyncBackend; credentials?: S3Credentials } {
-  const { backend, credentials } = (request ?? {}) as Partial<SyncBackendRequest>;
+  const { backend, credentials } = (request ?? {}) as Partial<{ backend: S3SyncBackend; credentials: SyncCredentialsInput }>;
   if (!backend || typeof backend !== 'object' || backend.kind !== 's3') throw new Error('Choose an S3-compatible bucket.');
   const problem = s3BackendError(backend);
   if (problem) throw new Error(problem);
@@ -57,8 +59,10 @@ function parseRequest(request: unknown): { backend: S3SyncBackend; credentials?:
  * main process once, when it is entered, and is kept by `credentials` alone: never in `settings.json`, never in an
  * answer, an error or the log.
  */
-export function registerSyncSettings({ ipcMain, owner, settings, credentials, changed }: {
+export function registerSyncSettings({ ipcMain, owner, settings, credentials, cloudKit, changed }: {
   ipcMain: IpcMain;
+  /** What the CloudKit addon says about this build and account; undefined where there is no addon (#292). */
+  cloudKit?: () => Promise<CloudKitStatus | undefined>;
   owner: (event: IpcMainInvokeEvent) => unknown;
   settings: SettingsStore;
   credentials: () => CredentialStore;
@@ -68,7 +72,14 @@ export function registerSyncSettings({ ipcMain, owner, settings, credentials, ch
   const state = async (): Promise<SyncBackendState> => {
     const backend = settings.value.sync;
     const stored = backend?.kind === 's3' ? credentialHint(await credentials().read(credentialScope(backend)).catch(() => undefined)) : undefined;
-    return { available: true, ...(stored ? { credentials: stored } : {}) };
+    return { available: true, ...(stored ? { credentials: stored } : {}), ...await icloud() };
+  };
+  // iCloud is offered only by a build entitled to it; whether the account can use it now is asked each time.
+  const icloud = async (): Promise<Pick<SyncBackendState, 'icloud'>> => {
+    const status = await cloudKit?.().catch(() => undefined);
+    if (!status?.entitled) return {};
+    const availability = cloudKitAvailability(status);
+    return { icloud: availability.available ? { available: true } : { available: false, message: availability.message } };
   };
   const guard = async <T>(event: IpcMainInvokeEvent, run: () => Promise<T>): Promise<Result<T>> => {
     if (!owner(event)) return { error: 'Request is only available to Settings.' };
@@ -86,6 +97,16 @@ export function registerSyncSettings({ ipcMain, owner, settings, credentials, ch
     if (request === null) {
       const value = await settings.update({ sync: null });
       await credentials().remove();
+      changed(value);
+      return state();
+    }
+    if ((request as { backend?: { kind?: unknown } } | undefined)?.backend?.kind === 'icloud') {
+      if (Object.keys((request as { backend: object }).backend).length !== 1) throw new Error('Invalid sync setting.');
+      const offered = (await icloud()).icloud;
+      if (!offered) throw new Error('iCloud sync is not available in this build of ImageFlow.');
+      if (!offered.available) throw new Error(offered.message);
+      const value = await settings.update({ sync: { kind: 'icloud' } });
+      await forgetOtherCredentials(credentials(), previous, value.sync);
       changed(value);
       return state();
     }

@@ -77,6 +77,20 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
     } finally { setBusy(''); }
   }
 
+  async function useICloud() {
+    if (!api) return;
+    setBusy('save');
+    setResult(undefined);
+    try {
+      const answer = await api.saveSyncBackend({ backend: { kind: 'icloud' } });
+      if ('error' in answer) { setResult({ text: answer.error, error: true }); return; }
+      setState(answer.value);
+      setResult({ text: 'Saved.' });
+    } catch {
+      setResult({ text: 'ImageFlow could not complete the request.', error: true });
+    } finally { setBusy(''); }
+  }
+
   async function act(action: 'test' | 'save' | 'off') {
     if (!api) return;
     setBusy(action === 'off' ? 'remove' : action);
@@ -103,11 +117,16 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
   const disabled = !api || !settings || !!busy;
   const complete = !!fields.endpoint.trim() && !!fields.region.trim() && !!fields.bucket.trim() && (!!stored || (!!entered?.accessKeyId && !!entered.secretAccessKey));
   const folder = settings?.sync?.kind === 'folder' ? settings.sync.path : undefined;
-  const current = settings?.sync ? (settings.sync.kind === 'folder' ? '“' + (folder!.split('/').filter(Boolean).at(-1) ?? folder) + '”' : 'the bucket “' + settings.sync.bucket + '”') : undefined;
+  const current = !settings?.sync ? undefined : settings.sync.kind === 'folder' ? '“' + (folder!.split('/').filter(Boolean).at(-1) ?? folder) + '”'
+    : settings.sync.kind === 'icloud' ? 'iCloud' : 'the bucket “' + settings.sync.bucket + '”';
+  // iCloud is listed only by a build entitled to it (or while it is the setting), beside the bucket, neither preselected.
+  const icloud = state?.icloud;
+  const icloudListed = !!icloud || settings?.sync?.kind === 'icloud';
   return <div className="settings-form sync-settings">
     <span className="settings-label" id="sync-through-label">Sync through:</span>
     <div className="settings-control">
       <div className="appearance-options" role="radiogroup" aria-labelledby="sync-through-label">
+        {icloudListed && <label><input type="radio" name="sync-kind" value="icloud" disabled={disabled} checked={kind === 'icloud'} onChange={() => { setKind('icloud'); setResult(undefined); }} /><span>iCloud</span></label>}
         <label><input type="radio" name="sync-kind" value="s3" disabled={disabled} checked={kind === 's3'} onChange={() => { setKind('s3'); setResult(undefined); }} /><span>S3-compatible bucket</span></label>
         <label><input type="radio" name="sync-kind" value="folder" disabled={disabled} checked={kind === 'folder'} onChange={() => { setKind('folder'); setResult(undefined); }} /><span>Folder</span></label>
       </div>
@@ -115,6 +134,16 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
       {settings?.sync && <div className="settings-update-actions"><button disabled={disabled} onClick={() => void act('off')}>Turn Off</button></div>}
       {kind !== 's3' && result && <p role={result.error ? 'alert' : 'status'} className={result.error ? 'error-text' : 'settings-note sync-test-result'}>{result.text}</p>}
     </div>
+    {kind === 'icloud' && <>
+      <span className="settings-label">iCloud:</span>
+      <div className="settings-control">
+        <p className="settings-note">{icloud?.available === false ? icloud.message
+          : 'Books sync through your private iCloud database, with the Apple ID this Mac is signed in to. Their originals count toward your iCloud storage.'}</p>
+        {settings?.sync?.kind !== 'icloud' && <div className="settings-update-actions">
+          <button className="primary" disabled={disabled || !icloud?.available} onClick={() => void useICloud()}>Use iCloud</button>
+        </div>}
+      </div>
+    </>}
     {kind === 'folder' && <>
       <span className="settings-label">Folder:</span>
       <div className="settings-control">

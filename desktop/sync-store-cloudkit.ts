@@ -3,7 +3,7 @@ import { constants, createReadStream } from 'node:fs';
 import { chmod, copyFile, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { ChangeTokenExpiredError, childPrefix, requireStoreKey, requireStorePrefix, StoreAccessError } from './sync-store';
+import { ChangeTokenExpiredError, childPrefix, requireStoreKey, requireStorePrefix, StoreAccessError, StoreFullError } from './sync-store';
 import type { PutOptions, StoreAccessReason, StoreChanges, StoreEntry, StoreSource, SyncStore, TransferOptions } from './sync-store';
 
 /*
@@ -111,12 +111,25 @@ export class CloudKitAccessError extends StoreAccessError {
     this.cloudKitReason = reason;
   }
 }
-export type AnyCloudKitError = CloudKitError | CloudKitAccessError;
-/** The error for a CKError name: an access error where iCloud cannot be used now, a `CloudKitError` otherwise. */
+/** iCloud storage full (`quotaExceeded`): a `StoreFullError`, which a push handles as such. */
+export class CloudKitFullError extends StoreFullError {
+  readonly cloudKitReason: CloudKitReason = 'quota';
+  constructor(readonly code: string, detail?: string, readonly retryAfter?: number) {
+    super(messageOf(code, detail));
+    this.name = 'CloudKitFullError';
+  }
+}
+export type AnyCloudKitError = CloudKitError | CloudKitAccessError | CloudKitFullError;
+/**
+ * The error for a CKError name: an access error where iCloud cannot be used now, a full error for storage full, a
+ * `CloudKitError` otherwise.
+ */
 export function cloudKitError(code: string, detail?: string, retryAfter?: number): AnyCloudKitError {
+  if (cloudKitReason(code) === 'quota') return new CloudKitFullError(code, detail, retryAfter);
   return access[cloudKitReason(code)] ? new CloudKitAccessError(code, detail, retryAfter) : new CloudKitError(code, detail, retryAfter);
 }
-export const isCloudKitError = (error: unknown): error is AnyCloudKitError => error instanceof CloudKitError || error instanceof CloudKitAccessError;
+export const isCloudKitError = (error: unknown): error is AnyCloudKitError =>
+  error instanceof CloudKitError || error instanceof CloudKitAccessError || error instanceof CloudKitFullError;
 
 /** Whether this Mac can sync through iCloud now, from `status()`: available, or why not, as the status shows it. */
 export function cloudKitAvailability(status: CloudKitStatus): { available: true } | { available: false; reason: CloudKitReason; message: string } {

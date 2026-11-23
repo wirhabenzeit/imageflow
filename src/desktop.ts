@@ -6,7 +6,7 @@ import type { ControlItem } from './controls';
 import type { PageSide, ProjectFiles, Values } from './project';
 import type { AuthoringCheckRequest, AuthoringCheckResult } from './authoring-check';
 import type { ImportMode, SourceStatus } from './source-locations';
-import type { AppSettings, S3SyncBackend, SettingsPane } from './settings';
+import type { AppSettings, ICloudSyncBackend, S3SyncBackend, SettingsPane } from './settings';
 import type { LibraryEntry, LibraryImportResult, NewBookChoice } from './library';
 import type { CoverFormat, CoverResolution } from './cover';
 
@@ -130,9 +130,13 @@ export type Result<T> = { value: T } | { error: string; code?: 'BOOK_BUSY' };
  * Settings → Sync (#281), behind the development flag (`available`). The renderer sends an access key to the main
  * process when it is entered and never gets it back: only whether one is stored, and the last characters of its ID.
  */
-export type SyncBackendState = { available: boolean; credentials?: { stored: true; accessKeyEnd: string } };
+/**
+ * `icloud` is there only in a build entitled to iCloud (#292): whether this Mac can use it now, and why not (signed
+ * out, iCloud off for ImageFlow, restricted) when it cannot.
+ */
+export type SyncBackendState = { available: boolean; credentials?: { stored: true; accessKeyEnd: string }; icloud?: { available: boolean; message?: string } };
 export type SyncCredentialsInput = { accessKeyId: string; secretAccessKey: string };
-export type SyncBackendRequest = { backend: S3SyncBackend; credentials?: SyncCredentialsInput };
+export type SyncBackendRequest = { backend: S3SyncBackend; credentials?: SyncCredentialsInput } | { backend: ICloudSyncBackend };
 /** What Test Connection found: see `ConnectionReport` in desktop/sync-store-s3.ts. */
 export type SyncConnectionReport = { conditionalWrites: 'enforced' | 'ignored' | 'unsupported'; checksums: 'verified' | 'not-verified'; addressing: 'path' | 'virtual' };
 export type HistoryState = { undo?: string; redo?: string };

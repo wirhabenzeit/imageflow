@@ -6,6 +6,10 @@ import { FileHeaderCache } from './sync-header-cache';
 import type { CommitHeaderCache } from './sync-header-cache';
 import { StoreRemote } from './sync-remote';
 import { StoreAccessError } from './sync-store';
+import { CloudKitAccessError, CloudKitStore } from './sync-store-cloudkit';
+import type { CloudKitNative } from './sync-store-cloudkit';
+import { FileKeyIndexCache } from './sync-key-index';
+import type { KeyIndexCache } from './sync-key-index';
 import { FolderStore } from './sync-store-folder';
 import { endpointError, S3Store } from './sync-store-s3';
 import type { S3StoreOptions } from './sync-store-s3';
@@ -65,6 +69,9 @@ export type SyncRemoteDependencies = {
   /** Where commit headers that were read are kept (`<userData>/Sync Cache` in the app). */
   cacheFolder?: string;
   headerCache?: CommitHeaderCache;
+  keyIndex?: KeyIndexCache;
+  /** The CloudKit addon of this build (`loadCloudKitNative`), or a fake in tests; without it iCloud is unavailable. */
+  cloudKit?: () => CloudKitNative | undefined;
   /** Retries, timeouts and page size of the S3 store, for tests. */
   s3?: Partial<Pick<S3StoreOptions, 'retries' | 'retryDelay' | 'timeout' | 'pageSize'>>;
 };
@@ -100,8 +107,40 @@ export function s3Opener(backend: S3SyncBackend, { credentials, cacheFolder, hea
   };
 }
 
+/**
+ * Opens the iCloud remote at each use (#292): checks that this build may use CloudKit and that the account is available,
+ * then reads the iCloud user. The remote belongs to that user: when another Apple ID signs in, the remote is made again,
+ * and the key indexes of the former one are forgotten, so nothing this Mac learned about one account's database is
+ * used with another's. Its identity (`remote.json`) is then the other account's, and every book that synced reads as
+ * synced somewhere else and is asked about. Throws a `CloudKitAccessError` when iCloud cannot be used now.
+ */
+export function cloudKitOpener({ cloudKit, cacheFolder, headerCache, keyIndex, namespace }: { cloudKit?: () => CloudKitNative | undefined; cacheFolder?: () => string;
+  headerCache?: CommitHeaderCache; keyIndex?: KeyIndexCache; namespace?: string }) {
+  const headers = headerCache ?? (cacheFolder ? new FileHeaderCache(join(cacheFolder(), 'Sync Cache')) : undefined);
+  const indexes = keyIndex ?? (cacheFolder ? new FileKeyIndexCache(join(cacheFolder(), 'Sync Cache')) : undefined);
+  let store: { native: CloudKitNative; store: CloudKitStore } | undefined;
+  let built: { user: string; remote: StoreRemote<CloudKitStore> } | undefined;
+  return async () => {
+    const native = cloudKit?.();
+    if (!native) throw new CloudKitAccessError('notEntitled');
+    if (store?.native !== native) store = { native, store: new CloudKitStore(native, { namespace }) };
+    const status = await store.store.status();
+    if (!status.entitled) throw new CloudKitAccessError('notEntitled');
+    if (status.accountStatus !== 'available') throw new CloudKitAccessError(status.accountStatus);
+    const user = await store.store.userRecordId();
+    if (built?.user !== user) {
+      // The identity the former remote read last is the one its indexes are kept under.
+      const former = built && await built.remote.knownIdentity();
+      if (former) await indexes?.forget(former).catch((error) => console.warn('ImageFlow could not forget the keys of the former iCloud account', error));
+      built = { user, remote: new StoreRemote(store.store, { headerCache: headers, keyIndex: indexes }) };
+    }
+    return built.remote;
+  };
+}
+
 /** The sync remote of a backend setting, once. */
 export async function syncRemoteFor(backend: SyncBackend, dependencies: SyncRemoteDependencies): Promise<StoreRemote> {
   if (backend.kind === 'folder') return new StoreRemote(new FolderStore(backend.path));
+  if (backend.kind === 'icloud') return cloudKitOpener({ ...dependencies, cacheFolder: dependencies.cacheFolder ? () => dependencies.cacheFolder! : undefined })();
   return s3Opener(backend, { ...dependencies, credentials: () => dependencies.credentials, cacheFolder: dependencies.cacheFolder ? () => dependencies.cacheFolder! : undefined })();
 }

@@ -12,6 +12,9 @@ function syncBackend(value: unknown): SyncBackend {
     case 'folder':
       if (Object.keys(backend!).length === 2 && typeof backend!.path === 'string' && isAbsolute(backend!.path) && backend!.path.length <= 4096) return { kind: 'folder', path: backend!.path };
       break;
+    case 'icloud':
+      if (Object.keys(backend!).length === 1) return { kind: 'icloud' };
+      break;
     case 's3':
       if (Object.keys(backend!).every((key) => ['kind', 'endpoint', 'region', 'bucket', 'prefix', 'addressing'].includes(key))) {
         const problem = s3BackendError(backend as unknown as Partial<S3SyncBackend>);

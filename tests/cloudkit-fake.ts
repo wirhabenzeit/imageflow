@@ -3,7 +3,7 @@ import type { CloudKitNative, CloudKitRecord, CloudKitStatus } from '../desktop/
 
 type Stored = { name: string; data: Uint8Array; sha256?: string; lastModified: number; seq: number };
 type Zone = { epoch: number; records: Map<string, Stored>; deletions: Map<string, number> };
-type Failure = { op: string; code: string; retryAfter?: number; times: number; zone?: string };
+type Failure = { op: string; code: string; retryAfter?: number; times: number; zone?: string; name?: (name: string) => boolean };
 
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
 const failure = (code: string, retryAfter?: number) => Object.assign(new Error('CloudKit says ' + code), { code, ...(retryAfter === undefined ? {} : { retryAfter }) });
@@ -15,8 +15,14 @@ const failure = (code: string, retryAfter?: number) => Object.assign(new Error('
  */
 export class FakeCloudKit implements CloudKitNative {
   statusValue: CloudKitStatus = { entitled: true, container: 'iCloud.test', environment: 'Development', accountStatus: 'available' };
+  /** The signed-in iCloud user; each has a private database of their own (`signIn`). */
   user = '_user-one';
-  readonly zones = new Map<string, Zone>();
+  private readonly databases = new Map<string, Map<string, Zone>>();
+  get zones() {
+    let zones = this.databases.get(this.user);
+    if (!zones) this.databases.set(this.user, zones = new Map());
+    return zones;
+  }
   /** Every call by name, for tests that check what was (not) asked of CloudKit. */
   readonly calls: string[] = [];
   private readonly failures: Failure[] = [];
@@ -27,20 +33,25 @@ export class FakeCloudKit implements CloudKitNative {
   /** Tokens from before this sequence number are expired. */
   expiredBefore = 0;
 
-  /** The next `times` calls of `op` (in `zone`, when given) fail with `code`. */
-  fail(op: string, code: string, { times = 1, retryAfter, zone }: { times?: number; retryAfter?: number; zone?: string } = {}) {
-    this.failures.push({ op, code, times, retryAfter, zone });
+  /** The next `times` calls of `op` (in `zone`, for records whose name passes `name`, when given) fail with `code`. */
+  fail(op: string, code: string, { times = 1, retryAfter, zone, name }: { times?: number; retryAfter?: number; zone?: string; name?: (name: string) => boolean } = {}) {
+    this.failures.push({ op, code, times, retryAfter, zone, name });
   }
+  /** Ends failures set up with `fail`. */
+  recover() { this.failures.length = 0; }
   /** Deletes a zone as the user does in System Settings: later calls in it fail with `userDeletedZone`. */
   userDeletes(zone: string) { this.zones.delete(zone); this.userDeleted.add(zone); }
   private readonly userDeleted = new Set<string>();
+  /** Signs in as another Apple ID (or the same one again) and sends the account-change event. */
+  signIn(user: string) { this.user = user; this.changeAccount(); }
   changeAccount() { for (const listener of this.accountListeners) listener(); }
 
-  private async begin(op: string, zone?: string) {
+  private async begin(op: string, zone?: string, record?: string) {
     this.calls.push(op);
     if (!this.statusValue.entitled) throw failure('notInitialized');
     await tick();
-    const index = this.failures.findIndex((entry) => entry.op === op && (entry.zone === undefined || entry.zone === zone));
+    const index = this.failures.findIndex((entry) => entry.op === op && (entry.zone === undefined || entry.zone === zone)
+      && (!entry.name || (record !== undefined && entry.name(record))));
     if (index >= 0) {
       const entry = this.failures[index];
       if (--entry.times <= 0) this.failures.splice(index, 1);
@@ -73,7 +84,7 @@ export class FakeCloudKit implements CloudKitNative {
   async listZones() { await this.begin('listZones'); return [...this.zones.keys()]; }
 
   async putIfAbsent(zoneName: string, name: string, value: { data?: Uint8Array; file?: string; sha256?: string }, { id, onProgress }: { id?: number; onProgress?: (fraction: number) => void } = {}) {
-    await this.begin('putIfAbsent', zoneName);
+    await this.begin('putIfAbsent', zoneName, name);
     // CloudKit reads an asset while it uploads it.
     const data = value.data ? new Uint8Array(value.data) : new Uint8Array(await readFile(value.file!));
     if (value.data && data.length > 1024 * 1024) throw failure('limitExceeded');

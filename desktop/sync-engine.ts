@@ -28,7 +28,7 @@ import { bookPath, finishPull, preflightPull, readSyncState, stagingFolder, upda
 import type { PullMarker } from './sync-pull';
 import { remoteCommits } from './sync-remote';
 import type { SyncRemote } from './sync-remote';
-import { StoreAccessError } from './sync-store';
+import { StoreAccessError, StoreFullError } from './sync-store';
 import type { StoreAccessReason } from './sync-store';
 
 /**
@@ -76,6 +76,12 @@ export type SyncOutcome = {
   /** Whether the book's files changed, so the host reloads it. */
   changed: boolean;
   /**
+   * Owned originals not uploaded because the remote is full (iCloud storage full), and the store's words for it. The
+   * book's state and previews synced; the snapshot leaves these originals out, so other Macs show them as not uploaded,
+   * and a later sync uploads them once there is room.
+   */
+  notUploaded?: { count: number; message: string };
+  /**
    * With `fetchOriginals`: the originals downloaded after the sync, and why the rest are still pending. A failed
    * download never fails the sync, which had succeeded by then; the next sync or an explicit download retries.
    */
@@ -98,7 +104,9 @@ type Context = { root: string; remote: SyncRemote; book: OpenProject; stale: boo
    * digest, or, for a photo without a file (ADR 0011), the digest of the preview stored for the fact its provider
    * reported and `key`, a key of the content the provider shows now. A photo has one of `path` and `key`.
    */
-  here: Record<string, { path?: string; key?: string; digest: string }> };
+  here: Record<string, { path?: string; key?: string; digest: string }>;
+  /** Originals a push left for later because the remote is full, and the store's words for it. */
+  notUploaded?: { count: number; message: string } };
 
 /**
  * The path in the book of a photo whose original syncs (reach `book`, ADR 0012); undefined for any other photo, whose
@@ -294,11 +302,24 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
   // Counted first, so the status bar can say how many of how many have gone up.
   let uploaded = 0;
   if (uploads.size) context.options.uploadProgress?.({ done: 0, total: uploads.size });
+  // A remote that is full takes no more originals in this sync; the book's state and previews still go up.
+  let full: StoreFullError | undefined;
+  const skipped = new Set<string>();
   for (const [key, { path, digest }] of uploads) {
+    if (full) { skipped.add(key); continue; }
     if (await fileDigest(path) !== digest) throw new Error('A photo changed during sync. Sync again.');
-    await remote.putBlob(key, { file: path }, { sha256: digest });
+    try { await remote.putBlob(key, { file: path }, { sha256: digest }); }
+    catch (error) {
+      if (!(error instanceof StoreFullError)) throw error;
+      full = error;
+      skipped.add(key);
+      continue;
+    }
     context.options.uploadProgress?.({ done: ++uploaded, total: uploads.size });
   }
+  // Left out of the snapshot, as for an original still uploading; the next push finds them missing and tries again.
+  for (const [id, entry] of Object.entries(originals)) if (skipped.has(originalBlobKey(bookId, entry.digest, entry.ext))) delete originals[id];
+  context.notUploaded = full ? { count: skipped.size, message: full.message } : undefined;
   const proxies: StateBlob['proxies'] = {};
   const local = await proxyStore();
   for (const [id, fact] of Object.entries(assets)) {
@@ -512,7 +533,8 @@ export async function syncBook(options: SyncOptions): Promise<SyncOutcome> {
   const registered = AssetFacts.registered(root);
   const context: Context = { root, remote: options.remote, book: options.book, stale: false, options, here: {} };
   try {
-    const outcome = await decideAndSync(context);
+    const decided = await decideAndSync(context);
+    const outcome = context.notUploaded ? { ...decided, notUploaded: context.notUploaded } : decided;
     // The sync has succeeded; originals kept on this Mac come after it and never fail it.
     if (!options.fetchOriginals || (outcome.action === 'diverged' && !outcome.pulled)) return outcome;
     try {

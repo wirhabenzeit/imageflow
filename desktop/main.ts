@@ -58,6 +58,8 @@ import { SettingsStore } from './settings';
 import { FileCredentialStore, MemoryCredentialStore } from './sync-credentials';
 import type { CredentialStore } from './sync-credentials';
 import { forgetOtherCredentials, registerSyncSettings, syncFlag, syncPatchError } from './sync-settings';
+import { loadCloudKitNative } from './sync-store-cloudkit';
+import type { CloudKitNative } from './sync-store-cloudkit';
 import { AuthoringError } from './authoring-service';
 import { createMcpConnection } from './mcp-connection';
 import { addToCodex, bridgeLaunch, claudeCodeCommand, claudeExtension, findCodex, skillArchive } from './mcp-setup';
@@ -133,7 +135,11 @@ let settings: SettingsStore;
 const syncOffered = syncFlag();
 // The one backend every book syncs through on this Mac (`AppSettings.sync`): a bucket with the credentials stored for
 // it (read at each use, so a key saved in Settings → Sync counts at once) and the commit headers this Mac has read.
-const syncService = new SyncService(() => (syncOffered ? settings?.value.sync : undefined), { credentials: () => syncCredentials(), cacheFolder: () => app.getPath('userData') });
+// iCloud (#292) goes through the CloudKit addon, loaded once; it reports a build without the entitlements and never
+// touches CloudKit there.
+let cloudKitNative: CloudKitNative | undefined | null = null;
+const cloudKit = () => (cloudKitNative === null ? (cloudKitNative = loadCloudKitNative()) : cloudKitNative);
+const syncService = new SyncService(() => (syncOffered ? settings?.value.sync : undefined), { credentials: () => syncCredentials(), cacheFolder: () => app.getPath('userData'), cloudKit });
 let recents: RecentDocuments;
 let library: TemplateLibrary;
 let trust: TemplateTrust;
@@ -2117,7 +2123,7 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.restartUpdate, (event) => { if (updateOwner(event) && !preparingQuit && !quitting) updates.restart(); });
   // A bucket and its key are saved in Settings → Sync; every open book then looks at the remote again, also when only
   // the key changed (a corrected key clears "Sign-in needed" without a restart).
-  registerSyncSettings({ ipcMain, owner: settingsOwner, settings, credentials: syncCredentials,
+  registerSyncSettings({ ipcMain, owner: settingsOwner, settings, credentials: syncCredentials, cloudKit: async () => cloudKit()?.status(),
     changed: (value) => { syncBackendChanged(); for (const owner of appWindows()) if (!owner.isDestroyed()) owner.webContents.send(channels.settingsChanged, value); } });
   ipcMain.handle(channels.settings, (event) => appOwner(event) ? { value: settings.value } : { error: 'Request is only available to an app window.' });
   ipcMain.handle(channels.updateSettings, async (event, patch: unknown) => {
