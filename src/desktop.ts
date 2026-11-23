@@ -155,12 +155,12 @@ export type Result<T> = { value: T } | { error: string; code?: 'BOOK_BUSY' };
  * process when it is entered and never gets it back: only whether one is stored, and the last characters of its ID.
  */
 /**
- * `icloud` is there only in a build entitled to iCloud (#292), started with its flag (`IMAGEFLOW_SYNC_ICLOUD=1`): whether this Mac can use it now, and why not (signed
+ * `icloud` is there only in a build entitled to iCloud (#292): whether this Mac can use it now, and why not (signed
  * out, iCloud off for ImageFlow, restricted) when it cannot.
  */
 /** `booksUnchosen`: the sheet that asks which recent books sync waits for an answer (`AppSettings.syncBooksUnchosen`). */
 export type SyncBackendState = { available: boolean; credentials?: { stored: true; accessKeyEnd: string }; icloud?: { available: boolean; message?: string }; booksUnchosen?: true;
-  /** Why the configured backend is not used by this build (iCloud without its flag), which leaves sync off. */
+  /** Why the configured backend is not used by this build (iCloud in a build without its entitlements), which leaves sync off. */
   unusable?: string;
   /** Whether the folder backend is offered (development and tests, `IMAGEFLOW_SYNC_FOLDER=1`). */
   folder?: true };

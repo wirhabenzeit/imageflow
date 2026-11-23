@@ -64,7 +64,7 @@ import { createDocument, documentIdentity, documentPath, isDocument, RecentDocum
 import { SettingsStore } from './settings';
 import { FileCredentialStore, MemoryCredentialStore } from './sync-credentials';
 import type { CredentialStore } from './sync-credentials';
-import { folderSyncFlag, forgetOtherCredentials, registerSyncSettings, syncPatchError, usableBackend } from './sync-settings';
+import { folderSyncFlag, forgetOtherCredentials, registerSyncSettings, setICloudEntitled, syncPatchError, usableBackend } from './sync-settings';
 import { loadCloudKitNative } from './sync-store-cloudkit';
 import type { CloudKitNative } from './sync-store-cloudkit';
 import { AuthoringError } from './authoring-service';
@@ -143,7 +143,7 @@ let settings: SettingsStore;
 // touches CloudKit there.
 let cloudKitNative: CloudKitNative | undefined | null = null;
 const cloudKit = () => (cloudKitNative === null ? (cloudKitNative = loadCloudKitNative()) : cloudKitNative);
-// A setting that names iCloud in a build started without its flag leaves sync off (`usableBackend`).
+// A setting that names iCloud in a build without the iCloud entitlements leaves sync off (`usableBackend`).
 /** What Settings → Sync last showed that Clean Up would free (#285), which Clean Up then deletes. */
 let cleanUpPlan: CleanUpPlan | undefined;
 const syncService = new SyncService(() => usableBackend(settings?.value.sync), { credentials: () => syncCredentials(), cacheFolder: () => app.getPath('userData'), cloudKit,
@@ -1854,6 +1854,9 @@ void app.whenReady().then(async () => {
   settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'), { ...defaultSettings, updateChannel: releaseChannel(app.getVersion()) ?? 'stable' });
   recents = new RecentDocuments(join(app.getPath('userData'), 'recent-documents.json'));
   await Promise.all([settings.load(), recents.load()]);
+  // Whether this build may use iCloud (signed with its entitlements and provisioning profile), asked once: without
+  // them iCloud is not offered, and a setting that names it leaves sync off.
+  setICloudEntitled(!!(await Promise.resolve().then(() => cloudKit()?.status()).catch(() => undefined))?.entitled);
   configureSourceStore(join(app.getPath('userData'), 'source-cache'));
   configureSourceAccess(join(app.getPath('userData'), 'source-access'));
   configurePersistence(join(app.getPath('userData'), 'persistence'));

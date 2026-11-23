@@ -12,7 +12,7 @@ import { StoreAccessError, StoreFullError } from '../desktop/sync-store';
 import type { CloudKitNative, CloudKitStatus } from '../desktop/sync-store-cloudkit';
 import type { IpcMain } from 'electron';
 import { SettingsStore } from '../desktop/settings';
-import { registerSyncSettings, usableBackend } from '../desktop/sync-settings';
+import { registerSyncSettings, setICloudEntitled, usableBackend } from '../desktop/sync-settings';
 import { SyncService } from '../desktop/sync-service';
 import { credentialScope, MemoryCredentialStore } from '../desktop/sync-credentials';
 import { channels } from '../src/desktop';
@@ -271,9 +271,8 @@ test('settings: iCloud is a backend of its own kind, with nothing else in it', a
 test('Settings → Sync offers iCloud only in an entitled build, and saves it only for an account that can use it', async (t) => {
   const folder = await mkdtemp(join(tmpdir(), 'if-icloud-settings-'));
   t.after(() => rm(folder, { recursive: true, force: true }));
-  const flag = process.env.IMAGEFLOW_SYNC_ICLOUD;
-  process.env.IMAGEFLOW_SYNC_ICLOUD = '1';
-  t.after(() => { if (flag === undefined) delete process.env.IMAGEFLOW_SYNC_ICLOUD; else process.env.IMAGEFLOW_SYNC_ICLOUD = flag; });
+  setICloudEntitled(true);
+  t.after(() => setICloudEntitled(false));
   const handlers = new Map<string, (event: unknown, request?: unknown) => Promise<{ value?: SyncBackendState; error?: string }>>();
   const ipcMain = { handle: (channel: string, handler: never) => { handlers.set(channel, handler); } } as unknown as IpcMain;
   const settings = new SettingsStore(join(folder, 'settings.json'));
@@ -299,9 +298,10 @@ test('Settings → Sync offers iCloud only in an entitled build, and saves it on
   assert.deepEqual(changed, [{ kind: 'icloud' }]);
   assert.equal(await credentials.read(credentialScope(bucket)), undefined);
   assert.match((await save({ backend: { kind: 'icloud', extra: true } })).error ?? '', /Invalid sync setting/);
-  // iCloud keeps a flag of its own (#283): without it, an entitled build does not offer it, and a setting that names it
-  // leaves sync off, saying so, instead of failing or syncing.
-  delete process.env.IMAGEFLOW_SYNC_ICLOUD;
+  // A build without the entitlements (development, ad-hoc) does not offer iCloud, and a setting that names it leaves
+  // sync off, saying so, instead of failing or syncing.
+  setICloudEntitled(false);
+  status = { entitled: false };
   assert.equal((await state()).value?.icloud, undefined);
   assert.match((await state()).value?.unusable ?? '', /sync is off/);
   assert.equal(usableBackend(settings.value.sync), undefined);
@@ -339,9 +339,8 @@ test('Settings → Sync counts the storage the books take up, in the units Finde
   assert.equal(formatStorage(12_000_000_000_000), '12 TB');
   const folder = await mkdtemp(join(tmpdir(), 'if-icloud-usage-'));
   t.after(() => rm(folder, { recursive: true, force: true }));
-  const flag = process.env.IMAGEFLOW_SYNC_ICLOUD;
-  process.env.IMAGEFLOW_SYNC_ICLOUD = '1';
-  t.after(() => { if (flag === undefined) delete process.env.IMAGEFLOW_SYNC_ICLOUD; else process.env.IMAGEFLOW_SYNC_ICLOUD = flag; });
+  setICloudEntitled(true);
+  t.after(() => setICloudEntitled(false));
   const handlers = new Map<string, (event: unknown) => Promise<{ value?: unknown; error?: string }>>();
   const ipcMain = { handle: (channel: string, handler: never) => { handlers.set(channel, handler); } } as unknown as IpcMain;
   const settings = new SettingsStore(join(folder, 'settings.json'));

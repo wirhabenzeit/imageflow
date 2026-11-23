@@ -29,7 +29,7 @@ const output = [];
 // As a release starts: without the flags of iCloud and of the folder backend.
 async function launch() {
   const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + profile],
-    env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1', IMAGEFLOW_SYNC_CREDENTIALS: 'memory', IMAGEFLOW_SYNC_ICLOUD: '', IMAGEFLOW_SYNC_FOLDER: '' } });
+    env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1', IMAGEFLOW_SYNC_CREDENTIALS: 'memory', IMAGEFLOW_SYNC_FOLDER: '' } });
   app.process().stdout.on('data', (bytes) => output.push(String(bytes)));
   app.process().stderr.on('data', (bytes) => output.push(String(bytes)));
   return app;
@@ -244,13 +244,13 @@ try {
   await closeSettings(app);
   await closeApp(app);
 
-  // A settings file that names iCloud, in a build started without iCloud's flag: sync is off and the pane says so;
+  // A settings file that names iCloud, in a build without the iCloud entitlements: sync is off and the pane says so;
   // nothing syncs, nothing fails, iCloud is not offered, and a window still cannot set a backend.
   await writeFile(join(profile, 'settings.json'), JSON.stringify({ ...await savedSettings(), sync: { kind: 'icloud' } }));
   app = await launch();
   const plain = await openSettings(app, 'sync');
   await plain.settings.getByRole('tab', { name: 'Sync', selected: true }).waitFor();
-  await plain.settings.getByText('iCloud sync is not available in this version of ImageFlow, so sync is off on this Mac.', { exact: true }).waitFor();
+  await plain.settings.getByText('iCloud sync is not available in this build of ImageFlow, so sync is off on this Mac.', { exact: true }).waitFor();
   assert.equal((await plain.settings.evaluate(() => window.imageflow.syncBackendState())).value?.icloud, undefined);
   assert.match((await plain.settings.evaluate(() => window.imageflow.saveSyncBackend({ backend: { kind: 'icloud' } }))).error, /not available/);
   assert.match((await plain.settings.evaluate(() => window.imageflow.updateSettings({ sync: { kind: 'icloud' } }))).error, /Settings → Sync/);
