@@ -536,7 +536,9 @@ export async function syncBook(options: SyncOptions): Promise<SyncOutcome> {
     const decided = await decideAndSync(context);
     // Older originals a pull kept until their new versions arrived are replaced once they have, whether or not this Mac
     // keeps originals: the book had the file. Never fails the sync, which has succeeded by then.
-    const replaced = decided.action === 'diverged' && !decided.pulled ? [] : await fetchOriginals(root, options.remote, undefined, { keptOnly: true })
+    // Looked for only when the sync record says one was kept (a digest here other than the snapshot's), so a book that
+    // never kept one reads nothing more.
+    const replaced = (decided.action === 'diverged' && !decided.pulled) || !await keepsOlderOriginal(root) ? [] : await fetchOriginals(root, options.remote, undefined, { keptOnly: true })
       .then(({ downloaded }) => downloaded, (error) => { console.warn('ImageFlow could not replace an original that changed on another Mac', error); return [] as string[]; });
     const outcome = replaced.length ? { ...decided, changed: true } : decided;
     // The sync has succeeded; originals kept on this Mac come after it and never fail it.
@@ -657,6 +659,12 @@ const keptDigest = (synced: SyncedCommit | undefined, id: string, original: Stat
   const kept = synced?.localDigests?.[id];
   return kept !== undefined && kept !== original.digest ? kept : undefined;
 };
+
+/** Whether the sync record names, for some photo, a digest this Mac has other than the snapshot's: a kept older original. */
+async function keepsOlderOriginal(root: string) {
+  const synced = (await readSyncState(root)).lastSynced;
+  return !!synced?.localDigests && Object.entries(synced.localDigests).some(([id, digest]) => synced.photoDigests[id] !== undefined && synced.photoDigests[id] !== digest);
+}
 
 /**
  * The owned originals of the last synced snapshot that are not on this Mac, each with whether the remote has it

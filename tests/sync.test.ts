@@ -2802,6 +2802,11 @@ test('one listing per sync over a bucket answers its commits, its blobs and its 
   fake.requests.length = 0;
   assert.equal((await on(a, (book) => service.sync({ book, fetchOriginals: true }))).action, 'in-sync');
   assert.equal(lists(), 1, 'an unchanged book: one listing, ' + fake.requests.map(({ method, key, query }) => method + ' ' + key + '?' + query).join(', '));
+  // A book that kept no older original reads its state once, not again to look for one.
+  fake.requests.length = 0;
+  assert.equal((await on(a, (book) => service.sync({ book }))).action, 'in-sync');
+  assert.equal(fake.requests.filter(({ method, key, query }) => method === 'GET' && !query.has('list-type') && key.includes('/content/')).length, 1,
+    'the state blob is read once: ' + fake.requests.map(({ method, key }) => method + ' ' + key).join(', '));
   await edit(a, caption('shore', 'A caption'));
   fake.requests.length = 0;
   assert.equal((await on(a, (book) => service.sync({ book, fetchOriginals: true }))).action, 'push');
