@@ -22,6 +22,7 @@ import { memoryRemote, remoteBooks, remoteTips, StoreRemote } from '../desktop/s
 import type { SyncRemote } from '../desktop/sync-remote';
 import { FolderStore, folderRemote } from '../desktop/sync-store-folder';
 import { MemoryStore } from '../desktop/sync-store';
+import type { SyncStore } from '../desktop/sync-store';
 import { storeConformance } from './sync-store-conformance';
 import { readCommitHeaderV1 } from './sync-v1-reader';
 import { bookTrusted } from '../desktop/source-access';
@@ -1189,4 +1190,15 @@ each('a commit header is version 2 with an optional cover, and a version 1 reade
   assert.equal(forked.length, 2);
   const outcome = await sync(a, remote, { chooseTip: async () => forked[0].commitId });
   assert.equal((await commit(remote, a, outcome.pushed[0])).coverDigest, forked[0].coverDigest);
+});
+
+test('a remote over a store without a server-side copy copies nothing, so the caller uploads', async () => {
+  const store: SyncStore = new MemoryStore();
+  store.copy = undefined;
+  const remote = new StoreRemote(store);
+  const [from, to] = [crypto.randomUUID(), crypto.randomUUID()].map((book) => originalBlobKey(book, 'a'.repeat(64), '.jpg'));
+  await remote.putBlob(from, new TextEncoder().encode('original'));
+  assert.equal(await remote.copyBlob(from, to), false);
+  assert.equal(await remote.hasBlob(to), false);
+  await assert.rejects(remote.copyBlob(from, 'remote.json'), /Not a sync blob key/);
 });

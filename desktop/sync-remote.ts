@@ -34,7 +34,7 @@ export interface SyncRemote {
   /** Writes a blob to a new local file at `destination`; false when the remote does not have it (yet). For large blobs. */
   downloadBlob(key: string, destination: string, options?: TransferOptions): Promise<boolean>;
   /** Copies a blob to another key inside the remote (a duplicated book's originals), without uploading it again;
-   * false when the remote does not have it. */
+   * false when the remote does not have it or its store cannot copy, and the caller then uploads the blob. */
   copyBlob(from: string, to: string): Promise<boolean>;
   /** What a book stores, with sizes and times of last change: everything under its prefix, or one part of it. */
   listBook(bookId: string, folder?: BookFolder): Promise<StoreEntry[]>;
@@ -126,7 +126,11 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
   async putBlob(key: string, source: StoreSource, options?: PutOptions) { await this.store.putIfAbsent(requireBlobKey(key), source, options); }
   async getBlob(key: string) { return this.store.get(requireBlobKey(key)); }
   async downloadBlob(key: string, destination: string, options?: TransferOptions) { return this.store.download(requireBlobKey(key), destination, options); }
-  async copyBlob(from: string, to: string) { return this.store.copy(requireBlobKey(from), requireBlobKey(to)); }
+  async copyBlob(from: string, to: string) {
+    requireBlobKey(from);
+    requireBlobKey(to);
+    return await this.store.copy?.(from, to) ?? false;
+  }
 
   async listBook(bookId: string, folder?: BookFolder) {
     return this.store.list(bookPrefix(bookId) + (folder ? folder + '/' : ''));

@@ -42,10 +42,13 @@ export interface SyncStore {
    * `books/<bookId>/` for every book without listing its objects (S3's `Delimiter=/`).
    */
   listPrefixes(prefix: string): Promise<string[]>;
-  /** Copies an object inside the store without transferring it, replacing `to`; false when `from` is not there. */
-  copy(from: string, to: string): Promise<boolean>;
   /** Deletes objects. Keys the store does not have are ignored. */
   delete(keys: readonly string[]): Promise<void>;
+  /**
+   * Copies an object inside the store without transferring it, replacing `to`; false when `from` is not there.
+   * Optional: a store without a server-side copy leaves it out, and a caller then uploads instead.
+   */
+  copy?(from: string, to: string): Promise<boolean>;
 }
 
 const segmentOk = (part: string) => !!part && !part.startsWith('.') && !/[\\\0]/.test(part);

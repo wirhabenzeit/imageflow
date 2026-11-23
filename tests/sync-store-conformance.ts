@@ -14,6 +14,7 @@ import type { SyncStore } from '../desktop/sync-store';
  *     storeConformance('s3', async (t) => new S3Store({ …, prefix: 'conformance/' + randomUUID() + '/' }));
  *
  * `many` is the number of objects in the listing test; raise it past a store's page size (1,000 for S3) to cover paging.
+ * `copy` is optional in a store: its checks run where the store has it.
  */
 export function storeConformance(name: string, make: (t: TestContext) => Promise<SyncStore>, { many = 40 }: { many?: number } = {}) {
   const bytes = (text: string) => new TextEncoder().encode(text);
@@ -101,10 +102,12 @@ export function storeConformance(name: string, make: (t: TestContext) => Promise
     await utimes(old, new Date('2001-01-01T00:00:00Z'), new Date('2001-01-01T00:00:00Z'));
     const before = Date.now();
     await store.putIfAbsent('books/a/originals/old.jpg', { file: old });
-    await store.copy('books/a/originals/old.jpg', 'books/a/originals/old-copy.jpg');
     const recently = (time?: Date) => !!time && time.getTime() > before - 600_000;
     assert.ok(recently((await store.head('books/a/originals/old.jpg'))?.lastModified), 'a stored file');
-    assert.ok(recently((await store.head('books/a/originals/old-copy.jpg'))?.lastModified), 'a copy');
+    if (store.copy) {
+      await store.copy('books/a/originals/old.jpg', 'books/a/originals/old-copy.jpg');
+      assert.ok(recently((await store.head('books/a/originals/old-copy.jpg'))?.lastModified), 'a copy');
+    }
     await store.delete(['books/a/originals/old.jpg', 'books/a/originals/old-copy.jpg']);
     await store.putIfAbsent('books/a/content/one', bytes('1'));
     await store.putIfAbsent('books/a/originals/two.jpg', bytes('22'));
@@ -160,7 +163,8 @@ export function storeConformance(name: string, make: (t: TestContext) => Promise
     assert.deepEqual(await store.listPrefixes('books/'), ['books/a/', 'books/b/']);
   });
 
-  check('copy duplicates an object inside the store', async (store) => {
+  check('copy, where the store has it, duplicates an object inside the store', async (store, t) => {
+    if (!store.copy) { t.skip('this store has no copy'); return; }
     await store.putIfAbsent('books/a/originals/one.jpg', bytes('original'));
     assert.equal(await store.copy('books/a/originals/one.jpg', 'books/b/originals/one.jpg'), true);
     assert.deepEqual(await store.get('books/b/originals/one.jpg'), bytes('original'));
@@ -248,8 +252,10 @@ export function storeConformance(name: string, make: (t: TestContext) => Promise
       await assert.rejects(store.get(key), /Not a sync store key/, key);
       await assert.rejects(store.head(key), /Not a sync store key/, key);
       await assert.rejects(store.download(key, join(folder, 'no')), /Not a sync store key/, key);
-      await assert.rejects(store.copy(key, 'books/a/content/one'), /Not a sync store key/, key);
-      await assert.rejects(store.copy('books/a/content/one', key), /Not a sync store key/, key);
+      if (store.copy) {
+        await assert.rejects(store.copy(key, 'books/a/content/one'), /Not a sync store key/, key);
+        await assert.rejects(store.copy('books/a/content/one', key), /Not a sync store key/, key);
+      }
       await assert.rejects(store.delete([key]), /Not a sync store key/, key);
     }
     for (const prefix of ['/books/', 'books//', '../', 'books/../']) {
