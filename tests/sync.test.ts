@@ -16,7 +16,7 @@ import { importIntoProject, loadProject, updateProject } from '../desktop/projec
 import type { OpenProject } from '../desktop/project';
 import { collectSources, relinkFolder } from '../desktop/source-actions';
 import { captureBookStateRevision } from '../desktop/revisions';
-import { cloneFromRemote, describeLocalChange, describeSync, downloadOriginals, placeOriginals, RemoteSyncingError, stageOriginals, stageSyncPull, syncBook } from '../desktop/sync-engine';
+import { cloneFromRemote, describeLocalChange, describeSync, downloadOriginals, pendingOriginals, placeOriginals, RemoteSyncingError, stageOriginals, stageSyncPull, syncBook } from '../desktop/sync-engine';
 import type { SyncOptions } from '../desktop/sync-engine';
 import { memoryRemote, remoteBooks, remoteTips, StoreRemote } from '../desktop/sync-remote';
 import type { SyncRemote } from '../desktop/sync-remote';
@@ -1057,7 +1057,7 @@ if (store === 'memory') {
     const root = await realpath(await mkdtemp(join(tmpdir(), 'if-store-')));
     t.after(() => rm(root, { recursive: true, force: true }));
     return new FolderStore(root);
-  });
+  }, { sha256: 'ignored' });
 }
 
 test('a folder store leaves no temporary files and no empty folders, and never lists hidden files', async (t) => {
@@ -1201,4 +1201,137 @@ test('a remote over a store without a server-side copy copies nothing, so the ca
   assert.equal(await remote.copyBlob(from, to), false);
   assert.equal(await remote.hasBlob(to), false);
   await assert.rejects(remote.copyBlob(from, 'remote.json'), /Not a sync blob key/);
+});
+
+const failing = (code: string) => Object.assign(new Error(code + ': injected'), { code });
+
+test('a folder store on a volume without hard links renames into place, and still never replaces an object', async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'if-store-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  for (const code of ['EPERM', 'ENOTSUP', 'EXDEV']) {
+    let links = 0;
+    const folder = new FolderStore(join(root, code), { link: async () => { links++; throw failing(code); } });
+    const one = new TextEncoder().encode('one');
+    assert.deepEqual(await folder.putIfAbsent('books/a/content/one', one), { existed: false });
+    assert.equal(links, 1, 'the link was tried first');
+    assert.deepEqual(await folder.get('books/a/content/one'), one);
+    // One that is there is found by the look before the write.
+    assert.deepEqual(await folder.putIfAbsent('books/a/content/one', new TextEncoder().encode('other')), { existed: true });
+    // One that arrives while this writer copies is found by the look before the rename.
+    const late = new FolderStore(join(root, code), { link: async (_from, to) => { await writeFile(to, 'theirs'); throw failing(code); } });
+    assert.deepEqual(await late.putIfAbsent('books/a/content/two', new TextEncoder().encode('mine')), { existed: true });
+    assert.deepEqual(await folder.get('books/a/content/two'), new TextEncoder().encode('theirs'));
+    // From a file, with the time it was stored.
+    const file = join(root, 'source-' + code + '.jpg');
+    await image(file, '#445566');
+    assert.deepEqual(await folder.putIfAbsent('books/a/originals/three.jpg', { file }), { existed: false });
+    assert.deepEqual(await folder.get('books/a/originals/three.jpg'), new Uint8Array(await readFile(file)));
+    assert.deepEqual((await folder.list('')).map(({ key }) => key), ['books/a/content/one', 'books/a/content/two', 'books/a/originals/three.jpg']);
+    assert.deepEqual((await readdir(join(root, code), { recursive: true })).map(String).filter((path) => path.split('/').at(-1)!.startsWith('.')), [], 'no temporary files stay');
+  }
+  // Any other failure of the link is an error, and leaves nothing.
+  const refused = new FolderStore(join(root, 'refused'), { link: async () => { throw failing('EACCES'); } });
+  await assert.rejects(refused.putIfAbsent('books/a/content/one', new TextEncoder().encode('one')), /EACCES/);
+  assert.deepEqual(await refused.list(''), []);
+  assert.deepEqual(await readdir(join(root, 'refused', 'books', 'a', 'content')), []);
+});
+
+test('a folder store put or copy whose folder a delete removes meanwhile makes it again', async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'if-store-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  // What `delete` does when it empties a folder, at the worst moment: right after a writer made that folder.
+  let removals = 0;
+  const racing = (times: number) => new FolderStore(root, { mkdir: (async (path: string, options: object) => {
+    const made = await mkdir(path, options);
+    if (removals < times) { removals++; await rm(path, { recursive: true }); }
+    return made;
+  }) as typeof mkdir });
+  const one = new TextEncoder().encode('one');
+  assert.deepEqual(await racing(1).putIfAbsent('books/a/content/one', one), { existed: false });
+  assert.equal(removals, 1);
+  assert.deepEqual(await new FolderStore(root).get('books/a/content/one'), one);
+  const file = join(root, 'source.jpg');
+  await image(file, '#445566');
+  removals = 0;
+  assert.deepEqual(await racing(1).putIfAbsent('books/b/originals/two.jpg', { file }), { existed: false });
+  removals = 0;
+  assert.equal(await racing(1).copy('books/b/originals/two.jpg', 'books/c/originals/two.jpg'), true);
+  assert.deepEqual(await new FolderStore(root).get('books/c/originals/two.jpg'), new Uint8Array(await readFile(file)));
+  assert.equal(removals, 1);
+  const folder = new FolderStore(root);
+  // It is tried once more, not for ever: a folder that keeps going away is an error.
+  removals = 0;
+  await assert.rejects(racing(2).putIfAbsent('books/e/content/one', one), /ENOENT/);
+  // A source that is not there is still just that.
+  await assert.rejects(folder.putIfAbsent('books/e/originals/missing.jpg', { file: join(root, 'missing.jpg') }), /ENOENT/);
+  assert.equal(await folder.copy('books/e/originals/missing.jpg', 'books/f/originals/missing.jpg'), false);
+  assert.deepEqual((await readdir(root, { recursive: true })).map(String).filter((path) => path.split('/').at(-1)!.startsWith('.')), []);
+});
+
+each('a blob is copied only to its own key in another book, and never over a blob that is there', async (t) => {
+  const { remote } = await world(t);
+  const [from, to, other] = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+  const bytes = new TextEncoder().encode('original');
+  const digest = sha(bytes);
+  await remote.putBlob(originalBlobKey(from, digest, '.jpg'), bytes);
+  // Another blob, another part or another extension is not a copy of this one.
+  await assert.rejects(remote.copyBlob(originalBlobKey(from, digest, '.jpg'), originalBlobKey(to, 'f'.repeat(64), '.jpg')), /only copied to its own key/);
+  await assert.rejects(remote.copyBlob(originalBlobKey(from, digest, '.jpg'), originalBlobKey(to, digest, '.png')), /only copied to its own key/);
+  await assert.rejects(remote.copyBlob(originalBlobKey(from, digest, '.jpg'), proxyBlobKey(to, digest, '.jpg')), /only copied to its own key/);
+  await assert.rejects(remote.copyBlob(contentBlobKey(from, digest), coverBlobKey(to, digest)), /only copied to its own key/);
+  assert.deepEqual((await remote.store.list('')).map(({ key }) => key), [originalBlobKey(from, digest, '.jpg')]);
+  // A blob the target book has is left as it is, and the copy counts as done.
+  const theirs = new TextEncoder().encode('already there');
+  await remote.store.putIfAbsent(originalBlobKey(to, digest, '.jpg'), theirs);
+  const before = await remote.store.head(originalBlobKey(to, digest, '.jpg'));
+  assert.equal(await remote.copyBlob(originalBlobKey(from, digest, '.jpg'), originalBlobKey(to, digest, '.jpg')), true);
+  assert.deepEqual(await stored(remote, originalBlobKey(to, digest, '.jpg')), theirs);
+  assert.deepEqual(await remote.store.head(originalBlobKey(to, digest, '.jpg')), before);
+  // Also when the source is not there, and a blob copied onto itself stays.
+  assert.equal(await remote.copyBlob(originalBlobKey(other, digest, '.jpg'), originalBlobKey(to, digest, '.jpg')), true);
+  assert.equal(await remote.copyBlob(originalBlobKey(from, digest, '.jpg'), originalBlobKey(from, digest, '.jpg')), true);
+  assert.equal(await remote.copyBlob(originalBlobKey(from, digest, '.jpg'), originalBlobKey(other, digest, '.jpg')), true);
+  assert.deepEqual(await stored(remote, originalBlobKey(other, digest, '.jpg')), bytes);
+});
+
+each('a sync record names the book its commit belongs to, and originals are found there whatever project.json says later', async (t) => {
+  const { a, b, remote } = await world(t);
+  // Push, adopt, pull and clone all record it.
+  await sync(a, remote);
+  const id = await bookId(a);
+  assert.equal((await readSyncState(a.folder)).lastSynced?.bookId, id, 'a push');
+  await copyBook(a, b);
+  assert.equal((await sync(b, remote)).action, 'adopt');
+  assert.equal((await readSyncState(b.folder)).lastSynced?.bookId, id, 'an adopted tip');
+  await edit(a, caption('shore', 'Edited'));
+  await sync(a, remote);
+  assert.equal((await sync(b, remote)).action, 'fast-forward');
+  assert.equal((await readSyncState(b.folder)).lastSynced?.bookId, id, 'a pull');
+  await rm(b.folder, { recursive: true });
+  await use(b);
+  const [tip] = await tips(remote, a);
+  await cloneFromRemote({ remote, tip, destination: b.folder });
+  assert.equal((await readSyncState(b.folder)).lastSynced?.bookId, id, 'a book made from the remote');
+  const pending = await pendingOriginals(b.folder, remote);
+  assert.ok(pending.includes('shore'));
+  // The book gets another lineage ID, as one that syncs again as a new history does, before its record is reset.
+  const writeBookId = async (bookId: string) => {
+    const project = JSON.parse(await readFile(join(b.folder, 'project.json'), 'utf8'));
+    await writeFile(join(b.folder, 'project.json'), JSON.stringify({ ...project, bookId }, null, 2) + '\n');
+  };
+  await writeBookId(crypto.randomUUID());
+  assert.deepEqual(await pendingOriginals(b.folder, remote), pending, 'still read from the book the commit belongs to');
+  const staged = await stageOriginals({ remote, folder: b.folder });
+  assert.deepEqual(staged.map((original) => original.id).sort(), [...pending].sort());
+  await Promise.all(staged.map(({ staging }) => rm(staging, { force: true })));
+  await on(b, async (book) => assert.deepEqual(await downloadOriginals({ remote, book, ids: ['shore'] }), ['shore']));
+  assert.equal(sha(await readFile(join(b.folder, 'photos/shore.jpg'))), sha(await readFile(join(a.folder, 'photos/shore.jpg'))));
+  // A record from before the ID was kept loads, and falls back to project.json.
+  await rm(join(b.folder, 'photos/shore.jpg'));
+  await updateSyncState(b.folder, ({ lastSynced, ...state }) => { const { bookId: _, ...rest } = lastSynced!; return { ...state, lastSynced: rest }; });
+  assert.equal((await readSyncState(b.folder)).lastSynced?.bookId, undefined);
+  assert.deepEqual(await pendingOriginals(b.folder, remote), [], 'the other ID in project.json has no such snapshot');
+  await writeBookId(id);
+  assert.deepEqual(await pendingOriginals(b.folder, remote), pending);
+  await on(b, async (book) => assert.deepEqual(await downloadOriginals({ remote, book, ids: ['shore'] }), ['shore']));
 });

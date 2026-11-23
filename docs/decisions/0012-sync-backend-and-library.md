@@ -61,7 +61,7 @@ Where things are configured follows the same split:
 | `head(key)` | Size and presence |
 | `list(prefix)` | Keys with sizes and `lastModified` timestamps |
 | `listPrefixes(prefix)` | Immediate child prefixes (e.g. `books/<bookId>/`), so listing books does not scan every blob |
-| `copy(from, to)` | Duplicate, without uploading again |
+| `copy(from, to)` (optional) | Duplicate, without uploading again. A store without a server-side copy leaves it out, and the caller uploads instead |
 | `delete(keys)` | Deleting a book, the sweep |
 
 - **S3-compatible bucket:** endpoint, region, bucket and an optional prefix in app settings; the access key and secret are encrypted with `safeStorage` (keychain-backed) and stored in a separate `0600` credentials file, never in `settings.json`. `putIfAbsent` prefers `If-None-Match: *` (with head-then-put fallback if a service lacks conditional writes, since blobs are content-addressed and commit IDs are UUIDs; *unverified until the spike*). Works with S3, R2, B2, MinIO and Wasabi; the connection test checks conditional writes and checksum verification.

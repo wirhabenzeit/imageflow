@@ -28,8 +28,24 @@ async function cloneInto(source: string, staging: string) {
   await utimes(staging, now, now);
 }
 
+/**
+ * Runs a write once more when its folder went away under it: a `delete` that emptied the folder removes it, and may do
+ * so between this write making the folder and using it.
+ */
+async function again<T>(write: () => Promise<T>) {
+  try { return await write(); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    return write();
+  }
+}
+
+/** The file system calls a test replaces: a volume without hard links, a folder removed at the wrong moment. */
+export type FolderIo = { link: typeof link; mkdir: typeof mkdir };
+
 export class FolderStore implements SyncStore {
-  constructor(readonly root: string) {}
+  private readonly io: FolderIo;
+  constructor(readonly root: string, io: Partial<FolderIo> = {}) { this.io = { link, mkdir, ...io }; }
 
   private path(key: string) { return join(this.root, ...requireStoreKey(key).split('/')); }
   /** The folder a prefix lies in (as a key prefix ending in `/`, or empty) and its path. */
@@ -43,17 +59,23 @@ export class FolderStore implements SyncStore {
     signal?.throwIfAborted();
     // Looked at first, so a large original that is there already is not copied to find that out.
     if (await this.head(key)) return { existed: true };
-    await mkdir(dirname(destination), { recursive: true });
+    return again(() => this.write(destination, source, signal, onProgress));
+  }
+
+  private async write(destination: string, source: StoreSource, signal: AbortSignal | undefined, onProgress: PutOptions['onProgress']) {
+    await this.io.mkdir(dirname(destination), { recursive: true });
     const staging = temporary(destination);
     try {
       if (source instanceof Uint8Array) {
         const handle = await open(staging, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o644);
         try { await handle.writeFile(source); await handle.sync(); } finally { await handle.close(); }
       } else await cloneInto(source.file, staging);
+      // A file copy that is running cannot be stopped; one that was aborted meanwhile is discarded here, before it
+      // becomes an object.
       signal?.throwIfAborted();
       // A hard link never replaces a file that is already there; folders that cannot link fall back to a rename after
       // looking, which only a second writer of the same key at the same moment could race.
-      try { await link(staging, destination); }
+      try { await this.io.link(staging, destination); }
       catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
         if (code === 'EEXIST') return { existed: true };
@@ -74,7 +96,7 @@ export class FolderStore implements SyncStore {
       const bytes = new Uint8Array(await readFile(path, { signal }));
       onProgress?.(bytes.length, bytes.length);
       return bytes;
-    } catch (error) { if (missing(error)) return undefined; throw error; }
+    } catch (error) { signal?.throwIfAborted(); if (missing(error)) return undefined; throw error; }
   }
 
   async download(key: string, file: string, { signal, onProgress }: TransferOptions = {}) {
@@ -128,15 +150,16 @@ export class FolderStore implements SyncStore {
   async copy(from: string, to: string) {
     const source = this.path(from);
     const destination = this.path(to);
-    if (!await this.head(from)) return false;
-    await mkdir(dirname(destination), { recursive: true });
-    const staging = temporary(destination);
-    try {
-      try { await cloneInto(source, staging); }
-      catch (error) { if (missing(error)) return false; throw error; }
-      await rename(staging, destination);
-      return true;
-    } finally { await rm(staging, { force: true }); }
+    return again(async () => {
+      if (!await this.head(from)) return false;
+      await this.io.mkdir(dirname(destination), { recursive: true });
+      const staging = temporary(destination);
+      try {
+        await cloneInto(source, staging);
+        await rename(staging, destination);
+        return true;
+      } finally { await rm(staging, { force: true }); }
+    });
   }
 
   async delete(keys: readonly string[]) {

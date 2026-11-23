@@ -207,9 +207,10 @@ export function deriveTips(headers: readonly CommitHeader[]) {
 /**
  * What this Mac last synced of a book: the commit, its revision and the photo digests of its assets-meta.json, and
  * `localDigests`, the digests of the originals this Mac held then. An original whose bytes have not changed since is
- * no evidence against the snapshot, however old it is.
+ * no evidence against the snapshot, however old it is. `bookId` is the book the commit belongs to, so its blobs are
+ * found under that prefix whatever project.json says later; records from before it was kept lack it.
  */
-export type SyncedCommit = { commitId: string; bookStateRevision: string; stateDigest: string; photoDigests: Record<string, string>;
+export type SyncedCommit = { commitId: string; bookId?: string; bookStateRevision: string; stateDigest: string; photoDigests: Record<string, string>;
   localDigests?: Record<string, string> };
 
 export type SyncDecision =
@@ -252,7 +253,8 @@ export function decideSync({ pullInProgress, tips, commits = tips, lastSynced, l
 }): SyncDecision {
   if (pullInProgress) return { action: 'resume' };
   // The commit this Mac last synced is not there (yet): a folder still downloading, or the wrong one. Pushing now would
-  // start a second history that shows as diverged once the real commits arrive.
+  // start a second history that shows as diverged once the real commits arrive. A book last synced on the layout before
+  // ADR 0012 stays here too (its version 1 headers are no commits to this version) until its sync record is reset.
   if (lastSynced && !commits.some(({ commitId }) => commitId === lastSynced.commitId)) return { action: 'remote-behind' };
   if (!tips.length) return { action: 'initial-push' };
   if (tips.length > 1) return { action: 'diverged', tips: [...tips] };

@@ -15,14 +15,15 @@ export type StoreSource = Uint8Array | { file: string };
 export type StoreObject = { size: number; lastModified: Date };
 export type StoreEntry = StoreObject & { key: string };
 export type TransferOptions = {
-  /** Stops the transfer; it then rejects with the signal's reason and leaves nothing half-written behind. */
+  /** Stops the transfer, also one that is running; it then rejects with the signal's reason and leaves nothing behind:
+   * no object, no file, no temporary file. A transfer that had finished by then stays. */
   signal?: AbortSignal;
   /** Bytes transferred so far and, when known, the object's size. Called at least once, when the transfer is done. */
   onProgress?: (transferred: number, total?: number) => void;
 };
 export type PutOptions = TransferOptions & {
   /** The SHA-256 of the object (lower-case hex) when the caller knows it, so a store that sends or checks one need not
-   * read the source twice. A store that checks it rejects a source with other bytes. */
+   * read the source twice. A store that checks it rejects a source with other bytes and stores nothing. */
   sha256?: string;
 };
 
@@ -79,7 +80,10 @@ export class MemoryStore implements SyncStore {
     requireStoreKey(key);
     signal?.throwIfAborted();
     if (this.objects.has(key)) return { existed: true };
-    const bytes = source instanceof Uint8Array ? new Uint8Array(source) : new Uint8Array(await readFile(source.file, { signal }));
+    const bytes = source instanceof Uint8Array ? new Uint8Array(source)
+      : new Uint8Array(await readFile(source.file, { signal }).catch((error) => { signal?.throwIfAborted(); throw error; }));
+    // Aborted while the file was read: nothing is stored.
+    signal?.throwIfAborted();
     if (sha256 !== undefined && sha(bytes) !== sha256) throw new Error('An object does not have the SHA-256 it was stored with: ' + key);
     // Another put may have finished while the file was read.
     if (this.objects.has(key)) return { existed: true };
@@ -97,6 +101,7 @@ export class MemoryStore implements SyncStore {
   async download(key: string, file: string, options: TransferOptions = {}) {
     const bytes = await this.get(key, options);
     if (!bytes) return false;
+    options.signal?.throwIfAborted();
     await writeAtomically(file, bytes);
     return true;
   }

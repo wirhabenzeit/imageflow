@@ -33,7 +33,8 @@ export interface SyncRemote {
   getBlob(key: string): Promise<Uint8Array | undefined>;
   /** Writes a blob to a new local file at `destination`; false when the remote does not have it (yet). For large blobs. */
   downloadBlob(key: string, destination: string, options?: TransferOptions): Promise<boolean>;
-  /** Copies a blob to another key inside the remote (a duplicated book's originals), without uploading it again;
+  /** Copies a blob to its key in another book inside the remote (a duplicated book's originals), without uploading it
+   * again; a blob already there is kept. Both keys name the same blob (part, digest and extension);
    * false when the remote does not have it or its store cannot copy, and the caller then uploads the blob. */
   copyBlob(from: string, to: string): Promise<boolean>;
   /** What a book stores, with sizes and times of last change: everything under its prefix, or one part of it. */
@@ -85,6 +86,8 @@ export function requireBlobKey(key: string) {
   return key;
 }
 
+/** A blob key without its book: `originals/<digest>.jpg`. */
+const blobName = (key: string) => key.split('/').slice(2).join('/');
 const encode = (value: unknown) => new TextEncoder().encode(canonicalJson(value) + '\n');
 
 /**
@@ -127,8 +130,10 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
   async getBlob(key: string) { return this.store.get(requireBlobKey(key)); }
   async downloadBlob(key: string, destination: string, options?: TransferOptions) { return this.store.download(requireBlobKey(key), destination, options); }
   async copyBlob(from: string, to: string) {
-    requireBlobKey(from);
-    requireBlobKey(to);
+    // Only the book may differ: the same part, digest and extension, so a copy can never put other bytes under a key.
+    if (blobName(requireBlobKey(from)) !== blobName(requireBlobKey(to))) throw new Error('A sync blob is only copied to its own key in another book: ' + from + ' to ' + to);
+    // Blobs are immutable: one that is there already is left alone, and is what the copy would have been.
+    if (await this.hasBlob(to)) return true;
     return await this.store.copy?.(from, to) ?? false;
   }
 

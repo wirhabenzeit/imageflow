@@ -283,7 +283,7 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
   const header = commitHeaderSchema.parse({ version: commitHeaderVersion, commitId: randomUUID(), bookId, parents, bookStateRevision: state.revision,
     createdAt: (context.options.now?.() ?? new Date()).toISOString(), title: state.project.title.slice(0, 400), stateDigest });
   await remote.putCommit(header);
-  await recordSynced(root, { commitId: header.commitId, bookStateRevision: header.bookStateRevision, stateDigest, photoDigests: digestsOf(assets),
+  await recordSynced(root, { commitId: header.commitId, bookId, bookStateRevision: header.bookStateRevision, stateDigest, photoDigests: digestsOf(assets),
     localDigests: Object.fromEntries(Object.entries(hereDigests(context)).filter(([id]) => assets[id]?.digest === context.here[id].digest)) });
   return { header, blob };
 }
@@ -516,7 +516,7 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
       const blob = await fetchState(options.remote, bookId, decision.tip.stateDigest, decision.tip);
       const photoDigests = digestsOf(photoFacts(blob.assetsMeta.assets, local.photos));
       // Without a record of its own, every original here that differs from the snapshot counts as newer.
-      const adopted = { commitId: decision.tip.commitId, bookStateRevision: decision.tip.bookStateRevision, stateDigest: decision.tip.stateDigest, photoDigests };
+      const adopted = { commitId: decision.tip.commitId, bookId, bookStateRevision: decision.tip.bookStateRevision, stateDigest: decision.tip.stateDigest, photoDigests };
       await recordSynced(root, { ...adopted, localDigests: Object.fromEntries(Object.entries(hereDigests(context)).filter(([id, digest]) => photoDigests[id] === digest)) });
       await refetchProxies(context, bookId, blob);
       // Facts this Mac knows better than the snapshot go back with a commit of the same book state.
@@ -571,8 +571,12 @@ async function missingOriginals(root: string, blob: StateBlob, ids?: readonly st
   return missing;
 }
 
-/** The lineage ID a synced book's blobs are stored under: the one in its project.json. */
-async function syncedBookId(root: string) {
+/**
+ * The book a synced commit's blobs are stored under: the one its sync record names, whatever project.json says by now
+ * (a book that syncs again as a new history gets a new ID there). Records from before the ID was kept fall back to it.
+ */
+async function syncedBookId(root: string, synced: SyncedCommit) {
+  if (synced.bookId) return synced.bookId;
   const { bookId } = JSON.parse(await readFile(join(root, 'project.json'), 'utf8')) as { bookId?: unknown };
   if (typeof bookId !== 'string') throw new Error('This book has no lineage ID yet. Make an edit, then sync.');
   return bookId;
@@ -592,7 +596,7 @@ export async function stageOriginals({ remote, folder, signal, progress }: { rem
   const root = await realpath(folder);
   const synced = (await readSyncState(root)).lastSynced;
   if (!synced) return [];
-  const bookId = await syncedBookId(root);
+  const bookId = await syncedBookId(root, synced);
   const missing = await missingOriginals(root, await fetchState(remote, bookId, synced.stateDigest));
   const staged: StagedOriginal[] = [];
   progress?.(0, missing.length);
@@ -638,14 +642,14 @@ export async function pendingOriginals(folder: string, remote: SyncRemote) {
   const root = await realpath(folder);
   const synced = (await readSyncState(root)).lastSynced;
   if (!synced) return [];
-  const blob = await syncedBookId(root).then((bookId) => fetchState(remote, bookId, synced.stateDigest)).catch(() => undefined);
+  const blob = await syncedBookId(root, synced).then((bookId) => fetchState(remote, bookId, synced.stateDigest)).catch(() => undefined);
   return blob ? (await missingOriginals(root, blob)).map(({ id }) => id) : [];
 }
 
 async function fetchOriginals(root: string, remote: SyncRemote, ids?: readonly string[]) {
   const synced = (await readSyncState(root)).lastSynced;
   if (!synced) return [];
-  const bookId = await syncedBookId(root);
+  const bookId = await syncedBookId(root, synced);
   const blob = await fetchState(remote, bookId, synced.stateDigest);
   const downloaded: string[] = [];
   for (const { id, path, original } of await missingOriginals(root, blob, ids)) {
@@ -712,7 +716,7 @@ export async function cloneFromRemote({ remote, tip, destination, syncFolder }: 
     if (reserved) await rmdir(folder).catch(() => {});
   }
   await updateSyncState(folder, () => ({ version: 1, ...(syncFolder ? { folder: syncFolder } : {}),
-    lastSynced: { commitId: tip.commitId, bookStateRevision: tip.bookStateRevision, stateDigest: tip.stateDigest, photoDigests: digestsOf(facts), localDigests: {} } }));
+    lastSynced: { commitId: tip.commitId, bookId: tip.bookId, bookStateRevision: tip.bookStateRevision, stateDigest: tip.stateDigest, photoDigests: digestsOf(facts), localDigests: {} } }));
   return folder;
 }
 

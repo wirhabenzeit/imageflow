@@ -14,9 +14,11 @@ import type { SyncStore } from '../desktop/sync-store';
  *     storeConformance('s3', async (t) => new S3Store({ …, prefix: 'conformance/' + randomUUID() + '/' }));
  *
  * `many` is the number of objects in the listing test; raise it past a store's page size (1,000 for S3) to cover paging.
+ * `sha256` says what the store does with the checksum a put may carry: `checked` (the default), or `ignored` by a store
+ * that would have to read the source again to check it.
  * `copy` is optional in a store: its checks run where the store has it.
  */
-export function storeConformance(name: string, make: (t: TestContext) => Promise<SyncStore>, { many = 40 }: { many?: number } = {}) {
+export function storeConformance(name: string, make: (t: TestContext) => Promise<SyncStore>, { many = 40, sha256 = 'checked' }: { many?: number; sha256?: 'checked' | 'ignored' } = {}) {
   const bytes = (text: string) => new TextEncoder().encode(text);
   const sha = (value: Uint8Array) => createHash('sha256').update(value).digest('hex');
   const scratch = async (t: TestContext) => {
@@ -217,6 +219,56 @@ export function storeConformance(name: string, make: (t: TestContext) => Promise
     assert.deepEqual(await store.putIfAbsent('books/a/originals/aborted.jpg', { file }, { signal: live }), { existed: false });
     assert.deepEqual(await store.get('books/a/content/there', { signal: live }), bytes('there'));
     assert.equal(await store.download('books/a/content/there', join(folder, 'download'), { signal: live }), true);
+  });
+
+  check('a transfer aborted while it runs rejects and leaves nothing behind', async (store, t) => {
+    const folder = await scratch(t);
+    const file = join(folder, 'source.bin');
+    await writeFile(file, new Uint8Array(2_000_000).map((_, index) => index % 251));
+    await store.putIfAbsent('books/a/originals/there.jpg', { file });
+    // Aborted after the call began: past its first look at the signal, with the transfer under way.
+    const abortDuring = async (start: (signal: AbortSignal) => Promise<unknown>) => {
+      const controller = new AbortController();
+      const running = start(controller.signal);
+      controller.abort(new Error('stopped by the user'));
+      return running;
+    };
+    await assert.rejects(abortDuring((signal) => store.putIfAbsent('books/a/originals/aborted.jpg', { file }, { signal })), /stopped by the user/);
+    await assert.rejects(abortDuring((signal) => store.download('books/a/originals/there.jpg', join(folder, 'download'), { signal })), /stopped by the user/);
+    assert.equal(await store.head('books/a/originals/aborted.jpg'), undefined);
+    assert.deepEqual(await keys(store), ['books/a/originals/there.jpg'], 'no object, whole or partial');
+    assert.deepEqual(await readdir(folder), ['source.bin'], 'no file and no temporary file');
+    // A put of bytes already in memory may be done before it can be stopped: it is stored whole, or not at all.
+    const small = bytes('small enough to be done at once');
+    const outcome = await abortDuring((signal) => store.putIfAbsent('books/a/content/small', small, { signal }))
+      .then(() => 'stored', (error: Error) => { assert.match(error.message, /stopped by the user/); return 'stopped'; });
+    assert.deepEqual(await store.get('books/a/content/small'), outcome === 'stored' ? small : undefined);
+    // Likewise a get: the whole object, or the signal's reason.
+    const got = await abortDuring((signal) => store.get('books/a/originals/there.jpg', { signal })).catch((error: Error) => { assert.match(error.message, /stopped by the user/); return undefined; });
+    assert.ok(got === undefined || (got as Uint8Array).length === 2_000_000);
+    // What was stopped can be done again.
+    assert.deepEqual(await store.putIfAbsent('books/a/originals/aborted.jpg', { file }), { existed: false });
+    assert.equal((await store.head('books/a/originals/aborted.jpg'))?.size, 2_000_000);
+    assert.equal(await store.download('books/a/originals/there.jpg', join(folder, 'download')), true);
+    assert.equal((await lstat(join(folder, 'download'))).size, 2_000_000);
+  });
+
+  check(sha256 === 'checked' ? 'a put whose bytes do not have the SHA-256 given is rejected, and nothing is stored' : 'a put is not checked against the SHA-256 given', async (store, t) => {
+    const folder = await scratch(t);
+    const file = join(folder, 'source.bin');
+    await writeFile(file, 'real');
+    const wrong = sha(bytes('other'));
+    if (sha256 === 'ignored') {
+      assert.deepEqual(await store.putIfAbsent('books/a/content/' + wrong, bytes('real'), { sha256: wrong }), { existed: false });
+      return;
+    }
+    await assert.rejects(store.putIfAbsent('books/a/content/' + wrong, bytes('real'), { sha256: wrong }));
+    await assert.rejects(store.putIfAbsent('books/a/originals/' + wrong + '.jpg', { file }, { sha256: wrong }));
+    assert.deepEqual(await keys(store), [], 'nothing was stored');
+    assert.equal(await store.head('books/a/content/' + wrong), undefined);
+    // The right bytes go under the same key afterwards.
+    assert.deepEqual(await store.putIfAbsent('books/a/content/' + wrong, bytes('other'), { sha256: wrong }), { existed: false });
+    assert.deepEqual(await store.get('books/a/content/' + wrong), bytes('other'));
   });
 
   check('transfers report their progress, ending at the size of the object', async (store, t) => {
