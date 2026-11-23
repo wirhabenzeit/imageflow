@@ -26,18 +26,18 @@ import type { SourceEntry } from '../src/source-locations';
 import { assetPageLabels, assetUsage, usageLabel } from '../src/asset-usage';
 import { importFeedback } from '../src/import-feedback';
 import { configureSourceStore, pruneSourceCache, SourceStore } from './source-store';
-import { bookTrusted, configureSourceAccess, distrustBook, trustBook } from './source-access';
+import { bookTrusted, configureSourceAccess, trustBook } from './source-access';
 import { app, autoUpdater, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, powerMonitor, protocol, safeStorage, shell } from 'electron';
 import type { BaseWindow, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, extname, join, isAbsolute, parse } from 'node:path';
+import { basename, dirname, extname, join, isAbsolute, parse, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, renderOrigins, settingsURL, startURL, starterURL, assetsURL, templatesURL } from '../src/desktop';
-import type { AgentLeaseReply, BookMenuState, Command, ImportRequest, LightroomState, OpenAction, ProjectSummary, Result, MarkdownAction, McpClientTarget, McpSettings, SourceAction, SyncAction, TemplateInfo } from '../src/desktop';
+import type { AgentLeaseReply, BookMenuState, Command, ImportRequest, LightroomState, OpenAction, ProjectSummary, Result, MarkdownAction, McpClientTarget, McpSettings, SourceAction, SyncAction, SyncSetupBook, TemplateInfo } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
 import { renderPolicy } from './csp';
 import { assetTypes, loadProject, renderData, TemplateCompileError } from './project';
@@ -46,10 +46,12 @@ import { photoFile } from './photos';
 import { captureBookPreview, checkBookRender } from './preview';
 import { PreviewError } from '../src/preview';
 import { chooseSyncTip, DocumentSession } from './document-session';
-import { cloneFromRemote } from './sync-engine';
+import { cloneFromRemote, ownedOriginalsSize } from './sync-engine';
 import { remoteBooks } from './sync-remote';
 import { SyncElsewhereError } from './sync-pull';
-import { insideBook, SyncService } from './sync-service';
+import { insideBook, pendingUploadsText, SyncService, UntrustedBookError } from './sync-service';
+import { syncExcludedBook as excludedFrom } from './sync-start';
+import { chooseBooksPatch } from './sync-settings';
 import { configureMacHeader, setToolbarDragRegions } from './mac-header';
 import type { RenderSessions } from './document-session';
 import { AssetFacts } from './asset-facts';
@@ -139,7 +141,8 @@ const syncOffered = syncFlag();
 // touches CloudKit there.
 let cloudKitNative: CloudKitNative | undefined | null = null;
 const cloudKit = () => (cloudKitNative === null ? (cloudKitNative = loadCloudKitNative()) : cloudKitNative);
-const syncService = new SyncService(() => (syncOffered ? settings?.value.sync : undefined), { credentials: () => syncCredentials(), cacheFolder: () => app.getPath('userData'), cloudKit });
+const syncService = new SyncService(() => (syncOffered ? settings?.value.sync : undefined), { credentials: () => syncCredentials(), cacheFolder: () => app.getPath('userData'), cloudKit,
+  booksUnchosen: () => !!settings?.value.syncBooksUnchosen });
 let recents: RecentDocuments;
 let library: TemplateLibrary;
 let trust: TemplateTrust;
@@ -334,6 +337,18 @@ function focusedDocument(owner: BaseWindow | null | undefined = BrowserWindow.ge
 function report(owner: BrowserWindow | null | undefined, error: unknown) {
   if (owner && !owner.isDestroyed()) owner.webContents.send(channels.appError, errorMessage(error));
   else { showStart(); startWindow?.webContents.once('did-finish-load', () => report(startWindow, error)); }
+}
+/**
+ * Books that never start syncing by themselves (ADR 0012, section 3): the sample books that ship with the app, and the
+ * books a template preview renders, which are staged in the app's cache. Read-only opens and untrusted books are told
+ * apart by the sync service.
+ */
+const syncExcludedBook = (folder: string) => excludedFrom(folder, [sampleFolder(''), cache]);
+/** The recent books the first-configuration sheet lists: those on this Mac, without the sample and preview books. */
+async function booksToChoose() {
+  const entries = (await recents.list()).filter(({ available }) => available);
+  const excluded = await Promise.all(entries.map(({ path }) => syncExcludedBook(path)));
+  return entries.filter((_, index) => !excluded[index]);
 }
 function sampleFolder(name: string) {
   return sampleRoot ? join(sampleRoot, name) : app.isPackaged ? join(process.resourcesPath, 'sample', name) : join(app.getAppPath(), 'sample', name);
@@ -578,6 +593,7 @@ async function openDocument(path: string): Promise<DocumentSession | undefined> 
       document.keepOriginals = () => settings.value.keepOriginals !== false;
       document.syncChanged = () => updateMenus();
       document.syncService = syncService;
+      document.syncExcluded = await syncExcludedBook(folder);
       const asking = document;
       asking.syncElsewhere = async () => { if (await offerSyncHere(asking)) void asking.syncNow().catch((error) => report(asking.window, error)); };
       document.dependencyCache = dependencyCache();
@@ -978,10 +994,12 @@ async function stopTrustingBook(owner: BaseWindow | undefined) {
   }
   const { response } = await dialog.showMessageBox(window, { type: 'warning', buttons: ['Stop Trusting', 'Cancel'], defaultId: 1, cancelId: 1,
     message: 'Stop trusting this book’s template?',
-    detail: 'Maps and other pictures that load from the internet stop drawing until you trust the book again.' });
+    detail: 'Maps and other pictures that load from the internet stop drawing until you trust the book again.' +
+      (syncOffered ? ' The book also stops syncing on this Mac; other Macs keep syncing it.' : '') });
   if (response !== 0) return;
-  await distrustBook(document.book.folder);
-  await document.updateNetwork();
+  // An untrusted book never continues syncing (ADR 0012, section 2): it stops on this Mac, and the remote is left as it
+  // is. Through the session, so it waits for nothing and never interrupts a sync of the book.
+  await document.stopTrusting();
 }
 
 /** Library entries with why their network access needs no question, for Manage Templates and New Book. */
@@ -1104,9 +1122,27 @@ async function syncDocument(document: DocumentSession, start: boolean) {
   if (!syncService.configured) { showSettings('sync'); return; }
   try { await document.syncNow({ start }); }
   catch (error) {
+    // Only trusted books sync: Start Syncing on one that is not asks once to trust it (ADR 0012, section 2).
+    if (error instanceof UntrustedBookError) {
+      if (await offerTrust(document)) await document.syncNow({ start, trust: true });
+      return;
+    }
     if (!(error instanceof SyncElsewhereError)) throw error;
     if (await offerSyncHere(document)) await document.syncNow();
   }
+}
+
+/**
+ * Asks once whether an untrusted book is trusted, so it can sync: older or copied books without declared sites, and
+ * books from elsewhere. True when the user agreed; the caller trusts it as it starts syncing.
+ */
+async function offerTrust(document: DocumentSession) {
+  if (document.closing || document.window.isDestroyed()) return false;
+  const { response } = await dialog.showMessageBox(document.window, { type: 'question', buttons: ['Trust and Sync', 'Cancel'], defaultId: 0, cancelId: 1,
+    message: 'Trust this book and sync it?',
+    detail: 'Only books you trust sync. “' + bookName(document.book.folder) + '” was not made on this Mac and was not trusted here. ' +
+      'Trust it only if you made it or got it from someone you trust: its template may then load maps or data from the sites it declares without asking.' });
+  return response === 0 && !document.closing;
 }
 
 /**
@@ -1123,7 +1159,10 @@ async function offerSyncHere(document: DocumentSession) {
       'If you don’t, it does not sync on this Mac until you choose File → Sync → Start Syncing.' });
   if (document.closing) return false;
   if (response !== 0) { await document.stopSyncing(); return false; }
-  await document.startSyncing({ newHistory: true });
+  // Only a trusted book starts syncing, here too.
+  const trust = !await bookTrusted(document.book.folder);
+  if (trust && !await offerTrust(document)) { await document.stopSyncing(); return false; }
+  await document.startSyncing({ newHistory: true, trust });
   return true;
 }
 
@@ -1322,7 +1361,8 @@ function updateMenus() {
   const standing = document && !document.closing ? document.bookSync : 'unconfigured';
   const syncs = standing === 'syncing' || standing === 'unavailable';
   const syncEnabled: Record<string, boolean> = { 'sync-now': state.document && state.writable && syncs && !sync?.syncing,
-    'sync-download': !!sync && !sync.syncing && !sync.downloading && (sync.status?.pendingOriginals ?? 0) > 0,
+    // Originals another Mac is still uploading cannot be downloaded yet.
+    'sync-download': !!sync && !sync.syncing && !sync.downloading && (sync.status?.pendingOriginals ?? 0) > (sync.status?.notUploaded ?? 0),
     'sync-start': state.document && state.writable && (standing === 'off' || standing === 'stopped' || standing === 'elsewhere'),
     'sync-stop': syncs && !sync?.syncing, 'sync-setup': !syncService.configured, 'open-sync-folder': syncService.configured };
   for (const [id, enabled] of Object.entries(syncEnabled)) { const item = menu?.getMenuItemById(id); if (item) item.enabled = enabled; }
@@ -1681,6 +1721,13 @@ void app.whenReady().then(async () => {
     void (async () => {
       // Source editors flush pending keystrokes and retain their existing cancel/failure prompts.
       for (const document of documents.values()) if (!await markdownWindows.closeFor(document)) return;
+      // Quitting while originals upload is allowed: the books have synced, and what is left resumes when they open again.
+      const uploading = pendingUploadsText(syncService.pendingUploads(), bookName);
+      if (uploading) {
+        const { response } = await dialog.showMessageBox({ type: 'question', buttons: ['Quit', 'Keep Uploading'], defaultId: 0, cancelId: 1,
+          message: 'Originals are still uploading.', detail: uploading });
+        if (response !== 0) return;
+      }
       await Promise.allSettled([...opening.values()]);
       for (const document of documents.values()) {
         if (document.closing || document.window.isDestroyed()) continue;
@@ -1760,6 +1807,8 @@ void app.whenReady().then(async () => {
     if (quitReady) return;
     event.preventDefault();
     quitCleanup ??= (async () => {
+      // Uploads of originals stop cleanly: what is half-sent is never stored, and the next open resumes them.
+      await syncService.cancelUploads();
       await connectionSettingsQueue;
       await disableMcp();
       // The plugin sees the bridge file go and waits for the next run of ImageFlow.
@@ -2127,6 +2176,7 @@ void app.whenReady().then(async () => {
   // A bucket and its key are saved in Settings → Sync; every open book then looks at the remote again, also when only
   // the key changed (a corrected key clears "Sign-in needed" without a restart).
   registerSyncSettings({ ipcMain, owner: settingsOwner, settings, credentials: syncCredentials, cloudKit: async () => cloudKit()?.status(),
+    booksToChoose: async () => (await booksToChoose()).length,
     usage: async () => (await syncService.connect()).remote.usage(),
     changed: (value) => { syncBackendChanged(); for (const owner of appWindows()) if (!owner.isDestroyed()) owner.webContents.send(channels.settingsChanged, value); } });
   ipcMain.handle(channels.settings, (event) => appOwner(event) ? { value: settings.value } : { error: 'Request is only available to an app window.' });
@@ -2155,6 +2205,47 @@ void app.whenReady().then(async () => {
     } catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.handle(channels.syncOffered, () => syncOffered);
+  // The sheet after a backend is first set up (ADR 0012, section 3): it lists the recent books with what their owned
+  // originals take up and asks which to sync. Configuring a backend uploads nothing by itself.
+  ipcMain.handle(channels.syncSetupBooks, async (event) => {
+    if (!settingsOwner(event)) return { error: 'Request is only available to Settings.' };
+    if (!syncOffered || !syncService.configured) return { error: 'Sync is off on this Mac.' };
+    try {
+      const entries = await booksToChoose();
+      // With no book to list there is nothing to answer.
+      if (!entries.length) {
+        if (settings.value.syncBooksUnchosen) await settings.update({ syncBooksUnchosen: null });
+        return { value: [] };
+      }
+      // One connection for all of them; each book's files are read side by side.
+      const standings = await syncService.standings(entries.map(({ path }) => path));
+      const books: SyncSetupBook[] = await Promise.all(entries.map(async (entry, index) => ({ id: entry.id, title: entry.title,
+        bytes: await ownedOriginalsSize(entry.path).catch(() => 0), trusted: await bookTrusted(entry.path).catch(() => false), syncing: standings[index] === 'syncing' })));
+      return { value: books };
+    } catch (error) { return { error: errorMessage(error) }; }
+  });
+  ipcMain.handle(channels.chooseSyncBooks, async (event, choices: unknown) => {
+    if (!settingsOwner(event)) return { error: 'Request is only available to Settings.' };
+    if (!syncOffered || !syncService.configured) return { error: 'Sync is off on this Mac.' };
+    if (!Array.isArray(choices) || choices.length > 100 || !choices.every((choice) => choice && typeof choice.id === 'string' && typeof choice.sync === 'boolean')) return { error: 'Invalid choice of books.' };
+    try {
+      const chosen: { folder: string; sync: boolean }[] = [];
+      for (const { id, sync } of choices as { id: string; sync: boolean }[]) {
+        const entry = await recents.get(id);
+        if (await syncExcludedBook(entry.path)) continue;
+        chosen.push({ folder: (await documentIdentity(entry.path)).folder, sync });
+      }
+      await syncService.chooseBooks(chosen);
+      // Answered: books may start by themselves again.
+      await settings.update({ syncBooksUnchosen: null });
+      // Open books look again: one chosen to sync starts now, as it would at its next open.
+      for (const document of documents.values()) {
+        if (document.closing || !chosen.some(({ folder }) => folder === document.book.folder)) continue;
+        void document.refreshSync().then(() => document.syncOnOpen()).catch((error) => report(document.window, error));
+      }
+      return { value: undefined };
+    } catch (error) { return { error: errorMessage(error) }; }
+  });
   ipcMain.handle(channels.chooseSyncFolder, async (event) => {
     if (!appOwner(event) || !syncOffered) return { error: 'Request is only available to an app window.' };
     try {
@@ -2169,7 +2260,8 @@ void app.whenReady().then(async () => {
       // A book's own files are no place for the sync of every book (and a sync folder inside one is refused per book).
       if (insideBook(await realpath(path).catch(() => path)) || insideBook(path)) throw new Error('Choose a folder outside every book.');
       const previous = settings.value.sync;
-      const value = await settings.update({ sync: { kind: 'folder', path } });
+      const next = { kind: 'folder' as const, path };
+      const value = await settings.update({ sync: next, ...await chooseBooksPatch(previous, next, async () => (await booksToChoose()).length) });
       // One backend at a time: a bucket the folder replaces has its key forgotten.
       await forgetOtherCredentials(syncCredentials(), previous, value.sync).catch((error) => console.warn('ImageFlow could not forget the key of the former sync bucket', error));
       if (JSON.stringify(value.sync) !== JSON.stringify(previous)) syncBackendChanged();

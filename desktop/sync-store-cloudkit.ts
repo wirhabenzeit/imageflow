@@ -3,7 +3,7 @@ import { constants, createReadStream } from 'node:fs';
 import { chmod, copyFile, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { ChangeTokenExpiredError, childPrefix, requireStoreKey, requireStorePrefix, StoreAccessError, StoreFullError } from './sync-store';
+import { ChangeTokenExpiredError, childPrefix, requireStoreKey, requireStorePrefix, StoreAccessError, StoreFullError, uploadClonePrefix } from './sync-store';
 import type { PutOptions, StoreAccessReason, StoreChanges, StoreEntry, StoreSource, SyncStore, TransferOptions } from './sync-store';
 
 /*
@@ -303,9 +303,10 @@ export class CloudKitStore implements SyncStore {
           // An object that is there is not uploaded again.
           if (await this.head(key)) return { existed: true };
           // A clone beside the source: on APFS it takes no space and no copying, also for a book on another volume
-          // than the startup disk. The name is one a book ignores and sweeps after a crash. Where the source's folder
-          // cannot be written, the clone goes to the temporary folder instead.
-          staging = join(dirname(source.file), '.imageflow-write-' + randomUUID() + '.tmp');
+          // than the startup disk. The name is one a book ignores, and not the one the writer lock sweeps: originals
+          // upload in the background, without the lock (`uploadOriginals` sweeps these after a crash). Where the
+          // source's folder cannot be written, the clone goes to the temporary folder instead.
+          staging = join(dirname(source.file), uploadClonePrefix + randomUUID() + '.tmp');
           try { await copyFile(source.file, staging, constants.COPYFILE_FICLONE | constants.COPYFILE_EXCL); }
           catch (error) {
             const code = (error as NodeJS.ErrnoException).code;

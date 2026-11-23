@@ -1,7 +1,7 @@
-import { constants } from 'node:fs';
+import { constants, createReadStream } from 'node:fs';
 import type { Stats } from 'node:fs';
 import { copyFile, link, lstat, mkdir, open, readdir, readFile, rename, rm, rmdir, utimes } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { dirname, join, sep } from 'node:path';
 import { StoreRemote } from './sync-remote';
 import { isStoreKey, requireStoreKey, requireStorePrefix } from './sync-store';
@@ -21,6 +21,11 @@ import type { PutOptions, StoreEntry, StoreSource, SyncStore, TransferOptions } 
 const missing = (error: unknown) => ['ENOENT', 'ENOTDIR', 'EISDIR'].includes((error as NodeJS.ErrnoException).code ?? '');
 const temporary = (destination: string) => join(dirname(destination), '.sync-' + randomUUID() + '.tmp');
 const object = (info: Stats) => ({ size: info.size, lastModified: info.mtime });
+async function fileSha(file: string) {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(file)) hash.update(chunk as Buffer);
+  return hash.digest('hex');
+}
 /** A clone keeps its source's times; an object's time is when it was stored (the sweep's grace period counts from it). */
 async function cloneInto(source: string, staging: string) {
   await copyFile(source, staging, constants.COPYFILE_FICLONE | constants.COPYFILE_EXCL);
@@ -54,15 +59,15 @@ export class FolderStore implements SyncStore {
     return { folder, path: join(this.root, ...folder.split('/').filter(Boolean)) };
   }
 
-  async putIfAbsent(key: string, source: StoreSource, { signal, onProgress }: PutOptions = {}) {
+  async putIfAbsent(key: string, source: StoreSource, { sha256, signal, onProgress }: PutOptions = {}) {
     const destination = this.path(key);
     signal?.throwIfAborted();
     // Looked at first, so a large original that is there already is not copied to find that out.
     if (await this.head(key)) return { existed: true };
-    return again(() => this.write(destination, source, signal, onProgress));
+    return again(() => this.write(key, destination, source, sha256, signal, onProgress));
   }
 
-  private async write(destination: string, source: StoreSource, signal: AbortSignal | undefined, onProgress: PutOptions['onProgress']) {
+  private async write(key: string, destination: string, source: StoreSource, sha256: string | undefined, signal: AbortSignal | undefined, onProgress: PutOptions['onProgress']) {
     await this.io.mkdir(dirname(destination), { recursive: true });
     const staging = temporary(destination);
     try {
@@ -70,6 +75,9 @@ export class FolderStore implements SyncStore {
         const handle = await open(staging, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o644);
         try { await handle.writeFile(source); await handle.sync(); } finally { await handle.close(); }
       } else await cloneInto(source.file, staging);
+      // What becomes the object is the copy taken now, checked against the digest: a file that changes while it is
+      // copied never stores other bytes under it.
+      if (sha256 !== undefined && await fileSha(staging) !== sha256) throw new Error('An object does not have the SHA-256 it was stored with: ' + key);
       // A file copy that is running cannot be stopped; one that was aborted meanwhile is discarded here, before it
       // becomes an object.
       signal?.throwIfAborted();

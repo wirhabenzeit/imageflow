@@ -50,19 +50,18 @@ const syncStateSchema = z.object({
     targetCommit: z.uuid(), error: z.string().max(2000), at: z.iso.datetime(), bookStateRevision: sha256.optional(),
     conflictCopy: z.string().max(4096).optional(), atOpen: z.literal(true).optional(),
   }).strict().optional(),
-  // A pull changed template/: origins it declares that this book has not allowed are asked about even when the book is
-  // trusted, since a sync remote is not authenticated (ADR 0006).
-  networkReview: z.literal(true).optional(),
 }).strict();
 export type SyncState = z.infer<typeof syncStateSchema>;
 /**
  * A record as written before ADR 0012 named the folder a book synced through (#251). It is read without it: the book
  * then does not sync until it starts again on the configured remote, and a `lastSynced` it kept counts as synced
- * somewhere else (`bookSync`).
+ * somewhere else (`bookSync`). A record from before only trusted books synced (#282) may hold `networkReview`, which
+ * asked about sites a pulled template added even in a trusted book; it is read without it, and such a book now takes
+ * the path of every trusted book: the sites are allowed and named in a notice.
  */
 const storedSyncStateSchema = z.preprocess((value) => {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || !('folder' in value)) return value;
-  const { folder: _, ...rest } = value as Record<string, unknown>;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || (!('folder' in value) && !('networkReview' in value))) return value;
+  const { folder: _, networkReview: __, ...rest } = value as Record<string, unknown>;
   return rest;
 }, syncStateSchema);
 
@@ -341,10 +340,9 @@ export async function preflightPull(folder: string, marker: PullMarker) {
 export async function abandonPull(folder: string, marker: PullMarker, error: unknown, { atOpen = false } = {}) {
   const bookStateRevision = await captureBookStateRevision(folder).catch(() => undefined);
   const message = (error instanceof Error ? error.message : String(error)).slice(0, 2000) || 'The pull could not be finished.';
-  await updateSyncState(folder, ({ pull, lastSynced: _, ...state }) => ({ ...state,
+  await updateSyncState(folder, ({ pull: _, lastSynced: __, ...state }) => ({ ...state,
     abandoned: { targetCommit: marker.targetCommit, error: message, at: new Date().toISOString(), ...(bookStateRevision ? { bookStateRevision } : {}),
-      ...(marker.conflictCopy ? { conflictCopy: marker.conflictCopy } : {}), ...(atOpen ? { atOpen: true as const } : {}) },
-    ...(pull?.templateChanged || state.networkReview ? { networkReview: true as const } : {}) }));
+      ...(marker.conflictCopy ? { conflictCopy: marker.conflictCopy } : {}), ...(atOpen ? { atOpen: true as const } : {}) } }));
   await rm(await stagingFolder(folder), { recursive: true, force: true }).catch(() => {});
 }
 
@@ -383,8 +381,7 @@ export async function applyStagedPull(folder: string, marker: PullMarker) {
   await updateSyncState(root, ({ abandoned: _, ...state }) => ({ ...state, pull: undefined,
     lastSynced: { commitId: marker.targetCommit, ...(project.bookId ? { bookId: project.bookId } : {}), bookStateRevision: marker.bookStateRevision, stateDigest: marker.stateDigest, photoDigests,
       localDigests: Object.fromEntries(Object.entries(marker.localDigests).filter(([id]) => photos[id])),
-      localKeys: Object.fromEntries(Object.entries(marker.localKeys).filter(([id]) => photos[id])) },
-    ...(marker.templateChanged || state.networkReview ? { networkReview: true as const } : {}) }));
+      localKeys: Object.fromEntries(Object.entries(marker.localKeys).filter(([id]) => photos[id])) } }));
   await rm(await stagingFolder(root), { recursive: true, force: true });
   return { blob, project, photos };
 }

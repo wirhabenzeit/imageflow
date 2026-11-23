@@ -18,6 +18,9 @@ export type SyncBackend = FolderSyncBackend | S3SyncBackend | ICloudSyncBackend;
 // `keepOriginals`: synced books download their owned originals to this Mac in the background after opening and after
 // each sync (#251). On unless set to false, which keeps only previews here until Download Originals.
 // `sync`: the backend books sync through on this Mac (ADR 0012), one at a time. Each kind is one member of the union.
+// `syncBooksUnchosen`: the backend was set up (or changed) and the sheet that asks which recent books sync has not been
+// answered yet (#282): no book starts syncing by itself until it is. Only the Sync settings requests and the sheet's
+// answer set or clear it, never the generic settings patch; it goes when sync is turned off.
 export type AppSettings = { appearance: Appearance; automaticUpdates: boolean; updateChannel: UpdateChannel; newBookSize?: { width: number; height: number }; agentAccess?: boolean;
-  keepOriginals?: boolean; sync?: SyncBackend };
+  keepOriginals?: boolean; sync?: SyncBackend; syncBooksUnchosen?: true };
 export const defaultSettings: AppSettings = { appearance: 'system', automaticUpdates: true, updateChannel: 'stable' };

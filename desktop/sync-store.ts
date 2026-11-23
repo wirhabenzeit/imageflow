@@ -93,6 +93,14 @@ export class StoreFullError extends Error {
   constructor(message: string, options?: ErrorOptions) { super(message, options); this.name = 'StoreFullError'; }
 }
 
+/**
+ * The name a store gives the clone of a file it uploads when it clones beside the file (the iCloud store, for an
+ * original in photos/): one of its own, so acquiring the writer lock, which sweeps `.imageflow-write-*.tmp` in the book's
+ * root, never removes the clone of an upload running in the background without the lock. Revision tracking ignores it
+ * (`.tmp`), and the uploader sweeps what a crash left (`uploadOriginals`).
+ */
+export const uploadClonePrefix = '.imageflow-upload-';
+
 const segmentOk = (part: string) => !!part && !part.startsWith('.') && !/[\\\0]/.test(part);
 /** Whether a string is a store key: `/`-separated parts that are not empty, not hidden (`.`, `..`, `.name`), without `\`. */
 export const isStoreKey = (key: string) => typeof key === 'string' && key.length <= 1024 && key.split('/').every(segmentOk);
