@@ -91,8 +91,8 @@ try {
       const options = args.at(-1);
       globalThis.syncPrompts.push({ message: options.message, detail: options.detail, buttons: options.buttons, cancelId: options.cancelId, window: args.length > 1 ? args[0].id : undefined });
       const response = globalThis.syncAnswers[options.message];
-      // `{ not }` picks the first button that is neither that one nor Cancel.
-      const chosen = response && typeof response === 'object' ? options.buttons.findIndex((button, index) => button !== response.not && index !== options.cancelId) : response;
+      // `{ button }` picks the button with that label.
+      const chosen = response && typeof response === 'object' ? options.buttons.indexOf(response.button) : response;
       return { response: chosen === 'cancel' ? options.cancelId : chosen ?? 0, checkboxChecked: false };
     };
   });
@@ -156,11 +156,48 @@ try {
   assert.equal(await timesAsked(elsewhereQuestion, await windowId(duplicate)), 0);
   await duplicate.close();
 
+  // New Book with a backend configured: the new book is the user's own and syncs after its first save, without
+  // reopening it and without File → Sync.
+  const newBook = join(work, 'Desktop', 'New Sync Book.imageflow');
+  await choosePaths({ save: newBook });
+  const beforeNew = new Set(app.windows());
+  await desktop.evaluate(() => window.imageflow.openProject('new'));
+  let picker;
+  for (let attempt = 0; !(picker = app.windows().find((page) => page.url() === 'imageflow://editor/new')); attempt++) {
+    assert.ok(attempt < 400, 'New Book opens');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  await picker.getByRole('button', { name: 'Create', exact: true }).click();
+  let created;
+  for (let attempt = 0; !(created = app.windows().find((page) => !beforeNew.has(page) && page.url() === 'imageflow://editor/')); attempt++) {
+    assert.ok(attempt < 400, 'the new book opens');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  await ready(created);
+  // The first save; the book may be busy for a moment with its first sync.
+  for (let attempt = 0; ; attempt++) {
+    const saved = await created.evaluate(async () => {
+      const { value } = await window.imageflow.currentProject();
+      value.project.title = 'Renamed in the new book';
+      return window.imageflow.saveProject(value.id, { project: value.project, photoIndex: value.photoIndex });
+    });
+    if (saved.value) break;
+    assert.ok(attempt < 100 && /finishing another operation|changed/.test(saved.error ?? ''), 'the first save: ' + JSON.stringify(saved));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  const createdId = (await current(created)).project.bookId;
+  assert.ok(createdId, 'the new book has its lineage ID');
+  for (let attempt = 0; !(await readdir(await snapshots(createdId)).catch(() => [])).some((name) => name.endsWith('.json')); attempt++) {
+    assert.ok(attempt < 600, 'the new book synced by itself after its first save');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  await created.close();
+
   // Open Synced Book on the "laptop": it lists the configured backend, and makes an untrusted copy, which asks before
   // reaching the template's sites.
   await answer(trustQuestion, 1);
-  // The remote holds the duplicate too: the laptop opens the desktop's book.
-  await answer('Which book do you want to open?', { not: 'Sync Book Copy' });
+  // The remote holds the duplicate and the new book too: the laptop opens the desktop's book.
+  await answer('Which book do you want to open?', { button: (await current(desktop)).project.title });
   await choosePaths({ open: '/nonexistent', save: laptopBook });
   const beforeLaptop = new Set(app.windows());
   await app.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('open-sync-folder').click());
@@ -184,7 +221,10 @@ try {
   // A normal sync: the laptop pushes a caption, the desktop pulls it and its editor reloads.
   assert.ok((await setCaption(laptop, 'shore', 'From the laptop')).value);
   await statusIs(laptop, 'ahead');
+  // The laptop's book syncs but is not trusted (Open Synced Book; #283 makes downloads trusted): Sync Now asks once to
+  // trust it, and syncs once the user agrees.
   assert.deepEqual(await sync(laptop), { value: undefined });
+  await waitForPrompt((prompt) => prompt.message === 'Trust this book and sync it?' && prompt.window === laptopWindow);
   await statusIs(laptop, 'in-sync');
   assert.deepEqual(await sync(desktop), { value: undefined });
   await captionIs(desktop, 'shore', 'From the laptop');
@@ -283,6 +323,6 @@ try {
   const otherTips = await readdir(join(otherFolder, 'books', bookId, 'snapshots'));
   assert.equal(otherTips.filter((name) => name.endsWith('.json')).length, 1, 'a new history on the other backend');
   assert.ok(JSON.parse(await readFile(join(otherFolder, 'remote.json'), 'utf8')).remoteId, 'the backend has its identity');
-  console.log('The folder backend in Settings, Start Syncing, a duplicate that syncs on open with originals after the commit, Open Synced Book, reloads after sync and after a failed push, the five-tip chooser, a pulled template change in a trusted book and a changed backend passed.');
+  console.log('The folder backend in Settings, Start Syncing, a duplicate and a New Book book that sync by themselves with originals after the commit, Open Synced Book (trusted on its first Sync Now), reloads after sync and after a failed push, the five-tip chooser, a pulled template change in a trusted book and a changed backend passed.');
 } catch (error) { console.error(stderr.join('\n')); throw error; }
 finally { await closeApp(app); await rm(work, { recursive: true, force: true }); }

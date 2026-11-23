@@ -26,7 +26,7 @@ import type { SourceEntry } from '../src/source-locations';
 import { assetPageLabels, assetUsage, usageLabel } from '../src/asset-usage';
 import { importFeedback } from '../src/import-feedback';
 import { configureSourceStore, pruneSourceCache, SourceStore } from './source-store';
-import { bookTrusted, configureSourceAccess, distrustBook, trustBook } from './source-access';
+import { bookTrusted, configureSourceAccess, trustBook } from './source-access';
 import { app, autoUpdater, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, powerMonitor, protocol, safeStorage, shell } from 'electron';
 import type { BaseWindow, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
 import { execFile } from 'node:child_process';
@@ -992,11 +992,9 @@ async function stopTrustingBook(owner: BaseWindow | undefined) {
     detail: 'Maps and other pictures that load from the internet stop drawing until you trust the book again.' +
       (syncOffered ? ' The book also stops syncing on this Mac; other Macs keep syncing it.' : '') });
   if (response !== 0) return;
-  // An untrusted book never continues syncing (ADR 0012, section 2): it stops on this Mac, and the remote is left as it is.
-  if (syncOffered) await syncService.distrust(document.book.folder);
-  else await distrustBook(document.book.folder);
-  await document.updateNetwork();
-  if (syncOffered) await document.refreshSync();
+  // An untrusted book never continues syncing (ADR 0012, section 2): it stops on this Mac, and the remote is left as it
+  // is. Through the session, so it waits for nothing and never interrupts a sync of the book.
+  await document.stopTrusting();
 }
 
 /** Library entries with why their network access needs no question, for Manage Templates and New Book. */

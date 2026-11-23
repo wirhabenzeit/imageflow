@@ -26,7 +26,7 @@ import type { RenderProject } from '../src/project';
 import { printBook, printProof, savePdf } from './export';
 import { isProofDensity, proofDensities } from '../src/proof-sheet';
 import type { ProofDensity } from '../src/proof-sheet';
-import { approveNetwork, approvedNetwork, bookTrusted, trustBook } from './source-access';
+import { approveNetwork, approvedNetwork, bookTrusted, distrustBook, trustBook } from './source-access';
 import { importIntoProject, importProvidedPhotos, loadProject, projectSummary, readProjectManifest } from './project';
 import type { ImportProgress } from './project';
 import type { OpenProject } from './project';
@@ -383,6 +383,13 @@ export class DocumentSession {
    * remote's headers only accumulate.
    */
   private scheduleSyncRefresh() {
+    // A book whose first sync by itself did not happen (busy, offline) tries again after the next save, through the
+    // same checks as at open: exclusions, trust, opt-out, and a book synced elsewhere is asked about, never started.
+    if (this.startPending && !this.syncing && !this.closing) {
+      this.startPending = false;
+      clearTimeout(this.startTimer);
+      this.startTimer = setTimeout(() => void this.syncOnOpen().catch((error) => console.warn('ImageFlow could not start syncing the book', error)), 1500);
+    }
     if (!this.syncView?.status?.remote || this.syncing) return;
     clearTimeout(this.syncTimer);
     this.syncTimer = setTimeout(() => void this.refreshLocalSync().catch(() => {}), 1500);
@@ -407,13 +414,13 @@ export class DocumentSession {
   private storageFull?: SyncView['storageFull'];
   private publishSync(view: SyncView | undefined) {
     if (view) {
-      const { downloading: _, storageFull: __, uploading: ___, ...rest } = view;
+      const { downloading: _, storageFull: __, uploading: ___, uploadFailed: ____, ...rest } = view;
       // This Mac's originals going up in the background after the commit, or paused because the remote is full.
       const uploads = this.syncService?.uploadState(this.book.folder) ?? {};
       const manage = this.syncService?.kind === 'icloud' ? { manage: true as const } : {};
       const full = this.storageFull ?? (uploads.full && { message: uploads.full.message, notUploaded: uploads.full.left, ...manage });
       view = { ...rest, ...(this.downloading ? { downloading: this.downloading } : {}), ...(uploads.uploading?.total ? { uploading: uploads.uploading } : {}),
-        ...(full ? { storageFull: full } : {}) };
+        ...(full ? { storageFull: full } : {}), ...(!uploads.uploading && uploads.failed?.left ? { uploadFailed: uploads.failed } : {}) };
     }
     this.syncView = view;
     if (!this.closing && !this.window.isDestroyed()) this.window.webContents.send(channels.syncChanged, view ?? null);
@@ -427,6 +434,8 @@ export class DocumentSession {
    */
   syncExcluded = false;
   private stopUploads?: () => void;
+  private startPending = false;
+  private startTimer?: ReturnType<typeof setTimeout>;
   /**
    * Starts what sync does by itself when the book opens, outside the open path so opening is not slower: a trusted book
    * with no sync state for this remote starts syncing (its first sync), and a book that syncs here resumes uploading
@@ -439,7 +448,9 @@ export class DocumentSession {
     if (await service.startsOnOpen(this.book.folder, { excluded: this.syncExcluded, readOnly: this.book.readOnly }).catch(() => false)) {
       // Waits for the book while a reload or the first save holds it.
       for (let attempt = 0; attempt < 50 && this.busy && !this.closing; attempt++) await new Promise((resolve) => setTimeout(resolve, 200));
-      if (!this.closing) await this.syncNow({ start: true, auto: true });
+      if (this.closing) return;
+      try { await this.syncNow({ start: true, auto: true }); }
+      catch (error) { this.startPending = true; throw error; }
       return;
     }
     if (this.bookSync === 'syncing') this.uploadOriginals();
@@ -522,7 +533,8 @@ export class DocumentSession {
     if (standing === 'elsewhere' || (start && standing === 'stopped' && syncedElsewhere(state, connection.remoteId))) throw new SyncElsewhereError();
     if (standing !== 'syncing' && !start) throw new Error('This book does not sync on this Mac. Choose File → Sync → Start Syncing.');
     if (auto && standing === 'stopped') return undefined;
-    if (standing !== 'syncing') await this.syncService.optIn(this.book.folder, { trust });
+    // Only a trusted book syncs, also one that synced before it was trusted here (a book made by Open Synced Book).
+    await this.syncService.optIn(this.book.folder, { trust });
     this.syncing = true;
     this.storageFull = undefined;
     this.publishSync({ ...this.syncView, folder: connection.name, syncing: true, message: undefined });
@@ -554,6 +566,19 @@ export class DocumentSession {
     const result = await this.run(() => service.start(this.book.folder, options));
     if ('error' in result) throw new Error(result.error);
     await this.refreshSync();
+  }
+  /**
+   * Templates → Stop Trusting This Book's Template…: withdraws the trust, and an untrusted book stops syncing on this
+   * Mac (`SyncService.distrust`). Serialized with the book's other work, so it is refused while a sync of the book runs
+   * instead of stopping it halfway.
+   */
+  async stopTrusting() {
+    // Without a backend (or the development flag) no sync record is written; the book is only untrusted.
+    const service = this.syncService?.configured ? this.syncService : undefined;
+    const result = await this.run(() => (service ? service.distrust(this.book.folder) : distrustBook(this.book.folder)));
+    if ('error' in result) throw new Error(result.code === 'BOOK_BUSY' ? 'Wait for the book to finish syncing, then stop trusting it.' : result.error);
+    await this.updateNetwork();
+    if (service) await this.refreshSync();
   }
   /**
    * Stops syncing on this Mac; the remote and the book are left as they are. It changes only the sync record, which is
@@ -713,6 +738,7 @@ export class DocumentSession {
     this.stopWatch();
     clearTimeout(this.linkedRetry);
     clearTimeout(this.syncTimer);
+    clearTimeout(this.startTimer);
     // A background upload goes on after the book closes: it needs no writer lock, and Quit cancels it.
     this.stopUploads?.();
     this.linkedWatch?.stop();
@@ -1097,7 +1123,8 @@ export class DocumentSession {
       const known = await approvedNetwork(book.folder);
       // The user's own book (made here, or trusted once): every declared site, without asking. A site its template
       // newly declares is recorded and named in a quiet notice instead of a question. This holds for a template change
-      // that a sync pulled too: only trusted books sync, through a backend inside the user's trust boundary (ADR 0012).
+      // that a sync pulled too: a book syncs only while it is trusted here, through a backend inside the user's trust
+      // boundary (ADR 0012).
       if (await bookTrusted(book.folder)) {
         const added = origins.filter((origin) => !known.includes(origin));
         if (added.length) {

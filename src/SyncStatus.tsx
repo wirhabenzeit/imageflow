@@ -44,8 +44,11 @@ export function SyncStatus({ api, notice }: { api?: DesktopApi; notice: (message
   // This Mac's originals going up after the commit: the book has synced, its originals have not all arrived yet.
   const left = view.uploading ? view.uploading.total - view.uploading.done : 0;
   const uploadingHere = left > 0 ? left + (left === 1 ? ' original is' : ' originals are') + ' still uploading from this Mac.' : '';
+  // The last background upload failed: the book synced, these originals of this Mac did not go up yet.
+  const failed = !view.syncing && view.uploadFailed;
+  const failedText = failed ? failed.left + (failed.left === 1 ? ' original' : ' originals') + ' not uploaded: ' + failed.message.replace(/\.?$/, '.') : '';
   const title = view.syncing ? 'Syncing with ' + view.folder : settings ? [status!.detail ?? '', 'Click to open Settings → Sync.'].filter(Boolean).join('\n')
-    : [status ? explanations[status.state] : '', status?.detail ?? '', uploadingHere, pending.trim(), elsewhere, 'Click to sync with ' + view.folder + '.'].filter(Boolean).join('\n');
+    : [status ? explanations[status.state] : '', status?.detail ?? '', uploadingHere, failedText, pending.trim(), elsewhere, 'Click to sync with ' + view.folder + '.'].filter(Boolean).join('\n');
   // Originals downloading in the background: how far, with Cancel, beside the status.
   const download = view.downloading && <span className="sync-download" role="status"><TaskStatus progress={{ text: 'Downloading originals', ...view.downloading }}
     cancel={() => void api.syncAction('cancel-download')} /></span>;
@@ -63,7 +66,9 @@ export function SyncStatus({ api, notice }: { api?: DesktopApi; notice: (message
     void api.popupMenu([{ id: 'stop', label: 'Stop Syncing on This Mac…' }], { x: Math.round(event.clientX), y: Math.round(event.clientY) })
       .then((chosen) => (chosen === 'stop' ? api.syncAction('stop') : undefined)).then((result) => { if (result && 'error' in result) notice(result.error); });
   };
-  return <>{download}{upload}{full}<button type="button" className={'sync-status' + (status && !view.syncing ? ' sync-' + status.state : '')} title={title} aria-label={label + '. ' + title}
+  const notUploaded = failed && <span className="sync-download sync-full sync-upload-failed" role="status" title={failedText}>
+    <span>{failed.left + (failed.left === 1 ? ' original' : ' originals') + ' not uploaded'}</span></span>;
+  return <>{download}{upload}{full}{notUploaded}<button type="button" className={'sync-status' + (status && !view.syncing ? ' sync-' + status.state : '')} title={title} aria-label={label + '. ' + title}
     disabled={view.syncing} data-state={view.syncing ? 'syncing' : status?.state} data-uploading={left > 0 ? left : undefined} onContextMenu={menu}
     onClick={() => void (settings ? api.showSettings('sync') : api.syncAction('sync').then((result) => { if ('error' in result) notice(result.error); }))}>
     {view.syncing && <span className="status-spinner" aria-hidden="true" />}{label}{!view.syncing && status?.pendingOriginals ? <span className="sync-pending" aria-hidden="true">·</span> : null}

@@ -251,8 +251,9 @@ export class SyncService {
    * after a restart: what is pending is derived, so an upload that stopped resumes where it was. One upload per book at
    * a time; asking while one runs makes it look again once it is done. The remote is taken from `connect` for each photo.
    * A full remote pauses it (`UploadState.full`) until a later sync finds room: each sync asks again, and the first
-   * original that does not fit stops the queue. Resolves with how it ended, undefined without a backend; rejects when an
-   * upload failed (the next sync tries again).
+   * original that does not fit stops the queue. A failed upload is kept (`UploadState.failed`, with what is left) until
+   * an upload ends without. Resolves with how it ended, undefined without a backend or for a book that is not trusted;
+   * rejects when an upload failed (the next sync tries again).
    */
   async upload(folder: string): Promise<UploadOutcome | undefined> {
     if (!this.configured) return undefined;
@@ -263,6 +264,8 @@ export class SyncService {
     const entry = { job, again: false, progress: { done: 0, total: 0 }, task: Promise.resolve<UploadOutcome | undefined>(undefined) };
     entry.task = (async () => {
       let outcome: UploadOutcome;
+      // Nothing uploads by itself for a book that is not trusted, also one that synced before (ADR 0012, section 2).
+      if (!await bookTrusted(key).catch(() => false)) return undefined;
       try {
         do {
           entry.again = false;

@@ -550,9 +550,9 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
   const local = await captureBookState(root);
   const bookId = local.project.bookId;
   if (!bookId) throw new Error('This book has no lineage ID yet. Make an edit, then sync.');
-  // One listing of the book, so the push below asks about no content file or preview that the remote already has:
-  // over a bucket, each question would be a request of its own.
-  await options.remote.listBook(bookId);
+  // The push below asks about no content file or preview that the remote already has with a request of its own: over
+  // a bucket, one listing of the book answers all of them.
+  await options.remote.prepareSync?.(bookId);
   const commits = await remoteCommits(options.remote, bookId);
   const tips = deriveTips(commits);
   const synced = state.lastSynced;

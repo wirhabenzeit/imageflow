@@ -53,6 +53,12 @@ export interface SyncRemote {
   usage(): Promise<{ bytes: number; books: { bookId: string; bytes: number }[] }>;
   /** The books on this remote, from one listing of prefixes. A deleted book is reported as such. */
   listBooks(): Promise<RemoteBook[]>;
+  /**
+   * Prepares a sync of a book, so that it asks about no blob the remote has with a request of its own (`hasBlob`):
+   * over a store without a change feed, one listing of the book; over one with a feed, nothing, since the key index
+   * already answers. Optional: a remote without it asks per blob.
+   */
+  prepareSync?(bookId: string): Promise<void>;
   /** The remote's identity, a UUID written at first use. Two Macs that initialize an empty remote at once agree on it. */
   remoteId(): Promise<string>;
   /** The tombstone of a book deleted from sync, or undefined. Throws `NewerSyncFormatError` for one a newer version wrote. */
@@ -270,6 +276,10 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     // The feed leaves the tombstone out (it outlives the book's objects); a listing of the whole book has it.
     const tombstone = folder ? undefined : await this.store.head(tombstoneKey(bookId));
     return tombstone ? [...entries, { key: tombstoneKey(bookId), ...tombstone }].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)) : entries;
+  }
+  async prepareSync(bookId: string) {
+    // Over a change feed the key index is brought up to date when the commits are listed, and answers `hasBlob`.
+    if (!this.store.changes) await this.listBook(bookId);
   }
   async usage() {
     const books: { bookId: string; bytes: number }[] = [];

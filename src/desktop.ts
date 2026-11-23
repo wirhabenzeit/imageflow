@@ -94,7 +94,12 @@ export type SyncView = { folder: string; status?: SyncStatus; syncing?: boolean;
    * itself failed because its commit or a preview did not fit. `manage` when the remote is iCloud, whose storage
    * System Settings manages (`manage-storage`).
    */
-  storageFull?: { message: string; notUploaded?: number; manage?: true } };
+  storageFull?: { message: string; notUploaded?: number; manage?: true };
+  /**
+   * The last background upload of this book's originals failed (offline, a refused request): how many of this Mac's
+   * originals are not uploaded, and why. Shown until an upload ends without; the next sync tries again.
+   */
+  uploadFailed?: { message: string; left: number } };
 /** `start` makes the book sync on this Mac (asking first when it last synced somewhere else), `stop` stops that. */
 export type SyncAction = 'sync' | 'download' | 'cancel-download' | 'start' | 'stop' | 'manage-storage';
 // The main canvas shows spreads in one vertical column, or a row-by-row grid with this many columns.

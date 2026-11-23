@@ -1794,9 +1794,12 @@ async function syncPath(mac: Mac) {
   await mkdir(folder, { recursive: true, mode: 0o700 });
   return join(folder, 'sync.json');
 }
-/** A sync through the app's sync service, then its background upload of the originals the commit named. */
+/**
+ * A sync through the app's sync service, then its background upload of the originals the commit named. The book is
+ * the user's own (trusted), as every book that syncs in the app is.
+ */
 const syncWith = async (mac: Mac, service: SyncService) => {
-  const outcome = await on(mac, (book) => service.sync({ book }));
+  const outcome = await on(mac, async (book) => { await trustBook(mac.folder); return service.sync({ book }); });
   await service.upload(mac.folder);
   return outcome;
 };
@@ -2191,6 +2194,7 @@ test('iCloud storage full during the background upload: the commit and previews 
   const native = new FakeCloudKit();
   const service = new SyncService(() => ({ kind: 'icloud' }), { cloudKit: () => native });
   native.fail('putIfAbsent', 'quotaExceeded', { times: Infinity, name: (name) => name.startsWith('originals/') });
+  await ownBook(a);
   const first = await on(a, (book) => service.sync({ book }));
   assert.equal(first.action, 'initial-push');
   const connection = await service.connect();
@@ -2574,4 +2578,51 @@ test('a push of an unchanged book over a bucket sends no request per file', asyn
     /\/(content|proxies|originals)\//.test(key) && !key.endsWith('/' + previous) && !key.endsWith('/' + next));
   assert.deepEqual(perFile.map(({ method, key }) => method + ' ' + key), []);
   assert.ok(fake.requests.length < 15, fake.requests.length + ' requests: ' + fake.requests.map(({ method, key, query }) => method + ' ' + key + '?' + query).join(', '));
+});
+
+test('a failed background upload is kept with what is left until an upload ends without, and an untrusted book uploads nothing by itself', async (t) => {
+  const { a } = await world(t);
+  const native = new FakeCloudKit();
+  const service = new SyncService(() => ({ kind: 'icloud' }), { cloudKit: () => native });
+  await ownBook(a);
+  await on(a, (book) => service.sync({ book }));
+  const { remote } = await service.connect();
+  const pending = (await pendingUploads(a.folder, remote)).length;
+  assert.ok(pending > 0);
+  // A request iCloud refuses: the upload fails, and the status keeps how many of this Mac's originals are not uploaded.
+  native.fail('putIfAbsent', 'serverRejectedRequest', { times: Infinity, name: (name) => name.startsWith('originals/') });
+  await assert.rejects(service.upload(a.folder));
+  const failed = service.uploadState(a.folder).failed;
+  assert.equal(failed?.left, pending);
+  assert.match(failed?.message ?? '', /iCloud reported an error/);
+  native.recover();
+  assert.equal((await service.upload(a.folder))?.uploaded, pending);
+  assert.deepEqual(service.uploadState(a.folder), {}, 'an upload that ends without any left clears it');
+  // A book that syncs but is not trusted (one made by Open Synced Book, or one that synced before it was trusted here)
+  // uploads nothing by itself.
+  await edit(a, caption('shore', 'Before distrust'));
+  const photo = join(a.external, 'late.jpg');
+  await image(photo, '#123456');
+  await on(a, (book) => importIntoProject(book, { kind: 'photo', mode: 'copy' }, [photo]));
+  await on(a, (book) => service.sync({ book }));
+  await distrustBook(a.folder);
+  const left = (await pendingUploads(a.folder, remote)).length;
+  assert.ok(left > 0);
+  assert.equal(await service.upload(a.folder), undefined);
+  assert.equal((await pendingUploads(a.folder, remote)).length, left);
+});
+
+test('a sync over iCloud asks the change feed once and lists nothing besides; over a bucket one listing answers every blob', async (t) => {
+  const { a } = await world(t);
+  const native = new FakeCloudKit();
+  const service = new SyncService(() => ({ kind: 'icloud' }), { cloudKit: () => native, keyIndex: new MemoryKeyIndexCache() });
+  await syncWith(a, service);
+  await service.connect();
+  native.calls.length = 0;
+  assert.equal((await on(a, (book) => service.sync({ book }))).action, 'in-sync');
+  assert.equal(native.calls.filter((call) => call === 'changes').length, 1, 'an unchanged book: one feed request, ' + native.calls.join(', '));
+  await edit(a, caption('shore', 'A caption'));
+  native.calls.length = 0;
+  assert.equal((await on(a, (book) => service.sync({ book }))).action, 'push');
+  assert.equal(native.calls.filter((call) => call === 'changes').length, 1, 'a push: one feed request, ' + native.calls.join(', '));
 });
