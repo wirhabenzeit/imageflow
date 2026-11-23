@@ -36,7 +36,6 @@ import { canonicalJson } from '../src/canonical-json';
 import { computeBookStateRevision } from '../src/book-revision';
 import { photoIndexSchema, projectSchema } from '../src/project';
 import { persistenceRoot } from './persistence-root';
-import { pendingOriginals } from '../desktop/sync-engine';
 import { importProvidedPhotos } from '../desktop/project';
 import { LightroomBridge } from '../desktop/lightroom/bridge';
 import { lightroomProvider } from '../desktop/providers/lightroom';
@@ -814,7 +813,7 @@ function onlineServer(t: { after: (fn: () => void) => void }) {
   return server;
 }
 // The keys of a remote's blobs of one kind (`originals`, `proxies`), optionally of one digest.
-const blobKeys = (remote: MemoryRemote, kind: string, digest = '') => [...remote.blobs.keys()].filter((key) => key.includes(kind + '/' + digest)).sort();
+const blobKeys = async (remote: Remote, kind: string, digest = '') => (await remote.store.list('')).map(({ key }) => key).filter((key) => key.includes('/' + kind + '/' + digest));
 const harbour = 'https://photos.example/albums/7/harbour';
 const dawn: OnlineAsset = { revision: 'r1', content: 'c1', width: 3000, height: 2000, color: '#cc8844', title: 'Harbour at dawn' };
 
@@ -825,7 +824,7 @@ test('an online photo syncs its locator whole with facts and a preview, never an
   await sync(a, remote);
   await copyBook(a, b);
   assert.equal((await sync(b, remote)).action, 'adopt');
-  const originals = blobKeys(remote, 'originals');
+  const originals = await blobKeys(remote, 'originals');
   assert.ok(originals.length, 'the book’s own photos synced their originals');
 
   // Desktop adds a photo from the server and pushes.
@@ -834,15 +833,15 @@ test('an online photo syncs its locator whole with facts and a preview, never an
   const pushed = await sync(a, remote);
   assert.equal(pushed.action, 'push');
   const c1 = await commit(remote, a, pushed.pushed[0]);
-  const s1 = stateOf(remote, c1);
+  const s1 = await stateOf(remote, c1);
   assert.deepEqual(s1.photos.web, entry, 'the locator syncs whole: nothing in it is one Mac’s');
   const fact1 = s1.assetsMeta.assets.web;
   assert.deepEqual([fact1.width, fact1.height, fact1.provided?.title], [3000, 2000, 'Harbour at dawn'], 'with the facts its provider reported');
   assert.ok(s1.proxies[fact1.digest], 'and its preview');
-  const [proxy1] = blobKeys(remote, 'proxies', fact1.digest);
-  assert.equal(sha(remote.blobs.get(proxy1)!), s1.proxies[fact1.digest].sha256, 'which was uploaded');
+  const [proxy1] = await blobKeys(remote, 'proxies', fact1.digest);
+  assert.equal(sha(await stored(remote, proxy1)), s1.proxies[fact1.digest].sha256, 'which was uploaded');
   assert.equal(s1.originals.web, undefined, 'no original is recorded for it');
-  assert.deepEqual(blobKeys(remote, 'originals'), originals, 'and none was uploaded');
+  assert.deepEqual(await blobKeys(remote, 'originals'), originals, 'and none was uploaded');
   assert.deepEqual(server.materialized, [], 'or even asked for');
   await use(a);
   assert.deepEqual(await pendingOriginals(a.folder, remote), []);
@@ -871,11 +870,11 @@ test('an online photo syncs its locator whole with facts and a preview, never an
   assert.equal(second.action, 'push', 'the new fact is ahead of the last snapshot');
   const c2 = await commit(remote, a, second.pushed[0]);
   assert.equal(c2.bookStateRevision, c1.bookStateRevision, 'with the same book state');
-  const s2 = stateOf(remote, c2);
+  const s2 = await stateOf(remote, c2);
   const fact2 = s2.assetsMeta.assets.web;
   assert.notEqual(fact2.digest, fact1.digest);
   assert.equal(fact2.provided?.title, 'Harbour at dusk', 'the changed fact is in the snapshot, not the one carried forward');
-  assert.equal(sha(remote.blobs.get(blobKeys(remote, 'proxies', fact2.digest)[0])!), s2.proxies[fact2.digest].sha256, 'with its new preview');
+  assert.equal(sha(await stored(remote, (await blobKeys(remote, 'proxies', fact2.digest))[0])), s2.proxies[fact2.digest].sha256, 'with its new preview');
   assert.equal(s2.originals.web, undefined);
   assert.equal((await sync(a, remote)).action, 'in-sync', 'a fact that was pushed is no longer ahead');
 
@@ -894,19 +893,19 @@ test('an online photo syncs its locator whole with facts and a preview, never an
   await edit(a, caption('shore', 'Edited with the third version'));
   const third = await sync(a, remote);
   assert.equal(third.action, 'push');
-  const fact3 = stateOf(remote, await commit(remote, a, third.pushed[0])).assetsMeta.assets.web;
+  const fact3 = (await stateOf(remote, await commit(remote, a, third.pushed[0]))).assetsMeta.assets.web;
   assert.deepEqual([fact3.width, fact3.height, fact3.provided?.title], [2000, 3000, 'Harbour at night']);
   server.signedIn = false;
   assert.equal((await sync(b, remote)).action, 'fast-forward');
   assert.deepEqual((await readAssetFacts(b.folder)).web, fact3);
   assert.ok(await proxyFile(b, fact3.digest));
-  assert.deepEqual(blobKeys(remote, 'originals'), originals, 'no push uploaded an original for it');
+  assert.deepEqual(await blobKeys(remote, 'originals'), originals, 'no push uploaded an original for it');
   assert.deepEqual(server.materialized, []);
 });
 
 const outcome = (mac: Mac, remote: SyncRemote) => sync(mac, remote).then(({ action, pushed }) => ({ action, pushed: pushed.length }));
-const webFactOf = async (remote: MemoryRemote, mac: Mac, id: string) => stateOf(remote, (await tips(remote, mac))[0]).assetsMeta.assets[id];
-const webFact = (remote: MemoryRemote, mac: Mac) => webFactOf(remote, mac, 'web');
+const webFactOf = async (remote: Remote, mac: Mac, id: string) => (await stateOf(remote, (await tips(remote, mac))[0])).assetsMeta.assets[id];
+const webFact = (remote: Remote, mac: Mac) => webFactOf(remote, mac, 'web');
 
 test('a fact of an online photo that a pull changed is never pushed back, however often a Mac that sees an older version syncs', async (t) => {
   const { a, b, remote } = await world(t);
@@ -974,7 +973,7 @@ test('two Macs that see different versions of an online photo for good stop push
   // The laptop reads the photo for the first time: its other version is where it starts counting from, not a change.
   assert.deepEqual(await outcome(laptop(), remote), { action: 'adopt', pushed: 0 });
   assert.deepEqual(await outcome(desktop(), remote), { action: 'in-sync', pushed: 0 });
-  const settled = { commits: remote.commits.size, fact: await webFact(remote, a) };
+  const settled = { commits: await commitCount(remote), fact: await webFact(remote, a) };
   assert.equal(settled.fact.provided?.title, 'Harbour at dawn');
   // From then on neither pushes, though each draws its own version and so differs from the snapshot or the other.
   for (const round of [1, 2, 3]) {
@@ -989,7 +988,7 @@ test('two Macs that see different versions of an online photo for good stop push
   assert.deepEqual(await outcome(laptop(), remote), { action: 'push', pushed: 1 });
   assert.deepEqual(await outcome(desktop(), remote), { action: 'fast-forward', pushed: 0 });
   for (const mac of [desktop, laptop, desktop, laptop]) assert.deepEqual(await outcome(mac(), remote), { action: 'in-sync', pushed: 0 });
-  assert.equal(remote.commits.size, settled.commits + 2, 'only the two edits made commits');
+  assert.equal(await commitCount(remote), settled.commits + 2, 'only the two edits made commits');
   assert.equal((await tips(remote, a)).length, 1);
   assert.deepEqual(await webFact(remote, a), settled.fact);
 
@@ -1087,19 +1086,19 @@ test('a Lightroom photo syncs its locator, facts and preview but no original, a 
   await sync(desktop(), remote);
   await copyBook(a, b);
   assert.equal((await sync(laptop(), remote)).action, 'adopt');
-  const originals = blobKeys(remote, 'originals');
+  const originals = await blobKeys(remote, 'originals');
 
   // Desktop imports the photo from Lightroom and pushes.
   const [id] = await on(desktop(), async (book) => (await importProvidedPhotos(book, [lightroomEntry(1)])).imported);
   const pushed = await sync(desktop(), remote);
   assert.equal(pushed.action, 'push');
-  const s1 = stateOf(remote, await commit(remote, a, pushed.pushed[0]));
+  const s1 = await stateOf(remote, await commit(remote, a, pushed.pushed[0]));
   assert.deepEqual(s1.photos[id], { lightroom: { catalog: catalogId, uuid: lightroomUuid(1), name: 'DSC_0001.ARW' } }, 'the locator: the catalog’s identity, never its path');
   const fact1 = s1.assetsMeta.assets[id];
   assert.deepEqual([fact1.width, fact1.height, fact1.provided?.title], [6000, 4000, 'Harbour']);
-  assert.equal(sha(remote.blobs.get(blobKeys(remote, 'proxies', fact1.digest)[0])!), s1.proxies[fact1.digest].sha256, 'its preview was uploaded');
+  assert.equal(sha(await stored(remote, (await blobKeys(remote, 'proxies', fact1.digest))[0])), s1.proxies[fact1.digest].sha256, 'its preview was uploaded');
   assert.equal(s1.originals[id], undefined);
-  assert.deepEqual(blobKeys(remote, 'originals'), originals, 'no original was uploaded');
+  assert.deepEqual(await blobKeys(remote, 'originals'), originals, 'no original was uploaded');
   assert.equal(lr.jobs('render', 'full'), 0, 'and Lightroom rendered none');
 
   // Laptop: pulls the photo. Its own catalog shows it developed otherwise, which is where it starts, not a change.
@@ -1119,21 +1118,21 @@ test('a Lightroom photo syncs its locator, facts and preview but no original, a 
   lr.plugin.edit(lightroomUuid(1), { develop: { Exposure2012: -1 }, color: '#404040', title: 'Harbour, darker' });
   const second = await sync(desktop(), remote);
   assert.equal(second.action, 'push');
-  const s2 = stateOf(remote, await commit(remote, a, second.pushed[0]));
+  const s2 = await stateOf(remote, await commit(remote, a, second.pushed[0]));
   const fact2 = s2.assetsMeta.assets[id];
   assert.notEqual(fact2.digest, fact1.digest);
   assert.equal(fact2.provided?.title, 'Harbour, darker');
-  assert.ok(blobKeys(remote, 'proxies', fact2.digest).length, 'with its new preview');
+  assert.ok((await blobKeys(remote, 'proxies', fact2.digest)).length, 'with its new preview');
   // It reaches the laptop, which does not push its own state back, however often both sync.
   assert.deepEqual(await outcome(laptop(), remote), { action: 'fast-forward', pushed: 0 });
   assert.deepEqual(await fact(b, id), fact2);
   assert.ok(await proxyFile(b, fact2.digest));
-  const commits = remote.commits.size;
+  const commits = await commitCount(remote);
   for (const mac of [laptop, desktop, laptop, desktop]) assert.deepEqual(await outcome(mac(), remote), { action: 'in-sync', pushed: 0 });
-  assert.equal(remote.commits.size, commits);
+  assert.equal(await commitCount(remote), commits);
   assert.equal((await tips(remote, a)).length, 1);
   assert.deepEqual(await webFactOf(remote, a, id), fact2);
-  assert.deepEqual(blobKeys(remote, 'originals'), originals);
+  assert.deepEqual(await blobKeys(remote, 'originals'), originals);
   assert.equal(lr.jobs('render', 'full'), 0);
 });
 
