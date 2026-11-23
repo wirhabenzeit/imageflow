@@ -33,15 +33,7 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
   const [pane, setPane] = useState<SettingsPane>();
   const [requestedPane, setRequestedPane] = useState<SettingsPane>();
   const content = useRef<HTMLDivElement>(null);
-  // Sync is offered only with the development flag until the library ships (ADR 0012): then it has a pane of its own.
-  const [syncOffered, setSyncOffered] = useState(false);
-  useEffect(() => {
-    if (!api) return;
-    let active = true;
-    void api.syncOffered().then((offered) => { if (active) setSyncOffered(offered); }, () => {});
-    return () => { active = false; };
-  }, [api]);
-  const panes = allPanes.filter(({ value }) => value !== 'sync' || syncOffered);
+  const panes = allPanes;
   useEffect(() => {
     if (!api) { setRequestedPane('general'); return; }
     let active = true;

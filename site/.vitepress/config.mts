@@ -56,6 +56,7 @@ const sidebar: DefaultTheme.Sidebar = {
       items: [
         { text: 'Getting started', link: '/guide/getting-started' },
         { text: 'Books and sources', link: '/guide/books-and-sources' },
+        { text: 'Syncing between Macs', link: '/guide/sync' },
         { text: 'Editing a book', link: '/guide/editing' },
         { text: 'The workspace', link: '/guide/workspace' },
         { text: 'Checking and exporting', link: '/guide/checking-and-export' },

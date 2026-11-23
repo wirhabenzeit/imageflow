@@ -401,6 +401,24 @@ export async function resumeSyncPull(folder: string, { readOnly = false }: { rea
   return true;
 }
 
+/** What an older original a pull kept says about its photo (#283): it is drawn from its new preview until the new file arrives. */
+export const keptOriginalProblem = 'Original still uploading from another Mac';
+
+/**
+ * The older originals a pull kept because the remote did not have their new versions yet (#295), by photo: the digest
+ * of the file kept here and the digest the synced snapshot has. The book state, crop and size are the new version's,
+ * so the book draws such a photo from its new preview, not from the kept file, until the new file replaces it.
+ */
+export async function keptOriginals(folder: string): Promise<Map<string, { kept: string; current: string }>> {
+  const synced = (await readSyncState(folder).catch(() => undefined))?.lastSynced;
+  const kept = new Map<string, { kept: string; current: string }>();
+  for (const [id, digest] of Object.entries(synced?.localDigests ?? {})) {
+    const current = synced!.photoDigests[id];
+    if (current !== undefined && current !== digest) kept.set(id, { kept: digest, current });
+  }
+  return kept;
+}
+
 /** The trace of a pull given up when the book opened, once: the editor tells the user, then it stays for the status. */
 export async function takeAbandonedAtOpen(folder: string) {
   // Nothing to take is the common case: it reads without writing, and without creating a sync record.

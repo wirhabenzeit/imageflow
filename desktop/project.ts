@@ -32,7 +32,7 @@ import { digestBytes, SourceStore } from './source-store';
 import type { ResolvedSource, StoredSource } from './source-store';
 import { AssetFacts } from './asset-facts';
 import { proxyStore } from './proxy-store';
-import { resumeSyncPull } from './sync-pull';
+import { keptOriginalProblem, keptOriginals, resumeSyncPull } from './sync-pull';
 import { providedFieldNames } from '../src/asset-facts';
 import type { AssetFact, ProvidedField, ProvidedMetadata } from '../src/asset-facts';
 import { captureFields } from '../src/photo-metadata';
@@ -288,6 +288,8 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
   // Derived facts follow photos the editor reads in place; a private export read changes nothing.
   if (writable) store.onDigest = (key, observation, digest) => { if (key.startsWith('photo:')) facts.digest(key.slice('photo:'.length), observation, digest); };
   const unavailablePhotos: Record<string, AssetFact> = {};
+  // Older originals a sync pull kept until the remote has their new versions: drawn from the new preview (see below).
+  const kept = await keptOriginals(book.folder);
   // Each provider is asked about all its photos at once (ADR 0011), and photos it reports facts for get their facts
   // and previews brought up to date before they load.
   const observed = await observePhotos(book.folder, entries, store, facts);
@@ -308,6 +310,22 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
       const { status, stored } = await store.resolve(book.folder, source, { pin: pinSources, cache: book.cache, observed: source.kind === 'photo' ? observed.get(source.id)?.observed : undefined });
       sources[source.key] = status;
       if (status.problem && source.kind !== 'file') problems.push(source.kind + ' ' + source.id + ' · ' + status.problem);
+      // An older original a pull kept (#295, #283): the book state, crop and size are the new version's, so the photo is
+      // drawn from the new version's preview and marked as still uploading from another Mac, in the editor, an export and
+      // print alike, until the new file replaces the kept one. Its fact stays the new version's. A file changed here
+      // since (another digest) is this Mac's own and loads as any file.
+      const older = source.kind === 'photo' ? kept.get(source.id) : undefined;
+      if (older && status.state === 'available' && (status.digest ?? stored?.digest ?? older.kept) === older.kept) {
+        const fact = facts.get(source.id);
+        const photo = fact?.digest === older.current ? await proxyPhoto(book, source.id, fact, keptOriginalProblem) : undefined;
+        // Nothing to locate: the file is here, at its older version. Replace stays, and what the user chooses then is this
+        // Mac's own change; Remove, Copy into Book and Locate Folder leave the kept file where it is.
+        sources[source.key] = { ...status, state: 'missing', problem: keptOriginalProblem, repairs: [], ...(photo ? { cached: true } : {}) };
+        problems.push('photo ' + source.id + ' · ' + keptOriginalProblem);
+        if (photo) photos.set(source.id, photo);
+        else if (fact) unavailablePhotos[source.id] = fact;
+        return;
+      }
       if (source.kind === 'photo') {
         const loaded = await loadPhoto(book, source, { status, stored }, facts, writable);
         if (loaded?.photo) photos.set(source.id, loaded.photo);

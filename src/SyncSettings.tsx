@@ -27,10 +27,12 @@ export function describeReport(report: SyncConnectionReport) {
 }
 
 /**
- * Settings → Sync (#281, behind the development flag): the one backend this Mac syncs through (ADR 0012), off until one
- * is chosen and none preselected: an S3-compatible bucket with its access key and Test Connection, or a folder (for
- * development and tests, chosen in the app's own dialog). Keep originals is here too. The secret access key is sent to
- * the main process when saved or tested and then cleared here; the main process never sends it back.
+ * Settings → Sync (#281, shipped with the library in #283): the one backend this Mac syncs through (ADR 0012), off until
+ * one is chosen and none preselected: an S3-compatible bucket with its access key and Test Connection, or iCloud where
+ * this build offers it (its own flag until #292 is done). A folder is offered only for development and tests
+ * (`IMAGEFLOW_SYNC_FOLDER=1`), chosen in the app's own dialog. Keep originals and the folder for downloaded books are
+ * here too. The secret access key is sent to the main process when saved or tested and then cleared here; the main
+ * process never sends it back.
  */
 export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; settings?: AppSettings; choose: (patch: Partial<AppSettings>) => Promise<void> }) {
   const configured = settings?.sync?.kind === 's3' ? settings.sync : undefined;
@@ -124,6 +126,12 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
     } finally { setBusy(''); }
   }
 
+  async function chooseBooksFolder() {
+    if (!api) return;
+    const answer = await api.chooseBooksFolder().catch(() => ({ error: 'ImageFlow could not complete the request.' }));
+    if ('error' in answer) setResult({ text: answer.error, error: true });
+  }
+
   async function useICloud() {
     if (!api) return;
     setBusy('save');
@@ -165,7 +173,9 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
   const disabled = !api || !settings || !!busy;
   const complete = !!fields.endpoint.trim() && !!fields.region.trim() && !!fields.bucket.trim() && (!!stored || (!!entered?.accessKeyId && !!entered.secretAccessKey));
   const folder = settings?.sync?.kind === 'folder' ? settings.sync.path : undefined;
-  const current = !settings?.sync ? undefined : settings.sync.kind === 'folder' ? '“' + (folder!.split('/').filter(Boolean).at(-1) ?? folder) + '”'
+  // A setting this build does not use (iCloud without its flag) leaves sync off, and says so.
+  const unusable = state?.unusable;
+  const current = !settings?.sync || unusable ? undefined : settings.sync.kind === 'folder' ? '“' + (folder!.split('/').filter(Boolean).at(-1) ?? folder) + '”'
     : settings.sync.kind === 'icloud' ? 'iCloud' : 'the bucket “' + settings.sync.bucket + '”';
   // iCloud is listed only by a build entitled to it (or while it is the setting), beside the bucket, neither preselected.
   const icloud = state?.icloud;
@@ -176,9 +186,9 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
       <div className="appearance-options" role="radiogroup" aria-labelledby="sync-through-label">
         {icloudListed && <label><input type="radio" name="sync-kind" value="icloud" disabled={disabled} checked={kind === 'icloud'} onChange={() => { setKind('icloud'); setResult(undefined); }} /><span>iCloud</span></label>}
         <label><input type="radio" name="sync-kind" value="s3" disabled={disabled} checked={kind === 's3'} onChange={() => { setKind('s3'); setResult(undefined); }} /><span>S3-compatible bucket</span></label>
-        <label><input type="radio" name="sync-kind" value="folder" disabled={disabled} checked={kind === 'folder'} onChange={() => { setKind('folder'); setResult(undefined); }} /><span>Folder</span></label>
+        {(state?.folder || kind === 'folder') && <label><input type="radio" name="sync-kind" value="folder" disabled={disabled} checked={kind === 'folder'} onChange={() => { setKind('folder'); setResult(undefined); }} /><span>Folder</span></label>}
       </div>
-      <p className="settings-note sync-backend" title={folder}>{current ? 'Books sync through ' + current + '.' : 'Sync is off: books do not sync on this Mac.'}</p>
+      <p className="settings-note sync-backend" title={folder}>{current ? 'Books sync through ' + current + '.' : unusable ?? 'Sync is off: books do not sync on this Mac.'}</p>
       {settings?.sync && <div className="settings-update-actions"><button disabled={disabled} onClick={() => void act('off')}>Turn Off</button></div>}
       {kind !== 's3' && result && <p role={result.error ? 'alert' : 'status'} className={result.error ? 'error-text' : 'settings-note sync-test-result'}>{result.text}</p>}
     </div>
@@ -259,6 +269,14 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
         {setup.error && <p role="alert" className="error-text">{setup.error}</p>}
       </div>
     </>}
+    <span className="settings-label">Downloads:</span>
+    <div className="settings-control">
+      <p className="settings-note sync-books-folder" title={settings?.booksFolder}>Books you download from the Start window are saved in {settings?.booksFolder
+        ? '“' + (settings.booksFolder.split('/').filter(Boolean).at(-1) ?? settings.booksFolder) + '”' : 'Documents → ImageFlow'}.</p>
+      <div className="settings-update-actions" style={{ marginTop: 0 }}>
+        <button disabled={!api || !settings} onClick={() => void chooseBooksFolder()}>Change Folder…</button>
+      </div>
+    </div>
     <span className="settings-label">Originals:</span>
     <div className="settings-control">
       <label className="pc-switch" title="Synced books download their originals in the background. Off: only previews, until File → Sync → Download Originals.">

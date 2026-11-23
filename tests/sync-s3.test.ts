@@ -389,15 +389,17 @@ test('an endpoint pasted with its bucket is split into server and bucket, and a 
   assert.equal(credentialScope(stored), credentialScope({ endpoint: r2, bucket: 'photo-books' }));
 });
 
-test('a window may only turn sync off through the settings patch, and only with the flag', () => {
+test('a window may only turn sync off through the settings patch, and never set the books folder', () => {
   const backend = { kind: 's3', endpoint: 'https://s3.example.com', region: 'auto', bucket: 'books' };
-  assert.match(syncPatchError({ sync: backend }, true)!, /Settings → Sync/);
-  assert.match(syncPatchError({ sync: { kind: 'folder', path: '/tmp/x' } }, true)!, /Settings → Sync/);
-  assert.equal(syncPatchError({ sync: null }, true), undefined);
-  assert.equal(syncPatchError({ sync: undefined }, true), undefined);
-  assert.match(syncPatchError({ sync: null }, false)!, /Settings → Sync/);
-  assert.equal(syncPatchError({ appearance: 'dark' }, false), undefined);
-  assert.equal(syncPatchError(undefined, false), undefined);
+  assert.match(syncPatchError({ sync: backend })!, /Settings → Sync/);
+  assert.match(syncPatchError({ sync: { kind: 'folder', path: '/tmp/x' } })!, /Settings → Sync/);
+  assert.match(syncPatchError({ sync: { kind: 'icloud' } })!, /Settings → Sync/);
+  assert.equal(syncPatchError({ sync: null }), undefined);
+  assert.equal(syncPatchError({ sync: undefined }), undefined);
+  assert.match(syncPatchError({ syncBooksUnchosen: true })!, /Settings → Sync/);
+  assert.match(syncPatchError({ booksFolder: '/tmp' })!, /Settings → Sync/);
+  assert.equal(syncPatchError({ appearance: 'dark' }), undefined);
+  assert.equal(syncPatchError(undefined), undefined);
 });
 
 test('refusals say what to fix: the access key ID, the secret, the permission for the operation, or the clock', async (t) => {

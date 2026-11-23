@@ -33,7 +33,7 @@ npm run test:unit
 
 `tests/sync-s3-real.test.ts` answers the spike's questions (conditional writes, checksum verification, addressing, listing right after a put, a large single PUT) as test diagnostics and in the report file. Never commit the variables or the report's endpoint if it names an account.
 
-In the app, Settings → Sync exists only when ImageFlow starts with `IMAGEFLOW_SYNC=1` (the development flag of ADR 0012, shared with #280). Development builds can keep the bucket's access key in memory instead of the keychain with `IMAGEFLOW_SYNC_CREDENTIALS=memory`.
+In the app, Settings → Sync offers an S3-compatible bucket; iCloud only with `IMAGEFLOW_SYNC_ICLOUD=1` and a folder only with `IMAGEFLOW_SYNC_FOLDER=1` (see [setup](setup.md)). Development builds can keep the bucket's access key in memory instead of the keychain with `IMAGEFLOW_SYNC_CREDENTIALS=memory`. The sync smokes (`smoke-sync`, `smoke-sync-settings`, `smoke-library`) set the folder backend up in a profile's `settings.json`.
 
 ## Flaky tests
 

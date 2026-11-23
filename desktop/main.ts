@@ -37,7 +37,7 @@ import { basename, dirname, extname, join, isAbsolute, parse, sep } from 'node:p
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, renderOrigins, settingsURL, startURL, starterURL, assetsURL, templatesURL } from '../src/desktop';
-import type { AgentLeaseReply, BookMenuState, Command, ImportRequest, LightroomState, OpenAction, ProjectSummary, Result, MarkdownAction, McpClientTarget, McpSettings, SourceAction, SyncAction, SyncSetupBook, TemplateInfo } from '../src/desktop';
+import type { AgentLeaseReply, BookMenuState, Command, ImportRequest, LibraryAction, LibraryBook, LibraryRemote, LightroomState, OpenAction, ProjectSummary, RecentDocument, Result, MarkdownAction, McpClientTarget, McpSettings, SourceAction, SyncAction, SyncSetupBook, TemplateInfo } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
 import { renderPolicy } from './csp';
 import { assetTypes, loadProject, renderData, TemplateCompileError } from './project';
@@ -46,9 +46,10 @@ import { photoFile } from './photos';
 import { captureBookPreview, checkBookRender } from './preview';
 import { PreviewError } from '../src/preview';
 import { chooseSyncTip, DocumentSession } from './document-session';
-import { cloneFromRemote, ownedOriginalsSize } from './sync-engine';
-import { remoteBooks } from './sync-remote';
-import { SyncElsewhereError } from './sync-pull';
+import { cloneFromRemote, downloadName, originalsAway, ownedOriginalsSize } from './sync-engine';
+import { BookDeletedError, BookDeleteError, BookNotDeletedError, remoteTips } from './sync-remote';
+import { readSyncState, SyncElsewhereError } from './sync-pull';
+import { deleteFromSyncQuestion, libraryBook, libraryListing, limited, syncsWithRemote } from './sync-library';
 import { insideBook, pendingUploadsText, SyncService, UntrustedBookError } from './sync-service';
 import { syncExcludedBook as excludedFrom } from './sync-start';
 import { chooseBooksPatch } from './sync-settings';
@@ -59,7 +60,7 @@ import { createDocument, documentIdentity, documentPath, isDocument, RecentDocum
 import { SettingsStore } from './settings';
 import { FileCredentialStore, MemoryCredentialStore } from './sync-credentials';
 import type { CredentialStore } from './sync-credentials';
-import { forgetOtherCredentials, registerSyncSettings, syncFlag, syncPatchError } from './sync-settings';
+import { folderSyncFlag, forgetOtherCredentials, registerSyncSettings, syncPatchError, usableBackend } from './sync-settings';
 import { loadCloudKitNative } from './sync-store-cloudkit';
 import type { CloudKitNative } from './sync-store-cloudkit';
 import { AuthoringError } from './authoring-service';
@@ -132,16 +133,14 @@ let connectionSettingsQueue = Promise.resolve();
 let lightroom: LightroomBridge | undefined;
 let cache: string;
 let settings: SettingsStore;
-// Sync stays behind a development flag until the library ships (ADR 0012, #283): IMAGEFLOW_SYNC=1 offers the sync
-// backend in Settings, File → Sync and Open Synced Book. Without it, no book syncs, whatever the settings hold.
-const syncOffered = syncFlag();
 // The one backend every book syncs through on this Mac (`AppSettings.sync`): a bucket with the credentials stored for
 // it (read at each use, so a key saved in Settings → Sync counts at once) and the commit headers this Mac has read.
 // iCloud (#292) goes through the CloudKit addon, loaded once; it reports a build without the entitlements and never
 // touches CloudKit there.
 let cloudKitNative: CloudKitNative | undefined | null = null;
 const cloudKit = () => (cloudKitNative === null ? (cloudKitNative = loadCloudKitNative()) : cloudKitNative);
-const syncService = new SyncService(() => (syncOffered ? settings?.value.sync : undefined), { credentials: () => syncCredentials(), cacheFolder: () => app.getPath('userData'), cloudKit,
+// A setting that names iCloud in a build started without its flag leaves sync off (`usableBackend`).
+const syncService = new SyncService(() => usableBackend(settings?.value.sync), { credentials: () => syncCredentials(), cacheFolder: () => app.getPath('userData'), cloudKit,
   booksUnchosen: () => !!settings?.value.syncBooksUnchosen });
 let recents: RecentDocuments;
 let library: TemplateLibrary;
@@ -585,13 +584,27 @@ async function openDocument(path: string): Promise<DocumentSession | undefined> 
       document = new DocumentSession(editor, book, cache, sessions, release, (next) => {
         if (document) queueMicrotask(() => { if (document) publishAssets(document); });
         if (document) {
-          void recents.refresh(next.folder, next.project.title).then(publishRecents).catch((error) => console.warn('ImageFlow could not update recent books', error));
+          void recents.refresh(next.folder, next.project.title, undefined, next.project.bookId).then(publishRecents).catch((error) => console.warn('ImageFlow could not update recent books', error));
           markCoverDirty(document);
         }
       });
       document.networkTrust = bookNetworkTrust;
       document.keepOriginals = () => settings.value.keepOriginals !== false;
-      document.syncChanged = () => updateMenus();
+      const tracked = document;
+      document.syncChanged = () => {
+        updateMenus();
+        // A book that syncs here stays in the library beyond the most recent books (#283); while the remote cannot be
+        // read (`unavailable`) tracking stays as it was.
+        if (tracked.bookSync === 'unavailable') return;
+        const syncs = tracked.bookSync === 'syncing';
+        void recents.track(tracked.book.folder, syncs).then((changed) => { if (changed) publishRecents(); }).catch((error) => console.warn('ImageFlow could not update recent books', error));
+      };
+      // The cover the recent books keep, for the push to record (#283): a data URL made in the background, decoded here.
+      document.cover = async () => {
+        const url = await recents.coverOf(tracked.book.folder);
+        return url?.startsWith('data:image/jpeg;base64,') ? new Uint8Array(Buffer.from(url.slice('data:image/jpeg;base64,'.length), 'base64')) : undefined;
+      };
+      document.announceSites = downloadedBooks.delete(folder);
       document.syncService = syncService;
       document.syncExcluded = await syncExcludedBook(folder);
       const asking = document;
@@ -995,7 +1008,7 @@ async function stopTrustingBook(owner: BaseWindow | undefined) {
   const { response } = await dialog.showMessageBox(window, { type: 'warning', buttons: ['Stop Trusting', 'Cancel'], defaultId: 1, cancelId: 1,
     message: 'Stop trusting this book’s template?',
     detail: 'Maps and other pictures that load from the internet stop drawing until you trust the book again.' +
-      (syncOffered ? ' The book also stops syncing on this Mac; other Macs keep syncing it.' : '') });
+      (syncService.configured ? ' The book also stops syncing on this Mac; other Macs keep syncing it.' : '') });
   if (response !== 0) return;
   // An untrusted book never continues syncing (ADR 0012, section 2): it stops on this Mac, and the remote is left as it
   // is. Through the session, so it waits for nothing and never interrupts a sync of the book.
@@ -1127,8 +1140,32 @@ async function syncDocument(document: DocumentSession, start: boolean) {
       if (await offerTrust(document)) await document.syncNow({ start, trust: true });
       return;
     }
+    if (error instanceof BookDeletedError) { await askRemoved(document); return; }
     if (!(error instanceof SyncElsewhereError)) throw error;
     if (await offerSyncHere(document)) await document.syncNow();
+  }
+}
+
+/**
+ * A book deleted from sync on another Mac (its tombstone) pushes nothing; this asks what becomes of it here (ADR 0012,
+ * section 4): Keep Here Only stops syncing it on this Mac, and Sync Again makes it a new book on the remote.
+ */
+async function askRemoved(document: DocumentSession) {
+  if (document.closing || document.window.isDestroyed()) return;
+  const { response } = await dialog.showMessageBox(document.window, { type: 'question', buttons: ['Keep Here Only', 'Sync Again', 'Cancel'], defaultId: 0, cancelId: 2,
+    message: 'This book was deleted from sync on another Mac.',
+    detail: 'Keep “' + bookName(document.book.folder) + '” on this Mac only, or sync it again as a new book? Copies on other Macs stay as they are.' });
+  if (document.closing) return;
+  if (response === 0) await document.stopSyncing();
+  else if (response === 1) await syncAgainDocument(document);
+}
+
+/** Sync Again through the open book's session, asking once to trust an untrusted book. */
+async function syncAgainDocument(document: DocumentSession) {
+  try { await document.syncAgain(); }
+  catch (error) {
+    if (!(error instanceof UntrustedBookError)) throw error;
+    if (await offerTrust(document)) await document.syncAgain({ trust: true });
   }
 }
 
@@ -1173,59 +1210,172 @@ async function stopSyncingDocument(document: DocumentSession) {
 }
 
 /**
- * Open Synced Book (#251): lists the books on the configured remote, by the titles in their commit headers, and makes
- * a new local book from the one chosen. It starts untrusted (ADR 0006). The library (#283) replaces it.
+ * The library (ADR 0012, section 5; #283): what the Start window lists of the configured remote, read once per session
+ * and backend (Refresh, an action and a changed backend read it again), and each book's row, read as it comes into view.
  */
-async function openFromSync(owner: BrowserWindow | undefined) {
-  const parent = owner && !owner.isDestroyed() ? owner : undefined;
-  const ask = <T extends Electron.MessageBoxOptions>(options: T) => parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options);
+let libraryCache: { key: string; listing?: Promise<LibraryRemote>; books: Map<string, Promise<LibraryBook>> } | undefined;
+/** Covers by book and digest, for the backend they were read from; content-addressed, so kept across refreshes. */
+let libraryCovers: { key: string; covers: Map<string, Promise<string | undefined>> } | undefined;
+/** Rows read four at a time, so a window full of books does not ask the remote for all of them at once. */
+const libraryRows = limited(4);
+function libraryState() {
+  const key = JSON.stringify(usableBackend(settings.value.sync) ?? null);
+  if (libraryCache?.key !== key) libraryCache = { key, books: new Map() };
+  if (libraryCovers?.key !== key) libraryCovers = { key, covers: new Map() };
+  return libraryCache;
+}
+async function libraryRemote(refresh = false) {
+  if (!syncService.configured) return null;
+  const state = libraryState();
+  if (refresh) { state.listing = undefined; state.books.clear(); }
+  const listing = state.listing ??= syncService.connect().then(({ remote, remoteId, name }) => libraryListing(remote, remoteId, name));
+  // A listing that failed is not kept: the next look reads the remote again.
+  listing.catch(() => { if (state.listing === listing) state.listing = undefined; });
+  return listing;
+}
+async function libraryRow(bookId: string) {
+  const state = libraryState();
+  let book = state.books.get(bookId);
+  if (!book) {
+    const covers = libraryCovers!.covers;
+    book = libraryRows(() => syncService.connect().then(({ remote }) => libraryBook(remote, bookId, covers)));
+    state.books.set(bookId, book);
+    const kept = book;
+    kept.catch(() => { if (state.books.get(bookId) === kept) state.books.delete(bookId); });
+  }
+  return book;
+}
+/** Books downloaded from the library and not opened yet: their first open names the sites their template reaches. */
+const downloadedBooks = new Set<string>();
+/** The folder Download puts books in: the one set in Settings → Sync, or ~/Documents/ImageFlow. Made when missing. */
+async function booksFolder() {
+  const folder = settings.value.booksFolder ?? join(app.getPath('documents'), 'ImageFlow');
+  await mkdir(folder, { recursive: true });
+  return folder;
+}
+/** The open session of the book at `folder`, if any. */
+const openSession = (folder: string) => [...documents.values()].find((document) => !document.closing && document.book.folder === folder);
+/** The recent books as the library lists them: each with this Mac's sync record of it, read without the remote. */
+/**
+ * The configured remote's identity for the library's local part: `null` with sync off, undefined when it cannot be read
+ * now. The identity read last is used when there is one, so listing the books on this Mac sends no request of its own.
+ */
+async function configuredRemoteId(): Promise<string | null | undefined> {
+  if (!syncService.configured) return null;
+  return syncService.knownRemoteId ?? await syncService.connect().then(({ remoteId }) => remoteId, () => undefined);
+}
+async function libraryLocal(): Promise<RecentDocument[]> {
+  const entries = await recents.list();
+  const remoteId = await configuredRemoteId();
+  const listed = await Promise.all(entries.map(async (entry) => {
+    if (!entry.available) return entry;
+    const state = await readSyncState(entry.path).catch(() => undefined);
+    const sync = state ? { ...(state.remoteId ? { remoteId: state.remoteId } : {}), ...(state.enabled !== undefined ? { enabled: state.enabled } : {}) } : undefined;
+    // Books that sync with the configured remote stay tracked beyond the most recent ones (`RecentDocuments.track`);
+    // while the remote cannot be read, tracking stays as it was.
+    const syncs = syncsWithRemote(sync, remoteId);
+    if (syncs !== undefined) await recents.track(entry.path, syncs).catch(() => {});
+    return { ...entry, ...(sync ? { sync } : {}) };
+  }));
+  const ids = new Set(listed.map(({ id }) => id));
+  // Tracking may have changed which entries are kept; the list follows it.
+  return (await recents.list()).filter(({ id }) => ids.has(id)).map((entry) => ({ ...listed.find(({ id }) => id === entry.id)!, syncs: entry.syncs }));
+}
+/** The title a book has on this Mac or on the remote, for the questions about it. */
+async function libraryTitle(bookId: string) {
+  const local = (await recents.list()).find((entry) => entry.bookId === bookId);
+  if (local) return local.title || bookName(local.path);
+  return (await libraryCache?.books.get(bookId)?.catch(() => undefined))?.title || 'Untitled';
+}
+
+/**
+ * The library's actions (#283), from the Start window. Delete from Sync is asked here, in the main process, every time:
+ * the window names a book, never whether it was confirmed.
+ */
+async function libraryAction(owner: BrowserWindow, request: LibraryAction) {
+  if (request.action === 'update') {
+    if (updates.state.status === 'ready') updates.restart();
+    else { showSettings('general'); updates.check(); }
+    return;
+  }
   if (!syncService.configured) { showSettings('sync'); return; }
-  const { remote, remoteId, name } = await syncService.connect();
-  // A book deleted from sync is not offered.
-  const books = (await remoteBooks(remote)).filter((book) => !book.deleted);
-  if (!books.length) {
-    await ask({ type: 'info', message: 'There are no ImageFlow books in “' + name + '” yet.',
-      detail: 'Sync a book on another Mac (File → Sync → Sync Now), then try again.' });
+  const entry = 'id' in request ? await recents.get(request.id) : undefined;
+  const bookId = 'bookId' in request ? request.bookId : entry?.bookId;
+  if (request.action === 'download') {
+    if (!bookId) throw new Error('Choose a book to download.');
+    const { remote, remoteId, name } = await syncService.connect();
+    const tips = await remoteTips(remote, bookId);
+    if (!tips.length) throw new Error('This book has not fully arrived in “' + name + '” yet. Try again in a moment.');
+    // Several versions (Macs changed it at once): which one to download.
+    const tipId = tips.length === 1 ? tips[0].commitId : await chooseSyncTip(owner, tips);
+    const tip = tips.find(({ commitId }) => commitId === tipId);
+    if (!tip) return;
+    const folder = await cloneFromRemote({ remote, tip, destination: join(await booksFolder(), downloadName(tip.title) + '.imageflow'), remoteId, unique: true });
+    downloadedBooks.add(folder);
+    libraryCache = undefined;
+    const document = await openDocument(folder);
+    if (document && settings.value.keepOriginals !== false) void document.downloadSyncedOriginals().catch((error) => report(document.window, error));
     return;
   }
-  let book = books[0];
-  if (books.length > 1) {
-    const shown = books.slice(0, 6);
-    const { response } = await ask({ type: 'question', buttons: [...shown.map(({ title, newer }) => newer ? 'A Book Synced by a Newer ImageFlow' : title || 'Untitled'), 'Cancel'], cancelId: shown.length, defaultId: 0,
-      message: 'Which book do you want to open?', detail: books.length > shown.length ? 'The ' + shown.length + ' most recently synced books are shown.' : undefined });
-    if (!shown[response]) return;
-    book = shown[response];
-  }
-  if (book.newer) {
-    await ask({ type: 'info', message: 'This book was synced by a newer version of ImageFlow.', detail: 'Update ImageFlow to open it.' });
+  if (request.action === 'delete') {
+    if (!bookId) throw new Error('This book has not synced yet, so it is not in sync.');
+    const title = entry?.title || (entry && bookName(entry.path)) || await libraryTitle(bookId);
+    const local = (await recents.list()).filter((book) => book.available && book.bookId === bookId).map(({ path }) => path);
+    // What goes with it: for a copy here, its originals that are not on this Mac (counted from its own files).
+    const counts = await Promise.all(local.map((folder) => originalsAway(folder).catch(() => undefined)));
+    const away = !counts.length || counts.some((count) => count === undefined) ? undefined : Math.min(...counts.map(Number));
+    const { response } = await dialog.showMessageBox(owner, { type: 'warning',
+      ...deleteFromSyncQuestion({ title, backend: syncService.name ?? 'sync', here: local.length > 0, away }) });
+    if (response !== 0) return;
+    const open = [...documents.values()].filter((document) => !document.closing && document.book.project.bookId === bookId);
+    const folders = [...new Set([...local, ...open.map((document) => document.book.folder)])];
+    await syncService.deleteBook(bookId, { folders, settle: async () => { await Promise.all(open.map((document) => document.settleSync())); } });
+    libraryCache = undefined;
+    for (const folder of folders) await recents.track(folder, false).catch(() => {});
+    for (const document of open) void document.refreshSync().catch((error) => console.warn('ImageFlow could not read the sync status', error));
     return;
   }
-  const tipId = book.tips.length === 1 ? book.tips[0].commitId : parent ? await chooseSyncTip(parent, book.tips) : book.tips.at(-1)!.commitId;
-  const tip = book.tips.find(({ commitId }) => commitId === tipId);
-  if (!tip) return;
-  const saveOptions = { title: 'Save Synced Book', buttonLabel: 'Save',
-    defaultPath: join(app.getPath('documents'), (book.title || 'Untitled').replace(/[/\\:]/g, '-') + '.imageflow'), filters: [{ name: 'ImageFlow Book', extensions: ['imageflow'] }] };
-  const save = parent ? await dialog.showSaveDialog(parent, saveOptions) : await dialog.showSaveDialog(saveOptions);
-  if (save.canceled || !save.filePath) return;
-  const path = await cloneFromRemote({ remote, tip, destination: documentPath(save.filePath), remoteId });
-  const document = await openDocument(path);
-  if (document && settings.value.keepOriginals !== false) void document.downloadSyncedOriginals().catch((error) => report(document.window, error));
+  if (!entry) throw new Error('This recent book is no longer listed.');
+  const folder = (await documentIdentity(entry.path)).folder;
+  const session = openSession(folder);
+  if (request.action === 'stop' || request.action === 'keep-here') {
+    if (request.action === 'stop') {
+      const { response } = await dialog.showMessageBox(owner, { type: 'question', buttons: ['Stop Syncing', 'Cancel'], defaultId: 0, cancelId: 1,
+        message: 'Stop syncing “' + (entry.title || bookName(folder)) + '” on this Mac?', detail: 'The book and its copy in “' + (syncService.name ?? 'sync') + '” stay as they are. Other Macs keep syncing.' });
+      if (response !== 0) return;
+    }
+    if (session) await session.stopSyncing(); else await syncService.stop(folder);
+    await recents.track(folder, false);
+    return;
+  }
+  // Start Syncing and Sync Again run in the book, which opens: the questions they may ask (trust, a book that synced
+  // elsewhere) are the book's, and it syncs at once.
+  const document = session ?? await openDocument(folder);
+  if (!document) return;
+  await document.whenIdle();
+  if (request.action === 'start') await syncDocument(document, true);
+  else if (request.action === 'sync-again') await syncAgainDocument(document);
 }
 
 /** System Settings → Apple Account → iCloud, where its storage is managed; the Apple Account pane where that scene is unknown. */
 const manageICloudStorage = 'x-apple.systempreferences:com.apple.systempreferences.AppleIDSettings:icloud';
 async function syncCommand(document: DocumentSession, action: SyncAction) {
-  if (!syncOffered) throw new Error('Sync is not available.');
   if (action === 'sync' || action === 'start') await syncDocument(document, action === 'start');
   else if (action === 'download') await document.downloadSyncedOriginals();
   else if (action === 'cancel-download') document.cancelDownload();
-  else if (action === 'stop') await stopSyncingDocument(document);
+  else if (action === 'stop') {
+    if (document.bookSync !== 'syncing' && document.bookSync !== 'unavailable') throw new Error('This book does not sync on this Mac.');
+    await stopSyncingDocument(document);
+  }
   else if (action === 'manage-storage') await shell.openExternal(manageICloudStorage);
   else throw new Error('Unknown sync action.');
 }
 
 /** The backend changed in Settings: every open book looks at where it syncs now, and the menus follow. */
 function syncBackendChanged() {
+  // The library reads the new remote.
+  libraryCache = undefined;
+  publishRecents();
   for (const document of documents.values()) {
     if (!document.closing) void document.refreshSync().catch((error) => console.warn('ImageFlow could not read the sync status', error));
   }
@@ -1272,10 +1422,7 @@ function installMenu() {
       { label: 'Revert To', submenu: [registered('revert-opened'), registered('reload')] },
       { type: 'separator' },
       registered('export'), registered('export-proof'), { type: 'separator' },
-      ...syncOffered ? [{ id: 'open-sync-folder', label: 'Open Synced Book…', click: (_item: Electron.MenuItem, owner?: BaseWindow) => {
-        const window = owner ? BrowserWindow.fromId(owner.id) ?? undefined : undefined;
-        void openFromSync(window).catch((error) => report(window ?? startWindow, error));
-      } }, { label: 'Sync', submenu: [
+      { label: 'Sync', submenu: [
         ...([['sync-now', 'Sync Now', 'sync'], ['sync-download', 'Download Originals', 'download'], ['sync-start', 'Start Syncing', 'start'],
           ['sync-stop', 'Stop Syncing on This Mac…', 'stop']] as const).flatMap(([id, label, action]) => [
           ...id === 'sync-start' ? [{ type: 'separator' as const }] : [],
@@ -1285,7 +1432,7 @@ function installMenu() {
           } }]),
         { type: 'separator' as const },
         { id: 'sync-setup', label: 'Set Up Sync…', click: () => showSettings('sync') },
-      ] }] : [],
+      ] },
       { type: 'separator' }, registered('reveal-book'),
     ] },
     { label: 'Edit', submenu: [
@@ -1364,7 +1511,7 @@ function updateMenus() {
     // Originals another Mac is still uploading cannot be downloaded yet.
     'sync-download': !!sync && !sync.syncing && !sync.downloading && (sync.status?.pendingOriginals ?? 0) > (sync.status?.notUploaded ?? 0),
     'sync-start': state.document && state.writable && (standing === 'off' || standing === 'stopped' || standing === 'elsewhere'),
-    'sync-stop': syncs && !sync?.syncing, 'sync-setup': !syncService.configured, 'open-sync-folder': syncService.configured };
+    'sync-stop': syncs && !sync?.syncing, 'sync-setup': !syncService.configured };
   for (const [id, enabled] of Object.entries(syncEnabled)) { const item = menu?.getMenuItemById(id); if (item) item.enabled = enabled; }
   const zoomAlias = menu?.getMenuItemById('zoom-in-equals');
   if (zoomAlias) zoomAlias.enabled = commandState('zoom-in', state).enabled;
@@ -1981,14 +2128,48 @@ void app.whenReady().then(async () => {
     try { return { value: await createNewBook(owner, choice) }; }
     catch (error) { return { error: errorMessage(error) }; }
   });
-  ipcMain.handle(channels.recents, async (event) => startOwner(event) ? { value: await recents.list() } : { error: 'Request is only available to the start window.' });
+  ipcMain.handle(channels.recents, async (event) => startOwner(event) ? { value: await libraryLocal() } : { error: 'Request is only available to the start window.' });
+  ipcMain.handle(channels.libraryRemote, async (event, refresh?: unknown) => {
+    if (!startOwner(event)) return { error: 'Request is only available to the start window.' };
+    try { return { value: await libraryRemote(refresh === true) }; } catch (error) { return { error: errorMessage(error) }; }
+  });
+  ipcMain.handle(channels.libraryBook, async (event, bookId: unknown) => {
+    if (!startOwner(event) || typeof bookId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookId)) return { error: 'Request is only available to the start window.' };
+    try { return { value: await libraryRow(bookId) }; } catch (error) { return { error: errorMessage(error) }; }
+  });
+  ipcMain.handle(channels.libraryAction, async (event, request: unknown) => {
+    const owner = startOwner(event);
+    if (!owner || quitting) return { error: 'Request is only available to the start window.' };
+    const { action, bookId, id } = (request ?? {}) as { action?: unknown; bookId?: unknown; id?: unknown };
+    const uuid = (value: unknown) => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+    const valid = ((action === 'download' || action === 'update') && uuid(bookId) && id === undefined) || (action === 'delete' && (uuid(bookId) !== uuid(id))) ||
+      ((action === 'start' || action === 'stop' || action === 'keep-here' || action === 'sync-again') && uuid(id) && bookId === undefined);
+    if (!valid) return { error: 'Unknown library action.' };
+    try { await libraryAction(owner, request as LibraryAction); return { value: null }; }
+    catch (error) {
+      // The library showed something the remote no longer says: it reads the remote again.
+      if (error instanceof BookDeletedError || error instanceof BookNotDeletedError || error instanceof BookDeleteError) libraryCache = undefined;
+      return { error: errorMessage(error) };
+    } finally { publishRecents(); }
+  });
   ipcMain.handle(channels.recentAction, async (event, id: string, action: 'open' | 'locate' | 'remove' | 'reveal') => {
     const owner = startOwner(event);
     if (!owner || typeof id !== 'string') return { error: 'Request is only available to the start window.' };
     try {
       const entry = await recents.get(id);
       if (action === 'reveal') shell.showItemInFolder(entry.path);
-      else if (action === 'remove') { await recents.remove(id); publishRecents(); }
+      else if (action === 'remove') {
+        // A book that syncs here stays listed, so the library never takes it for a book only on the remote (#283); one
+        // that cannot be found any more can go, and its remote copy is then offered for download.
+        if (isDocument(entry.path)) {
+          const state = await readSyncState(entry.path).catch(() => undefined);
+          const present = await documentIdentity(entry.path).then(() => true, () => false);
+          // Only a book that syncs with the configured remote, as far as can be told: one that synced with another
+          // remote, or any book with sync off, can go; with the remote unreadable, removal is not refused on a guess.
+          if (present && syncsWithRemote(state, await configuredRemoteId()) === true) throw new Error('“' + (entry.title || bookName(entry.path)) + '” syncs on this Mac, so it stays in the list. Stop syncing it on this Mac first.');
+        }
+        await recents.remove(id); publishRecents();
+      }
       else if (action === 'open') {
         const document = await openDocument(entry.path);
         if (!document) return { value: null };
@@ -2139,8 +2320,6 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.syncAction, async (event, action: unknown): Promise<Result<void>> => {
     const document = editorOwner(event);
     if (!document || quitting) return { error: 'Request is only available to an open book.' };
-    // Without the development flag no sync action does anything, not even writing a book's sync record.
-    if (!syncOffered) return { error: 'Sync is not available.' };
     if (action !== 'sync' && action !== 'download' && action !== 'cancel-download' && action !== 'start' && action !== 'stop' && action !== 'manage-storage') return { error: 'Unknown sync action.' };
     try { await syncCommand(document, action); return { value: undefined }; }
     catch (error) { return { error: errorMessage(error) }; }
@@ -2204,12 +2383,11 @@ void app.whenReady().then(async () => {
       return { value };
     } catch (error) { return { error: errorMessage(error) }; }
   });
-  ipcMain.handle(channels.syncOffered, () => syncOffered);
   // The sheet after a backend is first set up (ADR 0012, section 3): it lists the recent books with what their owned
   // originals take up and asks which to sync. Configuring a backend uploads nothing by itself.
   ipcMain.handle(channels.syncSetupBooks, async (event) => {
     if (!settingsOwner(event)) return { error: 'Request is only available to Settings.' };
-    if (!syncOffered || !syncService.configured) return { error: 'Sync is off on this Mac.' };
+    if (!syncService.configured) return { error: 'Sync is off on this Mac.' };
     try {
       const entries = await booksToChoose();
       // With no book to list there is nothing to answer.
@@ -2226,7 +2404,7 @@ void app.whenReady().then(async () => {
   });
   ipcMain.handle(channels.chooseSyncBooks, async (event, choices: unknown) => {
     if (!settingsOwner(event)) return { error: 'Request is only available to Settings.' };
-    if (!syncOffered || !syncService.configured) return { error: 'Sync is off on this Mac.' };
+    if (!syncService.configured) return { error: 'Sync is off on this Mac.' };
     if (!Array.isArray(choices) || choices.length > 100 || !choices.every((choice) => choice && typeof choice.id === 'string' && typeof choice.sync === 'boolean')) return { error: 'Invalid choice of books.' };
     try {
       const chosen: { folder: string; sync: boolean }[] = [];
@@ -2246,8 +2424,25 @@ void app.whenReady().then(async () => {
       return { value: undefined };
     } catch (error) { return { error: errorMessage(error) }; }
   });
+  // The folder downloads go to (#283), chosen in the app's own dialog: a window never names a path for it.
+  ipcMain.handle(channels.chooseBooksFolder, async (event) => {
+    const owner = settingsOwner(event);
+    if (!owner) return { error: 'Request is only available to Settings.' };
+    try {
+      const current = settings.value.booksFolder ?? join(app.getPath('documents'), 'ImageFlow');
+      const choice = await dialog.showOpenDialog(owner, { title: 'Folder for Downloaded Books', buttonLabel: 'Choose', properties: ['openDirectory', 'createDirectory'],
+        message: 'Books you download from sync are saved here.', defaultPath: current });
+      const path = choice.filePaths[0];
+      if (choice.canceled || !path) return { value: null };
+      if (insideBook(await realpath(path).catch(() => path)) || insideBook(path)) throw new Error('Choose a folder outside every book.');
+      const value = await settings.update({ booksFolder: path });
+      for (const window of appWindows()) if (!window.isDestroyed()) window.webContents.send(channels.settingsChanged, value);
+      return { value };
+    } catch (error) { return { error: errorMessage(error) }; }
+  });
   ipcMain.handle(channels.chooseSyncFolder, async (event) => {
-    if (!appOwner(event) || !syncOffered) return { error: 'Request is only available to an app window.' };
+    // The folder backend is for development and tests (`IMAGEFLOW_SYNC_FOLDER=1`): a release does not offer it.
+    if (!appOwner(event) || !folderSyncFlag()) return { error: 'Request is only available to an app window.' };
     try {
       const owner = BrowserWindow.fromWebContents(event.sender);
       const current = settings.value.sync?.kind === 'folder' ? settings.value.sync.path : undefined;
@@ -2280,8 +2475,7 @@ void app.whenReady().then(async () => {
   }));
   ipcMain.handle(channels.showSettings, (event, pane: SettingsPane) => {
     if ((appOwner(event) || pickerOwner(event)) && (pane === 'general' || pane === 'sources' || pane === 'agents')) showSettings(pane);
-    // Settings → Sync exists behind the development flag; without it, Keep originals is in General.
-    else if (appOwner(event) && pane === 'sync') showSettings(syncOffered ? 'sync' : 'general');
+    else if (appOwner(event) && pane === 'sync') showSettings('sync');
   });
   ipcMain.handle(channels.templatePreview, async (event, id: unknown, hash: unknown) => {
     if ((!templatesOwner(event) && !pickerOwner(event)) || typeof id !== 'string' || typeof hash !== 'string')

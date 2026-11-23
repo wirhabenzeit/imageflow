@@ -9,13 +9,14 @@ import type { PhotoIndex } from '../src/project';
 import { sourceEntries } from '../src/source-locations';
 import { entryReach, isFileLocator, packagePath } from '../src/source-locator';
 import type { LocatorFields } from '../src/source-locator';
-import { changedOriginals, commitHeaderSchema, commitHeaderVersion, contentBlobKey, decideSync, deriveTips, encodeStateBlob, factsAhead, newerStateBlob, NewerSyncFormatError, originalBlobKey, portableManifests,
+import { changedOriginals, commitHeaderSchema, commitHeaderVersion, contentBlobKey, coverBlobKey, decideSync, deriveTips, encodeStateBlob, factsAhead, newerStateBlob, NewerSyncFormatError, originalBlobKey, portableManifests,
   projectManifests, proxyBlobKey, stateBlobSchema, stateMatchesHeader } from '../src/sync-snapshot';
 import type { CommitHeader, StateBlob, SyncDecision, SyncedCommit } from '../src/sync-snapshot';
 import type { SyncStatus } from '../src/desktop';
 import { AssetFacts, readAssetFacts } from './asset-facts';
 import { documentPath } from './documents';
 import { holdsProjectLock, persistProjectManifests } from './persistence';
+import { trustBook } from './source-access';
 import { photoDetails, photoFile } from './photos';
 import { loadProject, observePhotos } from './project';
 import type { OpenProject } from './project';
@@ -24,9 +25,9 @@ import { proxyStore } from './proxy-store';
 import { captureBookState, captureBookStateRevision } from './revisions';
 import { saveDocumentCopy } from './source-actions';
 import { SourceStore } from './source-store';
-import { bookPath, finishPull, preflightPull, readSyncState, stagingFolder, updateSyncState } from './sync-pull';
+import { bookPath, finishPull, keptOriginals, preflightPull, readSyncState, stagingFolder, SyncHalfPulledError, updateSyncState } from './sync-pull';
 import type { PullMarker } from './sync-pull';
-import { remoteCommits } from './sync-remote';
+import { BookDeletedError, remoteCommits } from './sync-remote';
 import type { SyncRemote } from './sync-remote';
 import { StoreAccessError, StoreFullError } from './sync-store';
 import type { StoreAccessReason } from './sync-store';
@@ -64,6 +65,13 @@ export type SyncOptions = {
   fetchOriginals?: boolean;
   /** Asks which tip to continue from when the remote holds several; undefined leaves the book as it is. */
   chooseTip?: (tips: CommitHeader[]) => Promise<string | undefined>;
+  /**
+   * The book's cached 320 px JPEG cover (the app keeps it with the recent books, made in the background), for the
+   * library on other Macs. It may be missing or older than the book; a push then carries its parent's cover forward.
+   */
+  cover?: () => Promise<Uint8Array | undefined>;
+  /** The name of this Mac, recorded with the originals a push names first, for "never uploaded from …". */
+  device?: string;
   now?: () => Date;
 };
 export type SyncOutcome = {
@@ -123,6 +131,9 @@ async function refreshFacts(context: Context) {
   const index = JSON.parse(await readFile(join(root, 'photos.json'), 'utf8')) as unknown;
   const photos = photoIndexSchema.parse(index);
   const proxies = await proxyStore();
+  // An older original a pull kept is not this Mac's version of the photo: the fact stays the snapshot's, so the book
+  // lays the photo out at the new version's size and draws it from its preview (`keptOriginals`, desktop/project.ts).
+  const kept = await keptOriginals(root);
   context.here = {};
   const sources = sourceEntries({ project: book.project, photoIndex: photos }).filter((entry) => entry.kind === 'photo');
   // Photos that are not files are asked about once per provider, all at once (ADR 0011): a sync holds the book, and a
@@ -147,7 +158,7 @@ async function refreshFacts(context: Context) {
     if (!resolved.status.digest) { await store.digested(); resolved = await store.resolve(root, source); }
     const digest = resolved.status.digest;
     if (resolved.status.state !== 'available' || !resolved.stored || !digest) continue;
-    facts.note(source.id, resolved.stored.observation, await photoDetails(resolved.stored.snapshot, null), digest);
+    if (kept.get(source.id)?.kept !== digest) facts.note(source.id, resolved.stored.observation, await photoDetails(resolved.stored.snapshot, null), digest);
     context.here[source.id] = { path: resolved.stored.snapshot, digest };
   }
   await store.settled();
@@ -265,7 +276,8 @@ async function uploadProxy(remote: SyncRemote, bookId: string, digest: string, b
  * for photos whose original is not on this Mac (not located, not downloaded) are carried forward from `base`, the last
  * synced snapshot, or taken from the local proxy store.
  */
-async function push(context: Context, parents: string[], base: StateBlob | undefined, facts: Record<string, AssetFact>, synced: SyncedCommit | undefined) {
+async function push(context: Context, parents: string[], base: StateBlob | undefined, facts: Record<string, AssetFact>, synced: SyncedCommit | undefined,
+  parentCover?: string) {
   const { root, remote } = context;
   const state = await captureBookState(root);
   const bookId = state.project.bookId;
@@ -286,6 +298,7 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
     return fact ? [[id, fact]] : [];
   }));
   const originals: StateBlob['originals'] = {};
+  const named: NonNullable<StateBlob['named']> = {};
   for (const [id, photo] of Object.entries(state.photos)) {
     // Only photos whose source reaches the book sync as originals (ADR 0012, Sync by reach).
     const owned = syncedOriginalPath(photo);
@@ -295,6 +308,14 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
     // shows the photo's preview and says that it is still uploading.
     if (here?.path !== undefined && here.digest === assets[id]?.digest) originals[id] = { digest: here.digest, ext: extname(owned).toLowerCase() };
     else if (base?.originals[id]) originals[id] = base.originals[id];
+    // The version the last snapshot named keeps when and where it was first named. A new one is named here, now, only
+    // by the Mac that has its file; one carried forward without an earlier record stays without one (it then reads as
+    // still uploading, never as "never uploaded from" a Mac that never had it).
+    const earlier = base?.named?.[id];
+    if (originals[id] && earlier?.digest === originals[id].digest) named[id] = earlier;
+    else if (originals[id] && here?.path !== undefined && here.digest === originals[id].digest) {
+      named[id] = { digest: originals[id].digest, at: (context.options.now?.() ?? new Date()).toISOString(), ...(context.options.device ? { by: context.options.device.slice(0, 100) } : {}) };
+    }
   }
   const proxies: StateBlob['proxies'] = {};
   const local = await proxyStore();
@@ -321,12 +342,13 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
   }
   const portable = portableManifests(state.project, state.photos);
   const blob: StateBlob = { version: 1, project: portable.project, photos: portable.photos, assetsMeta: { version: 1, assets },
-    content: state.contentDigests, originals, proxies };
+    content: state.contentDigests, originals, ...(Object.keys(named).length ? { named } : {}), proxies };
   const bytes = encodeStateBlob(blob);
   const stateDigest = sha(bytes);
   if (!await remote.hasBlob(contentBlobKey(bookId, stateDigest))) await remote.putBlob(contentBlobKey(bookId, stateDigest), bytes, { sha256: stateDigest });
+  const coverDigest = await uploadCover(context, bookId, parentCover);
   const header = commitHeaderSchema.parse({ version: commitHeaderVersion, commitId: randomUUID(), bookId, parents, bookStateRevision: state.revision,
-    createdAt: (context.options.now?.() ?? new Date()).toISOString(), title: state.project.title.slice(0, 400), stateDigest });
+    createdAt: (context.options.now?.() ?? new Date()).toISOString(), title: state.project.title.slice(0, 400), stateDigest, ...(coverDigest ? { coverDigest } : {}) });
   await remote.putCommit(header);
   await recordSynced(root, { commitId: header.commitId, bookId, bookStateRevision: header.bookStateRevision, stateDigest, photoDigests: digestsOf(assets),
     // What this Mac has: originals at the snapshot's digest, and older versions a pull kept until their new ones arrive.
@@ -334,6 +356,33 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
       (assets[id]?.digest === digest || synced?.localDigests?.[id] === digest)).map(([id, { digest }]) => [id, digest])),
     localKeys: syncedKeys(context, synced, state.photos) });
   return { header, blob };
+}
+
+/** The largest cover a push sends: the app keeps covers of at most 300,000 characters as data URLs. */
+export const maximumCoverBytes = 240_000;
+/** Whether bytes look like a whole JPEG of a cover's size (start and end markers); the library decodes it again before showing it. */
+export const isCoverJpeg = (bytes: Uint8Array) => bytes.length > 4 && bytes.length <= maximumCoverBytes &&
+  bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff && bytes[bytes.length - 2] === 0xff && bytes[bytes.length - 1] === 0xd9;
+
+/**
+ * The cover a commit records (#283): this Mac's cached cover, uploaded under its digest unless the parent has the same
+ * one, or the parent's cover when there is none here (not made yet, or not readable). A cover that cannot be uploaded
+ * never fails the push; the parent's is carried forward instead.
+ */
+async function uploadCover(context: Context, bookId: string, parentCover: string | undefined) {
+  const bytes = await context.options.cover?.().catch(() => undefined);
+  if (!bytes || !isCoverJpeg(bytes)) return parentCover;
+  const digest = sha(bytes);
+  if (digest === parentCover) return parentCover;
+  const key = coverBlobKey(bookId, digest);
+  try {
+    if (!await context.remote.hasBlob(key)) await context.remote.putBlob(key, bytes, { sha256: digest });
+    return digest;
+  } catch (error) {
+    if (error instanceof BookDeletedError) throw error;
+    console.warn('ImageFlow could not upload the book’s cover', error);
+    return parentCover;
+  }
 }
 
 /**
@@ -575,6 +624,10 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
   // push would ask about, and the originals. It ends with the sync (`syncBook`).
   context.endSync = await options.remote.prepareSync?.(bookId);
   const commits = await remoteCommits(options.remote, bookId);
+  // A book deleted from sync is never pushed back, nor pulled (ADR 0012, section 4): the Mac that still has it asks.
+  // Asked after the commits were listed, so that listing answers it without a request of its own.
+  const tombstone = await deletedFromSync(options.remote, bookId, commits.length);
+  if (tombstone) throw new BookDeletedError(tombstone);
   const tips = deriveTips(commits);
   const synced = state.lastSynced;
   const factsChanged = !!synced && factsAhead(hereDigests(context), synced, hereKeys(context));
@@ -588,7 +641,7 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
     }
     case 'push': {
       const base = await fetchState(options.remote, bookId, synced!.stateDigest);
-      const { header } = await push(context, [decision.tip.commitId], base, facts, synced);
+      const { header } = await push(context, [decision.tip.commitId], base, facts, synced, decision.tip.coverDigest);
       return { action: 'push', pushed: [header.commitId], changed };
     }
     case 'in-sync': {
@@ -596,7 +649,7 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
       if (blob) await refetchProxies(context, bookId, blob);
       // Originals here that an older push left out (it found iCloud full) are named now; they upload after the commit.
       if (blob && await unnamedOriginals(context, blob)) {
-        const { header } = await push(context, [decision.tip.commitId], blob, facts, synced);
+        const { header } = await push(context, [decision.tip.commitId], blob, facts, synced, decision.tip.coverDigest);
         return { action: 'push', pushed: [header.commitId], changed };
       }
       // A photo without a file is compared from here on with what this Mac sees of it now, where it reads the photo
@@ -618,7 +671,7 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
       // Facts this Mac knows better than the snapshot go back with a commit of the same book state, and so do
       // originals here that it does not name.
       if (factsAhead(hereDigests(context), adopted, hereKeys(context)) || await unnamedOriginals(context, blob)) {
-        const { header } = await push(context, [decision.tip.commitId], blob, facts, adopted);
+        const { header } = await push(context, [decision.tip.commitId], blob, facts, adopted, decision.tip.coverDigest);
         return { action: 'adopt', pushed: [header.commitId], changed };
       }
       return { action: 'adopt', pushed: [], changed };
@@ -628,7 +681,7 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
       const now = (await readSyncState(root)).lastSynced!;
       // The merge kept the facts of originals that changed here; they go back, never stale ones.
       if (factsAhead(hereDigests(context), now, hereKeys(context)) || await unnamedOriginals(context, blob)) {
-        const { header } = await push(context, [decision.tip.commitId], blob, await readAssetFacts(root), now);
+        const { header } = await push(context, [decision.tip.commitId], blob, await readAssetFacts(root), now, decision.tip.coverDigest);
         return { action: 'fast-forward', pushed: [header.commitId], pulled: decision.tip.commitId, changed: true };
       }
       return { action: 'fast-forward', pushed: [], pulled: decision.tip.commitId, changed: true };
@@ -795,16 +848,36 @@ async function recordReplaced(root: string, replaced: Record<string, string>) {
  * The owned originals of the last synced snapshot that are not on this Mac, without hashing anything, and those of
  * them that another Mac has not uploaded yet (`notUploaded`).
  */
-export async function originalsNotHere(folder: string, remote: SyncRemote): Promise<{ ids: string[]; notUploaded: string[] }> {
+export async function originalsNotHere(folder: string, remote: SyncRemote, now = new Date()): Promise<{ ids: string[]; notUploaded: string[]; neverUploaded?: NeverUploaded[] }> {
   const root = await realpath(folder);
   const synced = (await readSyncState(root)).lastSynced;
   if (!synced) return { ids: [], notUploaded: [] };
   const bookId = await syncedBookId(root, synced).catch(() => undefined);
   const blob = bookId && await fetchState(remote, bookId, synced.stateDigest).catch(() => undefined);
   if (!bookId || !blob) return { ids: [], notUploaded: [] };
+  const all = await missingOriginals(root, remote, bookId, blob);
   // A kept older version is here: the photo has its file, which the new one replaces once it is there.
-  const missing = (await missingOriginals(root, remote, bookId, blob)).filter(({ replaces }) => !replaces);
-  return { ids: missing.map(({ id }) => id), notUploaded: missing.filter(({ uploaded }) => !uploaded).map(({ id }) => id) };
+  const missing = all.filter(({ replaces }) => !replaces);
+  // Named long ago and still not on the remote: the Mac that had it never uploaded it (it is gone, or never synced
+  // again). Also for a kept older version, whose photo then stays on its old file.
+  const namedOf = (id: string, digest: string) => (blob.named?.[id]?.digest === digest ? blob.named[id] : undefined);
+  const neverUploaded = all.flatMap(({ id, uploaded, original }) => {
+    const named = namedOf(id, original.digest);
+    return !uploaded && named && now.getTime() - Date.parse(named.at) > neverUploadedAfter ? [{ id, namedAt: named.at, ...(named.by ? { by: named.by } : {}) }] : [];
+  });
+  return { ids: missing.map(({ id }) => id), notUploaded: missing.filter(({ uploaded }) => !uploaded).map(({ id }) => id), ...(neverUploaded.length ? { neverUploaded } : {}) };
+}
+
+/** How long an original a commit named may take to arrive before it counts as never uploaded: a week. */
+export const neverUploadedAfter = 7 * 24 * 60 * 60 * 1000;
+/** An original a commit named a week or more ago that never arrived on the remote, with the Mac that named it. */
+export type NeverUploaded = { id: string; namedAt: string; by?: string };
+
+/** What the status and the asset say about originals that never arrived: from which Mac, when it is known. */
+export function neverUploadedText(lost: readonly NeverUploaded[]) {
+  const macs = [...new Set(lost.map(({ by }) => by).filter((by): by is string => !!by))];
+  const from = macs.length === 1 ? ' from “' + macs[0] + '”' : macs.length ? ' from ' + macs.map((mac) => '“' + mac + '”').join(', ') : ' from the Mac that added ' + (lost.length === 1 ? 'it' : 'them');
+  return (lost.length === 1 ? '1 original was' : lost.length + ' originals were') + ' never uploaded' + from + '. Open the book on that Mac to upload ' + (lost.length === 1 ? 'it' : 'them') + '.';
 }
 
 /** The owned originals of the last synced snapshot that are not on this Mac, without hashing anything. */
@@ -856,6 +929,25 @@ export async function ownedOriginalsSize(folder: string) {
   return bytes;
 }
 
+/**
+ * How many of a book's owned originals are not on this Mac, from its own files alone: owned photos whose file photos/
+ * lacks, and those a pull kept at an older version (their new version is elsewhere). For the question Delete from Sync
+ * asks; reads photos.json, the sync record and the files' presence, nothing else.
+ */
+export async function originalsAway(folder: string) {
+  const root = await realpath(folder);
+  const photos = photoIndexSchema.parse(JSON.parse(await readFile(join(root, 'photos.json'), 'utf8')));
+  const kept = await keptOriginals(root);
+  let away = 0;
+  for (const [id, photo] of Object.entries(photos)) {
+    const path = syncedOriginalPath(photo);
+    if (!path?.startsWith('photos/')) continue;
+    const info = await lstat(await bookPath(root, path, { checking: true })).catch(() => undefined);
+    if (!info?.isFile() || kept.has(id)) away++;
+  }
+  return away;
+}
+
 /** An owned original the last synced snapshot names, that is here, and that the remote lacks: still to upload. */
 export type PendingUpload = { id: string; path: string; key: string; digest: string };
 
@@ -891,6 +983,18 @@ export async function pendingUploads(folder: string, remote: SyncRemote): Promis
   return [...pending.values()];
 }
 
+/**
+ * Whether a book was deleted from sync, given how many commits a listing just found for it (ADR 0012, section 4): its
+ * tombstone, or, for a book without commits, its deletion marker. A deletion writes the marker, removes the commits, then
+ * writes the tombstone, so a deletion that stopped after its commits still reads as one on every Mac, and a copy without
+ * a sync record (a Finder duplicate) never pushes the book back; a marker over a book that still has commits (a deletion
+ * that stopped right after it) reads as not deleted. The marker is read only when there are no commits.
+ */
+export async function deletedFromSync(remote: SyncRemote, bookId: string, commits: number, options?: { fresh?: boolean; listedOnly?: boolean }) {
+  if (commits === 0) return remote.deletionMarker(bookId);
+  return remote.bookTombstone(bookId, options);
+}
+
 /** An upload clone (`uploadClonePrefix`) a store made beside an original. */
 const uploadClone = /^\.imageflow-upload-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/;
 
@@ -910,9 +1014,9 @@ export type UploadConnection = { remote: SyncRemote; remoteId: string };
  * How a background upload ended: what went up, what is left, originals that changed here since the commit named them
  * (`changed`; the next sync names their new version), and why it stopped early: the remote is full (`full`, the queue
  * pauses), the book no longer syncs with the remote it was asked about (`elsewhere`: another Apple ID or bucket, or Stop
- * Syncing), or it was cancelled.
+ * Syncing), it was cancelled, or the book was deleted from sync (`deleted`).
  */
-export type UploadOutcome = { uploaded: number; left: number; changed: number; full?: StoreFullError; stopped?: 'elsewhere' | 'cancelled' };
+export type UploadOutcome = { uploaded: number; left: number; changed: number; full?: StoreFullError; stopped?: 'elsewhere' | 'cancelled' | 'deleted' };
 
 /**
  * Uploads a book's pending originals (`pendingUploads`) in the background, after the commit that named them, without
@@ -935,8 +1039,19 @@ export async function uploadOriginals({ folder, connect, signal, progress }: { f
   if (!expected) return outcome;
   let connection = await connect();
   if (connection.remoteId !== expected) return { ...outcome, stopped: 'elsewhere' };
-  await sweepUploadClones(root);
-  const pending = await pendingUploads(root, connection.remote);
+  // A book deleted from sync uploads nothing: on iCloud an upload would make its zone again.
+  const synced = (await readSyncState(root)).lastSynced;
+  const lineage = synced && await syncedBookId(root, synced);
+  // One listing of the book (over a bucket) answers its commits, its tombstone and what is to upload.
+  const end = lineage ? await connection.remote.prepareSync?.(lineage) : undefined;
+  let pending: PendingUpload[];
+  try {
+    if (lineage && await deletedFromSync(connection.remote, lineage, (await connection.remote.listBook(lineage, 'snapshots')).length)) return { ...outcome, stopped: 'deleted' };
+    await sweepUploadClones(root);
+    pending = await pendingUploads(root, connection.remote);
+  } finally { end?.(); }
+  // Looked at again while the upload runs (at most every 30 s), so a deletion on another Mac stops it soon.
+  let looked = Date.now();
   progress?.(0, pending.length);
   for (const [index, { path, key, digest }] of pending.entries()) {
     const left = pending.length - index;
@@ -944,10 +1059,16 @@ export async function uploadOriginals({ folder, connect, signal, progress }: { f
     // The remote anew for each photo: the account or the bucket may have changed since the commit, or since the last one.
     if (index > 0) connection = await connect();
     if (connection.remoteId !== expected || await syncsWith() !== expected) return { ...outcome, left, stopped: 'elsewhere' };
+    if (lineage && Date.now() - looked > 30_000) {
+      looked = Date.now();
+      if (await connection.remote.bookTombstone(lineage, { fresh: true }) || await connection.remote.deletionMarker(lineage).then((marker) => marker && connection.remote.listBook(lineage, 'snapshots')
+        .then((commits) => !commits.length))) return { ...outcome, left, stopped: 'deleted' };
+    }
     if (await fileDigest(path).catch(() => undefined) !== digest) { outcome.changed++; continue; }
     try { await connection.remote.putBlob(key, { file: path }, { sha256: digest, signal }); }
     catch (error) {
       if (signal?.aborted) return { ...outcome, left, stopped: 'cancelled' };
+      if (error instanceof BookDeletedError) return { ...outcome, left, stopped: 'deleted' };
       if (error instanceof StoreFullError) return { ...outcome, left, full: error };
       // Changed while it uploaded: the store refused bytes without the digest, and the next sync names the new version.
       if (await fileDigest(path).catch(() => undefined) !== digest) { outcome.changed++; continue; }
@@ -960,19 +1081,35 @@ export async function uploadOriginals({ folder, connect, signal, progress }: { f
 }
 
 /**
- * Open Synced Book (#251): makes a new local book at `destination` from a commit on the remote, for a Mac that
- * has no copy of it yet. Content, the manifests (linked sources unlocated, as on any Mac that has not located them)
- * and the snapshot's facts are written into a staging folder and checked against the commit's revision before the
- * book appears under its name; proxies go to the proxy store, and owned originals stay on the remote until downloaded.
- * The new book records the commit as synced and, with `remoteId`, syncs on this Mac with that remote.
- *
- * It is not trusted (ADR 0006): its template comes from an unauthenticated remote, so it asks before reaching any site.
+ * A name for a downloaded book made from its title: what Finder allows, without a leading dot or dash, at most 100 characters,
+ * and "Untitled" for one that leaves nothing.
  */
-export async function cloneFromRemote({ remote, tip, destination, remoteId }: { remote: SyncRemote; tip: CommitHeader; destination: string; remoteId?: string }) {
-  const folder = join(await realpath(dirname(destination)), basename(documentPath(destination)));
+export function downloadName(title: string) {
+  const name = title.normalize('NFC').replace(/[\u0000-\u001f\u007f/:\\]/g, '-').replace(/^[\s.-]+/, '').trim().slice(0, 100).trim();
+  return name || 'Untitled';
+}
+
+/**
+ * Download from the library (#283; Open Synced Book in #251): makes a new local book at `destination` from a commit on
+ * the remote, for a Mac that has no copy of it yet. Content, the manifests (linked sources unlocated, as on any Mac that
+ * has not located them) and the snapshot's facts are written into a staging folder and checked against the commit's
+ * revision before the book appears under its name; proxies go to the proxy store, and owned originals stay on the
+ * remote until downloaded. The new book records the commit as synced and, with `remoteId`, syncs on this Mac with that
+ * remote. With `unique`, a name that is taken (a book, or any file) gets a number ("Book 2"); without, it is refused.
+ * Nothing that is there is ever replaced. A book deleted from sync is refused (`BookDeletedError`).
+ *
+ * The book arrives trusted (ADR 0012, section 2): the configured backend lies inside the user's trust boundary, so the
+ * book is one of their own. Returns the folder it made.
+ */
+export async function cloneFromRemote({ remote, tip, destination, remoteId, unique = false }: { remote: SyncRemote; tip: CommitHeader; destination: string; remoteId?: string; unique?: boolean }) {
+  const parent = await realpath(dirname(destination));
+  const name = basename(documentPath(destination)).slice(0, -'.imageflow'.length);
+  const tombstone = await remote.bookTombstone(tip.bookId);
+  if (tombstone) throw new BookDeletedError(tombstone);
   const { blob } = await fetchStateBytes(remote, tip.bookId, tip.stateDigest, tip);
-  const staging = join(dirname(folder), '.imageflow-create-' + randomUUID());
-  let reserved = false;
+  const staging = join(parent, '.imageflow-create-' + randomUUID());
+  let reserved: string | undefined;
+  let folder = join(parent, name + '.imageflow');
   let facts: Record<string, AssetFact> = {};
   try {
     await mkdir(staging);
@@ -994,22 +1131,61 @@ export async function cloneFromRemote({ remote, tip, destination, remoteId }: { 
     if (await captureBookState(staging).then(({ revision }) => revision) !== tip.bookStateRevision) {
       throw new Error('The book on the remote does not match its commit. Nothing was created.');
     }
-    // Reserve the name exclusively: never replace a book that is already there, even an empty package.
-    try { await mkdir(folder); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('A book named “' + basename(folder) + '” already exists there. Choose another name.', { cause: error });
-      throw error;
+    // Reserve the name exclusively: never replace a book or file that is already there, even an empty package.
+    for (let number = 2; ; number++) {
+      try { await mkdir(folder); reserved = folder; break; }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        if (!unique || number > 999) throw new Error('A book named “' + basename(folder) + '” already exists there. Choose another name.', { cause: error });
+        folder = join(parent, name + ' ' + number + '.imageflow');
+      }
     }
-    reserved = true;
     await rename(staging, folder);
-    reserved = false;
+    reserved = undefined;
   } finally {
     await rm(staging, { recursive: true, force: true });
-    if (reserved) await rmdir(folder).catch(() => {});
+    if (reserved) await rmdir(reserved).catch(() => {});
   }
   await updateSyncState(folder, () => ({ version: 1, ...(remoteId ? { remoteId, enabled: true } : {}),
     lastSynced: { commitId: tip.commitId, bookId: tip.bookId, bookStateRevision: tip.bookStateRevision, stateDigest: tip.stateDigest, photoDigests: digestsOf(facts), localDigests: {} } }));
+  await trustBook(folder);
   return folder;
+}
+
+/**
+ * Sync Again (#283), for a book that was deleted from sync on another Mac and is kept here: it becomes a new book on
+ * the remote, with a new lineage in project.json (`bookId`) and a fresh history, so the tombstone of the old one stays.
+ * Its sync record forgets what it last synced and syncs with `remoteId` from its next sync on. Needs the writer lock,
+ * held by the open book's session or taken for a closed one. A pull that was interrupted is finished first; one that
+ * could not be finished (the book may be half-pulled) starts nothing (`SyncHalfPulledError`), as for any new history.
+ */
+export async function newBookHistory(folder: string, remoteId: string) {
+  const root = await realpath(folder);
+  if (!await holdsProjectLock(root)) throw new Error('Open the book for editing to sync it again.');
+  const before = await readSyncState(root);
+  if (before.pull) {
+    try { await finishPull(root, before.pull); }
+    catch (error) { throw new SyncHalfPulledError(error instanceof Error ? error.message : String(error)); }
+  }
+  const { abandoned } = await readSyncState(root);
+  if (abandoned) throw new SyncHalfPulledError(abandoned.error);
+  // Older originals a pull kept were waiting for versions that were only in the deleted book: the files here are what
+  // the new book has of those photos, so their facts become the files' (the book shows them as files again).
+  const kept = await keptOriginals(root);
+  // The record first: a crash after it leaves the book with its old lineage and no record of the deleted history, so
+  // its next sync finds the deleted book (its marker, as it has no commits) and asks again; Sync Again then finishes.
+  await updateSyncState(root, ({ lastSynced: _, pull: __, abandoned: ___, ...state }) => ({ ...state, remoteId, enabled: true }));
+  if (kept.size) {
+    const facts = await readAssetFacts(root);
+    await AssetFacts.adoptSynced(root, Object.fromEntries(Object.entries(facts).filter(([id]) => !kept.has(id))));
+  }
+  const manifests = { 'project.json': await readFile(join(root, 'project.json')), 'photos.json': await readFile(join(root, 'photos.json')) };
+  const project = parseDocument(projectSchema, JSON.parse(manifests['project.json'].toString('utf8')), 'project.json');
+  const photos = parseDocument(photoIndexSchema, JSON.parse(manifests['photos.json'].toString('utf8')), 'photos.json');
+  const bookId = randomUUID();
+  const after = { ...manifests, 'project.json': Buffer.from(JSON.stringify(withBookFormat(parseDocument(projectSchema, { ...project, bookId }, 'project.json'), photos), null, 2) + '\n') };
+  await persistProjectManifests(root, manifests, after, { origin: 'app', label: 'Sync again' });
+  return { bookId, reverted: kept.size };
 }
 
 /**
@@ -1021,14 +1197,19 @@ export async function describeSync(folder: string, remote: SyncRemote): Promise<
   try {
     const root = await realpath(folder);
     const state = await readSyncState(root);
-    const away = await originalsNotHere(root, remote).catch(() => ({ ids: [], notUploaded: [] }));
-    const base = { pendingOriginals: away.ids.length, ...(away.notUploaded.length ? { notUploaded: away.notUploaded.length } : {}) };
+    const away = await originalsNotHere(root, remote).catch(() => ({ ids: [], notUploaded: [] as string[], neverUploaded: undefined }));
+    const base = { pendingOriginals: away.ids.length, ...(away.notUploaded.length ? { notUploaded: away.notUploaded.length } : {}),
+      ...(away.neverUploaded?.length ? { neverUploaded: neverUploadedText(away.neverUploaded) } : {}) };
     // A pull given up stays the status until a sync succeeds: the book may be half-pulled.
     if (state.abandoned) return { ...base, state: 'abandoned', detail: state.abandoned.error };
     const local = await captureBookState(root);
     const bookId = local.project.bookId;
     if (!bookId) return { ...base, state: 'ahead' };
     const commits = await remoteCommits(remote, bookId);
+    // Deleted from sync on another Mac: the book asks to be kept here only or synced again, and pushes nothing. As cheap
+    // as the listing of commits: the marker is read only for a book without commits, and the tombstone of one with
+    // commits only where a listing answers it (see `deletedFromSync`).
+    if (await deletedFromSync(remote, bookId, commits.length, { listedOnly: true })) return { state: 'removed', pendingOriginals: 0 };
     const tips = deriveTips(commits);
     const decision = decideSync({ pullInProgress: !!state.pull, tips, commits, lastSynced: state.lastSynced, localRevision: local.revision, factsChanged: false });
     const states: Record<SyncDecision['action'], SyncStatus['state']> = { 'resume': 'behind', 'remote-behind': 'remote-syncing', 'initial-push': 'ahead',

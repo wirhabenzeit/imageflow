@@ -14,6 +14,7 @@ import { watchLinkedFiles } from './providers/files';
 import { app, dialog, shell } from 'electron';
 import type { BrowserWindow } from 'electron';
 import { randomUUID } from 'node:crypto';
+import { hostname } from 'node:os';
 import { watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { mkdtemp, readdir, rm, stat, mkdir, rename, rmdir } from 'node:fs/promises';
@@ -56,6 +57,7 @@ import type { SyncRemote } from './sync-remote';
 import { bookSync, readSyncState, startSyncing, SyncElsewhereError, syncedElsewhere, takeAbandonedAtOpen } from './sync-pull';
 import type { SyncService, SyncStanding } from './sync-service';
 import { FirstSync } from './sync-start';
+import { networkNotice } from './sync-library';
 import type { CommitHeader } from '../src/sync-snapshot';
 import type { SyncView } from '../src/desktop';
 import { acquireProjectLock, CommittedProjectSaveError } from './persistence';
@@ -72,6 +74,13 @@ import { previewPictures } from './preview-picture-cache';
 export type RenderSessions = Map<string, { book: OpenProject; mode: RenderProject['mode']; network?: () => readonly string[];
   photos?: 'preview'; pictures?: ReturnType<typeof previewPictures.view>; pictureScope?: string }>;
 const viewPath = /^\/render\/([a-f0-9-]{36})(?:\/(.*))?$/;
+/** The book is held by another operation (a save, a reload, a sync); `run` reports it as `BOOK_BUSY`. */
+export class BookBusyError extends Error {
+  readonly code = 'BOOK_BUSY';
+  constructor() { super('ImageFlow is finishing another operation in this book.'); this.name = 'BookBusyError'; }
+}
+/** This Mac's name as other Macs see it in "never uploaded from …": its network name without `.local`. */
+function macName() { return hostname().replace(/\.local$/i, '').slice(0, 100) || undefined; }
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'ImageFlow could not complete the request.'; }
 async function fingerprint(path: string) {
   try {
@@ -173,6 +182,11 @@ export class DocumentSession {
   private askingNetwork?: Promise<string[]>;
   /** The declared sites the library trusts for a template with this hash (ADR 0006); set by the app. */
   networkTrust?: (hash: string, declared?: readonly string[]) => Promise<string[]>;
+  /**
+   * The book was just downloaded from the library (#283): it arrives trusted, so its template reaches the sites it
+   * declares without a question, and the first time it does, a notice names them once. Set by the app.
+   */
+  announceSites = false;
 
   /** Lets the frames reach the origins already allowed for this book's template, or trusted for it, before it renders. */
   async prepareNetwork() {
@@ -281,14 +295,23 @@ export class DocumentSession {
     }
   }
   async run<T>(task: () => Promise<T>): Promise<Result<T>> {
-    if (this.closing) return { error: 'This book is closing.' };
-    if (this.busy) return { error: 'ImageFlow is finishing another operation in this book.', code: 'BOOK_BUSY' };
-    this.busy = true;
-    try { return { value: await task() }; }
+    try { return { value: await this.hold(task) }; }
     catch (error) {
+      if (error instanceof BookBusyError) return { error: error.message, code: 'BOOK_BUSY' };
       if (error instanceof CommittedProjectSaveError) this.notify({ error: error.message });
       return { error: errorMessage(error) };
-    } finally { this.busy = false; }
+    }
+  }
+  /**
+   * Runs `task` holding the book, as `run` does, but rejects with the task's own error (`BookBusyError` while the book
+   * is busy), so callers in the main process can tell errors apart by their class instead of their text.
+   */
+  async hold<T>(task: () => Promise<T>): Promise<T> {
+    if (this.closing) throw new Error('This book is closing.');
+    if (this.busy) throw new BookBusyError();
+    this.busy = true;
+    try { return await task(); }
+    finally { this.busy = false; }
   }
   async relocate(folder: string) {
     if (this.unlockProject && !await this.unlockProject.tryRelocate(folder)) throw new Error('Could not verify the moved book’s writer lock.');
@@ -342,7 +365,7 @@ export class DocumentSession {
   async sync(remote: SyncRemote, options: Pick<SyncOptions, 'fetchOriginals'> & { remoteId?: string;
     /** Told when the sync fails because the remote is full (its commit or a preview did not fit). */
     full?: (error: StoreFullError) => void } = {}) {
-    return this.run(async () => {
+    return this.hold(async () => {
       // Syncing turns on only once the sync holds the book: one that finds it busy changes nothing.
       if (options.remoteId) await startSyncing(this.book.folder, options.remoteId);
       this.stopWatch();
@@ -351,7 +374,7 @@ export class DocumentSession {
         (await readSyncState(this.book.folder).catch(() => undefined))?.lastSynced?.commitId ?? ''].join(':');
       const before = await mark();
       try {
-        const outcome = await syncBook({ remote, book: this.book, fetchOriginals: options.fetchOriginals, chooseTip: (tips) => this.chooseTip(tips) });
+        const outcome = await syncBook({ remote, book: this.book, fetchOriginals: options.fetchOriginals, chooseTip: (tips) => this.chooseTip(tips), cover: this.cover, device: macName() });
         if (outcome.changed) this.notify({ value: this.activate(await loadProject(this.book.folder, this.cache), true) });
         return outcome;
       } catch (error) {
@@ -374,6 +397,8 @@ export class DocumentSession {
   syncView?: SyncView;
   /** Called when `syncView` changes, so the app updates its menus. */
   syncChanged?: () => void;
+  /** The book's cached cover (a JPEG the app made for the recent books), for a push to record (#283); set by the app. */
+  cover?: () => Promise<Uint8Array | undefined>;
   /** The per-Mac "keep originals" preference, read at each sync. */
   keepOriginals?: () => boolean;
   private syncing = false;
@@ -407,6 +432,8 @@ export class DocumentSession {
    */
   private notDownloaded = new Set<string>();
   private stillUploading = new Set<string>();
+  /** Of the originals not here, those a commit named a week or more ago that never arrived, with the Mac that named them. */
+  private neverUploaded = new Map<string, string | undefined>();
   /** A sync that failed because the remote is full (its commit or a preview did not fit); cleared by the next sync. */
   private storageFull?: SyncView['storageFull'];
   private publishSync(view: SyncView | undefined) {
@@ -510,10 +537,13 @@ export class DocumentSession {
     if (this.syncing) { this.publishSync({ ...this.syncView, folder: name, syncing: true, message: notice }); return; }
     const remote = standing.connection?.remote;
     const status = remote ? await describeSync(this.book.folder, remote) : unavailableStatus(standing.error ?? 'The remote cannot be read.', standing.access);
-    const away = remote && status.pendingOriginals ? await originalsNotHere(this.book.folder, remote).catch(() => ({ ids: [], notUploaded: [] })) : { ids: [], notUploaded: [] };
-    if (away.ids.join() !== [...this.notDownloaded].join() || away.notUploaded.join() !== [...this.stillUploading].join()) {
+    const none = { ids: [] as string[], notUploaded: [] as string[], neverUploaded: undefined };
+    const away: Awaited<ReturnType<typeof originalsNotHere>> = remote && (status.pendingOriginals || status.neverUploaded) ? await originalsNotHere(this.book.folder, remote).catch(() => none) : none;
+    const lost = new Map((away.neverUploaded ?? []).map(({ id, by }) => [id, by]));
+    if (away.ids.join() !== [...this.notDownloaded].join() || away.notUploaded.join() !== [...this.stillUploading].join() || JSON.stringify([...lost]) !== JSON.stringify([...this.neverUploaded])) {
       this.notDownloaded = new Set(away.ids);
       this.stillUploading = new Set(away.notUploaded);
+      this.neverUploaded = lost;
       // The book check and the asset statuses say so at once: the book renders again with the new statuses. While
       // the book is busy, the save or load that follows renders them anyway.
       if (!this.closing && !this.busy) this.notify({ value: this.activate(this.book) });
@@ -546,7 +576,7 @@ export class DocumentSession {
     if (standing === 'elsewhere' || (start && standing === 'stopped' && syncedElsewhere(state, connection.remoteId))) throw new SyncElsewhereError();
     if (standing !== 'syncing' && !start) throw new Error('This book does not sync on this Mac. Choose File → Sync → Start Syncing.');
     if (auto && standing === 'stopped') return undefined;
-    // Only a trusted book syncs, also one that synced before it was trusted here (a book made by Open Synced Book).
+    // Only a trusted book syncs, also one that synced before it was trusted here.
     await this.syncService.optIn(this.book.folder, { trust });
     this.syncing = true;
     this.storageFull = undefined;
@@ -557,10 +587,10 @@ export class DocumentSession {
       // Originals come after the sync, in the background (`downloadSyncedOriginals`), so the book stays usable.
       const manage = this.syncService.kind === 'icloud' ? { manage: true as const } : {};
       const result = await this.sync(connection.remote, { remoteId: connection.remoteId, full: (error) => { this.storageFull = { message: error.message, ...manage }; } });
-      if ('error' in result) throw new Error(result.error);
-      message = describeOutcome(result.value);
+      // Errors keep their class (`hold`): a tombstone is a `BookDeletedError`, and the app asks what becomes of the book.
+      message = describeOutcome(result);
       synced = true;
-      return result.value;
+      return result;
     } finally {
       this.syncing = false;
       await this.refreshSync({ message }).catch((error) => console.warn('ImageFlow could not read the sync status', error));
@@ -580,13 +610,43 @@ export class DocumentSession {
     if ('error' in result) throw new Error(result.error);
     await this.refreshSync();
   }
+  /** Waits until a sync of the book that is running has ended (Delete from Sync waits for it before it deletes). */
+  async settleSync() { await this.syncTask?.catch(() => {}); }
+  /** Waits, up to 10 s, while a reload or the first save holds the book (a book the library just opened). */
+  async whenIdle() {
+    for (let attempt = 0; attempt < 50 && this.busy && !this.closing; attempt++) await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  /**
+   * Sync Again on a book deleted from sync on another Mac (#283): through the session, which holds the writer lock, the
+   * book gets a new lineage and a fresh history (`SyncService.syncAgain`), the editor takes the new project.json, and
+   * the book syncs as a new book. An untrusted book throws `UntrustedBookError` unless `trust`.
+   */
+  async syncAgain(options: { trust?: boolean } = {}) {
+    const service = this.syncService;
+    if (!service) throw new Error('Sync is not available.');
+    await this.settleSync();
+    await this.whenIdle();
+    // Rejects with the service's own error, so an untrusted book is an `UntrustedBookError` the app asks about.
+    const { reverted } = await this.hold(async () => {
+      this.stopWatch();
+      try {
+        const result = await service.syncAgain(this.book.folder, options);
+        this.notify({ value: this.activate(await loadProject(this.book.folder, this.cache), true) });
+        return result;
+      } finally { this.watchProject(this.book); }
+    });
+    // Photos whose newer originals were only in the deleted book go back to the files this Mac has.
+    if (reverted && !this.window.isDestroyed()) this.window.webContents.send(channels.appNotice, (reverted === 1 ? '1 photo shows' : reverted + ' photos show') +
+      ' the version on this Mac again: ' + (reverted === 1 ? 'its newer original was' : 'their newer originals were') + ' only in the deleted book.');
+    return this.syncNow();
+  }
   /**
    * Templates → Stop Trusting This Book's Template…: withdraws the trust, and an untrusted book stops syncing on this
    * Mac (`SyncService.distrust`). Serialized with the book's other work, so it is refused while a sync of the book runs
    * instead of stopping it halfway.
    */
   async stopTrusting() {
-    // Without a backend (or the development flag) no sync record is written; the book is only untrusted.
+    // Without a backend no sync record is written; the book is only untrusted.
     const service = this.syncService?.configured ? this.syncService : undefined;
     const result = await this.run(() => (service ? service.distrust(this.book.folder) : distrustBook(this.book.folder)));
     if ('error' in result) throw new Error(result.code === 'BOOK_BUSY' ? 'Wait for the book to finish syncing, then stop trusting it.' : result.error);
@@ -858,12 +918,15 @@ export class DocumentSession {
    * mark lives in the session, not in what a load reads, so a reload or a check snapshot keeps the warning.
    */
   private marked(book: OpenProject): OpenProject {
-    if ((!this.reshaped.size && !this.notDownloaded.size) || !book.sources) return book;
+    if ((!this.reshaped.size && !this.notDownloaded.size && !this.neverUploaded.size) || !book.sources) return book;
     return { ...book, sources: Object.fromEntries(Object.entries(book.sources).map(([key, status]) => {
       if (status.kind !== 'photo') return [key, status];
       let marked = this.reshaped.has(status.id) ? { ...status, reshaped: true } : status;
       // An original another Mac synced and this one has not downloaded yet is not missing: it is on its way.
-      if (status.state === 'missing' && this.stillUploading.has(status.id)) marked = { ...marked, problem: 'Original still uploading from another Mac' };
+      if (status.state === 'missing' && this.neverUploaded.has(status.id)) {
+        const by = this.neverUploaded.get(status.id);
+        marked = { ...marked, problem: 'Original never uploaded' + (by ? ' from “' + by + '”' : ' from the Mac that added it') };
+      } else if (status.state === 'missing' && this.stillUploading.has(status.id)) marked = { ...marked, problem: 'Original still uploading from another Mac' };
       else if (status.state === 'missing' && this.notDownloaded.has(status.id)) marked = { ...marked, problem: 'Original not downloaded yet' +
         (this.downloading ? ' (downloading)' : ' (File → Sync → Download Originals)') };
       return [key, marked];
@@ -1140,10 +1203,11 @@ export class DocumentSession {
       // boundary (ADR 0012).
       if (await bookTrusted(book.folder)) {
         const added = origins.filter((origin) => !known.includes(origin));
+        const notice = networkNotice(added, { known: known.length > 0, downloaded: this.announceSites });
         if (added.length) {
           await approveNetwork(book.folder, added, hash);
-          if (known.length && !this.window.isDestroyed()) this.window.webContents.send(channels.appNotice,
-            'This book’s template now also loads maps or data from ' + added.join(', ') + '.');
+          this.announceSites = false;
+          if (notice && !this.window.isDestroyed()) this.window.webContents.send(channels.appNotice, notice);
         }
         return origins;
       }

@@ -83,11 +83,12 @@ try {
   };
 
   await expectStatus('');
-  // Sync is behind a development flag (IMAGEFLOW_SYNC): without it, no sync action does anything, nor is it offered.
-  for (const action of ['sync', 'start', 'stop', 'download']) {
-    assert.deepEqual(await window.evaluate((action) => window.imageflow.syncAction(action), action), { error: 'Sync is not available.' });
-  }
-  assert.equal(await instance.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('sync-now')), null);
+  // Sync ships (#283) but is off until a backend is set up: File → Sync offers Set Up Sync…, and a sync action on a book
+  // changes nothing.
+  assert.deepEqual(await instance.evaluate(({ Menu }) => ['sync-now', 'sync-start', 'sync-stop', 'sync-setup'].map((id) => Menu.getApplicationMenu().getMenuItemById(id)?.enabled)),
+    [false, false, false, true]);
+  assert.match((await window.evaluate(() => window.imageflow.syncAction('stop'))).error ?? '', /does not sync on this Mac/);
+  assert.match((await window.evaluate(() => window.imageflow.syncAction('download'))).error ?? '', /not set up/);
   await window.waitForFunction(() => document.querySelector('iframe.book-frame-book[data-current][data-ready]'));
   const previewLines = await window.frameLocator('iframe.book-frame-book[data-current]').locator('[data-box="story"]').evaluate((box) => {
     const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);

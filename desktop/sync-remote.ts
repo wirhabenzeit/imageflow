@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { canonicalJson } from '../src/canonical-json';
-import { blobKeyPattern, bookIdOfPrefix, bookPrefix, booksPrefix, bookTombstoneSchema, commitHeaderSchema, commitKey, deriveTips, NewerSyncFormatError, readBookTombstone,
-  readCommitHeader, readRemoteIdentity, remoteIdentityKey, remoteIdentitySchema, snapshotsPrefix, tombstoneKey } from '../src/sync-snapshot';
+import { blobKeyPattern, bookIdOfDeletedMarker, bookIdOfPrefix, bookPrefix, booksPrefix, bookTombstoneSchema, commitHeaderSchema, commitKey, deletedMarkerKey, deletedPrefix, deriveTips,
+  NewerSyncFormatError, readBookTombstone, readCommitHeader, readRemoteIdentity, remoteIdentityKey, remoteIdentitySchema, snapshotsPrefix, tombstoneKey } from '../src/sync-snapshot';
 import type { BookTombstone, CommitHeader } from '../src/sync-snapshot';
 import { entryTag } from './sync-header-cache';
 import type { CachedHeader, CommitHeaderCache } from './sync-header-cache';
@@ -13,6 +13,41 @@ import type { PutOptions, StoreEntry, StoreSource, SyncStore, TransferOptions } 
 export type BookFolder = 'snapshots' | 'content' | 'originals' | 'proxies' | 'covers';
 /** A book on a remote: there, or deleted from sync (its tombstone), or marked by a newer ImageFlow in a way this one cannot read. */
 export type RemoteBook = { bookId: string; deleted?: BookTombstone; newer?: true };
+
+/**
+ * A book that was deleted from sync (its tombstone, ADR 0012, section 4): nothing is pushed for it, and a Mac that still
+ * has it asks whether to keep it here only or sync it again as a new book.
+ */
+/**
+ * Delete from Sync failed. `started` says whether the remote was changed: when it was not (the first request failed,
+ * offline), nothing was deleted and the book syncs as before; when it was, the deletion is unfinished and deleting again
+ * finishes it.
+ */
+export class BookDeleteError extends Error {
+  readonly code = 'SYNC_DELETE_FAILED';
+  constructor(readonly started: boolean, cause: unknown) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    super((started ? 'The book was not fully deleted from sync. Delete it from sync again to finish. ' : 'Nothing was deleted: the book could not be deleted from sync. ') + reason, { cause });
+    this.name = 'BookDeleteError';
+  }
+}
+
+/** Sync Again on a book that the remote has not deleted: it would make a second book of one that syncs. */
+export class BookNotDeletedError extends Error {
+  readonly code = 'SYNC_NOT_DELETED';
+  constructor() {
+    super('This book is not deleted from sync, so it does not need to sync again. It syncs as it is.');
+    this.name = 'BookNotDeletedError';
+  }
+}
+
+export class BookDeletedError extends Error {
+  readonly code = 'SYNC_DELETED';
+  constructor(readonly tombstone?: BookTombstone) {
+    super('This book was deleted from sync on another Mac, so it was not synced. Keep it on this Mac only, or sync it again as a new book.');
+    this.name = 'BookDeletedError';
+  }
+}
 
 /**
  * The storage books sync through (ADR 0010, Milestone 1; ADR 0012): immutable commit headers and immutable
@@ -51,7 +86,10 @@ export interface SyncRemote {
    * only what is left of them. Over a store with a change feed it comes from the key indexes.
    */
   usage(): Promise<{ bytes: number; books: { bookId: string; bytes: number }[] }>;
-  /** The books on this remote, from one listing of prefixes. A deleted book is reported as such. */
+  /**
+   * The books on this remote, from one listing of prefixes and one of the deletion markers (`deletedPrefix`); only the
+   * tombstones of books deleted from sync are read. A deleted book is reported as such.
+   */
   listBooks(): Promise<RemoteBook[]>;
   /**
    * Starts a sync of a book; the function it returns ends it. Over a store without a change feed, the first listing the
@@ -62,9 +100,27 @@ export interface SyncRemote {
   prepareSync?(bookId: string): Promise<() => void>;
   /** The remote's identity, a UUID written at first use. Two Macs that initialize an empty remote at once agree on it. */
   remoteId(): Promise<string>;
-  /** The tombstone of a book deleted from sync, or undefined. Throws `NewerSyncFormatError` for one a newer version wrote. */
-  bookTombstone(bookId: string): Promise<BookTombstone | undefined>;
-  /** Deletes a book from the remote for every Mac: writes its tombstone, then removes everything else under its prefix. */
+  /**
+   * The tombstone of a book deleted from sync, or undefined. Throws `NewerSyncFormatError` for one a newer version wrote.
+   * Asked right after the book's commits were listed (a sync, a status), it is answered from that listing where it
+   * says: the one listing of a sync over a bucket, which holds `deleted.json` when there is one, or the key index the
+   * change feed just brought up to date, which has commits only while the book is not deleted (deleting it removes its
+   * commits first). Otherwise, and with `fresh`, the store is asked.
+   */
+  bookTombstone(bookId: string, options?: { fresh?: boolean;
+    /** For a status: answered only from what was listed; over a store without a feed, outside a sync, not asked at all. */
+    listedOnly?: boolean }): Promise<BookTombstone | undefined>;
+  /**
+   * The deletion marker of a book (`deleted/<bookId>.json`), read from the store. A deletion writes it first and removes
+   * the book's commits before its tombstone, so a book with a marker and no commits is being deleted (or was), and
+   * reads as deleted (`deletedFromSync`). Throws `NewerSyncFormatError` for one a newer version wrote.
+   */
+  deletionMarker(bookId: string): Promise<BookTombstone | undefined>;
+  /**
+   * Deletes a book from the remote for every Mac: writes its marker and then its tombstone, then removes everything else
+   * under its prefix. From the start, this remote refuses to store anything more for the book (`BookDeletedError`), so
+   * an upload that was under way does not bring it back.
+   */
   deleteBook(bookId: string, now?: Date): Promise<BookTombstone>;
 }
 
@@ -122,9 +178,19 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     /** Runs before each commit is stored and refuses it by throwing: the iCloud remote checks that the account is still its own. */
     beforeCommit?: () => Promise<void> } = {}) {}
   private identity?: string;
+  /** Books this remote deleted: it stores nothing more for them, so nothing under way puts their prefix (an iCloud zone) back. */
+  private readonly deleted = new Set<string>();
+  private refuseDeleted(key: string) {
+    const bookId = key.split('/')[1];
+    if (key.startsWith(booksPrefix) && this.deleted.has(bookId)) throw new BookDeletedError();
+  }
   /** The key indexes read or kept up to date while this remote is used, by remote identity and book. */
   private readonly indexes = new Map<string, { token?: string; entries: Map<string, StoreEntry> }>();
   private readonly indexing = new Map<string, Promise<StoreEntry[]>>();
+  /** When the key index of each book was last brought up to date from the change feed. */
+  private readonly refreshed = new Map<string, number>();
+  /** Books this remote asked about and found without a tombstone, while nothing changed in them since (see `bookTombstone`). */
+  private readonly confirmed = new Set<string>();
 
   /**
    * Every key of a book but its tombstone. Over a store with a change feed (#292): the key index, brought up to date
@@ -154,11 +220,16 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
         if (remoteId) await this.options.keyIndex?.write(remoteId, bookId, undefined).catch(() => {});
         return [];
       }
+      // Changes this Mac did not make itself (another Mac's push or deletion; its own writes are in the index already)
+      // make the tombstone be asked again (`bookTombstone`).
+      const known = index?.entries;
+      if (!index?.token || result.deleted.some((key) => known?.has(key)) || result.changed.some((entry) => !known?.has(entry.key))) this.confirmed.delete(slot);
       // Without a token the answer is everything: it replaces the index.
       const entries = index?.token ? new Map(index.entries) : new Map<string, StoreEntry>();
       for (const key of result.deleted) entries.delete(key);
       for (const entry of result.changed) entries.set(entry.key, entry);
       this.indexes.set(slot, { token: result.token, entries });
+      this.refreshed.set(slot, Date.now());
       if (remoteId) {
         await this.options.keyIndex?.write(remoteId, bookId, { token: result.token, entries: Object.fromEntries([...entries.values()].map(({ key, size, lastModified }) => [key, { size, lastModified: lastModified.getTime() }])) })
           .catch((error) => console.warn('ImageFlow could not keep the keys it read', error));
@@ -205,6 +276,7 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
 
   async putCommit(header: CommitHeader) {
     const parsed = commitHeaderSchema.parse(header);
+    this.refuseDeleted(commitKey(parsed.bookId, parsed.commitId));
     await this.options.beforeCommit?.();
     const bytes = encode(parsed);
     const { existed } = await this.store.putIfAbsent(commitKey(parsed.bookId, parsed.commitId), bytes);
@@ -260,6 +332,7 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     return !!await this.store.head(key);
   }
   async putBlob(key: string, source: StoreSource, options?: PutOptions) {
+    this.refuseDeleted(requireBlobKey(key));
     let size = 0;
     await this.store.putIfAbsent(requireBlobKey(key), source, { ...options, onProgress: (done, total) => { size = total ?? done; options?.onProgress?.(done, total); } });
     this.noteStored(key, size);
@@ -271,6 +344,7 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     if (blobName(requireBlobKey(from)) !== blobName(requireBlobKey(to))) throw new Error('A sync blob is only copied to its own key in another book: ' + from + ' to ' + to);
     // Blobs are immutable: one that is there already is left alone, and is what the copy would have been.
     if (await this.hasBlob(to)) return true;
+    this.refuseDeleted(to);
     return await this.store.copy?.(from, to) ?? false;
   }
 
@@ -311,10 +385,14 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     return { bytes: books.reduce((sum, book) => sum + book.bytes, 0), books };
   }
   async listBooks() {
-    const ids = (await this.store.listPrefixes(booksPrefix)).map(bookIdOfPrefix).filter((id) => id !== undefined);
+    const [prefixes, markers] = await Promise.all([this.store.listPrefixes(booksPrefix), this.store.list(deletedPrefix)]);
+    const ids = prefixes.map(bookIdOfPrefix).filter((id) => id !== undefined);
+    // Only books with a marker can be deleted: their tombstones are read, and no other book costs a request.
+    const marked = new Set(markers.map(({ key }) => bookIdOfDeletedMarker(key)).filter((id) => id !== undefined));
     return Promise.all(ids.map(async (bookId): Promise<RemoteBook> => {
+      if (!marked.has(bookId)) return { bookId };
       try {
-        const deleted = await this.bookTombstone(bookId);
+        const deleted = await this.bookTombstone(bookId, { fresh: true });
         return deleted ? { bookId, deleted } : { bookId };
       } catch (error) {
         if (!(error instanceof NewerSyncFormatError)) throw error;
@@ -335,20 +413,62 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     return this.identity = adopted;
   }
 
-  async bookTombstone(bookId: string) {
+  async bookTombstone(bookId: string, { fresh = false, listedOnly = false }: { fresh?: boolean; listedOnly?: boolean } = {}) {
+    if (!fresh && !await this.mayHaveTombstone(bookId)) return undefined;
+    // A status over a bucket asks nothing more: a sync reads the tombstone from its listing before it pushes.
+    if (listedOnly && !this.store.changes && !this.sessions.get(bookId)?.listing) return undefined;
     const tombstone = readBookTombstone(await this.json(tombstoneKey(bookId)));
-    return tombstone?.bookId === bookId ? tombstone : undefined;
+    const found = tombstone?.bookId === bookId ? tombstone : undefined;
+    if (!found && this.store.changes) this.confirmed.add((this.identity ?? '') + '/' + bookId);
+    return found;
+  }
+  /**
+   * False when a listing just taken says the book has no tombstone, so no request is needed (see `bookTombstone`):
+   * - over a store without a feed, the listing of the sync running, which holds `deleted.json` when there is one;
+   * - over a store with a feed (iCloud, whose tombstones live apart from the book), a key index brought up to date in
+   *   the last few seconds that holds commits, of a book this remote found without a tombstone before while nothing
+   *   in it changed since. Deleting a book removes its commits before it writes the tombstone, so a deletion always
+   *   shows in the feed.
+   * True when the store has to be asked.
+   */
+  private async mayHaveTombstone(bookId: string) {
+    const session = this.sessions.get(bookId)?.listing;
+    if (session) {
+      const listed = await session.catch(() => undefined);
+      return !listed || listed.has(tombstoneKey(bookId));
+    }
+    if (!this.store.changes) return true;
+    const slot = (this.identity ?? '') + '/' + bookId;
+    const index = this.indexes.get(slot);
+    const recent = Date.now() - (this.refreshed.get(slot) ?? 0) < 5000;
+    return !index || !recent || !this.confirmed.has(slot) || ![...index.entries.keys()].some((key) => key.startsWith(snapshotsPrefix(bookId)));
   }
   async deleteBook(bookId: string, now = new Date()) {
     const key = tombstoneKey(bookId);
-    // The tombstone goes first, so a deletion that is interrupted still reads as one; an earlier tombstone is kept.
-    await this.store.putIfAbsent(key, encode(bookTombstoneSchema.parse({ version: 1, bookId, deletedAt: now.toISOString() })));
-    const tombstone = await this.bookTombstone(bookId);
-    if (!tombstone) throw new Error('The book could not be marked as deleted on the remote.');
-    await this.store.delete((await this.store.list(bookPrefix(bookId))).map((entry) => entry.key).filter((other) => other !== key));
-    this.indexes.delete((this.identity ?? '') + '/' + bookId);
-    if (this.identity) await this.options.keyIndex?.write(this.identity, bookId, undefined).catch(() => {});
-    return tombstone;
+    const record = encode(bookTombstoneSchema.parse({ version: 1, bookId, deletedAt: now.toISOString() }));
+    // The marker goes first: a marker without a tombstone over a book with commits reads as a book that is not deleted,
+    // and a tombstone then always has its marker. A marker that does not get stored leaves the remote as it was.
+    try { await this.store.putIfAbsent(deletedMarkerKey(bookId), record); }
+    catch (error) { throw new BookDeleteError(false, error); }
+    // From here on this remote stores nothing more for the book, so nothing under way puts its prefix back.
+    this.deleted.add(bookId);
+    try {
+      // Then its commits, so the book stops reading as one with a history (a book with a marker and no commits reads as
+      // deleted, and the change feed shows the deletion), then the tombstone; an earlier tombstone is kept.
+      const commits = (await this.store.list(snapshotsPrefix(bookId))).map((entry) => entry.key);
+      if (!await this.store.head(key)) await this.store.delete(commits);
+      await this.store.putIfAbsent(key, record);
+      const tombstone = await this.bookTombstone(bookId, { fresh: true });
+      if (!tombstone) throw new Error('The book could not be marked as deleted on the remote.');
+      await this.store.delete((await this.store.list(bookPrefix(bookId))).map((entry) => entry.key).filter((other) => other !== key));
+      this.indexes.delete((this.identity ?? '') + '/' + bookId);
+      if (this.identity) await this.options.keyIndex?.write(this.identity, bookId, undefined).catch(() => {});
+      return tombstone;
+    } catch (error) { throw error instanceof BookDeleteError ? error : new BookDeleteError(true, error); }
+  }
+  async deletionMarker(bookId: string) {
+    const marker = readBookTombstone(await this.json(deletedMarkerKey(bookId)));
+    return marker?.bookId === bookId ? marker : undefined;
   }
 }
 

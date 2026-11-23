@@ -44,6 +44,7 @@ Templates run code. Only open books and templates you trust.
 
 - [Editing a book](editing.md): spreads, photos, text and settings.
 - [Books and sources](books-and-sources.md): document contents and linked files.
+- [Syncing books between Macs](sync.md): a bucket or iCloud, and the library.
 - [The workspace](workspace.md): panels, menus and shortcuts.
 - [Writing templates](../templates/index.md): create your own layouts.
 - [Connecting agents](agents.md): work with an AI agent.

@@ -28,7 +28,7 @@ function syncBackend(value: unknown): SyncBackend {
 
 function applyPatch(current: AppSettings, patch: unknown): AppSettings {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch) ||
-      Object.keys(patch).some((key) => key !== 'appearance' && key !== 'newBookSize' && key !== 'automaticUpdates' && key !== 'updateChannel' && key !== 'agentAccess' && key !== 'keepOriginals' && key !== 'sync' && key !== 'syncBooksUnchosen')) throw new Error('Invalid app settings.');
+      Object.keys(patch).some((key) => key !== 'appearance' && key !== 'newBookSize' && key !== 'automaticUpdates' && key !== 'updateChannel' && key !== 'agentAccess' && key !== 'keepOriginals' && key !== 'sync' && key !== 'syncBooksUnchosen' && key !== 'booksFolder')) throw new Error('Invalid app settings.');
   const appearance = 'appearance' in patch ? patch.appearance : current.appearance;
   if (appearance !== 'light' && appearance !== 'dark' && appearance !== 'system') throw new Error('Invalid appearance setting.');
   const newBookSize = 'newBookSize' in patch ? patch.newBookSize as { width?: unknown; height?: unknown } : current.newBookSize;
@@ -42,12 +42,15 @@ function applyPatch(current: AppSettings, patch: unknown): AppSettings {
   if (agentAccess !== undefined && typeof agentAccess !== 'boolean') throw new Error('Invalid agent access setting.');
   const keepOriginals = 'keepOriginals' in patch ? patch.keepOriginals : current.keepOriginals;
   if (keepOriginals !== undefined && typeof keepOriginals !== 'boolean') throw new Error('Invalid keep originals setting.');
+  const booksFolder = 'booksFolder' in patch ? patch.booksFolder : current.booksFolder;
+  if (booksFolder !== undefined && booksFolder !== null && (typeof booksFolder !== 'string' || !isAbsolute(booksFolder) || booksFolder.length > 4096)) throw new Error('Invalid books folder.');
   const sync = 'sync' in patch ? patch.sync : current.sync;
   const unchosen = 'syncBooksUnchosen' in patch ? patch.syncBooksUnchosen : current.syncBooksUnchosen;
   if (unchosen !== undefined && unchosen !== null && unchosen !== true) throw new Error('Invalid sync setting.');
   const backend = sync !== undefined && sync !== null ? syncBackend(sync) : undefined;
   return { appearance, automaticUpdates, updateChannel, ...(newBookSize ? { newBookSize: newBookSize as {width:number;height:number} } : {}),
     ...(agentAccess ? { agentAccess: true } : {}), ...(keepOriginals === false ? { keepOriginals: false } : {}), ...(backend ? { sync: backend } : {}),
+    ...(typeof booksFolder === 'string' ? { booksFolder } : {}),
     // Books wait to be chosen only for a backend: turning sync off answers the sheet too.
     ...(backend && unchosen === true ? { syncBooksUnchosen: true as const } : {}) };
 }
