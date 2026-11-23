@@ -1331,6 +1331,7 @@ async function libraryAction(owner: BrowserWindow, request: LibraryAction) {
   // elsewhere) are the book's, and it syncs at once.
   const document = session ?? await openDocument(folder);
   if (!document) return;
+  await document.whenIdle();
   if (request.action === 'start') await syncDocument(document, true);
   else if (request.action === 'sync-again') await syncAgainDocument(document);
 }

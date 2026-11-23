@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { libraryRows } from '../src/book-library';
+import { channels } from '../src/desktop';
 import type { LibraryRemote, RecentDocument } from '../src/desktop';
 import { maximumRecents, RecentDocuments } from '../desktop/documents';
 import { coverDataUrl, libraryBook, libraryListing, networkNotice } from '../desktop/sync-library';
@@ -211,4 +212,9 @@ test('listing a library over a bucket takes two listings, whatever the number of
   assert.deepEqual(listed.books.filter(({ deleted }) => deleted).map(({ bookId }) => bookId), [ids[4]]);
   const methods = fake.requests.map(({ method }) => method);
   assert.equal(methods.filter((method) => method === 'GET').length, 2 + 1, 'the books, the deletion markers, and one tombstone');
+});
+
+test('every IPC channel has a name of its own, so no handler is registered twice', () => {
+  const names = Object.values(channels);
+  assert.deepEqual(names.filter((name, index) => names.indexOf(name) !== index), []);
 });

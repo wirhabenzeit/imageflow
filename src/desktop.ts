@@ -35,7 +35,7 @@ export const channels = {
   showAssets: 'document:show-assets', showTemplates: 'library:show', templatePreview: 'library:preview',
   current: 'document:current', appError: 'app:error', appNotice: 'app:notice',
   recents: 'app:recents', recentsChanged: 'app:recents-changed', recentAction: 'app:recent-action',
-  libraryRemote: 'library:remote', libraryBook: 'library:book', libraryAction: 'library:action', chooseBooksFolder: 'sync:choose-books-folder',
+  libraryRemote: 'books:remote', libraryBook: 'books:book', libraryAction: 'books:action', chooseBooksFolder: 'sync:choose-books-folder',
   sourceCommand: 'document:source-command', templateAction: 'library:action', sourceAction: 'document:source-action', saveCopy: 'document:save-copy',
   chooseStarter: 'app:choose-starter', documentAction: 'document:action',
   open: 'project:open', save: 'project:save', import: 'project:import', network: 'project:editor-network',

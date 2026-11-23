@@ -53,6 +53,7 @@ import { AssetFacts } from './asset-facts';
 import { StoreFullError } from './sync-store';
 import { describeLocalChange, describeSync, originalsNotHere, placeOriginals, stageOriginals, syncBook, unavailableStatus } from './sync-engine';
 import type { SyncOptions, SyncOutcome } from './sync-engine';
+import { BookDeletedError } from './sync-remote';
 import type { SyncRemote } from './sync-remote';
 import { bookSync, readSyncState, startSyncing, SyncElsewhereError, syncedElsewhere, takeAbandonedAtOpen } from './sync-pull';
 import type { SyncService, SyncStanding } from './sync-service';
@@ -573,7 +574,8 @@ export class DocumentSession {
       // Originals come after the sync, in the background (`downloadSyncedOriginals`), so the book stays usable.
       const manage = this.syncService.kind === 'icloud' ? { manage: true as const } : {};
       const result = await this.sync(connection.remote, { remoteId: connection.remoteId, full: (error) => { this.storageFull = { message: error.message, ...manage }; } });
-      if ('error' in result) throw new Error(result.error);
+      // A tombstone stays a `BookDeletedError` across `run`, so the app asks what becomes of the book.
+      if ('error' in result) throw result.error === new BookDeletedError().message ? new BookDeletedError() : new Error(result.error);
       message = describeOutcome(result.value);
       synced = true;
       return result.value;
@@ -598,6 +600,10 @@ export class DocumentSession {
   }
   /** Waits until a sync of the book that is running has ended (Delete from Sync waits for it before it deletes). */
   async settleSync() { await this.syncTask?.catch(() => {}); }
+  /** Waits, up to 10 s, while a reload or the first save holds the book (a book the library just opened). */
+  async whenIdle() {
+    for (let attempt = 0; attempt < 50 && this.busy && !this.closing; attempt++) await new Promise((resolve) => setTimeout(resolve, 200));
+  }
   /**
    * Sync Again on a book deleted from sync on another Mac (#283): through the session, which holds the writer lock, the
    * book gets a new lineage and a fresh history (`SyncService.syncAgain`), the editor takes the new project.json, and
@@ -607,6 +613,7 @@ export class DocumentSession {
     const service = this.syncService;
     if (!service) throw new Error('Sync is not available.');
     await this.settleSync();
+    await this.whenIdle();
     const result = await this.run(async () => {
       this.stopWatch();
       try {

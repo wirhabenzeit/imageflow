@@ -1,9 +1,11 @@
-// Sync through the Mac's sync backend (#251, #280, #282), end to end in the app with the development flag: the folder
-// backend chosen in Settings, Start Syncing, a trusted duplicate that starts syncing by itself when it opens and
-// uploads its originals after the commit, Open Synced Book (an untrusted copy on "another Mac"), a normal sync that
-// reloads the editor, a pulled template change in a trusted book (allowed, with a notice and no question), a sync that
-// fails after its pull and still reloads it, the tip chooser with five tips including Cancel, and a changed backend,
-// which asks once before a synced book starts a new history there. The "Macs" are windows of one app with one backend.
+// Sync through the Mac's sync backend (#251, #280, #282, #283), end to end in the app with the folder backend (which only
+// development and tests reach, `IMAGEFLOW_SYNC_FOLDER=1`): the folder chosen in Settings, Start Syncing, a trusted
+// duplicate that starts syncing by itself when it opens and uploads its originals after the commit, Download from the
+// Start window (a trusted copy on "another Mac" that names its template's sites once), a normal sync that reloads the
+// editor, a pulled template change in a trusted book (allowed, with a notice and no question), a sync that fails after
+// its pull and still reloads it, the tip chooser with five tips including Cancel, a changed backend, which asks once
+// before a synced book starts a new history there, and Delete from Sync, after which a sync asks and Sync Again makes a
+// new book. The "Macs" are windows of one app with one backend.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -19,7 +21,6 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await realpath(await mkdtemp(join(root, '.build/sync-smoke-')));
 const desktopBook = join(work, 'Desktop', 'Sync Book.imageflow');
 const duplicateBook = join(work, 'Desktop', 'Sync Book Copy.imageflow');
-const laptopBook = join(work, 'Laptop', 'Sync Book.imageflow');
 const folder = join(work, 'Sync Folder');
 const otherFolder = join(work, 'Other Sync Folder');
 await mkdir(join(work, 'Desktop'));
@@ -30,8 +31,11 @@ const trustQuestion = 'Trust this book’s template?';
 const tipQuestion = 'This book was changed on two Macs.';
 const elsewhereQuestion = 'This book last synced somewhere else.';
 
+// Downloaded books go to the "laptop"'s folder, never to the real Documents folder.
+await mkdir(join(work, 'profile'));
+await writeFile(join(work, 'profile', 'settings.json'), JSON.stringify({ booksFolder: join(work, 'Laptop') }));
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
-  env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1', IMAGEFLOW_SYNC: '1' } });
+  env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1', IMAGEFLOW_SYNC_FOLDER: '1' } });
 const stderr = [];
 app.process().stderr.on('data', (bytes) => stderr.push(String(bytes)));
 const windowId = (page) => app.browserWindow(page).then((window) => window.evaluate((window) => window.id));
@@ -208,27 +212,45 @@ try {
   }
   await created.close();
 
-  // Open Synced Book on the "laptop": it lists the configured backend, and makes an untrusted copy, which asks before
-  // reaching the template's sites.
-  await answer(trustQuestion, 1);
-  // The remote holds the duplicate and the new book too: the laptop opens the desktop's book.
-  await answer('Which book do you want to open?', { button: (await current(desktop)).project.title });
-  await choosePaths({ open: '/nonexistent', save: laptopBook });
+  // Download from the library on the "laptop": the Start window lists the books on the backend, and Download makes a
+  // trusted copy in the folder for downloaded books, which names its template's sites once instead of asking.
+  await app.evaluate(({ app: electronApp }) => {
+    globalThis.syncNotices = [];
+    electronApp.on('web-contents-created', (_event, contents) => {
+      const send = contents.send.bind(contents);
+      contents.send = (channel, ...args) => { if (channel === 'app:notice') globalThis.syncNotices.push(String(args[0])); return send(channel, ...args); };
+    });
+  });
+  const start = app.windows().find((page) => page.url() === 'imageflow://editor/start');
+  assert.ok(start, 'the Start window is there');
+  const listing = await start.evaluate(() => window.imageflow.libraryRemote(true));
+  assert.equal(listing.value?.name, 'Sync Folder');
+  assert.ok(listing.value.books.some((book) => book.bookId === bookId && !book.deleted));
+  const title = (await current(desktop)).project.title;
+  assert.equal((await start.evaluate((id) => window.imageflow.libraryBook(id), bookId)).value?.title, title);
+  assert.match((await desktop.evaluate((id) => window.imageflow.libraryAction({ action: 'download', bookId: id }), bookId)).error ?? '', /start window/, 'only the Start window asks');
   const beforeLaptop = new Set(app.windows());
-  await app.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('open-sync-folder').click());
+  assert.deepEqual(await start.evaluate((id) => window.imageflow.libraryAction({ action: 'download', bookId: id }), bookId), { value: null });
   let laptop;
   for (let attempt = 0; !(laptop = app.windows().find((page) => !beforeLaptop.has(page) && page.url() === 'imageflow://editor/')); attempt++) {
-    assert.ok(attempt < 400, 'Open Synced Book opens the new book');
+    assert.ok(attempt < 400, 'Download opens the new book');
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   await ready(laptop);
   const laptopWindow = await windowId(laptop);
-  await waitForPrompt((prompt) => prompt.message === trustQuestion && prompt.window === laptopWindow);
+  const [downloaded] = (await readdir(join(work, 'Laptop'))).filter((name) => name.endsWith('.imageflow'));
+  assert.ok(downloaded, 'the book is in the folder for downloaded books');
+  const laptopBook = join(work, 'Laptop', downloaded);
   assert.equal((await current(laptop)).project.bookId, bookId);
   await statusIs(laptop, 'in-sync');
-  // Owned originals download in the background after Open Synced Book (the default), and the book then shows them.
+  for (let attempt = 0; !(await app.evaluate(() => globalThis.syncNotices)).some((text) => /loads maps or data from .*downloaded from your sync/.test(text)); attempt++) {
+    assert.ok(attempt < 600, 'the downloaded book names its template’s sites once: ' + JSON.stringify(await app.evaluate(() => globalThis.syncNotices)));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal(await timesAsked(trustQuestion, laptopWindow), 0, 'a downloaded book is trusted and asks nothing');
+  // Owned originals download in the background after Download (Keep originals is on), and the book then shows them.
   for (let attempt = 0; (await current(laptop)).sources['photo:shore'].state !== 'available'; attempt++) {
-    assert.ok(attempt < 400, 'owned originals download after Open Synced Book');
+    assert.ok(attempt < 400, 'owned originals download after Download');
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   await stat(join(laptopBook, (await current(laptop)).photoIndex.shore.path));
@@ -236,11 +258,9 @@ try {
   // A normal sync: the laptop pushes a caption, the desktop pulls it and its editor reloads.
   assert.ok((await setCaption(laptop, 'shore', 'From the laptop')).value);
   await statusIs(laptop, 'ahead');
-  // The laptop's book syncs but is not trusted (Open Synced Book; #283 makes downloads trusted): Sync Now asks once to
-  // trust it, and syncs once the user agrees.
   assert.deepEqual(await sync(laptop), { value: undefined });
-  await waitForPrompt((prompt) => prompt.message === 'Trust this book and sync it?' && prompt.window === laptopWindow);
   await statusIs(laptop, 'in-sync');
+  assert.equal(await timesAsked('Trust this book and sync it?', laptopWindow), 0, 'a downloaded book syncs without asking to be trusted');
   assert.deepEqual(await sync(desktop), { value: undefined });
   await captionIs(desktop, 'shore', 'From the laptop');
   await statusIs(desktop, 'in-sync');
@@ -252,6 +272,7 @@ try {
   assert.ok(laptopTemplate.includes('network: [mapOrigin, elevationOrigin]'));
   await writeFile(laptopIndex, laptopTemplate.replace('network: [mapOrigin, elevationOrigin]', "network: [mapOrigin, elevationOrigin, 'https://sync-smoke.example.org']"));
   assert.deepEqual(await sync(laptop), { value: undefined });
+  // The desktop's window was made before notices were recorded: its notices are recorded from here on.
   await app.evaluate(({ BrowserWindow }, id) => {
     globalThis.syncNotices = [];
     const contents = BrowserWindow.fromId(id).webContents;
@@ -338,6 +359,30 @@ try {
   const otherTips = await readdir(join(otherFolder, 'books', bookId, 'snapshots'));
   assert.equal(otherTips.filter((name) => name.endsWith('.json')).length, 1, 'a new history on the other backend');
   assert.ok(JSON.parse(await readFile(join(otherFolder, 'remote.json'), 'utf8')).remoteId, 'the backend has its identity');
-  console.log('The folder backend in Settings, Start Syncing, a duplicate and a New Book book that sync by themselves with originals after the commit, Open Synced Book (trusted on its first Sync Now), reloads after sync and after a failed push, the five-tip chooser, a pulled template change in a trusted book and a changed backend passed.');
+
+  // Delete from Sync, from the Start window: asked in the main process, and Cancel deletes nothing.
+  const question = 'Delete “' + title + '” from sync?';
+  await answer(question, 'cancel');
+  assert.deepEqual(await start.evaluate((id) => window.imageflow.libraryAction({ action: 'delete', bookId: id }), bookId), { value: null });
+  await waitForPrompt((prompt) => prompt.message === question);
+  assert.equal(await stat(join(otherFolder, 'books', bookId, 'deleted.json')).catch(() => undefined), undefined, 'Cancel deletes nothing');
+  await answer(question, { button: 'Delete from Sync' });
+  assert.deepEqual(await start.evaluate((id) => window.imageflow.libraryAction({ action: 'delete', bookId: id }), bookId), { value: null });
+  assert.deepEqual((await readdir(join(otherFolder, 'books', bookId))).sort(), ['deleted.json'], 'only the tombstone is left');
+  assert.ok(await stat(join(desktopBook, 'project.json')), 'the copy on this Mac stays');
+  assert.ok((await start.evaluate(() => window.imageflow.libraryRemote())).value.books.some((book) => book.bookId === bookId && book.deleted));
+  // The desktop's book stopped syncing here; Start Syncing finds the tombstone, pushes nothing, and asks. Sync Again
+  // makes it a new book on the remote.
+  await waitForPage(desktop, () => !document.querySelector('.sync-status'));
+  const removedQuestion = 'This book was deleted from sync on another Mac.';
+  await answer(removedQuestion, { button: 'Sync Again' });
+  assert.deepEqual(await sync(desktop, 'start'), { value: undefined });
+  await waitForPrompt((prompt) => prompt.message === removedQuestion && prompt.window === desktopWindow);
+  await statusIs(desktop, 'in-sync');
+  const again = (await current(desktop)).project.bookId;
+  assert.notEqual(again, bookId, 'Sync Again gives the book a new lineage');
+  assert.deepEqual((await readdir(join(otherFolder, 'books', bookId))).sort(), ['deleted.json'], 'the deleted book stays deleted');
+  assert.equal((await readdir(join(otherFolder, 'books', again, 'snapshots'))).filter((name) => name.endsWith('.json')).length, 1);
+  console.log('The folder backend in Settings, Start Syncing, a duplicate and a New Book book that sync by themselves with originals after the commit, Download from the Start window (trusted, naming its sites once), reloads after sync and after a failed push, the five-tip chooser, a pulled template change in a trusted book, a changed backend, and Delete from Sync with Sync Again passed.');
 } catch (error) { console.error(stderr.join('\n')); throw error; }
 finally { await closeApp(app); await rm(work, { recursive: true, force: true }); }

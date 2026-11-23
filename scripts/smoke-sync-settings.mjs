@@ -1,12 +1,13 @@
-// Settings → Sync (#281) in the app, against the fake S3 server of the unit tests: the pane exists only with the
-// development flag, Test Connection reports what the service does, Save keeps the bucket in settings.json and the
+// Settings → Sync (#281) in the app, against the fake S3 server of the unit tests: the pane ships without a flag since
+// #283 and offers a bucket (not iCloud or a folder, which need flags of their own), Test Connection reports what the service does, Save keeps the bucket in settings.json and the
 // access key in the credential store (in memory here, as `IMAGEFLOW_SYNC_CREDENTIALS=memory` allows in development),
 // a book syncs through the bucket from File → Sync (Start Syncing, which trusts the book once, then Sync Now), its
 // originals follow the commit in the background, a wrong key saved in Settings turns its status to "Sign-in needed" and
 // a corrected one clears it without a restart, setting the bucket up again lists the recent books and syncs only those
-// chosen (#282), and the secret never reaches settings.json, the renderer or the app's output.
+// chosen (#282), a settings file that names iCloud leaves sync off in a build started without iCloud's flag, and the
+// secret never reaches settings.json, the renderer or the app's output.
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, readFile, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import electron from 'electron';
@@ -25,9 +26,10 @@ const secret = fake.credentials.secretAccessKey;
 const wrongSecret = 'wrong-secret-' + Date.now();
 
 const output = [];
-async function launch(flag) {
+// As a release starts: without the flags of iCloud and of the folder backend.
+async function launch() {
   const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + profile],
-    env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1', IMAGEFLOW_SYNC_CREDENTIALS: 'memory', IMAGEFLOW_SYNC: flag ? '1' : '' } });
+    env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1', IMAGEFLOW_SYNC_CREDENTIALS: 'memory', IMAGEFLOW_SYNC_ICLOUD: '', IMAGEFLOW_SYNC_FOLDER: '' } });
   app.process().stdout.on('data', (bytes) => output.push(String(bytes)));
   app.process().stderr.on('data', (bytes) => output.push(String(bytes)));
   return app;
@@ -46,7 +48,7 @@ const savedSettings = async () => JSON.parse(await readFile(join(profile, 'setti
 
 let app;
 try {
-  app = await launch(true);
+  app = await launch();
   const opened = await openSettings(app, 'sync');
   const start = opened.start;
   let settings = opened.settings;
@@ -55,9 +57,14 @@ try {
   await settings.getByRole('tab', { name: 'Sync', selected: true }).waitFor();
   // Keep originals moved here from General.
   await settings.getByRole('checkbox', { name: 'Keep originals of synced books on this Mac' }).waitFor();
-  // Sync is off, and no backend is preselected (ADR 0012): the bucket is chosen first.
+  // Sync is off, and no backend is preselected (ADR 0012): the bucket is chosen first. Neither iCloud nor a folder is
+  // offered without its flag.
   await settings.getByText('Sync is off: books do not sync on this Mac.', { exact: true }).waitFor();
-  assert.deepEqual(await settings.getByRole('radio').evaluateAll((radios) => radios.map((radio) => radio.checked)), [false, false]);
+  assert.deepEqual(await settings.getByRole('radio').evaluateAll((radios) => radios.map((radio) => [radio.value, radio.checked])), [['s3', false]]);
+  assert.match((await settings.evaluate(() => window.imageflow.chooseSyncFolder())).error ?? '', /only available/);
+  // The folder for downloaded books is shown, and only the app's own dialog sets it.
+  await settings.getByText('Books you download from the Start window are saved in Documents → ImageFlow.', { exact: true }).waitFor();
+  assert.match((await settings.evaluate(() => window.imageflow.updateSettings({ booksFolder: '/tmp' }))).error ?? '', /Settings → Sync/);
   await settings.getByRole('radio', { name: 'S3-compatible bucket' }).check();
   // The S3 URL as R2 shows it, with the bucket: split into Endpoint and Bucket when the field is left.
   const endpoint = settings.getByRole('textbox', { name: 'Endpoint' });
@@ -219,15 +226,19 @@ try {
   await closeSettings(app);
   await closeApp(app);
 
-  // Without the flag nothing of sync is offered: no Sync pane, no Keep originals, and the requests are refused.
-  app = await launch(false);
+  // A settings file that names iCloud, in a build started without iCloud's flag: sync is off and the pane says so;
+  // nothing syncs, nothing fails, iCloud is not offered, and a window still cannot set a backend.
+  await writeFile(join(profile, 'settings.json'), JSON.stringify({ ...await savedSettings(), sync: { kind: 'icloud' } }));
+  app = await launch();
   const plain = await openSettings(app, 'sync');
-  await plain.settings.getByRole('tab', { name: 'General', selected: true }).waitFor();
-  assert.equal(await plain.settings.getByRole('tab', { name: 'Sync' }).count(), 0);
-  assert.equal(await plain.settings.getByRole('checkbox', { name: 'Keep originals of synced books on this Mac' }).count(), 0);
-  assert.deepEqual(await plain.settings.evaluate(() => window.imageflow.syncBackendState()), { value: { available: false } });
-  assert.match((await plain.settings.evaluate(() => window.imageflow.saveSyncBackend(null))).error, /not available/);
-  assert.match((await plain.settings.evaluate(() => window.imageflow.updateSettings({ sync: null }))).error, /Settings → Sync/);
+  await plain.settings.getByRole('tab', { name: 'Sync', selected: true }).waitFor();
+  await plain.settings.getByText('iCloud sync is not available in this version of ImageFlow, so sync is off on this Mac.', { exact: true }).waitFor();
+  assert.equal((await plain.settings.evaluate(() => window.imageflow.syncBackendState())).value?.icloud, undefined);
+  assert.match((await plain.settings.evaluate(() => window.imageflow.saveSyncBackend({ backend: { kind: 'icloud' } }))).error, /not available/);
+  assert.match((await plain.settings.evaluate(() => window.imageflow.updateSettings({ sync: { kind: 'icloud' } }))).error, /Settings → Sync/);
+  assert.match((await plain.settings.evaluate(() => window.imageflow.updateSettings({ syncBooksUnchosen: true }))).error, /Settings → Sync/);
+  assert.equal(await app.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('sync-setup')?.enabled), true, 'File → Sync offers Set Up Sync…');
+  assert.equal((await plain.start.evaluate(() => window.imageflow.libraryRemote())).value, null, 'the library lists no remote');
   await closeApp(app);
   app = undefined;
   assert.ok(!output.join('').includes(secret) && !output.join('').includes(wrongSecret), 'the key is never in the app’s output');
