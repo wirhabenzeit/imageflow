@@ -8,7 +8,12 @@ import { build } from 'esbuild';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const out = join(root, '.build', 'unit');
 await rm(out, { recursive: true, force: true });
-const tests = (await readdir(join(root, 'tests'))).filter((name) => name.endsWith('.test.ts'));
+// The sync engine scenarios run against the memory store in tests/sync.test.ts. Their reruns against the folder, S3 and
+// iCloud stores take minutes and belong to the full run (`--full`: `npm run test:unit:full`, and `npm run test:desktop`,
+// which the nightly workflow runs); each store's own conformance tests run every time.
+const full = process.argv.includes('--full');
+const storeReruns = new Set(['sync-folder-store.test.ts', 'sync-s3-store.test.ts', 'sync-cloudkit-engine.test.ts']);
+const tests = (await readdir(join(root, 'tests'))).filter((name) => name.endsWith('.test.ts') && (full || !storeReruns.has(name)));
 await build({
   entryPoints: tests.map((name) => join(root, 'tests', name)), outdir: out, outExtension: { '.js': '.mjs' },
   bundle: true, platform: 'node', format: 'esm', packages: 'external', logLevel: 'warning',
