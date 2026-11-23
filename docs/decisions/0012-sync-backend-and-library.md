@@ -18,7 +18,7 @@ Sync and source providers were built separately and do not yet read as one desig
 ## Decision
 
 1. **Sync behaviour follows from a photo's source.** A provider declares its reach, and the reach decides what syncs. A book has no sync options.
-2. **The sync backend is a per-Mac app setting**, one at a time: **iCloud** (the user's private CloudKit database) by default on a Mac signed in to iCloud, or an **S3-compatible bucket** the user brings. A book only records whether it syncs on this Mac.
+2. **The sync backend is a per-Mac app setting**, one at a time, and **sync is off until the user turns it on** in Settings → Sync and chooses the backend: **iCloud** (the user's private CloudKit database) or an **S3-compatible bucket** they bring. Neither is preselected, and being signed in to iCloud starts nothing. A book only records whether it syncs on this Mac.
 3. **Every trusted book syncs once a backend is configured**, unless it is opted out. A user's personal sync backend sits inside their trust boundary: only trusted books sync, and books downloaded from it arrive trusted.
 4. **Each book has its own prefix on the remote**, with every blob it needs under it.
 5. **The Start window is the library**: books on this Mac and books on the remote in one list, with the actions to download, stop syncing and delete. Storage is managed in Settings.
@@ -138,7 +138,7 @@ books/<bookId>/deleted.json
 - *Update* opens Settings → General and checks for updates (or restarts if an update is already ready).
 - **Open from Sync Folder** and **Sync with Folder…** are removed; **File → Sync** offers *Set Up Sync…* when no backend is configured.
 
-**Settings → Sync.** The backend (iCloud, offered first when this build can use it and the Mac is signed in, or an S3-compatible bucket) and, for a bucket, a connection test, total and per-book storage (computed on demand, not at launch), *Keep originals*, *Sync automatically*, the default books folder, and *Clean Up*.
+**Settings → Sync.** Sync is off at first. Turning it on asks for the backend: iCloud (listed when this build can use it and the Mac is signed in) or an S3-compatible bucket, with neither preselected. Then, for a bucket, a connection test, and for either, total and per-book storage (computed on demand, not at launch), *Keep originals*, *Sync automatically*, the default books folder, and *Clean Up*.
 
 ## Deferred
 
@@ -156,7 +156,7 @@ books/<bookId>/deleted.json
 - A book carries no sync configuration. What it syncs follows from its sources, and where it syncs follows from the Mac.
 - *Synced* means that the other Mac can get the changes. Automatic sync and a library become possible.
 - Treating a personal sync backend as inside the user's trust boundary removes friction when downloading and syncing books across the user's own Macs, while keeping untrusted books from elsewhere out of sync.
-- On a Mac signed in to iCloud, syncing needs no setup. A bucket remains for users without iCloud or who want their own storage; that is a higher bar than choosing an iCloud Drive folder, accepted because the folder could not keep the promise.
+- Sync is opt-in: nothing leaves the Mac until the user turns sync on and chooses a backend. On a Mac signed in to iCloud, choosing iCloud needs no further setup. A bucket serves users without iCloud or who want their own storage; that is a higher bar than choosing an iCloud Drive folder, accepted because the folder could not keep the promise.
 - iCloud sync uses the user's iCloud storage (5 GB on the free plan), works only on Apple platforms, and CloudKit keeps its own cache copy of uploaded and downloaded originals until the system purges it.
 - Signing gains restricted entitlements and an embedded Developer ID provisioning profile. Without the profile the app is killed at launch, so the release checks verify it; a Mac with the profile installed hides its absence.
 - `SyncRemote`, the engine and the snapshot format survive. The work is the object store and its S3 and CloudKit implementations, per-book keys, the remote identity and tombstone, moving the setting, and the library.
@@ -167,7 +167,7 @@ books/<bookId>/deleted.json
 2. `reach` on the provider contract; engine reads it and syncs updated facts for non-file providers (#279).
 3. Sync backend as a per-Mac setting with remote identity (#280).
 4. S3-compatible object store (starting with the spike), `safeStorage` credentials, commit header cache and Settings → Sync pane (#281).
-5. iCloud (CloudKit) object store with the optional change feed, iCloud as the default backend, and the signing changes (#292).
+5. iCloud (CloudKit) object store with the optional change feed, iCloud as a backend choice beside S3, and the signing changes (#292).
 6. Every trusted opened book syncs with opt-out; originals upload in the background after the commit (#282).
 7. Start window as the library: covers, download, stop, delete with tombstones; removes the development flag and ships sync (#283).
 8. Automatic pull/push on open, focus, idle and close, with `fastForwardOnly` safety; for iCloud, a database subscription whose push starts a pull (#284).
