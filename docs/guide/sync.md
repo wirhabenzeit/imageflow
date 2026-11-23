@@ -23,7 +23,7 @@ On your other Macs, enter the same bucket and key. That is all a Mac needs to se
 
 Where your version of ImageFlow offers iCloud, choose **iCloud** in **Settings → Sync** and **Use iCloud**. There is nothing else to set up: the Mac's Apple Account is the sign-in, and your books go into ImageFlow's private storage in your iCloud, which only you can reach.
 
-- Books count toward your iCloud storage (5 GB on the free plan). Settings → Sync says how much ImageFlow uses.
+- Books count toward your iCloud storage (5 GB on the free plan). **Settings → Sync → Show Storage** says how much ImageFlow uses (see [Storage and Clean Up](#storage-and-clean-up)).
 - When your iCloud storage is full, the book itself still syncs as long as it fits; originals that do not fit wait, and the status bar says so with **Manage Storage…**. They upload once there is room.
 - macOS keeps a copy of the originals ImageFlow uploads and downloads in iCloud's own cache until it needs the space.
 - Signing in with another Apple Account is syncing with another iCloud: books that synced with the first ask before they sync with the second.
@@ -85,6 +85,22 @@ Right-click a book (or press Shift-F10) for its actions.
 - **Update** checks for a newer ImageFlow in **Settings → General**, or restarts into one that is ready.
 
 A book that syncs on this Mac stays in the list, however many books you open; to take it off, stop syncing it first. To remove a book from your Mac, move it to the Trash in Finder.
+
+## Storage and Clean Up
+
+**Settings → Sync → Show Storage** counts what your books take up in your sync, in all and book by book, with the part that is originals. It counts when you ask, since over a bucket that lists everything each book stores; **Count Again** counts once more.
+
+Your sync keeps every version of every book, but not every photo. When you remove a photo, or a book gets a new cover, the old original, preview and cover stay in your sync until you choose **Clean Up…**:
+
+- Clean Up first says how much it would free, and asks once more before it deletes anything, since what it deletes is gone for every Mac.
+- It deletes originals, previews and covers that a book has not used for a week: the week starts when you remove the photo or change the cover, so your other Macs have that week to sync before the original goes. Anything uploaded in the last week stays too, so a Mac that is in the middle of syncing loses nothing. A book changed on two Macs keeps what either version uses, and a duplicate still copying an original keeps it in the book it was duplicated from.
+- It also deletes what is left of books deleted from sync (a bucket only; iCloud removes them whole).
+- A book's text, files, template and history stay. Clean Up leaves a book alone when it cannot read what the book uses (for example, one synced by a newer ImageFlow).
+- If you add a photo back while Clean Up runs, its original stays. In the rare case that an original or preview goes anyway, a Mac that has it uploads it again at its next sync.
+
+### Duplicating a synced book
+
+**File → Duplicate…** makes a new book, which syncs as a book of its own. Over a bucket its originals are copied inside the bucket from the book you duplicated, so nothing is uploaded again, also when this Mac keeps only previews or is offline when you duplicate. iCloud cannot copy inside your storage: the duplicate's originals are uploaded again (from this Mac, or downloaded from the book you duplicated first, when this Mac keeps only previews) and count toward your iCloud storage a second time. The question before you duplicate says so.
 
 ## Your sync is yours
 

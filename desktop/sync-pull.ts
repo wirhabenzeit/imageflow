@@ -1,12 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readdir, readFile, realpath, rename, rm, rmdir } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, extname, join } from 'node:path';
 import { z } from 'zod';
 import type { AssetFact } from '../src/asset-facts';
 import { parseDocument, photoIndexSchema, projectSchema, withBookFormat } from '../src/project';
 import type { PhotoIndex, Project } from '../src/project';
-import { projectManifests, stateBlobSchema } from '../src/sync-snapshot';
+import { entryReach, packagePath } from '../src/source-locator';
+import { originalBlobKey, projectManifests, stateBlobSchema } from '../src/sync-snapshot';
 import type { StateBlob } from '../src/sync-snapshot';
 import { AssetFacts, readAssetFacts } from './asset-facts';
 import { bookStateFolder, persistProjectManifests } from './persistence';
@@ -32,6 +33,12 @@ const syncStateSchema = z.object({
   remoteId: z.uuid().optional(),
   enabled: z.boolean().optional(),
   lastSynced: syncedSchema.optional(),
+  // The book this one is a copy of (Duplicate, Save a Copy; #285), on the remote `remoteId`, with the originals that
+  // book's last synced snapshot named, by photo: the copy's first push names them for photos without a file here, and
+  // its background upload copies each inside the store from the source book instead of uploading it
+  // (`recordCopySource`, `pendingUploads`). Used only while the copy syncs with that same remote.
+  copiedFrom: z.object({ bookId: z.uuid(), remoteId: z.uuid(),
+    originals: z.record(z.string(), z.object({ digest: sha256, ext: z.string().regex(/^\.[a-z0-9]{1,10}$/) }).strict()) }).strict().optional(),
   // A pull that started touching the book. `staleOriginals` are owned originals here that the snapshot replaced and
   // that go (by path, with their stale digest), so the photo shows its new proxy until its new original is downloaded.
   // `keepLocal` are the photos whose original here changed since the last sync, so their local fact wins;
@@ -141,6 +148,41 @@ export async function updateSyncState(folder: string, change: (state: SyncState)
   });
   syncStateWrites.set(key, task);
   try { await task; } finally { if (syncStateWrites.get(key) === task) syncStateWrites.delete(key); }
+}
+
+/** Where a copy's originals are on the remote it syncs with: the hint `recordCopySource` left, while the copy syncs there. */
+export const copySource = (state: SyncState) => (state.copiedFrom && state.copiedFrom.remoteId === state.remoteId ? state.copiedFrom : undefined);
+
+/**
+ * Duplicate and Save a Copy make a new `bookId`, so the copy's originals have keys of their own on the remote (ADR 0012,
+ * section 4). When the book copied is synced, the copy's sync record notes it (`copiedFrom`): the book, its remote, and
+ * the owned originals its last synced snapshot named, as this Mac knows them without asking the remote (the digests the
+ * sync record holds for photos whose original syncs, with the extension of their file). That holds also when the copy is
+ * made offline or on a Mac that keeps only previews. Best effort: a copy without the hint uploads its originals.
+ */
+export async function recordCopySource(source: string, copy: string) {
+  try {
+    const state = await readSyncState(source);
+    const synced = state.lastSynced;
+    if (!synced || !state.remoteId || state.enabled === false) return;
+    const project = JSON.parse(await readFile(join(source, 'project.json'), 'utf8')) as { bookId?: unknown };
+    const bookId = synced.bookId ?? (typeof project.bookId === 'string' ? project.bookId : undefined);
+    if (!bookId) return;
+    const photos = photoIndexSchema.parse(JSON.parse(await readFile(join(source, 'photos.json'), 'utf8')));
+    const originals: NonNullable<SyncState['copiedFrom']>['originals'] = {};
+    for (const [id, photo] of Object.entries(photos)) {
+      const path = entryReach(photo) === 'book' ? packagePath(photo) : undefined;
+      const digest = synced.photoDigests[id];
+      if (!path?.startsWith('photos/') || !digest) continue;
+      const ext = extname(path).toLowerCase();
+      // Only what makes a key of the layout.
+      try { originalBlobKey(bookId, digest, ext); } catch { continue; }
+      originals[id] = { digest, ext };
+    }
+    if (!Object.keys(originals).length) return;
+    const remoteId = state.remoteId;
+    await updateSyncState(copy, (current) => ({ ...current, copiedFrom: { bookId, remoteId, originals } }));
+  } catch (error) { console.warn('ImageFlow could not note which book a copy was made from', error); }
 }
 
 /** A book that last synced with another remote starts on this one only as a new history, which the user is asked about. */

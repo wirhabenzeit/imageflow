@@ -696,6 +696,10 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .sync-setup-books label { display: flex; align-items: baseline; gap: 6px; }
 .sync-setup-books .settings-note { margin: 0; }
 .sync-setup-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sync-storage-books { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 4px; max-height: 180px; overflow-y: auto; }
+.sync-storage-books li { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.sync-storage-books .settings-note { margin: 0; white-space: nowrap; }
+.sync-storage-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .settings-form .pc-switch + .settings-note { margin-top: 1px; padding-left: 21px; }
 .settings-status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .settings-buttons { display: inline-grid; gap: 8px; }
