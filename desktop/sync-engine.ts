@@ -308,10 +308,14 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
     // shows the photo's preview and says that it is still uploading.
     if (here?.path !== undefined && here.digest === assets[id]?.digest) originals[id] = { digest: here.digest, ext: extname(owned).toLowerCase() };
     else if (base?.originals[id]) originals[id] = base.originals[id];
-    // The version the last snapshot named keeps when and where it was first named; a new one is named here, now.
+    // The version the last snapshot named keeps when and where it was first named. A new one is named here, now, only
+    // by the Mac that has its file; one carried forward without an earlier record stays without one (it then reads as
+    // still uploading, never as "never uploaded from" a Mac that never had it).
     const earlier = base?.named?.[id];
-    if (originals[id]) named[id] = earlier?.digest === originals[id].digest ? earlier
-      : { digest: originals[id].digest, at: (context.options.now?.() ?? new Date()).toISOString(), ...(context.options.device ? { by: context.options.device.slice(0, 100) } : {}) };
+    if (originals[id] && earlier?.digest === originals[id].digest) named[id] = earlier;
+    else if (originals[id] && here?.path !== undefined && here.digest === originals[id].digest) {
+      named[id] = { digest: originals[id].digest, at: (context.options.now?.() ?? new Date()).toISOString(), ...(context.options.device ? { by: context.options.device.slice(0, 100) } : {}) };
+    }
   }
   const proxies: StateBlob['proxies'] = {};
   const local = await proxyStore();
@@ -622,7 +626,7 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
   const commits = await remoteCommits(options.remote, bookId);
   // A book deleted from sync is never pushed back, nor pulled (ADR 0012, section 4): the Mac that still has it asks.
   // Asked after the commits were listed, so that listing answers it without a request of its own.
-  const tombstone = await options.remote.bookTombstone(bookId);
+  const tombstone = await deletedFromSync(options.remote, bookId, commits.length);
   if (tombstone) throw new BookDeletedError(tombstone);
   const tips = deriveTips(commits);
   const synced = state.lastSynced;
@@ -979,6 +983,18 @@ export async function pendingUploads(folder: string, remote: SyncRemote): Promis
   return [...pending.values()];
 }
 
+/**
+ * Whether a book was deleted from sync, given how many commits a listing just found for it (ADR 0012, section 4): its
+ * tombstone, or, for a book without commits, its deletion marker. A deletion writes the marker, removes the commits, then
+ * writes the tombstone, so a deletion that stopped after its commits still reads as one on every Mac, and a copy without
+ * a sync record (a Finder duplicate) never pushes the book back; a marker over a book that still has commits (a deletion
+ * that stopped right after it) reads as not deleted. The marker is read only when there are no commits.
+ */
+export async function deletedFromSync(remote: SyncRemote, bookId: string, commits: number, options?: { fresh?: boolean; listedOnly?: boolean }) {
+  if (commits === 0) return remote.deletionMarker(bookId);
+  return remote.bookTombstone(bookId, options);
+}
+
 /** An upload clone (`uploadClonePrefix`) a store made beside an original. */
 const uploadClone = /^\.imageflow-upload-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/;
 
@@ -1026,12 +1042,16 @@ export async function uploadOriginals({ folder, connect, signal, progress }: { f
   // A book deleted from sync uploads nothing: on iCloud an upload would make its zone again.
   const synced = (await readSyncState(root)).lastSynced;
   const lineage = synced && await syncedBookId(root, synced);
-  // Right after a sync this is answered from its listing; on its own (a book reopened) the remote is asked.
-  if (lineage && await connection.remote.bookTombstone(lineage)) return { ...outcome, stopped: 'deleted' };
+  // One listing of the book (over a bucket) answers its commits, its tombstone and what is to upload.
+  const end = lineage ? await connection.remote.prepareSync?.(lineage) : undefined;
+  let pending: PendingUpload[];
+  try {
+    if (lineage && await deletedFromSync(connection.remote, lineage, (await connection.remote.listBook(lineage, 'snapshots')).length)) return { ...outcome, stopped: 'deleted' };
+    await sweepUploadClones(root);
+    pending = await pendingUploads(root, connection.remote);
+  } finally { end?.(); }
   // Looked at again while the upload runs (at most every 30 s), so a deletion on another Mac stops it soon.
   let looked = Date.now();
-  await sweepUploadClones(root);
-  const pending = await pendingUploads(root, connection.remote);
   progress?.(0, pending.length);
   for (const [index, { path, key, digest }] of pending.entries()) {
     const left = pending.length - index;
@@ -1041,7 +1061,8 @@ export async function uploadOriginals({ folder, connect, signal, progress }: { f
     if (connection.remoteId !== expected || await syncsWith() !== expected) return { ...outcome, left, stopped: 'elsewhere' };
     if (lineage && Date.now() - looked > 30_000) {
       looked = Date.now();
-      if (await connection.remote.bookTombstone(lineage, { fresh: true })) return { ...outcome, left, stopped: 'deleted' };
+      if (await connection.remote.bookTombstone(lineage, { fresh: true }) || await connection.remote.deletionMarker(lineage).then((marker) => marker && connection.remote.listBook(lineage, 'snapshots')
+        .then((commits) => !commits.length))) return { ...outcome, left, stopped: 'deleted' };
     }
     if (await fileDigest(path).catch(() => undefined) !== digest) { outcome.changed++; continue; }
     try { await connection.remote.putBlob(key, { file: path }, { sha256: digest, signal }); }
@@ -1148,14 +1169,23 @@ export async function newBookHistory(folder: string, remoteId: string) {
   }
   const { abandoned } = await readSyncState(root);
   if (abandoned) throw new SyncHalfPulledError(abandoned.error);
+  // Older originals a pull kept were waiting for versions that were only in the deleted book: the files here are what
+  // the new book has of those photos, so their facts become the files' (the book shows them as files again).
+  const kept = await keptOriginals(root);
+  // The record first: a crash after it leaves the book with its old lineage and no record of the deleted history, so
+  // its next sync finds the deleted book (its marker, as it has no commits) and asks again; Sync Again then finishes.
+  await updateSyncState(root, ({ lastSynced: _, pull: __, abandoned: ___, ...state }) => ({ ...state, remoteId, enabled: true }));
+  if (kept.size) {
+    const facts = await readAssetFacts(root);
+    await AssetFacts.adoptSynced(root, Object.fromEntries(Object.entries(facts).filter(([id]) => !kept.has(id))));
+  }
   const manifests = { 'project.json': await readFile(join(root, 'project.json')), 'photos.json': await readFile(join(root, 'photos.json')) };
   const project = parseDocument(projectSchema, JSON.parse(manifests['project.json'].toString('utf8')), 'project.json');
   const photos = parseDocument(photoIndexSchema, JSON.parse(manifests['photos.json'].toString('utf8')), 'photos.json');
   const bookId = randomUUID();
   const after = { ...manifests, 'project.json': Buffer.from(JSON.stringify(withBookFormat(parseDocument(projectSchema, { ...project, bookId }, 'project.json'), photos), null, 2) + '\n') };
   await persistProjectManifests(root, manifests, after, { origin: 'app', label: 'Sync again' });
-  await updateSyncState(root, ({ lastSynced: _, pull: __, abandoned: ___, ...state }) => ({ ...state, remoteId, enabled: true }));
-  return bookId;
+  return { bookId, reverted: kept.size };
 }
 
 /**
@@ -1164,13 +1194,9 @@ export async function newBookHistory(folder: string, remoteId: string) {
  * pushed by the next sync, but does not count as ahead here), and so is anything a sync would find still arriving.
  */
 export async function describeSync(folder: string, remote: SyncRemote): Promise<SyncStatus> {
-  let end: (() => void) | undefined;
   try {
     const root = await realpath(folder);
     const state = await readSyncState(root);
-    // Over a bucket one listing of the book answers its commits, its originals and its tombstone, as in a sync.
-    const lineage = (JSON.parse(await readFile(join(root, 'project.json'), 'utf8')) as { bookId?: unknown }).bookId;
-    if (typeof lineage === 'string') end = await remote.prepareSync?.(lineage);
     const away = await originalsNotHere(root, remote).catch(() => ({ ids: [], notUploaded: [] as string[], neverUploaded: undefined }));
     const base = { pendingOriginals: away.ids.length, ...(away.notUploaded.length ? { notUploaded: away.notUploaded.length } : {}),
       ...(away.neverUploaded?.length ? { neverUploaded: neverUploadedText(away.neverUploaded) } : {}) };
@@ -1180,8 +1206,10 @@ export async function describeSync(folder: string, remote: SyncRemote): Promise<
     const bookId = local.project.bookId;
     if (!bookId) return { ...base, state: 'ahead' };
     const commits = await remoteCommits(remote, bookId);
-    // Deleted from sync on another Mac: the book asks to be kept here only or synced again, and pushes nothing.
-    if (await remote.bookTombstone(bookId)) return { state: 'removed', pendingOriginals: 0 };
+    // Deleted from sync on another Mac: the book asks to be kept here only or synced again, and pushes nothing. As cheap
+    // as the listing of commits: the marker is read only for a book without commits, and the tombstone of one with
+    // commits only where a listing answers it (see `deletedFromSync`).
+    if (await deletedFromSync(remote, bookId, commits.length, { listedOnly: true })) return { state: 'removed', pendingOriginals: 0 };
     const tips = deriveTips(commits);
     const decision = decideSync({ pullInProgress: !!state.pull, tips, commits, lastSynced: state.lastSynced, localRevision: local.revision, factsChanged: false });
     const states: Record<SyncDecision['action'], SyncStatus['state']> = { 'resume': 'behind', 'remote-behind': 'remote-syncing', 'initial-push': 'ahead',
@@ -1195,7 +1223,7 @@ export async function describeSync(folder: string, remote: SyncRemote): Promise<
     if (error instanceof NewerSyncFormatError) return { state: 'newer', detail: error.message, pendingOriginals: 0 };
     if (error instanceof StoreAccessError) return unavailableStatus(error.message, error.reason);
     return { state: 'unavailable', detail: error instanceof Error ? error.message : String(error), pendingOriginals: 0 };
-  } finally { end?.(); }
+  }
 }
 
 /**

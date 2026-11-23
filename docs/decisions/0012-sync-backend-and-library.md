@@ -113,13 +113,14 @@ books/<bookId>/originals/<digest><ext>
 books/<bookId>/proxies/<digest>-preview-v1<ext>
 books/<bookId>/covers/<digest>.jpg
 books/<bookId>/deleted.json
+deleted/<bookId>.json
 ```
 
 - **Why per book:** deleting a book deletes one prefix, a book's size is one listing, and a service can scope credentials or a share link to one prefix.
 - **Cost:** two books with the same photo store it twice. *Duplicate* and *Save a Copy* make a new `bookId` and record the source book's remote originals so the copy's first push copies them inside the store instead of uploading them — even if this Mac only holds previews or was offline when duplicating.
 - **Blob keys** (`blobKeyPattern`, `src/sync-snapshot.ts`) become relative to a book. Nothing has shipped on the old layout beyond the folder test case, so there is no migration.
 - **Sweep.** Commit headers and everything under `content/` (state blobs as well as historical `texts/`, `files/` and `template/` blobs) are kept for good: they are small, and the three-way merge of Milestone 2 needs the common ancestor. Originals, proxies and covers that no tip references (neither a tip's state blob nor a tip header's `coverDigest`) are deleted by *Clean Up*, after a grace period (7 days by object `lastModified`) so that a Mac that is mid-push does not lose what it just uploaded. The grace period does not protect an old blob that a push reuses instead of uploading (a photo removed and added again), so *Clean Up* reads the tips again immediately before it deletes, and a blob lost in the remaining window is uploaded again by the repair above.
-- **Deletion leaves a tombstone.** *Delete from Sync* cancels any active upload for the book, writes `deleted.json` (`{ version: 1, bookId, deletedAt }`) and removes everything else. A Mac that still has the book then asks ("removed from sync on another Mac: keep it here only, or sync it again?") instead of pushing it back.
+- **Deletion leaves a tombstone.** *Delete from Sync* cancels any active upload for the book, writes `deleted.json` (`{ version: 1, bookId, deletedAt }`) and removes everything else. A Mac that still has the book then asks ("removed from sync on another Mac: keep it here only, or sync it again?") instead of pushing it back. Beside it, a marker `deleted/<bookId>.json` at the remote's root lets the library find every deleted book in one listing; the deletion writes the marker first, then removes the commits, then writes the tombstone, and a book with a marker and no commits reads as deleted.
 - **Cover and format version.** `commitHeaderSchema` bumps to `version: 2` and gains an optional `coverDigest` pointing at `books/<bookId>/covers/<digest>.jpg` (the 320 px JPEG cover), so a book that is only on the remote has a thumbnail. Bumping to `version: 2` also ensures older builds hitting the per-book layout cleanly refuse with `NewerSyncFormatError` instead of misreading it as *Remote still syncing*; it ships with the layout change, before any real remote exists.
 
 ## 5. Library and storage

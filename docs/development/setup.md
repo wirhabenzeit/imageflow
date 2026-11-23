@@ -22,7 +22,12 @@ The built-in sample books share their photographs. The files live once in `sampl
 
 Set `IMAGEFLOW_TEMPLATES` to use another template library folder.
 
-Set `IMAGEFLOW_SYNC=1` to offer sync, which stays behind this development flag until the library ships ([ADR 0012](../decisions/0012-sync-backend-and-library.md)): **Settings → Sync** chooses the backend this Mac syncs every book through (an S3-compatible bucket with its access key and Test Connection, or a folder for development and tests), **File → Sync** starts and stops syncing a book, and **File → Open Synced Book…** makes a book from one on that backend. `IMAGEFLOW_SYNC_CREDENTIALS=memory` keeps a bucket's key in memory instead of the keychain in a development build. Without the flag no book syncs, whatever the settings hold.
+Sync ships ([ADR 0012](../decisions/0012-sync-backend-and-library.md)): **Settings → Sync** chooses the backend this Mac syncs every book through, an S3-compatible bucket with its access key and Test Connection; **File → Sync** starts and stops syncing a book; and the Start window is the library, which downloads and deletes books on that backend. Two flags offer what a release does not:
+
+- `IMAGEFLOW_SYNC_ICLOUD=1` lists **iCloud** in Settings → Sync (it needs a signed build with the provisioning profile, `docs/signing.md`) until the checks of #292 are done. Without it, a settings file that names iCloud leaves sync off.
+- `IMAGEFLOW_SYNC_FOLDER=1` lists **Folder**, a backend over a local folder for development and tests. A `settings.json` that names a folder (`"sync": { "kind": "folder", "path": "/abs/path" }`) is used with or without the flag, which is how the smoke tests set it up.
+
+`IMAGEFLOW_SYNC_CREDENTIALS=memory` keeps a bucket's key in memory instead of the keychain in a development build.
 
 ## Build the app
 

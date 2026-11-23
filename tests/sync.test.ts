@@ -2837,11 +2837,14 @@ test('one listing per sync over a bucket answers its commits, its blobs and its 
   assert.equal(lists(), 1, 'an unchanged book: one listing, ' + fake.requests.map(({ method, key, query }) => method + ' ' + key + '?' + query).join(', '));
   const tombstoneRequests = () => fake.requests.filter(({ key }) => key.endsWith('/deleted.json')).length;
   assert.equal(tombstoneRequests(), 0, 'the listing answers whether the book was deleted');
-  // A status refresh: one listing, and no request for the tombstone either.
+  // A status refresh: one listing of the book's commits alone (not of the whole book), and no request for its tombstone
+  // or marker: the book has commits, and a sync reads the tombstone from its listing before it pushes.
   fake.requests.length = 0;
   assert.equal((await describeSync(a.folder, (await service.connect()).remote)).state, 'in-sync');
-  assert.equal(lists(), 1, 'a status refresh: one listing, ' + fake.requests.map(({ method, key, query }) => method + ' ' + key + '?' + query).join(', '));
-  assert.equal(tombstoneRequests(), 0);
+  const listings = fake.requests.filter(({ method, query }) => method === 'GET' && query.has('list-type'));
+  assert.equal(listings.length, 1, 'a status refresh: one listing, ' + fake.requests.map(({ method, key, query }) => method + ' ' + key + '?' + query).join(', '));
+  assert.match(listings[0].query.get('prefix') ?? '', /\/snapshots\/$/, 'of the commits only');
+  assert.equal(fake.requests.filter(({ key }) => key.endsWith('/deleted.json') || key.includes('deleted/')).length, 0);
   // A book that kept no older original reads its state once, not again to look for one.
   fake.requests.length = 0;
   assert.equal((await on(a, (book) => service.sync({ book }))).action, 'in-sync');
@@ -2949,7 +2952,7 @@ each('Delete from Sync on one Mac: the other Mac’s sync pushes nothing, its up
   const remoteId = await remote.remoteId();
   const release = await acquireProjectLock(b.folder);
   let fresh: string;
-  try { fresh = await newBookHistory(b.folder, remoteId); } finally { await release(); }
+  try { fresh = (await newBookHistory(b.folder, remoteId)).bookId; } finally { await release(); }
   assert.notEqual(fresh, id);
   assert.equal(await bookId(b), fresh);
   assert.equal((await readSyncState(b.folder)).lastSynced, undefined);
@@ -2958,7 +2961,7 @@ each('Delete from Sync on one Mac: the other Mac’s sync pushes nothing, its up
   assert.deepEqual((await remote.listBooks()).map(({ bookId, deleted }) => [bookId, !!deleted]).sort(), [[fresh, false], [id, true]].sort());
   // Sync Again on the open book, through the session that holds it: the same.
   await sync(a, remote).catch(() => undefined);
-  const again = await on(a, () => newBookHistory(a.folder, remoteId));
+  const again = (await on(a, () => newBookHistory(a.folder, remoteId))).bookId;
   assert.ok(again !== id && again !== fresh);
   assert.equal((await sync(a, remote)).action, 'initial-push');
   // Outside the writer lock it is refused.
@@ -3007,7 +3010,7 @@ test('Delete from Sync through the service, while a background upload runs: the 
   assert.equal((await service.standing(b.folder)).sync, 'stopped');
   assert.deepEqual((await remote.listBook(id)).map(({ key }) => key), [tombstoneKey(id)]);
   // Sync Again through the service: a new book on the remote.
-  const fresh = await on(b, () => service.syncAgain(b.folder, { trust: true }));
+  const { bookId: fresh } = await on(b, () => service.syncAgain(b.folder, { trust: true }));
   assert.equal((await syncWith(b, service)).action, 'initial-push');
   assert.ok((await remote.listBooks()).some((book) => book.bookId === fresh && !book.deleted));
 });
@@ -3051,11 +3054,16 @@ each('a deletion that stops after its marker reads as not deleted, one that stop
   assert.deepEqual((await remote.listBooks()).find((book) => book.bookId === id), { bookId: id });
   await edit(a, caption('shore', 'Still syncing'));
   assert.equal((await sync(a, remote)).action, 'push');
-  // Stopped after its commits went: no history, so the sync pushes nothing and says the remote is not there yet.
+  // Stopped after its commits went: a marker and no commits read as deleted, on this Mac and for a Finder duplicate
+  // without a sync record, which would otherwise push the book back; the status says so too.
   const snapshots = (await remote.store.list('books/' + id + '/snapshots/')).map(({ key }) => key);
   await remote.store.delete(snapshots);
   await edit(a, caption('shore', 'After the commits went'));
-  await assert.rejects(commitOnly(a, remote), { name: 'RemoteSyncingError' });
+  await assert.rejects(commitOnly(a, remote), { name: 'BookDeletedError' });
+  assert.equal((await describeSync(a.folder, remote)).state, 'removed');
+  const { b: duplicate } = await world(t);
+  await copyBook(a, duplicate);
+  await assert.rejects(commitOnly(duplicate, remote), { name: 'BookDeletedError' });
   assert.equal(await commitCount(remote), 0);
   // Stopped after the tombstone (its marker is there): the book reads as deleted, and nothing is pushed.
   await remote.store.putIfAbsent(tombstoneKey(id), record);
@@ -3128,4 +3136,126 @@ test('a folder store put that is cancelled leaves no folder it made behind', asy
   assert.deepEqual((await readdir(join(root, 'books', 'a'))).sort(), ['content'], 'the originals folder it made is gone');
   await assert.rejects(store.putIfAbsent('books/a/originals/y.jpg', new Uint8Array([1]), { signal: job.signal }));
   assert.deepEqual((await readdir(join(root, 'books', 'a'))).sort(), ['content']);
+});
+
+/** A store whose next `failures` writes fail, as offline. */
+function failingWrites<Store extends SyncStore>(store: Store, failures: { count: number }) {
+  const put = store.putIfAbsent.bind(store);
+  store.putIfAbsent = async (...args) => { if (failures.count > 0) { failures.count--; throw new StoreAccessError('unavailable', 'The sync store cannot be reached.'); } return put(...args); };
+  return store;
+}
+
+test('a Delete from Sync that fails on its first request deletes nothing: the copies here and on another Mac sync as before', async (t) => {
+  const { root, a, b } = await world(t);
+  const backend = await folderBackend(root, 'Sync');
+  const service = new SyncService(() => backend);
+  await ownBook(a);
+  await syncWith(a, service);
+  const id = await bookId(a);
+  const { remote } = await service.connect();
+  const failures = { count: 1 };
+  failingWrites((remote as StoreRemote).store, failures);
+  await assert.rejects(service.deleteBook(id, { folders: [a.folder] }), (error: Error & { started?: boolean }) =>
+    error.name === 'BookDeleteError' && error.started === false && /^Nothing was deleted/.test(error.message));
+  assert.equal((await readSyncState(a.folder)).enabled, true, 'the copy here syncs again');
+  assert.equal(await remote.deletionMarker(id), undefined);
+  // This Mac pushes as before (the remote does not refuse the book), and so does another Mac.
+  await edit(a, caption('shore', 'After the failed delete'));
+  assert.equal((await syncWith(a, service)).action, 'push');
+  await use(b);
+  const laptop = new SyncService(() => ({ ...backend }));
+  await copyBook(a, b);
+  await edit(b, caption('shore', 'On the laptop'));
+  assert.notEqual((await on(b, async (book) => { await trustBook(b.folder); return laptop.sync({ book }); })).action, undefined);
+  assert.ok((await remoteTips(remote, id)).length >= 1);
+  // One that fails after it changed the remote says so, and deleting again finishes it.
+  failures.count = 0;
+  const store = (remote as StoreRemote).store;
+  const remove = store.delete.bind(store);
+  let once = true;
+  store.delete = async (keys) => { if (once) { once = false; throw new Error('offline'); } return remove(keys); };
+  await assert.rejects(service.deleteBook(id, { folders: [a.folder] }), (error: Error & { started?: boolean }) => error.name === 'BookDeleteError' && error.started === true && /Delete it from sync again/.test(error.message));
+  await service.deleteBook(id, { folders: [a.folder] });
+  assert.deepEqual((await remote.listBook(id)).map(({ key }) => key), [tombstoneKey(id)]);
+});
+
+test('Sync Again on a book that is not deleted is refused and changes nothing; Delete from Sync refuses a book a newer ImageFlow synced', async (t) => {
+  const { root, a } = await world(t);
+  const backend = await folderBackend(root, 'Sync');
+  const service = new SyncService(() => backend);
+  await ownBook(a);
+  await syncWith(a, service);
+  const id = await bookId(a);
+  await assert.rejects(on(a, () => service.syncAgain(a.folder)), { name: 'BookNotDeletedError' });
+  assert.equal(await bookId(a), id);
+  assert.ok((await readSyncState(a.folder)).lastSynced);
+  // A newer ImageFlow's commit: this version does not delete the book.
+  const { remote } = await service.connect();
+  await putHeader(remote as StoreRemote, id, crypto.randomUUID(), { version: 3, commitId: crypto.randomUUID(), bookId: id });
+  await assert.rejects(service.deleteBook(id, { folders: [a.folder] }), NewerSyncFormatError);
+  assert.equal(await remote.deletionMarker(id), undefined);
+  assert.equal((await readSyncState(a.folder)).enabled, true);
+});
+
+test('Sync Again of a book with a kept older original makes the file this Mac’s version of the photo, consistently', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  const kept = sha(await readFile(join(b.folder, 'photos/shore.jpg')));
+  await image(join(a.folder, 'photos/shore.jpg'), '#aa3300', 160, 100);
+  await commitOnly(a, remote);
+  await sync(b, remote);
+  await remote.deleteBook(await bookId(a));
+  const remoteId = await remote.remoteId();
+  const { reverted } = await on(b, () => newBookHistory(b.folder, remoteId));
+  assert.equal(reverted, 1);
+  const book = await on(b, async (book) => book);
+  assert.equal(book.photos.get('shore')!.original, join(b.folder, 'photos/shore.jpg'), 'the photo is its file again');
+  assert.equal(book.sources!['photo:shore'].problem, undefined);
+  await on(b, async () => { await AssetFacts.forBook(b.folder); });
+  assert.equal((await sync(b, remote)).action, 'initial-push');
+  const [tip] = await tips(remote, b);
+  const state = await stateOf(remote, tip);
+  assert.equal(state.assetsMeta.assets.shore.digest, kept, 'the new book has the file this Mac has');
+  assert.equal(state.originals.shore.digest, kept);
+});
+
+test('a digest that arrives for a note taken before a pull does not put the old file’s fact back', async (t) => {
+  const { a } = await world(t);
+  await use(a);
+  const release = await acquireProjectLock(a.folder);
+  try {
+    const facts = await AssetFacts.forBook(a.folder);
+    const old = facts.get('shore')!;
+    facts.note('shore', 'old-observation', { width: 1, height: 1 });
+    await AssetFacts.adoptSynced(a.folder, { ...facts.all(), shore: { ...old, digest: 'e'.repeat(64), width: 160, height: 100 } });
+    facts.digest('shore', 'old-observation', 'd'.repeat(64));
+    assert.equal(facts.get('shore')!.digest, 'e'.repeat(64));
+  } finally { await AssetFacts.release(a.folder); await release(); }
+});
+
+each('an original carried forward from a snapshot without a record of who named it is not named by a Mac that does not have it', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  const [tip] = await tips(remote, a);
+  const state = await stateOf(remote, tip);
+  // A snapshot as written before the record existed, naming an original that is on no Mac here.
+  const ghost = 'f'.repeat(64);
+  const older: StateBlob = { ...state, named: undefined, originals: { ...state.originals, shore: { digest: ghost, ext: '.jpg' } }, assetsMeta: { ...state.assetsMeta,
+    assets: { ...state.assetsMeta.assets, shore: { ...state.assetsMeta.assets.shore, digest: ghost } } } };
+  delete (older as { named?: unknown }).named;
+  const bytes = new TextEncoder().encode(canonicalJson(older));
+  await remote.putBlob(contentBlobKey(tip.bookId, sha(bytes)), bytes);
+  await remote.putCommit({ ...tip, commitId: crypto.randomUUID(), parents: [tip.commitId], stateDigest: sha(bytes), createdAt: new Date(Date.parse(tip.createdAt) + 1000).toISOString() });
+  await sync(b, remote).catch(() => undefined);
+  await edit(b, caption('segla', 'On the laptop'));
+  await sync(b, remote, { device: 'Laptop' }).catch(() => undefined);
+  const [next] = await tips(remote, b);
+  assert.notEqual(next.stateDigest, sha(bytes), 'the laptop pushed');
+  assert.equal((await stateOf(remote, next)).originals.shore?.digest, ghost, 'and carried the original forward');
+  const named = (await stateOf(remote, next)).named ?? {};
+  assert.notEqual(named.shore?.by, 'Laptop', 'the laptop does not have that file, so it does not name it');
 });

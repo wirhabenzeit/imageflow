@@ -119,6 +119,10 @@ export class AssetFacts {
     if (loaded) {
       await loaded.flush();
       loaded.facts = { ...facts };
+      // What the session noted of the files before the pull describes them as they were then: a digest that arrives
+      // later for such a note (a kept older original, `store.onDigest`) must not put the old file's fact back.
+      loaded.notes.clear();
+      loaded.digests.clear();
     }
     await writeAssetFacts(folder, facts);
   }

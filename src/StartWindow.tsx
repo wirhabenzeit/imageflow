@@ -23,6 +23,8 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
   const [busy, setBusy] = useState<string | false>(false);
   const [error, setError] = useState('');
   const asked = useRef(new Set<string>());
+  // Bumped when the listing is read again, so the rows in view ask for their details again.
+  const [reload, setReload] = useState(0);
   useEffect(() => {
     if (!api) return;
     let mounted = true;
@@ -30,9 +32,10 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
     const readRemote = (refresh = false) => { void api.libraryRemote(refresh).then((result) => {
       if (!mounted) return;
       if (refresh || 'error' in result || JSON.stringify(result.value?.books) !== JSON.stringify((remoteRef.current as LibraryRemote | undefined)?.books)) {
-        // A new listing: rows of books on the remote load their details again as they come into view.
+        // A new listing: rows of books on the remote load their details again as they come into view, and show what
+        // they showed until then (no flicker to "Loading…"; covers are kept by digest in the main process).
         asked.current.clear();
-        setBooks({});
+        setReload((count) => count + 1);
       }
       setRemote('error' in result ? { error: result.error } : result.value);
     }, () => { if (mounted) setRemote({ error: 'ImageFlow could not complete the request.' }); }); };
@@ -58,7 +61,9 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
   function load(bookId: string) {
     if (!api || asked.current.has(bookId)) return;
     asked.current.add(bookId);
-    void api.libraryBook(bookId).then((result) => setBooks((current) => ({ ...current, [bookId]: 'error' in result ? { error: result.error } : result.value })),
+    void api.libraryBook(bookId).then((result) => setBooks((current) => ({ ...current,
+      // A row that could be read before keeps what it showed when reading it again fails.
+      [bookId]: 'error' in result ? (current[bookId] && 'title' in current[bookId] ? current[bookId] : { error: result.error }) : result.value })),
       () => setBooks((current) => ({ ...current, [bookId]: { error: 'ImageFlow could not complete the request.' } })));
   }
 
@@ -83,7 +88,8 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
   /** The actions a row offers in its context menu, by state. */
   function menuItems(row: LibraryRow): { items: PopupItem[]; run: (id: string) => void } {
     if (row.kind === 'remote') {
-      return { items: row.state === 'newer' ? [{ id: 'update', label: 'Update ImageFlow…' }, { type: 'separator' }, { id: 'delete', label: 'Delete from Sync…' }]
+      // A book a newer ImageFlow synced is not this version's to delete: only Update.
+      return { items: row.state === 'newer' ? [{ id: 'update', label: 'Update ImageFlow…' }]
         : [{ id: 'download', label: 'Download' }, { type: 'separator' }, { id: 'delete', label: 'Delete from Sync…' }],
       run: (id) => void library({ action: id as 'download' | 'delete' | 'update', bookId: row.bookId }) };
     }
@@ -95,11 +101,11 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
       if (state === 'not-syncing') items.push({ id: 'start', label: 'Start Syncing' });
       if (state === 'removed') items.push({ id: 'keep-here', label: 'Keep Here Only' }, { id: 'sync-again', label: 'Sync Again' });
       if (syncing) items.push({ id: 'stop', label: 'Stop Syncing on This Mac…' });
-      if (syncing && book.bookId && state !== 'unsynced') items.push({ id: 'delete', label: 'Delete from Sync…' });
+      if (syncing && book.bookId && state !== 'unsynced' && state !== 'newer') items.push({ id: 'delete', label: 'Delete from Sync…' });
     }
     if (!book.available && row.onRemote) items.push({ type: 'separator' }, { id: 'download', label: 'Download' });
     items.push({ type: 'separator' }, ...(!book.available ? [{ id: 'locate', label: 'Locate…' }] : []),
-      { id: 'remove', label: 'Remove from Recents', enabled: !syncing && state !== 'removed' });
+      { id: 'remove', label: 'Remove from Recents', enabled: !configured || !(state === 'synced' || state === 'unsynced' || state === 'newer' || state === 'removed') });
     return { items, run: (id) => {
       if (id === 'open' || id === 'reveal' || id === 'remove' || id === 'locate') void act(id, book.id);
       else if (id === 'download' && book.bookId) void library({ action: 'download', bookId: book.bookId });
@@ -121,7 +127,7 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
     const { book, state } = row;
     const name = bookName(book.path);
     const syncState = configured && book.available && state !== 'not-syncing' ? libraryStateLabels[state] : configured && book.available && listing ? libraryStateLabels['not-syncing'] : undefined;
-    const removable = !configured || !(state === 'synced' || state === 'unsynced' || state === 'checking' || state === 'unavailable' || state === 'newer' || state === 'removed');
+    const removable = !configured || !(state === 'synced' || state === 'unsynced' || state === 'newer' || state === 'removed');
     return <li key={book.id} className={book.available ? 'library-local library-' + state : 'missing'} data-state={state} data-book={book.bookId} {...menuHandlers(row)}>
       <button className="recent-open" disabled={!!busy} onClick={() => void act(book.available ? 'open' : 'locate', book.id)}>
         <span className="recent-cover">{book.cover ? <img src={book.cover} alt="" /> : <img className="recent-cover-icon" src={bookIcon} alt="" />}</span>
@@ -155,7 +161,7 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
       <h2 id="recent-heading">{configured ? 'Books' : 'Recent books'}{configured && remote && 'error' in remote && <span className="library-note" role="status" title={remote.error}> · {(listing?.name ? listing.name + ' ' : '') + 'cannot be read now'}</span>}
         {configured && remote === undefined && <span className="library-note" role="status"> · Looking at sync…</span>}</h2>
       {rows.length ? <ul>{rows.map((row) => row.kind === 'local' ? localRow(row)
-        : <RemoteRow key={row.bookId} row={row} book={books[row.bookId]} name={listing?.name} load={load} busy={!!busy} handlers={menuHandlers(row)}
+        : <RemoteRow key={row.bookId} row={row} book={books[row.bookId]} name={listing?.name} load={load} reload={reload} busy={!!busy} handlers={menuHandlers(row)}
           download={() => void library({ action: 'download', bookId: row.bookId })} update={() => void library({ action: 'update', bookId: row.bookId })} />)}</ul>
         : <div className="recent-empty"><img src={bookIcon} alt="" /><h3>A place for your stories</h3></div>}
     </section>
@@ -164,8 +170,8 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
 }
 
 /** A book only on the remote: its title and cover load as it comes into view. */
-function RemoteRow({ row, book, name, load, busy, handlers, download, update }: { row: Extract<LibraryRow, { kind: 'remote' }>; book?: LibraryBook | { error: string }; name?: string;
-  load: (bookId: string) => void; busy: boolean; handlers: Record<string, unknown>; download: () => void; update: () => void }) {
+function RemoteRow({ row, book, name, load, reload, busy, handlers, download, update }: { row: Extract<LibraryRow, { kind: 'remote' }>; book?: LibraryBook | { error: string }; name?: string;
+  load: (bookId: string) => void; reload: number; busy: boolean; handlers: Record<string, unknown>; download: () => void; update: () => void }) {
   const item = useRef<HTMLLIElement>(null);
   useEffect(() => {
     const node = item.current;
@@ -174,7 +180,7 @@ function RemoteRow({ row, book, name, load, busy, handlers, download, update }: 
     const observer = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) load(row.bookId); });
     observer.observe(node);
     return () => observer.disconnect();
-  }, [row.bookId, book === undefined]);
+  }, [row.bookId, reload]);
   const details = book && 'title' in book ? book : undefined;
   const newer = row.state === 'newer' || !!details?.newer;
   const title = details ? (newer ? 'A book synced by a newer ImageFlow' : details.title || 'Untitled') : book ? 'Cannot be read now' : 'Loading…';

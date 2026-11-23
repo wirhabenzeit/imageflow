@@ -44,7 +44,9 @@ export async function coverDataUrl(bytes: Uint8Array | undefined) {
  * (several when Macs changed it at once; Download asks which), and its cover. A book a newer ImageFlow synced says so
  * and nothing else. Over iCloud the first read of a book lists its zone once, and the key index keeps it from then on.
  */
-export async function libraryBook(remote: SyncRemote, bookId: string): Promise<LibraryBook> {
+export async function libraryBook(remote: SyncRemote, bookId: string,
+  /** Covers by digest, kept across reads: a cover is content-addressed, so an unchanged book fetches none again. */
+  covers: Map<string, Promise<string | undefined>> = new Map()): Promise<LibraryBook> {
   let tips;
   try { tips = await remoteTips(remote, bookId); }
   catch (error) {
@@ -53,7 +55,13 @@ export async function libraryBook(remote: SyncRemote, bookId: string): Promise<L
   }
   const latest = [...tips].sort((a, b) => a.createdAt.localeCompare(b.createdAt)).at(-1);
   if (!latest) return { bookId, title: '', versions: 0 };
-  const cover = latest.coverDigest ? await coverDataUrl(await remote.getBlob(coverBlobKey(bookId, latest.coverDigest)).catch(() => undefined)) : undefined;
+  const digest = latest.coverDigest;
+  let reading = digest ? covers.get(bookId + '/' + digest) : undefined;
+  if (digest && !reading) {
+    reading = remote.getBlob(coverBlobKey(bookId, digest)).then(coverDataUrl, () => undefined);
+    covers.set(bookId + '/' + digest, reading);
+  }
+  const cover = await reading;
   return { bookId, title: latest.title.slice(0, 400), updatedAt: latest.createdAt, versions: tips.length, ...(cover ? { cover } : {}) };
 }
 
@@ -80,4 +88,28 @@ export function deleteFromSyncQuestion({ title, backend, here, away }: { title: 
       : away === 0 ? 'This Mac has all its originals.'
       : (away === 1 ? '1 original of this book is' : away + ' originals of this book are') + ' not on this Mac: ' + (away === 1 ? 'it is' : 'they are') + ' removed with it, unless another Mac has ' + (away === 1 ? 'it.' : 'them.'));
   return { message: 'Delete “' + title + '” from sync?', detail, buttons: ['Delete from Sync', 'Cancel'], defaultId: 1, cancelId: 1 };
+}
+
+/**
+ * Whether a book syncs with the configured remote, by its sync record (#283): what keeps it in Recents beyond the 20
+ * most recent and refuses Remove from Recents. `remoteId` is the configured remote's identity, `null` with sync off
+ * (then no book syncs), and undefined when it cannot be read now (offline): the answer is then undefined, and neither
+ * use acts on a guess (tracking stays as it was, and removal is allowed).
+ */
+export function syncsWithRemote(record: { remoteId?: string; enabled?: boolean } | undefined, remoteId: string | null | undefined): boolean | undefined {
+  if (remoteId === null || !record?.remoteId || record.enabled === false) return false;
+  if (remoteId === undefined) return undefined;
+  return record.remoteId === remoteId;
+}
+
+/** Runs at most `limit` tasks at once, in the order they were asked for (the library's rows, four at a time). */
+export function limited(limit: number) {
+  let running = 0;
+  const waiting: (() => void)[] = [];
+  return async <T>(task: () => Promise<T>): Promise<T> => {
+    if (running >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
+    running++;
+    try { return await task(); }
+    finally { running--; waiting.shift()?.(); }
+  };
 }

@@ -8,6 +8,7 @@ import { newBookHistory, syncBook, uploadOriginals } from './sync-engine';
 import type { SyncOptions, UploadOutcome } from './sync-engine';
 import { bookSync, readSyncState, startSyncing, stopSyncing, syncedElsewhere, updateSyncState } from './sync-pull';
 import type { BookSync } from './sync-pull';
+import { BookDeleteError, BookNotDeletedError, remoteCommits } from './sync-remote';
 import type { SyncRemote } from './sync-remote';
 import { StoreAccessError } from './sync-store';
 import type { StoreAccessReason } from './sync-store';
@@ -131,7 +132,7 @@ export class SyncService {
     const setting = this.setting();
     if (!setting) { this.current = undefined; this.forgetUploads(); return undefined; }
     const key = JSON.stringify(setting);
-    if (this.current?.key !== key) { this.current = { key, backend: openBackend(setting, this.dependencies) }; this.forgetUploads(); }
+    if (this.current?.key !== key) { this.current = { key, backend: openBackend(setting, this.dependencies) }; this.forgetUploads(); this.lastIdentity = undefined; }
     return this.current;
   }
   /** The identity the remote had at the last `connect`; another one makes the upload results of the former go. */
@@ -144,6 +145,8 @@ export class SyncService {
     for (const folder of folders) this.tell(folder);
   }
 
+  /** The identity the configured remote had when it was last read, without reading it; undefined before that. */
+  get knownRemoteId() { return this.backend() ? this.lastIdentity : undefined; }
   /** Whether a backend is configured. */
   get configured() { return !!this.backend(); }
   /** The kind of the configured backend. */
@@ -269,15 +272,32 @@ export class SyncService {
    */
   async deleteBook(bookId: string, { folders = [], settle }: { folders?: readonly string[]; settle?: () => Promise<void> } = {}) {
     const { remote, remoteId } = await this.connect();
+    // A book a newer ImageFlow synced (its commits or tombstone of a newer format) is not this version's to delete: both
+    // reads throw `NewerSyncFormatError`, which is refused with the update message.
+    await remoteCommits(remote, bookId);
+    await remote.bookTombstone(bookId, { fresh: true });
     const running = await Promise.all([...this.uploads.keys()].map(async (folder) => ((await syncedLineage(folder)) === bookId ? folder : undefined)));
     await Promise.all([...new Set([...folders, ...running.filter((folder): folder is string => !!folder)])].map((folder) => this.cancelUpload(folder)));
+    const stopped: string[] = [];
     for (const folder of folders) {
-      await updateSyncState(folder, (state) => (state.enabled === false || state.remoteId !== remoteId ? state : { ...state, enabled: false }));
+      await updateSyncState(folder, (state) => {
+        if (state.enabled === false || state.remoteId !== remoteId) return state;
+        stopped.push(folder);
+        return { ...state, enabled: false };
+      });
     }
     await settle?.();
-    const tombstone = await remote.deleteBook(bookId);
-    for (const folder of folders) this.settled.delete(folder);
-    return tombstone;
+    try {
+      const tombstone = await remote.deleteBook(bookId);
+      for (const folder of folders) this.settled.delete(folder);
+      return tombstone;
+    } catch (error) {
+      // Nothing was deleted (the remote could not be reached): the copies here sync again, as before.
+      if (error instanceof BookDeleteError && !error.started) {
+        for (const folder of stopped) await updateSyncState(folder, (state) => (state.enabled === false ? { ...state, enabled: true } : state)).catch(() => {});
+      }
+      throw error;
+    }
   }
 
   /**
@@ -286,7 +306,13 @@ export class SyncService {
    * one taken for a closed book). Only a trusted book, as for Start Syncing.
    */
   async syncAgain(folder: string, options: { trust?: boolean } = {}) {
-    const { remoteId } = await this.connect(folder);
+    const { remote, remoteId } = await this.connect(folder);
+    // Only a book the remote deleted: a library row or a status read a while ago may be out of date, and a new lineage
+    // for a book that syncs would make a second book of it. Asked of the store now.
+    const lineage = await syncedLineage(folder);
+    const deleted = lineage && (await remote.bookTombstone(lineage, { fresh: true }) ??
+      (await remote.deletionMarker(lineage) && !(await remote.listBook(lineage, 'snapshots')).length ? true : undefined));
+    if (!deleted) throw new BookNotDeletedError();
     await this.optIn(folder, options);
     return newBookHistory(folder, remoteId);
   }

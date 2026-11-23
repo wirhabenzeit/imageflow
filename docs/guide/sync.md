@@ -2,6 +2,8 @@
 
 ImageFlow can keep your books in sync between your Macs. Each Mac syncs through one place you choose in **Settings → Sync**: an S3-compatible bucket you bring, or iCloud where your version of ImageFlow offers it. Sync is off until you choose one, and nothing leaves your Mac before that.
 
+Every Mac that syncs needs this version of ImageFlow or a later one: an older version cannot read what this one syncs, and asks to be updated instead of syncing.
+
 ## Set up sync
 
 ### An S3-compatible bucket
@@ -67,7 +69,7 @@ Right-click a book (or press Shift-F10) for its actions.
 
 - **Download** saves the book in **Documents → ImageFlow** (change the folder in **Settings → Sync**), with a number added if a book of that name is there, and opens it. A book Macs changed at once asks which version to download. The book arrives trusted; the first time its template loads maps or data, ImageFlow names the sites once.
 - **Stop Syncing on This Mac** leaves the book and its copy in your sync as they are; your other Macs keep syncing it.
-- **Delete from Sync** removes the book from your sync for every Mac, after asking. Every copy on your Macs stays where it is. Your other Macs show it as **Removed from sync** and push nothing for it; there, **Keep Here Only** keeps it on that Mac without syncing, and **Sync Again** syncs it as a new book.
+- **Delete from Sync** removes the book from your sync for every Mac, after asking. The copies on your Macs stay where they are, but only with what each Mac has: an original that no Mac downloaded (with **Keep originals** off, or still to download) is lost with the book, and a book that is on no Mac is gone for good. The question says how many originals of this Mac's copy are not on this Mac. Your other Macs show the book as **Removed from sync** and push nothing for it; there, **Keep Here Only** keeps it on that Mac without syncing, and **Sync Again** syncs it as a new book. A book synced by a newer ImageFlow can be deleted only from that version.
 - **Update** checks for a newer ImageFlow in **Settings → General**, or restarts into one that is ready.
 
 A book that syncs on this Mac stays in the list, however many books you open; to take it off, stop syncing it first. To remove a book from your Mac, move it to the Trash in Finder.

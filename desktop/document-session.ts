@@ -576,7 +576,7 @@ export class DocumentSession {
     if (standing === 'elsewhere' || (start && standing === 'stopped' && syncedElsewhere(state, connection.remoteId))) throw new SyncElsewhereError();
     if (standing !== 'syncing' && !start) throw new Error('This book does not sync on this Mac. Choose File → Sync → Start Syncing.');
     if (auto && standing === 'stopped') return undefined;
-    // Only a trusted book syncs, also one that synced before it was trusted here (a book made by Open Synced Book).
+    // Only a trusted book syncs, also one that synced before it was trusted here.
     await this.syncService.optIn(this.book.folder, { trust });
     this.syncing = true;
     this.storageFull = undefined;
@@ -627,13 +627,17 @@ export class DocumentSession {
     await this.settleSync();
     await this.whenIdle();
     // Rejects with the service's own error, so an untrusted book is an `UntrustedBookError` the app asks about.
-    await this.hold(async () => {
+    const { reverted } = await this.hold(async () => {
       this.stopWatch();
       try {
-        await service.syncAgain(this.book.folder, options);
+        const result = await service.syncAgain(this.book.folder, options);
         this.notify({ value: this.activate(await loadProject(this.book.folder, this.cache), true) });
+        return result;
       } finally { this.watchProject(this.book); }
     });
+    // Photos whose newer originals were only in the deleted book go back to the files this Mac has.
+    if (reverted && !this.window.isDestroyed()) this.window.webContents.send(channels.appNotice, (reverted === 1 ? '1 photo shows' : reverted + ' photos show') +
+      ' the version on this Mac again: ' + (reverted === 1 ? 'its newer original was' : 'their newer originals were') + ' only in the deleted book.');
     return this.syncNow();
   }
   /**
@@ -642,7 +646,7 @@ export class DocumentSession {
    * instead of stopping it halfway.
    */
   async stopTrusting() {
-    // Without a backend (or the development flag) no sync record is written; the book is only untrusted.
+    // Without a backend no sync record is written; the book is only untrusted.
     const service = this.syncService?.configured ? this.syncService : undefined;
     const result = await this.run(() => (service ? service.distrust(this.book.folder) : distrustBook(this.book.folder)));
     if ('error' in result) throw new Error(result.code === 'BOOK_BUSY' ? 'Wait for the book to finish syncing, then stop trusting it.' : result.error);

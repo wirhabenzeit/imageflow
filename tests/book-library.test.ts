@@ -9,7 +9,7 @@ import { libraryRows, libraryStateLabels } from '../src/book-library';
 import { channels } from '../src/desktop';
 import type { LibraryRemote, RecentDocument } from '../src/desktop';
 import { maximumRecents, RecentDocuments } from '../desktop/documents';
-import { coverDataUrl, deleteFromSyncQuestion, libraryBook, libraryListing, networkNotice } from '../desktop/sync-library';
+import { coverDataUrl, deleteFromSyncQuestion, libraryBook, libraryListing, limited, networkNotice, syncsWithRemote } from '../desktop/sync-library';
 import { memoryRemote, remoteTips, StoreRemote } from '../desktop/sync-remote';
 import { CloudKitStore } from '../desktop/sync-store-cloudkit';
 import { MemoryKeyIndexCache } from '../desktop/sync-key-index';
@@ -236,4 +236,36 @@ test('a book that syncs here by its record but that the remote does not have rea
   const unnamed = syncing({ bookId: undefined });
   assert.deepEqual(states(libraryRows([first, unnamed], listing([]))), [first.id + ':unsynced', unnamed.id + ':unsynced']);
   assert.equal(libraryStateLabels.unsynced, 'Not synced yet');
+});
+
+test('a book counts as syncing here only with the configured remote: not with sync off or another remote, and unknown while the remote cannot be read', () => {
+  const record = { remoteId, enabled: true };
+  assert.equal(syncsWithRemote(record, remoteId), true);
+  assert.equal(syncsWithRemote(record, randomUUID()), false, 'it synced with another remote');
+  assert.equal(syncsWithRemote(record, null), false, 'sync is off');
+  assert.equal(syncsWithRemote({ remoteId, enabled: false }, remoteId), false, 'stopped here');
+  assert.equal(syncsWithRemote(undefined, remoteId), false);
+  assert.equal(syncsWithRemote(record, undefined), undefined, 'offline: neither kept nor refused on a guess');
+  assert.equal(syncsWithRemote({ remoteId, enabled: false }, undefined), false);
+});
+
+test('reading a row again fetches no cover it has, and rows are read four at a time', async () => {
+  const remote = memoryRemote();
+  const id = randomUUID();
+  const cover = new Uint8Array(await sharp({ create: { width: 64, height: 48, channels: 3, background: '#336699' } }).jpeg().toBuffer());
+  await remote.putBlob(coverBlobKey(id, sha(cover)), cover);
+  await remote.putCommit(header(id, { coverDigest: sha(cover) }));
+  let fetched = 0;
+  const get = remote.getBlob.bind(remote);
+  remote.getBlob = async (key) => { if (key.includes('/covers/')) fetched++; return get(key); };
+  const covers = new Map<string, Promise<string | undefined>>();
+  const first = await libraryBook(remote, id, covers);
+  const again = await libraryBook(remote, id, covers);
+  assert.ok(first.cover);
+  assert.equal(again.cover, first.cover);
+  assert.equal(fetched, 1, 'a cover is content-addressed: read once');
+  const limit = limited(4);
+  let running = 0, most = 0;
+  await Promise.all(Array.from({ length: 12 }, () => limit(async () => { running++; most = Math.max(most, running); await new Promise((resolve) => setTimeout(resolve, 5)); running--; })));
+  assert.equal(most, 4);
 });

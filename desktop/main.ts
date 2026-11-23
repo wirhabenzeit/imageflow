@@ -47,9 +47,9 @@ import { captureBookPreview, checkBookRender } from './preview';
 import { PreviewError } from '../src/preview';
 import { chooseSyncTip, DocumentSession } from './document-session';
 import { cloneFromRemote, downloadName, originalsAway, ownedOriginalsSize } from './sync-engine';
-import { BookDeletedError, remoteTips } from './sync-remote';
+import { BookDeletedError, BookDeleteError, BookNotDeletedError, remoteTips } from './sync-remote';
 import { readSyncState, SyncElsewhereError } from './sync-pull';
-import { deleteFromSyncQuestion, libraryBook, libraryListing } from './sync-library';
+import { deleteFromSyncQuestion, libraryBook, libraryListing, limited, syncsWithRemote } from './sync-library';
 import { insideBook, pendingUploadsText, SyncService, UntrustedBookError } from './sync-service';
 import { syncExcludedBook as excludedFrom } from './sync-start';
 import { chooseBooksPatch } from './sync-settings';
@@ -593,8 +593,10 @@ async function openDocument(path: string): Promise<DocumentSession | undefined> 
       const tracked = document;
       document.syncChanged = () => {
         updateMenus();
-        // A book that syncs here stays in the library beyond the most recent books (#283).
-        const syncs = tracked.bookSync === 'syncing' || tracked.bookSync === 'unavailable';
+        // A book that syncs here stays in the library beyond the most recent books (#283); while the remote cannot be
+        // read (`unavailable`) tracking stays as it was.
+        if (tracked.bookSync === 'unavailable') return;
+        const syncs = tracked.bookSync === 'syncing';
         void recents.track(tracked.book.folder, syncs).then((changed) => { if (changed) publishRecents(); }).catch((error) => console.warn('ImageFlow could not update recent books', error));
       };
       // The cover the recent books keep, for the push to record (#283): a data URL made in the background, decoded here.
@@ -1212,9 +1214,14 @@ async function stopSyncingDocument(document: DocumentSession) {
  * and backend (Refresh, an action and a changed backend read it again), and each book's row, read as it comes into view.
  */
 let libraryCache: { key: string; listing?: Promise<LibraryRemote>; books: Map<string, Promise<LibraryBook>> } | undefined;
+/** Covers by book and digest, for the backend they were read from; content-addressed, so kept across refreshes. */
+let libraryCovers: { key: string; covers: Map<string, Promise<string | undefined>> } | undefined;
+/** Rows read four at a time, so a window full of books does not ask the remote for all of them at once. */
+const libraryRows = limited(4);
 function libraryState() {
   const key = JSON.stringify(usableBackend(settings.value.sync) ?? null);
   if (libraryCache?.key !== key) libraryCache = { key, books: new Map() };
+  if (libraryCovers?.key !== key) libraryCovers = { key, covers: new Map() };
   return libraryCache;
 }
 async function libraryRemote(refresh = false) {
@@ -1230,7 +1237,8 @@ async function libraryRow(bookId: string) {
   const state = libraryState();
   let book = state.books.get(bookId);
   if (!book) {
-    book = syncService.connect().then(({ remote }) => libraryBook(remote, bookId));
+    const covers = libraryCovers!.covers;
+    book = libraryRows(() => syncService.connect().then(({ remote }) => libraryBook(remote, bookId, covers)));
     state.books.set(bookId, book);
     const kept = book;
     kept.catch(() => { if (state.books.get(bookId) === kept) state.books.delete(bookId); });
@@ -1248,14 +1256,25 @@ async function booksFolder() {
 /** The open session of the book at `folder`, if any. */
 const openSession = (folder: string) => [...documents.values()].find((document) => !document.closing && document.book.folder === folder);
 /** The recent books as the library lists them: each with this Mac's sync record of it, read without the remote. */
+/**
+ * The configured remote's identity for the library's local part: `null` with sync off, undefined when it cannot be read
+ * now. The identity read last is used when there is one, so listing the books on this Mac sends no request of its own.
+ */
+async function configuredRemoteId(): Promise<string | null | undefined> {
+  if (!syncService.configured) return null;
+  return syncService.knownRemoteId ?? await syncService.connect().then(({ remoteId }) => remoteId, () => undefined);
+}
 async function libraryLocal(): Promise<RecentDocument[]> {
   const entries = await recents.list();
+  const remoteId = await configuredRemoteId();
   const listed = await Promise.all(entries.map(async (entry) => {
     if (!entry.available) return entry;
     const state = await readSyncState(entry.path).catch(() => undefined);
     const sync = state ? { ...(state.remoteId ? { remoteId: state.remoteId } : {}), ...(state.enabled !== undefined ? { enabled: state.enabled } : {}) } : undefined;
-    // Books that sync stay tracked beyond the most recent ones (`RecentDocuments.track`).
-    await recents.track(entry.path, !!sync?.remoteId && sync.enabled !== false).catch(() => {});
+    // Books that sync with the configured remote stay tracked beyond the most recent ones (`RecentDocuments.track`);
+    // while the remote cannot be read, tracking stays as it was.
+    const syncs = syncsWithRemote(sync, remoteId);
+    if (syncs !== undefined) await recents.track(entry.path, syncs).catch(() => {});
     return { ...entry, ...(sync ? { sync } : {}) };
   }));
   const ids = new Set(listed.map(({ id }) => id));
@@ -2128,7 +2147,8 @@ void app.whenReady().then(async () => {
     if (!valid) return { error: 'Unknown library action.' };
     try { await libraryAction(owner, request as LibraryAction); return { value: null }; }
     catch (error) {
-      if (error instanceof BookDeletedError) libraryCache = undefined;
+      // The library showed something the remote no longer says: it reads the remote again.
+      if (error instanceof BookDeletedError || error instanceof BookNotDeletedError || error instanceof BookDeleteError) libraryCache = undefined;
       return { error: errorMessage(error) };
     } finally { publishRecents(); }
   });
@@ -2144,7 +2164,9 @@ void app.whenReady().then(async () => {
         if (isDocument(entry.path)) {
           const state = await readSyncState(entry.path).catch(() => undefined);
           const present = await documentIdentity(entry.path).then(() => true, () => false);
-          if (present && state?.remoteId && state.enabled !== false) throw new Error('“' + (entry.title || bookName(entry.path)) + '” syncs on this Mac, so it stays in the list. Stop syncing it on this Mac first.');
+          // Only a book that syncs with the configured remote, as far as can be told: one that synced with another
+          // remote, or any book with sync off, can go; with the remote unreadable, removal is not refused on a guess.
+          if (present && syncsWithRemote(state, await configuredRemoteId()) === true) throw new Error('“' + (entry.title || bookName(entry.path)) + '” syncs on this Mac, so it stays in the list. Stop syncing it on this Mac first.');
         }
         await recents.remove(id); publishRecents();
       }
