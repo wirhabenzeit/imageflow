@@ -238,9 +238,14 @@ export type SyncDecision =
 export function changedOriginals(here: Record<string, string>, synced?: Pick<SyncedCommit, 'photoDigests' | 'localDigests' | 'localKeys'>, keys: Record<string, string> = {}) {
   return new Set(Object.entries(here).filter(([id, digest]) => {
     // A photo without a file (`keys`) changed here when its provider shows other content than at the last sync: its
-    // fact differing from the snapshot's says nothing, since another Mac may see another version of it for good.
-    const seen = keys[id] === undefined ? undefined : synced?.localKeys?.[id];
-    if (seen !== undefined) return keys[id] !== seen;
+    // fact differing from the snapshot's says nothing, since another Mac may see another version of it for good. One
+    // this Mac reads for the first time is only new where the snapshot lacks it; what it shows then is where this Mac
+    // starts counting from. Provider revisions have no order, so one case stays: a Mac whose view moved while it
+    // could not sync (to a version the remote has passed by then) pushes that version, once.
+    if (keys[id] !== undefined) {
+      const seen = synced?.localKeys?.[id];
+      return seen !== undefined ? keys[id] !== seen : synced?.photoDigests[id] === undefined;
+    }
     const baseline = synced?.localDigests?.[id] ?? synced?.photoDigests[id];
     return baseline === undefined || digest !== baseline;
   }).map(([id]) => id));
