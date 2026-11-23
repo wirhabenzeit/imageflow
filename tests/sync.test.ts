@@ -92,8 +92,16 @@ async function world(t: { after: (fn: () => Promise<void>) => void }) {
 // (`test`) runs once, here.
 type Remote = StoreRemote;
 const store = (['folder', 's3', 'cloudkit'] as const).find((name) => name === process.env.IMAGEFLOW_SYNC_TEST_STORE) ?? 'memory';
-const test: typeof runTest = store === 'memory' ? runTest : ((() => {}) as unknown as typeof runTest);
-const each = (name: string, run: (t: TestContext) => Promise<void>) => runTest(name + ' (' + store + ' store)', run);
+// This file takes a quarter of an hour on a CI runner, so `npm run test:unit` (every pull request) runs a core set:
+// `core` and `coreEach`, one test or so per feature and the ones that guard a user's data. Everything else (`test`,
+// `each`) runs with IMAGEFLOW_TEST_FULL=1, which `npm run test:unit:full` and `npm run test:desktop` (nightly) set.
+// New tests are `test` or `each` unless they belong to that core.
+const full = process.env.IMAGEFLOW_TEST_FULL === '1';
+const none = (() => {}) as unknown as typeof runTest;
+const core: typeof runTest = store === 'memory' ? runTest : none;
+const test: typeof runTest = full ? core : none;
+const coreEach = (name: string, run: (t: TestContext) => Promise<void>) => runTest(name + ' (' + store + ' store)', run);
+const each: typeof coreEach = full ? coreEach : async () => {};
 async function newRemote(root: string, name = 'Remote'): Promise<Remote> {
   if (store === 'memory') return memoryRemote();
   if (store === 's3') return s3Remote();
@@ -162,7 +170,7 @@ const proxyFile = async (mac: Mac, digest: string) => {
 /** The laptop starts as a Finder or AirDrop copy of the desktop's book, with no sync record of its own. */
 const copyBook = (from: Mac, to: Mac) => cp(from.folder, to.folder, { recursive: true });
 
-test('the decision table: fast-forward or keep both, and facts never diverge', () => {
+core('the decision table: fast-forward or keep both, and facts never diverge', () => {
   const header = (commitId: string, bookStateRevision: string, parents: string[] = []): CommitHeader => ({ version: 2, commitId, bookId: '00000000-0000-4000-8000-000000000000',
     parents, bookStateRevision, createdAt: '2026-11-21T10:00:00.000Z', title: 'Book', stateDigest: 'f'.repeat(64) });
   const [r1, r2, r3] = ['1', '2', '3'].map((digit) => digit.repeat(64));
@@ -189,7 +197,7 @@ test('the decision table: fast-forward or keep both, and facts never diverge', (
   assert.equal(decide({ tips: [c2], localRevision: r3 }), 'diverged');
 });
 
-test('a snapshot carries linked paths as file names, and a pull keeps this Mac’s own paths', () => {
+core('a snapshot carries linked paths as file names, and a pull keeps this Mac’s own paths', () => {
   const project = { schemaVersion: 1, title: 'B', template: { id: 't', version: '1' }, params: {}, spreads: [],
     texts: { a: { path: '/Users/alice/story.md', linked: true }, b: 'texts/b.md' }, files: {} } as never;
   const photos = { x: { path: '/Users/alice/Pictures/x.jpg', linked: true, caption: 'c' }, y: { path: 'photos/y.jpg' } };
@@ -204,7 +212,7 @@ test('a snapshot carries linked paths as file names, and a pull keeps this Mac�
   assert.ok(isUnlocatedPath(((pulled.project.texts as Record<string, { path: string }>).a).path));
 });
 
-each('desktop and laptop: adopt, push after import, proxies first, originals on demand, linked paths stay per Mac', async (t) => {
+coreEach('desktop and laptop: adopt, push after import, proxies first, originals on demand, linked paths stay per Mac', async (t) => {
   const { a, b, remote } = await world(t);
   // Desktop: the first push gives the book its lineage ID and uploads everything.
   const first = await sync(a, remote);
@@ -316,7 +324,7 @@ each('desktop and laptop: adopt, push after import, proxies first, originals on 
   assert.ok(await proxyFile(b, linkedDigest), 'the proxy is back');
 });
 
-each('an in-place re-export and a caption edit elsewhere fast-forward, merge facts and push, with no conflict copy', async (t) => {
+coreEach('an in-place re-export and a caption edit elsewhere fast-forward, merge facts and push, with no conflict copy', async (t) => {
   const { root, a, b, remote } = await world(t);
   const linkedPhoto = join(a.external, 'export.jpg');
   await image(linkedPhoto, '#225522');
@@ -367,7 +375,7 @@ each('a pull deletes template files the snapshot no longer has, and a pulled tem
   assert.equal('networkReview' in await readSyncState(b.folder), false);
 });
 
-each('an incomplete or corrupted remote fails as still syncing and leaves the book untouched', async (t) => {
+coreEach('an incomplete or corrupted remote fails as still syncing and leaves the book untouched', async (t) => {
   const { a, b, remote } = await world(t);
   await sync(a, remote);
   await copyBook(a, b);
@@ -414,7 +422,7 @@ each('an incomplete or corrupted remote fails as still syncing and leaves the bo
   assert.equal((await manifests(b)).photos.shore.caption, 'Remote edit');
 });
 
-each('a pull interrupted after it was staged is finished when the book opens', async (t) => {
+coreEach('a pull interrupted after it was staged is finished when the book opens', async (t) => {
   const { a, b, remote } = await world(t);
   await sync(a, remote);
   await copyBook(a, b);
@@ -441,7 +449,7 @@ each('a pull interrupted after it was staged is finished when the book opens', a
   await assert.rejects(loadProject(b.folder, b.cache, true), /interrupted sync/);
 });
 
-each('an AirDropped book edited before its first sync keeps both versions', async (t) => {
+coreEach('an AirDropped book edited before its first sync keeps both versions', async (t) => {
   const { a, b, remote } = await world(t);
   await sync(a, remote);
   await copyBook(a, b);
@@ -1415,7 +1423,7 @@ test('an incomplete sync folder is still syncing: the book is not changed and no
   assert.equal((await manifests(b)).photos.shore.caption, 'Remote edit');
 });
 
-test('a folder remote keeps files immutable, writes them whole, and clones blobs', async (t) => {
+core('a folder remote keeps files immutable, writes them whole, and clones blobs', async (t) => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'if-folder-')));
   t.after(() => rm(root, { recursive: true, force: true }));
   const remote = await syncFolder(root);
@@ -1479,7 +1487,7 @@ each('after an edit the status follows the local revision against what the remot
   assert.equal(await describeLocalChange(a.folder, syncing), syncing);
 });
 
-test('changes to a sync record are serialized, so none is lost', async (t) => {
+core('changes to a sync record are serialized, so none is lost', async (t) => {
   const { a } = await world(t);
   await Promise.all([
     updateSyncState(a.folder, (state) => ({ ...state, enabled: false })),
@@ -1511,7 +1519,7 @@ if (store === 'memory') {
   }, { sha256: 'checked' });
 }
 
-test('a folder store leaves no temporary files and no empty folders, and never lists hidden files', async (t) => {
+core('a folder store leaves no temporary files and no empty folders, and never lists hidden files', async (t) => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'if-store-')));
   t.after(() => rm(root, { recursive: true, force: true }));
   const folder = new FolderStore(root);
@@ -1571,7 +1579,7 @@ each('every blob of a book lives under its prefix, and two books never share one
   assert.match(coverBlobKey(copy, digest), blobKeyPattern);
 });
 
-each('a remote has one identity, also when two Macs initialize it at once', async (t) => {
+coreEach('a remote has one identity, also when two Macs initialize it at once', async (t) => {
   const { root, a, remote } = await world(t);
   const [first, second] = await Promise.all([remote.remoteId(), new StoreRemote(remote.store).remoteId()]);
   assert.equal(first, second);
@@ -1647,7 +1655,7 @@ each('a commit header is version 2 with an optional cover, and a version 1 reade
   assert.equal((await commit(remote, a, outcome.pushed[0])).coverDigest, forked[0].coverDigest);
 });
 
-test('a remote over a store without a server-side copy copies nothing, so the caller uploads', async () => {
+core('a remote over a store without a server-side copy copies nothing, so the caller uploads', async () => {
   const store: SyncStore = new MemoryStore();
   store.copy = undefined;
   const remote = new StoreRemote(store);
@@ -1660,7 +1668,7 @@ test('a remote over a store without a server-side copy copies nothing, so the ca
 
 const failing = (code: string) => Object.assign(new Error(code + ': injected'), { code });
 
-test('a folder store on a volume without hard links renames into place, and still never replaces an object', async (t) => {
+core('a folder store on a volume without hard links renames into place, and still never replaces an object', async (t) => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'if-store-')));
   t.after(() => rm(root, { recursive: true, force: true }));
   for (const code of ['EPERM', 'ENOTSUP', 'EXDEV']) {
@@ -1691,7 +1699,7 @@ test('a folder store on a volume without hard links renames into place, and stil
   assert.equal(await lstat(join(root, 'refused', 'books')).catch(() => undefined), undefined, 'not even the folders it made');
 });
 
-test('a folder store put or copy whose folder a delete removes meanwhile makes it again', async (t) => {
+core('a folder store put or copy whose folder a delete removes meanwhile makes it again', async (t) => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'if-store-')));
   t.after(() => rm(root, { recursive: true, force: true }));
   // What `delete` does when it empties a folder, at the worst moment: right after a writer made that folder.
@@ -1723,7 +1731,7 @@ test('a folder store put or copy whose folder a delete removes meanwhile makes i
   assert.deepEqual((await readdir(root, { recursive: true })).map(String).filter((path) => path.split('/').at(-1)!.startsWith('.')), []);
 });
 
-each('a blob is copied only to its own key in another book, and never over a blob that is there', async (t) => {
+coreEach('a blob is copied only to its own key in another book, and never over a blob that is there', async (t) => {
   const { remote } = await world(t);
   const [from, to, other] = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
   const bytes = new TextEncoder().encode('original');
@@ -1813,7 +1821,7 @@ const syncWith = async (mac: Mac, service: SyncService) => {
   return outcome;
 };
 
-test('two books sync through the one configured remote, without any setup of their own', async (t) => {
+core('two books sync through the one configured remote, without any setup of their own', async (t) => {
   const { root, a, b } = await world(t);
   const backend = await folderBackend(root, 'Sync');
   const service = new SyncService(() => backend);
@@ -2045,7 +2053,7 @@ test('the remote’s identity is read at every use: a backend emptied while the 
   await assert.rejects(syncWith(a, service), SyncElsewhereError);
 });
 
-test('a sync folder inside a book is refused', async (t) => {
+core('a sync folder inside a book is refused', async (t) => {
   const { a } = await world(t);
   const backend: FolderSyncBackend = { kind: 'folder', path: join(a.folder, 'files', 'Sync') };
   await mkdir(backend.path, { recursive: true });
@@ -2077,7 +2085,7 @@ async function bucketWorld(t: TestContext, root: string) {
   return { fake, backend, mac };
 }
 
-test('two Macs sync a book with owned originals through a bucket, and a wrong key on one shows sign-in until it is corrected, without a restart', async (t) => {
+core('two Macs sync a book with owned originals through a bucket, and a wrong key on one shows sign-in until it is corrected, without a restart', async (t) => {
   const { root, a, b } = await world(t);
   const { fake, backend, mac } = await bucketWorld(t, root);
   const desktop = await mac('Desktop');
@@ -2151,7 +2159,7 @@ test('a bucket emptied and set up again while the app runs gets a new identity a
   assert.equal((await desktop.service.connect()).remoteId, third.remoteId);
 });
 
-test('iCloud: a Mac signed in to iCloud syncs with nothing to set up, and another Apple ID is another remote that asks first', async (t) => {
+core('iCloud: a Mac signed in to iCloud syncs with nothing to set up, and another Apple ID is another remote that asks first', async (t) => {
   const { a } = await world(t);
   const native = new FakeCloudKit();
   const keyIndex = new MemoryKeyIndexCache();
@@ -2300,7 +2308,7 @@ async function ownBook(mac: Mac) {
   await trustBook(mac.folder);
 }
 
-test('a new trusted book syncs after its first save, without any setup', async (t) => {
+core('a new trusted book syncs after its first save, without any setup', async (t) => {
   const { root, a } = await world(t);
   const service = new SyncService(() => undefined);
   await ownBook(a);
@@ -2319,7 +2327,7 @@ test('a new trusted book syncs after its first save, without any setup', async (
   assert.equal(await configured.startsOnOpen(a.folder), false, 'a book that synced is not started again');
 });
 
-test('the sample, template previews, read-only opens and untrusted books never start by themselves; Start Syncing trusts an untrusted book once', async (t) => {
+core('the sample, template previews, read-only opens and untrusted books never start by themselves; Start Syncing trusts an untrusted book once', async (t) => {
   const { root, a } = await world(t);
   const backend = await folderBackend(root, 'Sync');
   const service = new SyncService(() => backend);
@@ -2402,7 +2410,7 @@ test('Stop Syncing and Start Syncing again continue the same history', async (t)
   assert.deepEqual((await commit(remote, a, pushed.pushed[0])).parents, [first.commitId], 'the same history');
 });
 
-each('a push interrupted after its commit: the other Mac pulls and shows previews, its originals read as still uploading, and the first Mac resumes after a restart and a pull', async (t) => {
+coreEach('a push interrupted after its commit: the other Mac pulls and shows previews, its originals read as still uploading, and the first Mac resumes after a restart and a pull', async (t) => {
   const { a, b, remote } = await world(t);
   await sync(a, remote);
   await copyBook(a, b);
@@ -2650,7 +2658,7 @@ test('a sync over iCloud asks the change feed once and lists nothing besides; ov
 
 // Second review of #282.
 
-each('a pull keeps this Mac’s original until the remote has the one that replaces it, pushes nothing back, and replaces it once it has arrived', async (t) => {
+coreEach('a pull keeps this Mac’s original until the remote has the one that replaces it, pushes nothing back, and replaces it once it has arrived', async (t) => {
   const { a, b, remote } = await world(t);
   await sync(a, remote);
   await copyBook(a, b);
@@ -2744,7 +2752,7 @@ test('an unanswered first-configuration sheet starts no book by itself, also one
   assert.equal(restarted.value.syncBooksUnchosen, undefined);
 });
 
-test('the sample books and template preview books are excluded by where they lie', async (t) => {
+core('the sample books and template preview books are excluded by where they lie', async (t) => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'if-excluded-')));
   t.after(() => rm(root, { recursive: true, force: true }));
   const sample = join(root, 'Resources', 'sample');
@@ -2906,7 +2914,7 @@ each('a push records the cached cover, uploads it once, and carries the parent�
   assert.deepEqual((await remote.listBook(first.bookId, 'covers')).map(({ key }) => key).sort(), [coverBlobKey(first.bookId, sha(red)), coverBlobKey(first.bookId, sha(blue))].sort());
 });
 
-each('Download makes the book under a name made unique, never over a book or file that is there, trusted, with its originals left on the remote', async (t) => {
+coreEach('Download makes the book under a name made unique, never over a book or file that is there, trusted, with its originals left on the remote', async (t) => {
   const { a, b, remote } = await world(t);
   await sync(a, remote);
   const [tip] = await tips(remote, a);
@@ -2937,7 +2945,7 @@ each('Download makes the book under a name made unique, never over a book or fil
   assert.equal(downloadName('x'.repeat(300)).length, 100);
 });
 
-each('Delete from Sync on one Mac: the other Mac’s sync pushes nothing, its upload stops, and it keeps the book here only or syncs it again as a new book', async (t) => {
+coreEach('Delete from Sync on one Mac: the other Mac’s sync pushes nothing, its upload stops, and it keeps the book here only or syncs it again as a new book', async (t) => {
   const { a, b, remote } = await world(t);
   await sync(a, remote);
   await copyBook(a, b);
@@ -3137,7 +3145,7 @@ test('the actions on a missing photo leave a kept older original on disk, and Re
   assert.equal(sha(await readFile(kept)), before, 'Remove leaves the kept file');
 });
 
-test('a folder store put that is cancelled leaves no folder it made behind', async (t) => {
+core('a folder store put that is cancelled leaves no folder it made behind', async (t) => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'if-folder-cancel-')));
   t.after(() => rm(root, { recursive: true, force: true }));
   const store = new FolderStore(root);
@@ -3233,7 +3241,7 @@ test('Sync Again of a book with a kept older original makes the file this Mac’
   assert.equal(state.originals.shore.digest, kept);
 });
 
-test('a digest that arrives for a note taken before a pull does not put the old file’s fact back', async (t) => {
+core('a digest that arrives for a note taken before a pull does not put the old file’s fact back', async (t) => {
   const { a } = await world(t);
   await use(a);
   const release = await acquireProjectLock(a.folder);
@@ -3274,7 +3282,7 @@ each('an original carried forward from a snapshot without a record of who named 
 
 // Automatic sync (#284): the engine's fast-forward-only and push-only modes, and the scheduler over the fake CloudKit.
 
-test('an automatic sync applies only a fast-forward: a divergence with one tip or several, also by a race with another Mac, is left as it is', async (t) => {
+core('an automatic sync applies only a fast-forward: a divergence with one tip or several, also by a race with another Mac, is left as it is', async (t) => {
   const { a, b, remote } = await world(t);
   await sync(a, remote);
   await copyBook(a, b);
@@ -3468,7 +3476,7 @@ test('the pull gate is read again as a fast-forward is applied: an editor opened
   assert.equal((await manifests(b)).photos.shore.caption, 'Opened an editor meanwhile');
 });
 
-test('an edit during an automatic push stops it and is kept; one during a pull being applied waits for it', async (t) => {
+core('an edit during an automatic push stops it and is kept; one during a pull being applied waits for it', async (t) => {
   const { a, b, remote } = await world(t);
   await sync(a, remote);
   await copyBook(a, b);
@@ -3546,7 +3554,7 @@ async function importPhoto(mac: Mac, name: string, color: string) {
   return { id, digest: sha(await readFile(photo)) };
 }
 
-each('Clean Up: an unused original, preview and cover go after the grace period; what a tip names, content and commits stay', async (t) => {
+coreEach('Clean Up: an unused original, preview and cover go after the grace period; what a tip names, content and commits stay', async (t) => {
   const { a, remote } = await world(t);
   const red = await jpeg('#aa0000');
   await sync(a, remote, { cover: async () => red });
@@ -3654,7 +3662,7 @@ test('storage figures: per book, with the part that is originals, titled from th
   assert.deepEqual({ ...report.books[1], bytes: 0 }, { bookId: other, title: '', bytes: 0, originals: 0, deleted: true });
 });
 
-each('Duplicate of a synced book copies its originals inside the store at the copy’s first sync, and uploads none where it can', async (t) => {
+coreEach('Duplicate of a synced book copies its originals inside the store at the copy’s first sync, and uploads none where it can', async (t) => {
   const { a, remote } = await world(t);
   await sync(a, remote);
   const source = await bookId(a);

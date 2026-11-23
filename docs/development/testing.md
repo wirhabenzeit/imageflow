@@ -15,7 +15,7 @@ Packaged checks cover document registration, Finder open events, proof and print
 
 ## Sync through an S3-compatible bucket
 
-The S3 store (`desktop/sync-store-s3.ts`) is tested against an in-process fake server (`tests/s3-fake.ts`) that checks every request's SigV4 signature and payload SHA-256 and injects failures; `npm run test:unit` runs the store conformance suite against it, and the sync engine scenarios against the memory store. `npm run test:unit:full` also runs the engine scenarios against the folder store, the fake S3 server and the fake CloudKit, which takes several minutes; `npm run test:desktop`, and so the nightly run, includes it.
+The S3 store (`desktop/sync-store-s3.ts`) is tested against an in-process fake server (`tests/s3-fake.ts`) that checks every request's SigV4 signature and payload SHA-256 and injects failures; `npm run test:unit` runs the store conformance suite against it, and the core set of the sync engine scenarios (`core` and `coreEach` in `tests/sync.test.ts`, about 30 tests) against the memory store. The rest of that file (`test`, `each`) runs only in the full run: add new sync tests there unless they guard a user's data or are the one test of a feature. `npm run test:unit:full` runs all of them, also against the folder store, the fake S3 server and the fake CloudKit, which takes several minutes; `npm run test:desktop`, and so the nightly run, includes it.
 
 The same tests run against a real bucket when these variables name one, which is how the spike of #281 is run against R2, B2, MinIO or S3. Use a bucket (or a prefix) for tests only and a key limited to it; each run writes below `<prefix>run-<uuid>/` and deletes what it wrote at the end.
 
