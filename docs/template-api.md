@@ -1353,7 +1353,7 @@ render: (ctx) => {
 },
 ```
 
-- **Choosing:** the generated control lists the project's files with an accepted extension, offers **Choose file…** to add one and **Remove** to clear the assignment. Imports follow the book's **Book → Copy Assets into Book** setting and register a copied or linked file in `project.json`; assigning it is a normal edit. Undo removes the assignment and keeps the file; clearing never deletes a file.
+- **Choosing:** the generated control lists the project's files with an accepted extension, offers **Choose file…** to add one and **Remove** to clear the assignment. Imports follow the book's **Assets → Copy Assets into Book** setting and register a copied or linked file in `project.json`; assigning it is a normal edit. Undo removes the assignment and keeps the file; clearing never deletes a file.
 - **Value:** the file's ID in the project's `files` registry, or `''`. Paths in the registry are relative to the project, so moving the project folder keeps its files.
 - **Content:** `file(id)` returns the file's name, extension and UTF-8 text, read when the project loads (files are limited to 20 MB). Preview and export render from the same text. It returns `undefined` when nothing is assigned or the assigned file cannot be read.
 - **Diagnostics:** ImageFlow reports an assigned file that is no longer registered, missing or unreadable, or whose extension is not in `accept`, as a Book check error for that element, which requires confirmation before PDF export. An unassigned file parameter is valid. The template parses the content. If it cannot, it should render without it and report a [template finding](#template-findings) that names the element, parameter and file.

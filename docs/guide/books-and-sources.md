@@ -20,13 +20,13 @@ Changes save automatically. **Undo** and **Redo** cover edits made in ImageFlow 
 
 ## Copy or link files
 
-**Book → Copy Assets into Book** controls new imports for this book. Checked (the default), it copies photos, Markdown and parameter files into the package. Uncheck it to link to original files instead. Existing assets keep their storage. A chain symbol marks linked files.
+**Assets → Copy Assets into Book** controls new imports for this book. Checked (the default), it copies photos, Markdown and parameter files into the package. Uncheck it to link to original files instead. Existing assets keep their storage. A chain symbol marks linked files.
 
 Linked files refresh after external saves, so a photo you re-export from Lightroom to the same file shows its new version. If an original goes missing, its last preview (for a photo) or a cached copy (for a text or file) may remain visible with a warning. PDF export asks for confirmation when used originals are unavailable and marks affected pages. Copying linked files into the book requires the originals.
 
 ## Manage assets
 
-**Book → Assets…** lists the book's photos, texts and files, with filters and availability badges.
+**Assets → Manage Assets…** lists the book's photos, texts and files, with filters and availability badges.
 
 - Click, Shift-click or Command-click to select. Command-A selects the current filter.
 - Right-click or press Shift-F10 for actions. Space opens Quick Look, Return reveals files, and Delete removes assets with Undo.
@@ -39,16 +39,16 @@ Linked files refresh after external saves, so a photo you re-export from Lightro
 
 ImageFlow can lay out photos straight from a Lightroom Classic catalog without exporting them first. It shows a 1400-pixel preview that Lightroom renders, and lays the photo out at its full size after Lightroom's crop, so resolution checks stay right. When you edit a photo in Lightroom, its preview in ImageFlow refreshes within a few seconds; a change of title, caption or rating updates what the book shows without rendering again.
 
-**Install the plugin once.** In **Settings → General → Lightroom**, choose **Install Plugin**. ImageFlow copies its plugin into Lightroom's Modules folder (`~/Library/Application Support/Adobe/Lightroom/Modules`). Quit and reopen Lightroom Classic if it is running. If **File → Plug-in Manager** in Lightroom lists ImageFlow as disabled, enable it there. Settings says when a newer plugin comes with an ImageFlow update; choose **Update Plugin** and reopen Lightroom.
+**Install the plugin once.** In **Settings → Sources**, choose **Install Plugin** on the Lightroom Classic card. ImageFlow copies its plugin into Lightroom's Modules folder (`~/Library/Application Support/Adobe/Lightroom/Modules`). Quit and reopen Lightroom Classic if it is running. If **File → Plug-in Manager** in Lightroom lists ImageFlow as disabled, enable it there. Settings says when a newer plugin comes with an ImageFlow update; choose **Update Plugin** and reopen Lightroom.
 
 **Add photos**, either way:
 
 - In Lightroom, select photos and choose **File → Plug-in Extras → Send to ImageFlow** (also in **Library → Plug-in Extras**). They go into the book in front in ImageFlow; if no book is open, ImageFlow asks for one.
-- In ImageFlow, choose **File → Import from Lightroom Classic…**. It adds the photos selected in Lightroom now.
+- In ImageFlow, choose **Assets → Import Selected from Lightroom Classic…**. It says how many photos are selected in Lightroom and adds them once you confirm. The status bar counts the previews while Lightroom renders them.
 
 Videos are left out. A photo the book holds already is not added again, and **Edit → Undo** removes what an import added. A Lightroom photo takes its title, caption and credit (Lightroom's copyright, else its creator) from Lightroom; whatever you type in the Inspector wins, and **Revert** goes back to Lightroom's. ImageFlow never writes into the catalog.
 
-**When Lightroom is not running**, or another catalog is open, the photos show as **Offline** and are drawn from their last preview. Choose **Open Lightroom Classic** in the asset's menu or at the bottom of **Book → Assets…**; the photos come back once the plugin connects. A photo removed from the catalog shows as missing.
+**When Lightroom is not running**, or another catalog is open, the photos show as **Offline** and are drawn from their last preview. Choose **Open Lightroom Classic** in the asset's menu or at the bottom of **Assets → Manage Assets…**; the photos come back once the plugin connects. A photo removed from the catalog shows as missing.
 
 **Export.** In this version a PDF export uses the previews of Lightroom photos, marks those pages ORIGINAL UNAVAILABLE and asks you to confirm a proof. Full-resolution renders from Lightroom at export time, and **Copy into Book** for these photos, follow in a later version. Until then, export the photos from Lightroom to files and import those for print.
 
@@ -70,5 +70,5 @@ A book can sync through a folder your Macs share, such as one in iCloud Drive or
 - **File → Open from Sync Folder…** makes a new book on this Mac from a book another Mac synced. It is not trusted yet, so it asks before its template reaches any website.
 - **File → Sync → Sync Now**, or a click on the sync status in the status bar, sends this Mac's changes and takes the other Mac's. The status shows whether the book is in sync, has changes to sync or fetch, changed on two Macs, or is waiting for the folder to catch up.
 - When a book changed on both Macs, sync keeps this Mac's version as a separate copy beside the book ("Conflict" and the date in its name) and continues with the version in the folder. If the folder has several versions, you choose one to continue with.
-- Photos copied into the book on another Mac show as previews until you choose **File → Sync → Download Originals**. To always download them after a sync, turn on **Settings → General → Keep originals of synced books on this Mac**. Linked photos stay where each Mac keeps them; use **Locate Folder…** on each Mac.
+- Photos copied into the book on another Mac arrive as previews first. Their originals download in the background after **File → Open from Sync Folder…** and after each sync, with progress and Cancel in the status bar; the book stays usable meanwhile, and Book check says "Original not downloaded yet" until they arrive. To keep only previews on this Mac, turn off **Settings → General → Keep originals of synced books on this Mac**; **File → Sync → Download Originals** then fetches them when you need them, for example to print. Linked photos stay where each Mac keeps them; use **Locate Folder…** on each Mac.
 - If a sync stops partway through, for example because the disk is full, the book stays openable and the status says why. The next sync continues with the folder's version, and keeps this Mac's version as a copy only if you edited the book since.

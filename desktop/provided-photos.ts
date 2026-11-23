@@ -1,6 +1,8 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import sharp from 'sharp';
 import { assetFactSchema } from '../src/asset-facts';
 import type { AssetFact } from '../src/asset-facts';
 import { canonicalJson } from '../src/canonical-json';
@@ -119,6 +121,30 @@ function serialized<T>(folder: string, task: () => Promise<T>): Promise<T> {
   return run;
 }
 
+// Previews are kept at most this long on their long edge, as ImageFlow's own are.
+const previewEdge = 1400;
+/**
+ * A provider's preview as ImageFlow keeps and syncs it: without the metadata a renderer rewrites (`strippedPreview`),
+ * at most 1400 px, and as a compact JPEG (mozjpeg, quality 82, 4:2:0) with its colour profile. Lightroom exports its
+ * previews at full chroma and high quality, about 800 KB each; this is about a quarter of that, with no difference a
+ * screen shows. Equal pixels still give equal bytes. A PNG preview (one with transparency) stays a PNG, and a preview
+ * is never made larger than it came.
+ */
+export async function compactPreview(input: Uint8Array): Promise<Buffer> {
+  const stripped = strippedPreview(input);
+  const image = sharp(stripped, { failOn: 'error' });
+  const { hasAlpha } = await image.metadata();
+  const sized = image.resize({ width: previewEdge, height: previewEdge, fit: 'inside', withoutEnlargement: true }).keepIccProfile();
+  const compact = await (hasAlpha ? sized.png({ compressionLevel: 9 }) : sized.jpeg({ quality: 82, mozjpeg: true, chromaSubsampling: '4:2:0' })).toBuffer();
+  return compact.length < stripped.length ? compact : stripped;
+}
+
+/**
+ * Who hears how many previews are done: an import of photos without a file runs its save and reload inside this, so the
+ * status bar can count the previews a provider such as Lightroom Classic renders while the book loads again.
+ */
+export const previewProgress = new AsyncLocalStorage<(done: number, total: number) => void>();
+
 /**
  * Records what a provider reported for photos without a file (`observed`, in the order of `refs`), asks it for the
  * previews that are missing or out of date, and stores them. Photos the provider reported as files are not in its
@@ -152,6 +178,9 @@ export function refreshProvided(folder: string, provider: SourceProvider<Locator
     if (!provider.preview) { for (const reported of wanted) failed(reported, 'Preview unavailable: The source provides no previews.'); return outcomes; }
     await mkdir(staging, { recursive: true });
     const directory = await mkdtemp(join(await realpath(staging), 'previews-'));
+    const report = previewProgress.getStore();
+    let done = 0;
+    report?.(0, wanted.length);
     try {
       // A preview made while its photo changed is discarded and asked for once more, as a materialization is.
       let pending = wanted;
@@ -173,7 +202,7 @@ export function refreshProvided(folder: string, provider: SourceProvider<Locator
               else failed(reported, 'Preview unavailable: The photo changed while its preview was made.');
               continue;
             }
-            const bytes = strippedPreview(await readFile(result.file));
+            const bytes = await compactPreview(await readFile(result.file));
             const digest = createHash('sha256').update(bytes).digest('hex');
             await store.put(digest, bytes);
             const previous = facts.get(result.id);
@@ -182,6 +211,7 @@ export function refreshProvided(folder: string, provider: SourceProvider<Locator
             outcomes.set(result.id, { state: 'available', fact, ...(previous ? { previous } : {}), change: previous?.digest === digest ? previous.revisions?.revision === result.after.revision ? 'unchanged' : 'metadata' : 'content' });
           } catch (error) { failed(reported, 'Preview unavailable: ' + (error instanceof Error ? error.message : String(error))); }
           finally { await rm(result.file, { force: true }); }
+          if (attempt === 0) report?.(++done, wanted.length);
         }
         // A photo the provider skipped, or one an abort left out.
         for (const reported of byId.values()) failed(reported, 'Preview unavailable: The source produced no preview.');

@@ -125,10 +125,16 @@ async function* render(bridge: LightroomPort, refs: readonly SourceRef<Lightroom
 
 /** The Lightroom Classic provider over a bridge (desktop/lightroom/bridge.ts). */
 export function lightroomProvider(bridge: LightroomPort): SourceProvider<LightroomLocator> {
+  // The catalog each book last observed its photos with (null: none connected). A watch starts from it, not from the
+  // connection when the watch starts: a book that loaded just before Lightroom connected has its photos offline, and
+  // the plugin connecting before its watch started must still bring them back.
+  const observedWith = new Map<string, string>();
+  const catalogKey = () => JSON.stringify(bridge.connection?.catalog.id ?? null);
   return {
     provider: 'lightroom',
-    async observe(_book, refs) {
+    async observe(book, refs) {
       const connection = bridge.connection;
+      observedWith.set(book, catalogKey());
       const results: (Observed | undefined)[] = refs.map(({ locator }) => unreachable(locator, connection));
       // Only photos of the open catalog are asked for: a UUID means nothing in another one.
       const open = refs.flatMap((ref, index) => results[index] ? [] : [{ ref, index }]);
@@ -149,24 +155,27 @@ export function lightroomProvider(bridge: LightroomPort): SourceProvider<Lightro
     },
     preview: (_book, refs, options) => render(bridge, refs, 'preview', options),
     materialize: (_book, refs, options) => render(bridge, refs, 'full', options),
-    watch(_book, refs, changed) {
+    watch(book, refs, changed) {
       const ids = new Map<string, string[]>();
       for (const { id, locator } of refs) ids.set(uuidKey(locator.uuid), [...ids.get(uuidKey(locator.uuid)) ?? [], id]);
       const owner = {};
       // A connection that comes, goes or opens another catalog changes every photo's state: all are observed again, so
       // photos come back as available when Lightroom reconnects.
-      let seen = JSON.stringify(bridge.connection?.catalog.id ?? null);
+      let seen = observedWith.get(book) ?? catalogKey();
+      // Lightroom connected, quit or switched catalogs between the book's last look and this watch: look again now.
+      let pending: NodeJS.Immediate | undefined;
+      if (seen !== catalogKey()) { seen = catalogKey(); pending = setImmediate(() => changed(refs.map(({ id }) => id))); }
       const stops = [
         bridge.track(owner, [...new Set(refs.map(({ locator }) => locator.uuid))]),
         bridge.onChanges((uuids) => { const moved = [...new Set(uuids.flatMap((uuid) => ids.get(uuidKey(uuid)) ?? []))]; if (moved.length) changed(moved); }),
         bridge.onConnection(() => {
-          const now = JSON.stringify(bridge.connection?.catalog.id ?? null);
+          const now = catalogKey();
           if (now === seen) return;
           seen = now;
           changed(refs.map(({ id }) => id));
         }),
       ];
-      return () => stops.forEach((stop) => stop());
+      return () => { if (pending) clearImmediate(pending); stops.forEach((stop) => stop()); };
     },
     // Retry is always offered; an offline photo can also have Lightroom launched for it. A missing one cannot be helped.
     repairs: (state) => state === 'offline' ? ['launch'] : [],

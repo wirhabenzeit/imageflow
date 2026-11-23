@@ -27,12 +27,12 @@ import { assetPageLabels, assetUsage, usageLabel } from '../src/asset-usage';
 import { importFeedback } from '../src/import-feedback';
 import { configureSourceStore, pruneSourceCache, SourceStore } from './source-store';
 import { bookTrusted, configureSourceAccess, distrustBook, trustBook } from './source-access';
-import { app, autoUpdater, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net, powerMonitor, protocol, shell } from 'electron';
+import { app, autoUpdater, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, powerMonitor, protocol, shell } from 'electron';
 import type { BaseWindow, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, isAbsolute, parse } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
@@ -324,6 +324,27 @@ function sampleFolder(name: string) {
 }
 /** Removing a file that parameters still use clears those assignments, so the person confirms it first and sees where
  * it is used. Anything else is removed at once; every removal is one undoable edit. */
+/**
+ * Copy into Book cuts a linked file or a Lightroom Classic photo off from its source: later edits there no longer reach
+ * the book. It asks first, and says that Lightroom renders each photo at full size on the way. When an original is
+ * unavailable the copy fails anyway, so it does not ask.
+ */
+async function confirmCopy(owner: BrowserWindow, document: DocumentSession, entries: SourceEntry[]) {
+  const copied = entries.filter((entry) => sourceProvider(entry) !== 'package');
+  if (!copied.length || copied.some(({ key }) => document.book.sources?.[key] && document.book.sources[key].state !== 'available')) return true;
+  const lightroom = copied.filter((entry) => sourceProvider(entry) === 'lightroom').length;
+  const files = copied.length - lightroom;
+  const what = copied.length === 1 ? copied[0].name : copied.length + ' ' + (files ? 'assets' : 'photos');
+  const cut = lightroom && files ? 'They no longer follow Lightroom Classic or their original files'
+    : lightroom ? (copied.length === 1 ? 'It no longer follows Lightroom Classic' : 'They no longer follow Lightroom Classic')
+    : copied.length === 1 ? 'It no longer follows its original file' : 'They no longer follow their original files';
+  const answer = await dialog.showMessageBox(owner, { type: 'warning', buttons: ['Copy into Book', 'Cancel'], defaultId: 1, cancelId: 1,
+    message: 'Copy ' + what + ' into the book?',
+    detail: cut + ': later edits there won’t reach the book. The book grows by the size of the originals.'
+      + (lightroom ? ' Lightroom renders ' + (lightroom === 1 ? 'the photo' : 'each photo') + ' at full size first, which can take a while.' : '') });
+  return answer.response === 0;
+}
+
 async function confirmRemoval(owner: BrowserWindow, document: DocumentSession, chosen: SourceEntry[]) {
   const usage = assetUsage(document.book, assetPageLabels(document.summary));
   const used = chosen.filter(({ kind, id }) => kind === 'file' && usage.file[id]?.length);
@@ -456,8 +477,9 @@ function scheduleCover(document: DocumentSession, book: OpenProject) {
     void captureCover(document, book);
   }, 1000);
 }
+// Books closing because the app quits stay on the list: a restart after a main-process change reopens them.
 async function saveDevState() {
-  if (devState) await writeFile(devState, JSON.stringify([...documents.values()].filter((document) => !document.closing)
+  if (devState && !quitting && !preparingQuit) await writeFile(devState, JSON.stringify([...documents.values()].filter((document) => !document.closing)
     .map((document) => ({ folder: document.book.folder })))).catch(() => {});
 }
 async function openDocument(path: string): Promise<DocumentSession | undefined> {
@@ -537,7 +559,7 @@ async function openDocument(path: string): Promise<DocumentSession | undefined> 
         }
       });
       document.networkTrust = bookNetworkTrust;
-      document.keepOriginals = () => !!settings.value.keepOriginals;
+      document.keepOriginals = () => settings.value.keepOriginals !== false;
       document.syncChanged = () => updateMenus();
       document.dependencyCache = dependencyCache();
       document.authoringTypes = join(__dirname, 'authoring-types');
@@ -1129,12 +1151,13 @@ async function openFromSyncFolder(owner: BrowserWindow | undefined) {
   if (save.canceled || !save.filePath) return;
   const path = await cloneFromRemote({ remote, tip, destination: documentPath(save.filePath), syncFolder: folder });
   const document = await openDocument(path);
-  if (document && settings.value.keepOriginals) void document.downloadSyncedOriginals().catch((error) => report(document.window, error));
+  if (document && settings.value.keepOriginals !== false) void document.downloadSyncedOriginals().catch((error) => report(document.window, error));
 }
 
 async function syncCommand(document: DocumentSession, action: SyncAction) {
   if (action === 'sync') await syncDocument(document);
   else if (action === 'download') await document.downloadSyncedOriginals();
+  else if (action === 'cancel-download') document.cancelDownload();
   else if (action === 'link') await linkSyncFolder(document);
   else if (action === 'unlink') await unlinkSyncFolder(document);
   else throw new Error('Unknown sync action.');
@@ -1179,7 +1202,6 @@ function installMenu() {
       { type: 'separator' }, { role: 'close' }, registered('save-copy'), registered('rename-book'), registered('move-book'),
       { label: 'Revert To', submenu: [registered('revert-opened'), registered('reload')] },
       { type: 'separator' },
-      registered('import'), registered('import-lightroom'),
       registered('export'), registered('export-proof'), { type: 'separator' },
       { id: 'open-sync-folder', label: 'Open from Sync Folder…', click: (_item, owner) => {
         const window = owner ? BrowserWindow.fromId(owner.id) ?? undefined : undefined;
@@ -1203,8 +1225,11 @@ function installMenu() {
     { label: 'Book', submenu: [
       registered('add-spread'), registered('duplicate-spread'), registered('delete-spread'),
       { type: 'separator' }, registered('move-spread-up'), registered('move-spread-down'), registered('swap-pages'),
-      { type: 'separator' }, registered('manage-sources'), registered('copy-assets', 'copy-assets', 'checkbox'),
       { type: 'separator' }, registered('book-check'),
+    ] },
+    { label: 'Assets', submenu: [
+      registered('import'), registered('import-lightroom'),
+      { type: 'separator' }, registered('manage-sources'), registered('copy-assets', 'copy-assets', 'checkbox'),
     ] },
     { label: 'Templates', submenu: [{ label: 'Manage Templates…', click: () => showTemplates() },
       { type: 'separator' }, { id: 'rebuild-dependencies', label: 'Rebuild Template Dependencies', enabled: false, click: (_item, owner) => void rebuildBookDependencies(owner) },
@@ -1224,7 +1249,7 @@ function installMenu() {
       { label: 'Sort Photos By', submenu: [registered('photos-sort-capture', undefined, 'radio'), registered('photos-sort-name', undefined, 'radio'), registered('photos-sort-import', undefined, 'radio')] },
       { label: 'Group Photos', submenu: [registered('photos-group-none', undefined, 'radio'), registered('photos-group-day', undefined, 'radio'),
         { label: 'By Time Gap', submenu: [registered('photos-gap-30', undefined, 'radio'), registered('photos-gap-120', undefined, 'radio'), registered('photos-gap-360', undefined, 'radio'), registered('photos-gap-custom')] }] },
-      registered('photos-show-time', undefined, 'checkbox'),
+      registered('photos-show-time', undefined, 'checkbox'), registered('photos-show-source', undefined, 'checkbox'),
       { type: 'separator' }, registered('presentation'), registered('presentation-start'),
       // macOS supplies its own full-screen item, including the system keyboard shortcut.
       ...process.platform === 'darwin' ? [] : [{ type: 'separator' as const }, { role: 'togglefullscreen' as const }],
@@ -1262,7 +1287,7 @@ function updateMenus() {
   if (rebuild) rebuild.enabled = state.document && state.writable;
   const sync = document && !document.closing ? document.syncView : undefined;
   const syncEnabled: Record<string, boolean> = { 'sync-now': state.document && state.writable && !sync?.syncing,
-    'sync-download': !!sync && !sync.syncing && (sync.status?.pendingOriginals ?? 0) > 0, 'sync-link': state.document && state.writable && !sync?.syncing,
+    'sync-download': !!sync && !sync.syncing && !sync.downloading && (sync.status?.pendingOriginals ?? 0) > 0, 'sync-link': state.document && state.writable && !sync?.syncing,
     'sync-unlink': !!sync && !sync.syncing };
   for (const [id, enabled] of Object.entries(syncEnabled)) { const item = menu?.getMenuItemById(id); if (item) item.enabled = enabled; }
   const zoomAlias = menu?.getMenuItemById('zoom-in-equals');
@@ -1347,9 +1372,21 @@ function publishUpdates() {
 // points a development build at another Modules folder, so trying the install never touches Lightroom's own.
 const lightroomLocations = () => ({ bundled: join(app.isPackaged ? process.resourcesPath : app.getAppPath(), 'ImageFlow.lrplugin'),
   modules: (!app.isPackaged && process.env.IMAGEFLOW_LIGHTROOM_MODULES) || defaultModules() });
+// Where Lightroom Classic installs itself. Settings shows its icon and offers to open it only when it is there.
+const lightroomAppPath = '/Applications/Adobe Lightroom Classic/Adobe Lightroom Classic.app';
+let lightroomIcon: Promise<string | undefined> | undefined;
+async function lightroomApp(): Promise<LightroomState['app']> {
+  const installed = await stat(lightroomAppPath).then(() => true, () => false);
+  // app.getFileIcon with size 'large' crashes Electron on macOS, and 'normal' is 32 px; a Quick Look thumbnail of the
+  // bundle is its icon at the card's size for a Retina screen.
+  if (installed) lightroomIcon ??= nativeImage.createThumbnailFromPath(lightroomAppPath, { width: 88, height: 88 })
+    .then((image) => image.isEmpty() ? undefined : image.toDataURL(), () => undefined);
+  const [running, icon] = await Promise.all([lightroomRunning(), installed ? lightroomIcon : undefined]);
+  return { installed: installed || running, running, ...(icon ? { icon } : {}) };
+}
 async function lightroomState(): Promise<LightroomState> {
   const connection = lightroom?.connection;
-  return { plugin: await pluginStatus(lightroomLocations()),
+  return { plugin: await pluginStatus(lightroomLocations()), app: await lightroomApp(),
     ...(connection ? { connection: { plugin: connection.plugin.version, ...(connection.catalog.name ? { catalog: connection.catalog.name } : {}) } } : {}) };
 }
 async function publishLightroom() {
@@ -1365,9 +1402,12 @@ async function publishLightroom() {
  */
 async function importLightroomPhotos(document: DocumentSession, { catalog, photos }: SentPhotos) {
   const locators: LightroomLocator[] = photos.map(({ uuid, name }) => ({ provider: 'lightroom', catalog, uuid, ...(name ? { name } : {}) }));
+  const count = (total: number) => total + ' photo' + (total === 1 ? '' : 's');
   const result = await document.run(async () => {
-    document.notify({ building: true });
-    try { return await document.importProvided(locators, 'Import from Lightroom Classic'); }
+    document.notify({ building: true, stage: 'Importing ' + count(photos.length) + '…' });
+    const previews = (done: number, total: number) => document.notify({ building: true,
+      stage: total > 1 ? 'Lightroom previews' : 'Rendering Lightroom preview…', ...(total > 1 ? { done, total } : {}) });
+    try { return await document.importProvided(locators, 'Import from Lightroom Classic', previews); }
     catch (error) { document.notify({ error: errorMessage(error) }); throw error; }
   });
   if ('error' in result) throw new Error(result.error);
@@ -1375,22 +1415,28 @@ async function importLightroomPhotos(document: DocumentSession, { catalog, photo
   if (!document.window.isDestroyed()) document.window.webContents.send(channels.appNotice, importFeedback(result.value.imported.length, result.value.counts));
 }
 
-/** Import from Lightroom Classic…: the photos selected in Lightroom now. */
+/** Import Selected from Lightroom Classic…: the photos selected in Lightroom now, after saying how many they are. */
 async function importFromLightroom(document: DocumentSession) {
   if (!lightroom?.connection) {
     const answer = await dialog.showMessageBox(document.window, { type: 'info', message: 'Lightroom Classic is not connected',
-      detail: 'Open Lightroom Classic with the ImageFlow plugin installed (Settings → General → Lightroom), select the photos to add, and choose Import from Lightroom Classic… again.',
+      detail: 'Open Lightroom Classic with the ImageFlow plugin installed (Settings → Sources), select the photos to add, and choose Import Selected from Lightroom Classic… again.',
       buttons: ['Open Lightroom Classic', 'Lightroom Settings…', 'Cancel'], defaultId: 0, cancelId: 2 });
     if (answer.response === 0) await launchLightroom();
-    else if (answer.response === 1) showSettings('general');
+    else if (answer.response === 1) showSettings('sources');
     return;
   }
   const selection = parseResult(selectionResultSchema, await lightroom.request('selection', {}, { timeout: 30_000 }), 'selection');
   if (!selection.photos.length) {
     await dialog.showMessageBox(document.window, { type: 'info', message: 'No photos are selected in Lightroom Classic',
-      detail: 'Select the photos to add in Lightroom Classic, then choose Import from Lightroom Classic… again. Videos are left out.', buttons: ['OK'] });
+      detail: 'Select the photos to add in Lightroom Classic, then choose Import Selected from Lightroom Classic… again. Videos are left out.', buttons: ['OK'] });
     return;
   }
+  const total = selection.photos.length;
+  const answer = await dialog.showMessageBox(document.window, { type: 'question',
+    message: 'Import ' + (total === 1 ? 'the photo' : total + ' photos') + ' selected in Lightroom Classic?',
+    detail: 'Lightroom renders a preview of each. Photos the book holds already are not added again.',
+    buttons: ['Import', 'Cancel'], defaultId: 0, cancelId: 1 });
+  if (answer.response !== 0 || document.closing) return;
   await importLightroomPhotos(document, selection);
 }
 
@@ -1932,7 +1978,11 @@ void app.whenReady().then(async () => {
       collectSources(document.book, chosenKeys, { ...options, failed: (photo) => unproduced.push(photo.name) }));
     const unproducedMessage = () => unproduced.length ? (unproduced.length === 1 ? unproduced[0] + ' could not be copied: its source could not produce the original.'
       : unproduced.length + ' photos could not be copied: their source could not produce the originals (' + unproduced.join(', ') + ').') : undefined;
-    if (request.action === 'collect') { next = await collect(keys); message = unproducedMessage(); }
+    if (request.action === 'collect') {
+      const entries = keys ? chosen : sourceEntries(document.book);
+      if (!await confirmCopy(owner, document, entries)) return { summary: document.summary };
+      next = await collect(keys); message = unproducedMessage();
+    }
     else if (request.action === 'import') {
       // Photos, Markdown and files the template's file parameters accept; the Assets window supplies its own accept list.
       if (request.paths !== undefined && (!Array.isArray(request.paths) || request.paths.length > 1000 || !request.paths.every((path) => typeof path === 'string'))) throw new Error('Invalid import.');
@@ -1967,7 +2017,10 @@ void app.whenReady().then(async () => {
     } else {
       if (!source) throw new Error('Choose a registered source.');
       // A linked file, or a photo without a file; one in the package is in the book already.
-      if (request.action === 'copy') { next = await collect(chosen.filter((entry) => sourceProvider(entry) !== 'package').map(({ key }) => key)); message = unproducedMessage(); }
+      if (request.action === 'copy') {
+        if (!await confirmCopy(owner, document, chosen)) return { summary: document.summary };
+        next = await collect(chosen.filter((entry) => sourceProvider(entry) !== 'package').map(({ key }) => key)); message = unproducedMessage();
+      }
       else if (request.action === 'locate' || request.action === 'replace') {
         // Locate is offered where the photo's provider offers it (`SourceProvider.repairs`); Replace is always a file.
         const status = document.book.sources?.[source.key];
@@ -1988,7 +2041,7 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.syncAction, async (event, action: unknown): Promise<Result<void>> => {
     const document = editorOwner(event);
     if (!document || quitting) return { error: 'Request is only available to an open book.' };
-    if (action !== 'sync' && action !== 'download' && action !== 'link' && action !== 'unlink') return { error: 'Unknown sync action.' };
+    if (action !== 'sync' && action !== 'download' && action !== 'cancel-download' && action !== 'link' && action !== 'unlink') return { error: 'Unknown sync action.' };
     try { await syncCommand(document, action); return { value: undefined }; }
     catch (error) { return { error: errorMessage(error) }; }
   });
@@ -2005,7 +2058,7 @@ void app.whenReady().then(async () => {
       defaultPath: join(app.getPath('documents'), bookName(document.book.folder) + ' Copy.imageflow'), filters: [{ name: 'ImageFlow Book', extensions: ['imageflow'] }] });
     if (choice.canceled || !choice.filePath) return null;
     let folder: string;
-    try { folder = await document.copying(document.window, (options) => saveDocumentCopy(document.book, choice.filePath!, includeAssets!, undefined, false, options)); }
+    try { folder = await document.copying(document.window, (options) => saveDocumentCopy(document.book, choice.filePath!, includeAssets!, undefined, false, options), 'Duplicating book'); }
     catch (error) { if (error instanceof CopyCancelled) return null; throw error; }
     await openDocument(folder);
     return null;
@@ -2046,7 +2099,7 @@ void app.whenReady().then(async () => {
     return document.activate(await document.projectSession.undo(direction));
   }));
   ipcMain.handle(channels.showSettings, (event, pane: SettingsPane) => {
-    if ((appOwner(event) || pickerOwner(event)) && (pane === 'general' || pane === 'agents')) showSettings(pane);
+    if ((appOwner(event) || pickerOwner(event)) && (pane === 'general' || pane === 'sources' || pane === 'agents')) showSettings(pane);
   });
   ipcMain.handle(channels.templatePreview, async (event, id: unknown, hash: unknown) => {
     if ((!templatesOwner(event) && !pickerOwner(event)) || typeof id !== 'string' || typeof hash !== 'string')
@@ -2178,6 +2231,11 @@ void app.whenReady().then(async () => {
       return { value: { state: await lightroomState(), message: installMessage(before, after, running) } };
     } catch (error) { return { error: errorMessage(error) }; }
   });
+  ipcMain.handle(channels.lightroomLaunch, async (event) => {
+    if (!settingsOwner(event)) return { error: 'Request is only available to Settings.' };
+    try { await launchLightroom(); return { value: undefined }; }
+    catch (error) { return { error: errorMessage(error) }; }
+  });
   ipcMain.on(channels.agentLeaseReply, (event, id: string, reply: AgentLeaseReply) => { editorOwner(event)?.replyLease(id, reply); });
   ipcMain.handle(channels.import, (event, id: string, request: ImportRequest) => fromEditor(event, async (document) => {
     if (request.target && request.paths?.length) {
@@ -2203,7 +2261,11 @@ void app.whenReady().then(async () => {
   });
   ipcMain.handle(channels.export, (event, id: string, surface?: unknown) =>
     fromEditor(event, (document) => document.exportBook(document.window, id, surface === 'cover' || surface === 'proof' ? surface : undefined)));
-  ipcMain.handle(channels.cancel, (event) => { editorOwner(event)?.cancelExport(); });
+  ipcMain.handle(channels.cancel, (event) => {
+    // The Assets window cancels its own Copy into Book, never the book window's export.
+    const assets = assetsOwner(event);
+    if (assets) assets.copyJob?.abort(); else editorOwner(event)?.cancelExport();
+  });
   ipcMain.handle(channels.check, (event, id: string, request: AuthoringCheckRequest) => fromEditor(event, (document) => document.checkOpenBook(document.currentBook(id), request)));
   ipcMain.handle(channels.cancelCheck, (event) => { editorOwner(event)?.cancelCheck(); });
   ipcMain.handle(channels.bookMenu, (event, state: BookMenuState) => {
@@ -2245,7 +2307,7 @@ void app.whenReady().then(async () => {
   else if (devState) {
     try {
       const state = JSON.parse(await readFile(devState, 'utf8')) as { folder: string }[];
-      for (const entry of state) await openDocument(entry.folder);
+      for (const entry of state) await openDocument(entry.folder).catch((error) => console.warn('Could not reopen ' + entry.folder + ':', errorMessage(error)));
     } catch { /* No development documents to restore. */ }
   }
   if (!documents.size) showStart();

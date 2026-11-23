@@ -106,7 +106,7 @@ export async function printProof(url: string, signal: AbortSignal, progress: (me
 }
 
 export async function printBook(url: string, fontNames: string[], signal: AbortSignal, progress: (message: string) => void, surface?: 'cover') {
-  progress(surface === 'cover' ? 'Rendering cover and preparing photos…' : 'Rendering spreads and preparing photos…');
+  progress(surface === 'cover' ? 'Rendering cover…' : 'Rendering spreads…');
   return renderOffscreen(url, signal, async (window, status) => {
     if (status.state === 'error') throw new Error(status.message);
     const format = parseDocument(formatSchema, status.template.format, 'Print format');

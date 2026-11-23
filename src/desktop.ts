@@ -49,7 +49,7 @@ export const channels = {
   history: 'project:history', mcp: 'mcp:settings', mcpChanged: 'mcp:changed', mcpInstall: 'mcp:install',
   agentLease: 'project:agent-lease', agentLeaseReply: 'project:agent-lease-reply', agentRelease: 'project:agent-release',
   syncState: 'project:sync-state', syncChanged: 'project:sync-changed', syncAction: 'project:sync-action',
-  lightroom: 'lightroom:state', lightroomChanged: 'lightroom:changed', lightroomInstall: 'lightroom:install',
+  lightroom: 'lightroom:state', lightroomChanged: 'lightroom:changed', lightroomInstall: 'lightroom:install', lightroomLaunch: 'lightroom:launch',
 } as const;
 
 export type OpenAction = 'open' | 'new' | 'reload';
@@ -69,9 +69,12 @@ export type SyncStatus = {
   /** Owned originals that are only proxies on this Mac. */
   pendingOriginals: number;
 };
-/** What the editor shows for sync: nothing for a book that does not sync, otherwise its folder and status. */
-export type SyncView = { folder: string; status?: SyncStatus; syncing?: boolean; message?: string };
-export type SyncAction = 'sync' | 'download' | 'link' | 'unlink';
+/**
+ * What the editor shows for sync: nothing for a book that does not sync, otherwise its folder and status. `downloading`
+ * counts the originals a download in the background has fetched; Cancel stops it (`cancel-download`).
+ */
+export type SyncView = { folder: string; status?: SyncStatus; syncing?: boolean; message?: string; downloading?: { done: number; total: number } };
+export type SyncAction = 'sync' | 'download' | 'cancel-download' | 'link' | 'unlink';
 // The main canvas shows spreads in one vertical column, or a row-by-row grid with this many columns.
 export type CanvasLayout = { mode: 'vertical' | 'grid'; columns: number };
 export const gridColumns = [1, 2, 3, 4] as const;
@@ -120,14 +123,24 @@ export type McpSettings = { enabled: boolean; clients: { name: string }[]; launc
 // `claude` opens Claude Desktop's extension installer; `codex` registers the bridge for the ChatGPT desktop app and
 // Codex, which share ~/.codex/config.toml. `skill` saves the ImageFlow templates agent skill as an archive.
 export type McpClientTarget = 'claude' | 'codex' | 'skill';
-export type ProjectChange = Result<ProjectSummary> | { building: true };
+/**
+ * What a long task of a window reports: what it is doing, how far it is when it counts something (`done` of `total`),
+ * and whether the window's Cancel stops it. The status shows a bar for a count and Cancel beside it.
+ */
+export type TaskProgress = { text: string; done?: number; total?: number; cancel?: boolean };
+// `stage` says what a reload the app started is doing, such as rendering previews of imported photos, with its count.
+export type ProjectChange = Result<ProjectSummary> | { building: true; stage?: string; done?: number; total?: number };
 /**
  * The ImageFlow plugin in Lightroom's Modules folder against the one this app bundles (ADR 0011): not there, the same,
  * older, newer, a link to a development copy, or a version that cannot be read.
  */
 export type LightroomPluginStatus = { state: 'missing' | 'current' | 'outdated' | 'newer' | 'linked' | 'unknown'; installed?: string; available?: string };
-/** What Settings shows for Lightroom Classic: the plugin, and the catalog and plugin version of a running Lightroom. */
-export type LightroomState = { plugin: LightroomPluginStatus; connection?: { catalog?: string; plugin: string } };
+/**
+ * What Settings shows for Lightroom Classic: the plugin, whether the app is on this Mac and running (with its icon as a
+ * data URL), and the catalog and plugin version of a connected Lightroom.
+ */
+export type LightroomState = { plugin: LightroomPluginStatus; app: { installed: boolean; running: boolean; icon?: string };
+  connection?: { catalog?: string; plugin: string } };
 // `file` imports into the files/ registry for file parameters, offering the parameter's `accept` extensions. Without a
 // kind, `accept` lists the extensions of the template's file parameters: files of those types import as files.
 export type ImportRequest = {
@@ -224,6 +237,7 @@ export type DesktopApi = {
   lightroomState(): Promise<Result<LightroomState>>;
   onLightroomChanged(listener: (state: LightroomState) => void): () => void;
   installLightroomPlugin(): Promise<Result<{ state: LightroomState; message: string }>>;
+  launchLightroom(): Promise<Result<void>>;
   // `footprint`: the layouts the agent's save changes, or the whole book (agent-footprint.ts).
   onAgentLease(listener: (id: string, footprint?: import('./agent-footprint').AgentFootprint) => AgentLeaseReply): () => void;
   onAgentRelease(listener: () => void): () => void;
@@ -238,7 +252,7 @@ export type DesktopApi = {
   cancelCheck(): Promise<void>;
   onCommand(listener: (command: Command) => void): () => void;
   onProjectChanged(listener: (result: ProjectChange) => void): () => void;
-  onProgress(listener: (stage: string) => void): () => void;
+  onProgress(listener: (progress: string | TaskProgress) => void): () => void;
 };
 
 // `editor` describes a template-supplied editor for some of the element's parameters, and for the layout (spread)

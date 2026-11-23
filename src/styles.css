@@ -67,6 +67,9 @@ body { margin: 0; }
 .book-check-panel .issue-error { color: var(--error-text); }
 .book-check-panel .issue-warning { color: var(--warning-text); }
 .book-check-panel .issue-current { font-weight: 600; }
+.book-check-panel .issue-group > details > summary { cursor: default; }
+.book-check-panel .issue-group > details > ul { max-height: none; margin: 4px 0 6px; padding-left: 14px; color: var(--text); }
+.book-check-panel .issue-group > details > ul > li { font-size: 11px; }
 .book-check-stale .book-check-panel ul { opacity: .6; }
 .book-check-panel button.link { all: unset; cursor: default; text-decoration: none; }
 .book-check-panel button.link:focus-visible { outline: 2px solid var(--accent); }
@@ -669,7 +672,8 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .settings-update-actions { display: flex; gap: 8px; }
 .update-notice button { cursor: default; min-height: 24px; padding: 3px 10px; border: 0; border-radius: 6px; background: var(--button-fill); box-shadow: var(--button-shadow); color: var(--text); font: 400 12px/16px var(--ui-font); }
 .settings-update-actions { margin-top: 12px; }
-.update-status { min-height: 2.8em; max-width: 330px; }
+.settings-update-actions { align-items: center; }
+.update-status { min-height: 1.45em; max-width: 330px; }
 
 .update-notice button.primary { background: var(--button-primary); color: #fff; box-shadow: 0 0 0 .5px #00000026, 0 .5px 1.5px #0000002e; font-weight: 500; }
 .update-notice button:active { background: var(--button-pressed); }
@@ -695,6 +699,57 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .settings-disclosure[open] > summary::before { transform: rotate(45deg); }
 .settings-disclosure .settings-note { margin: 10px 0 4px; }
 .studio .agent-settings textarea.settings-code { display: block; width: 100%; resize: none; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+/* A photo field's placeholder is the value its source provides (Lightroom's title, caption, credit): italic, as a default the book can override. */
+.source-inspector :is(input, textarea)::placeholder { font-style: italic; }
+/* Where an asset comes from: a book (in the book), a chain (linked file) or "Lr" (Lightroom Classic). */
+.source-origin { display: inline-flex; align-items: center; gap: 5px; vertical-align: middle; }
+.source-origin-mark { display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 4px; background: var(--subtle-hover); color: var(--muted); font: 700 9px/1 var(--ui-font); letter-spacing: .02em; }
+.source-origin-lightroom .source-origin-mark { background: #001e36; color: #31a8ff; }
+.source-origin-linked .source-origin-mark { color: var(--accent); }
+.source-origin-tile { position: absolute; left: 4px; top: 4px; }
+.source-origin-tile .source-origin-mark { box-shadow: 0 0 0 1px #0000001f; background: var(--control-surface); }
+.source-origin-tile.source-origin-lightroom .source-origin-mark { background: #001e36; }
+.source-text .source-title .source-origin { margin-right: 5px; }
+.asset-origin { margin-left: 8px; }
+.si-source { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.si-source > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.si-source .source-origin { color: var(--text); }
+.si-source .source-origin::after { content: '·'; margin-left: 1px; color: var(--muted); }
+.asset-progress { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; }
+/* A long task in a status line (TaskStatus): a fixed slot for the bar or spinner, a fixed-width count, the label,
+   and a small round Cancel, so nothing moves while the task runs. */
+.task-status { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; min-width: 0; vertical-align: middle; }
+.task-status-bar { flex: none; display: block; width: 96px; height: 5px; appearance: none; border: 0; border-radius: 3px; background: var(--subtle-hover); overflow: hidden; }
+.task-status-bar-indeterminate { position: relative; }
+.task-status-bar-indeterminate > span { position: absolute; inset: 0 auto 0 0; width: 35%; border-radius: 3px; background: var(--accent); animation: task-status-slide 1.2s ease-in-out infinite alternate; }
+@keyframes task-status-slide { from { left: 0; } to { left: 65%; } }
+.task-status-bar::-webkit-progress-bar { background: var(--subtle-hover); border-radius: 3px; }
+.task-status-bar::-webkit-progress-value { background: var(--accent); border-radius: 3px; transition: width 200ms ease; }
+.task-status-count { flex: none; min-width: 5ch; font-variant-numeric: tabular-nums; }
+.task-status-text { min-width: 0; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.studio .task-status-cancel { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; min-height: 0; padding: 0; border: 0; border-radius: 50%;
+  background: var(--subtle-hover); color: var(--muted); box-shadow: none; }
+.studio .task-status-cancel:hover:not(:disabled) { background: var(--edge); color: var(--text); }
+.task-status-cancel svg { stroke-width: 2; }
+@media (prefers-reduced-motion: reduce) { .task-status-bar::-webkit-progress-value { transition: none; } .task-status-bar-indeterminate > span { animation: none; width: 100%; opacity: .5; } }
+/* Sources pane: one card per photo source, with the app's icon, a status dot and line, and one action. */
+.source-cards { display: grid; gap: 12px; width: 440px; max-width: 100%; margin: 0 auto; }
+.source-card { border: 1px solid var(--subtle-border); border-radius: 10px; background: var(--field-surface); overflow: hidden; }
+.source-card-head { display: flex; align-items: center; gap: 12px; padding: 14px 14px 14px 12px; }
+.source-card-icon { flex: none; width: 44px; height: 44px; }
+.source-card-icon-fallback { display: grid; place-items: center; border-radius: 10px; background: var(--subtle-hover); color: var(--muted); }
+.source-card-title { flex: 1; min-width: 0; }
+.source-card-title h2 { margin: 0; font-size: 13px; font-weight: 600; }
+.source-card-status { display: flex; align-items: center; gap: 6px; margin: 3px 0 0; font-size: 12px; color: var(--muted); }
+.source-card-status > span:last-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.status-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); opacity: .55; }
+.status-dot-ok { background: #34c759; opacity: 1; }
+.status-dot-attention { background: #ff9f0a; opacity: 1; }
+.studio .source-card-head button { flex: none; font-size: 12px; }
+.source-card-foot { display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-top: 1px solid var(--subtle-border); background: var(--footer-surface, transparent); font-size: 11px; color: var(--muted); }
+.source-card-hint { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; white-space: nowrap; }
+.studio .source-card-foot button.link { min-height: 0; padding: 0; border: 0; background: transparent; box-shadow: none; color: var(--accent); font: 400 11px/1.5 var(--ui-font); }
+.source-card-error { margin: 0; padding: 0 14px 10px; font-size: 12px; }
 .appearance-options { display: flex; width: fit-content; max-width: 100%; padding: 2px; gap: 1px; border: 1px solid var(--subtle-border); border-radius: 6px; background: var(--segment-surface); }
 .appearance-options label { position: relative; min-width: 0; flex: 1; }
 .appearance-options input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; z-index: 1; }
@@ -854,6 +909,7 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .status-bar .status-cancel { grid-column: 2; }
 .studio .status-bar .status-cancel { height: 20px; min-height: 0; padding: 0 8px; font-size: 11px; }
 .status-bar .sync-status { grid-column: 3; }
+.status-bar .sync-download { grid-column: 2; display: flex; align-items: center; min-width: 0; font-size: 11px; color: var(--muted); }
 .status-bar .agent-status { grid-column: 4; position: relative; margin: 0; }
 .status-bar .book-check-list { grid-column: 5; min-width: 0; margin: 0; }
 /* Sync status (#251): quiet when in sync, the attention color when the user has something to do. */

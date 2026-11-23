@@ -1,4 +1,5 @@
 import { photoName, photoSourceName, sourceFile, sourcePath } from './source-locations';
+import { SourceBadge, sourceOrigin } from './SourceBadge';
 import { usageLabel } from './asset-usage';
 import { Fragment, useMemo, useState } from 'react';
 import { renderOrigin } from './desktop';
@@ -59,7 +60,7 @@ export function SourceInspector({ summary, source, template, render, usage, writ
     const print = size && ppi && [size.width, size.height].map((px) => (px / ppi * 2.54).toFixed(1)).join(' × ');
     const status = summary.sources?.['photo:' + source.id];
     const file = status && sourceFile(status);
-    const storage = file ? file.linked ? 'Linked' : 'In book' : undefined;
+    const origin = sourceOrigin(status);
     // What the photo's provider reports for each field (ADR 0011): shown while the book has no value of its own, which
     // Revert removes again.
     const provided = summary.photoProvided?.[source.id];
@@ -67,7 +68,7 @@ export function SourceInspector({ summary, source, template, render, usage, writ
       <div className="si-head">
         <p className="eyebrow">Photo</p>
         <h2>{photoName(summary, source.id)}</h2>
-        <p className="muted">{storage ? storage + ' · ' : ''}{photoSourceName(summary, source.id)}</p>
+        <p className="muted si-source">{origin && <SourceBadge origin={origin} labelled />}<span title={file?.path}>{photoSourceName(summary, source.id)}</span></p>
         {summary.sources?.['photo:' + source.id]?.problem && <p className="error-text">{summary.sources['photo:' + source.id].problem}{summary.sources['photo:' + source.id].cached ? ' · Showing cached preview' : ''}</p>}
       </div>
       {summary.photos[source.id]
@@ -109,7 +110,7 @@ export function SourceInspector({ summary, source, template, render, usage, writ
     <div className="si-head">
       <p className="eyebrow">Text</p>
       <h2>{fileName(path)}</h2>
-      <p className="muted">{sourcePath(path)}</p>
+      <p className="muted si-source">{(() => { const origin = sourceOrigin(summary.sources?.['markdown:' + source.id]); return origin && <SourceBadge origin={origin} labelled />; })()}<span>{sourcePath(path)}</span></p>
       {summary.sources?.['markdown:' + source.id]?.problem && <p className="error-text">{summary.sources['markdown:' + source.id].problem}{summary.sources['markdown:' + source.id].cached ? ' · Showing cached text' : ''}</p>}
     </div>
     {text === undefined ? <p className="error-text">The Markdown file is missing or unreadable.</p> : <dl className="si-facts">

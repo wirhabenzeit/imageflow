@@ -305,7 +305,10 @@ export async function saveDocumentCopy(source: OpenProject, destination: string,
     // With all files included, a photo without a file is copied into the new book too, as Copy into Book would.
     const provided = includeAssets ? await observeProvided(book, sourceEntries(book).filter(isProvided)) : undefined;
     if (provided?.unavailable.length) throw new Error('Cannot include all assets. Locate or restore ' + provided.unavailable[0].name + '.');
+    if (options.signal?.aborted) throw new CopyCancelled();
     for (const entry of sourceEntries(book)) {
+      // Cancel stops between files too, not only between the originals a source renders.
+      if (options.signal?.aborted) throw new CopyCancelled();
       if (provided && isProvided(entry)) continue;
       const { status, stored } = await store.resolve(book.folder, entry);
       if (includeAssets && status.state !== 'available') throw new Error('Cannot include all assets. Locate or restore ' + entry.name + '.');

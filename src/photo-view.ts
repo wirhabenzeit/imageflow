@@ -1,10 +1,11 @@
 import { photoName, photoTitle } from './source-locations';
 import type { ProjectSummary } from './desktop';
 
-export type PhotoView = { sort: 'capture' | 'name' | 'import'; group: 'none' | 'day' | 'gap'; gapMinutes: number; showTime: boolean };
-export const defaultPhotoView: PhotoView = { sort: 'capture', group: 'none', gapMinutes: 120, showTime: false };
+// `showSource`: a mark on each asset for where it comes from (in the book, linked, Lightroom Classic); on unless turned off.
+export type PhotoView = { sort: 'capture' | 'name' | 'import'; group: 'none' | 'day' | 'gap'; gapMinutes: number; showTime: boolean; showSource: boolean };
+export const defaultPhotoView: PhotoView = { sort: 'capture', group: 'none', gapMinutes: 120, showTime: false, showSource: true };
 export const photoViewCommands = ['photos-sort-capture', 'photos-sort-name', 'photos-sort-import', 'photos-group-none', 'photos-group-day',
-  'photos-gap-30', 'photos-gap-120', 'photos-gap-360', 'photos-gap-custom', 'photos-show-time'] as const;
+  'photos-gap-30', 'photos-gap-120', 'photos-gap-360', 'photos-gap-custom', 'photos-show-time', 'photos-show-source'] as const;
 export type PhotoViewCommand = typeof photoViewCommands[number];
 export const isPhotoViewCommand = (id: string): id is PhotoViewCommand => (photoViewCommands as readonly string[]).includes(id);
 export function validPhotoView(value: unknown): PhotoView {
@@ -12,12 +13,13 @@ export function validPhotoView(value: unknown): PhotoView {
   return { sort: ['capture', 'name', 'import'].includes(saved?.sort ?? '') ? saved!.sort! : defaultPhotoView.sort,
     group: ['none', 'day', 'gap'].includes(saved?.group ?? '') ? saved!.group! : 'none',
     gapMinutes: Number.isFinite(saved?.gapMinutes) && saved!.gapMinutes! >= 1 && saved!.gapMinutes! <= 10080 ? saved!.gapMinutes! : 120,
-    showTime: saved?.showTime === true };
+    showTime: saved?.showTime === true, showSource: saved?.showSource !== false };
 }
 export function photoViewChange(id: PhotoViewCommand, current: PhotoView): Partial<PhotoView> {
   if (id.startsWith('photos-sort-')) return { sort: id.slice(12) as PhotoView['sort'] };
   if (id === 'photos-group-none' || id === 'photos-group-day') return { group: id.endsWith('day') ? 'day' : 'none' };
   if (id === 'photos-show-time') return { showTime: !current.showTime };
+  if (id === 'photos-show-source') return { showSource: !current.showSource };
   if (id === 'photos-gap-custom') return {};
   return { group: 'gap', gapMinutes: Number(id.slice(11)) };
 }

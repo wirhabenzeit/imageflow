@@ -32,7 +32,7 @@ These flows can be tested in the editor now. Page-level MCP mutation commands ar
 
 ## Photos
 
-- **Import:** use **File → Import…**, the Sources strip's **Import** menu, or drop JPEG, PNG or WebP files onto the strip or a photo box.
+- **Import:** use **Assets → Import…**, the Sources strip's **Import** menu, or drop JPEG, PNG or WebP files onto the strip or a photo box.
 - **Place:** drag a photo from the strip onto a photo box. Drag an unselected placed photo onto another box to swap them.
 - **Crop:** click a placed photo, then drag to reposition it. Pinch, Control-scroll or use the toolbar slider to zoom. Each gesture is one undoable edit.
 - **Check resolution:** the crop toolbar compares print resolution with the template's minimum and target.

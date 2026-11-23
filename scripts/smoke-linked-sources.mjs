@@ -108,7 +108,8 @@ try {
     const owner = BrowserWindow.fromId(id);
     const send = owner.webContents.send.bind(owner.webContents);
     owner.webContents.send = (channel, ...args) => {
-      if (channel === 'project:progress' && String(args[0]).startsWith('Rendering spreads')) {
+      // Progress is a TaskProgress ({ text, done, total, cancel }) or, from older senders, a string.
+      if (channel === 'project:progress' && String(args[0]?.text ?? args[0]).startsWith('Rendering spreads')) {
         fs.renameSync(replacement, photo);
         owner.webContents.send = send;
       }
@@ -138,7 +139,7 @@ try {
   // A linked-file refresh may still own the book just after the renderer becomes ready.
   // Retry only that explicit busy response; any other error must fail with its actual message.
   const collection = await retryBookRefresh(async () => {
-    await manager.getByRole('button', { name: /^Copy All \d+ into Book$/ }).click();
+    await manager.getByRole('button', { name: /^Copy All \d+ into Book…$/ }).click();
     const alert = manager.getByRole('alert');
     await alert.waitFor();
     return { error: await alert.innerText(), code: await alert.getAttribute('data-error-code') };
@@ -207,18 +208,20 @@ try {
   await menuAction(app, 'Assets…');
   const linkedWindow = await assetWindow();
   const linkedRow = linkedWindow.locator('[data-source="photo:' + unusedId + '"]');
-  await linkedRow.getByRole('img', { name: 'Linked to original file' }).waitFor();
-  await app.evaluate(({ Menu }) => {
+  await linkedRow.getByRole('img', { name: 'Linked file' }).waitFor();
+  await app.evaluate(({ Menu, dialog }) => {
+    // Copy into Book asks first: it cuts the photo off from its original.
+    dialog.showMessageBox = async () => ({ response: 0 });
     Menu.prototype.popup = function ({ callback }) {
       globalThis.assetMenuLabels = this.items.map(({ label }) => label);
-      this.items.find(({ label }) => label === 'Copy into Book').click();
+      this.items.find(({ label }) => label === 'Copy into Book…').click();
       callback();
     };
   });
   await linkedRow.click({ button: 'right' });
   await waitForPage(linkedWindow, async (id) => !(await window.imageflow.currentProject()).value.photoIndex[id].linked, unusedId);
-  assert.deepEqual(await app.evaluate(() => globalThis.assetMenuLabels), ['Quick Look', 'Place on Current Spread', '', 'Show in Finder', 'Copy into Book', '', 'Remove from Book']);
-  await linkedRow.getByRole('img', { name: 'Linked to original file' }).waitFor({ state: 'detached' });
+  assert.deepEqual(await app.evaluate(() => globalThis.assetMenuLabels), ['Quick Look', 'Place on Current Spread', '', 'Show in Finder', 'Copy into Book…', '', 'Remove from Book']);
+  await linkedRow.getByRole('img', { name: 'Linked file' }).waitFor({ state: 'detached' });
   await stat(unused);
   await linkedWindow.close();
   // A shared manifest cannot approve a local file, even when its extension is valid for a parameter.
@@ -250,7 +253,7 @@ try {
   });
   await unapprovedRow.click({ button: 'right' });
   await accessWindow.waitForFunction(() => !document.querySelector('[data-source="file:notchosen"]')?.textContent.includes('Locate to approve'));
-  assert.deepEqual(await app.evaluate(() => globalThis.assetMenuLabels), ['Quick Look', 'Choose Files in a Spread’s Settings', 'Rename… (Copy into Book First)', '', 'Show in Finder', 'Locate…', 'Locate Folder…', 'Copy into Book', '', 'Remove from Book']);
+  assert.deepEqual(await app.evaluate(() => globalThis.assetMenuLabels), ['Quick Look', 'Choose Files in a Spread’s Settings', 'Rename… (Copy into Book First)', '', 'Show in Finder', 'Locate…', 'Locate Folder…', 'Copy into Book…', '', 'Remove from Book']);
   assert.deepEqual((await current(page)).history, historyBeforeLocate, 'Locate does not add an empty Undo step');
   await accessWindow.close();
   // Locate publishes a new revision to the open book. Verify that very frame can read the approved file.

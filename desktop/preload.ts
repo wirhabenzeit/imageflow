@@ -74,6 +74,7 @@ const api: DesktopApi = {
   lightroomState: () => ipcRenderer.invoke(channels.lightroom),
   onLightroomChanged: (listener) => listen(channels.lightroomChanged, listener),
   installLightroomPlugin: () => ipcRenderer.invoke(channels.lightroomInstall),
+  launchLightroom: () => ipcRenderer.invoke(channels.lightroomLaunch),
   onAgentLease: (listener) => listen<{ id: string; footprint?: AgentFootprint }>(channels.agentLease, ({ id, footprint }) => {
     ipcRenderer.send(channels.agentLeaseReply, id, listener(id, footprint));
   }),

@@ -37,7 +37,7 @@ export function assetMenu(summary: ProjectSummary, keys: string[], place = false
     ...(missing && !offers('locate') && !offers('locate-folder') ? [{ command: 'asset-retry' as const }] : []),
     ...(chosen.length === 1 && offers('locate') ? [{ command: 'asset-locate' as const }] : []),
     ...(offers('locate-folder') ? [{ command: 'asset-locate-folder' as const }] : []),
-    ...(linked ? [{ command: 'asset-copy' as const, label: linked > 1 ? 'Copy ' + linked + ' into Book' : undefined, enabled: !missing }] : []),
+    ...(linked ? [{ command: 'asset-copy' as const, label: linked > 1 ? 'Copy ' + linked + ' into Book…' : undefined, enabled: !missing }] : []),
     { type: 'separator' }, { command: 'asset-remove', label: chosen.length > 1 ? 'Remove ' + chosen.length + ' Assets from Book' : undefined },
   ];
 }

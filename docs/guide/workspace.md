@@ -6,8 +6,9 @@ The title bar shows the document name and icon, Undo, Redo and Export. Command-c
 
 | Menu | Commands |
 | --- | --- |
-| File | New Book ⌘N, Open ⌘O, Import ⇧⌘I, Duplicate ⇧⌘S, Rename, Move To, Revert To, Export PDF ⌘E, Export Proof ⌥⌘E |
-| Book | New Spread ⇧⌘N, Duplicate Spread ⌘D, Move Up/Down ⌥⌘↑ / ⌥⌘↓, Delete Spread ⌫, Assets, Copy Assets into Book, Check Book ⇧⌘K |
+| File | New Book ⌘N, Open ⌘O, Duplicate ⇧⌘S, Rename, Move To, Revert To, Export PDF ⌘E, Export Proof ⌥⌘E |
+| Book | New Spread ⇧⌘N, Duplicate Spread ⌘D, Move Up/Down ⌥⌘↑ / ⌥⌘↓, Delete Spread ⌫, Check Book ⇧⌘K |
+| Assets | Import ⇧⌘I, Import Selected from Lightroom Classic, Manage Assets, Copy Assets into Book |
 | Templates | Manage Templates… |
 | View | Canvas layout, guides, panels, zoom, photo sorting and grouping, presentation |
 
@@ -17,7 +18,7 @@ Text fields use the system's text Undo. Other edits use the book's Undo history.
 
 The left sidebar holds spread thumbnails and book settings. The right sidebar is the Inspector. Toggle them with the toolbar buttons or **View → Show/Hide Sidebar** (⌃⌘S) and **Show/Hide Inspector** (⌥⌘I).
 
-The **Photos / Texts / Assets** strip holds the book's sources. **Assets**, shown when the template has file parameters or the book holds files, is a plain list of those files, such as GPX tracks, each with its macOS document icon. It has the same search, filters and actions as **Book → Assets…**, which lists every asset, and **Import…** or a drop from Finder adds files of the types the template accepts. Toggle it with ⌥⌘3. Select a source and press Space, or double-click it, for Quick Look. **View → Sort Photos By** and **Group Photos** control the photo list.
+The **Photos / Texts / Assets** strip holds the book's sources. **Assets**, shown when the template has file parameters or the book holds files, is a plain list of those files, such as GPX tracks, each with its macOS document icon. It has the same search, filters and actions as **Assets → Manage Assets…**, which lists every asset, and **Import…** or a drop from Finder adds files of the types the template accepts. Toggle it with ⌥⌘3. Select a source and press Space, or double-click it, for Quick Look. **View → Sort Photos By** and **Group Photos** control the photo list.
 
 Drag dividers to resize panels. With a divider focused, use arrow keys to resize or Home to reset; double-clicking also resets it. Sizes are remembered on this Mac.
 

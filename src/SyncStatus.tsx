@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DesktopApi, SyncStatus as Status, SyncView } from './desktop';
+import { TaskStatus } from './TaskStatus';
 
 const labels: Record<Status['state'], string> = {
   'in-sync': 'In sync', 'ahead': 'Changes to sync', 'behind': 'Changes to fetch', 'diverged': 'Changed on two Macs',
@@ -36,9 +37,12 @@ export function SyncStatus({ api, notice }: { api?: DesktopApi; notice: (message
   const label = view.syncing ? 'Syncing…' : status ? labels[status.state] : 'Sync';
   const pending = status?.pendingOriginals ? ' ' + status.pendingOriginals + (status.pendingOriginals === 1 ? ' original is' : ' originals are') + ' only a preview on this Mac.' : '';
   const title = view.syncing ? 'Syncing with ' + view.folder : [status ? explanations[status.state] : '', status?.detail ?? '', pending.trim(), 'Click to sync with ' + view.folder + '.'].filter(Boolean).join('\n');
-  return <button type="button" className={'sync-status' + (status && !view.syncing ? ' sync-' + status.state : '')} title={title} aria-label={label + '. ' + title}
+  // Originals downloading in the background: how far, with Cancel, beside the status.
+  const download = view.downloading && <span className="sync-download" role="status"><TaskStatus progress={{ text: 'Downloading originals', ...view.downloading }}
+    cancel={() => void api.syncAction('cancel-download')} /></span>;
+  return <>{download}<button type="button" className={'sync-status' + (status && !view.syncing ? ' sync-' + status.state : '')} title={title} aria-label={label + '. ' + title}
     disabled={view.syncing} data-state={view.syncing ? 'syncing' : status?.state}
     onClick={() => void api.syncAction('sync').then((result) => { if ('error' in result) notice(result.error); })}>
     {view.syncing && <span className="status-spinner" aria-hidden="true" />}{label}{!view.syncing && status?.pendingOriginals ? <span className="sync-pending" aria-hidden="true">·</span> : null}
-  </button>;
+  </button></>;
 }
