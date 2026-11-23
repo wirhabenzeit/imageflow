@@ -1,6 +1,6 @@
 # 0012: One sync backend per Mac, sync by source reach, and a book library
 
-Status: proposed, 2026-11-23 (revised after review). Builds on [0010](0010-sync-revisions-and-cloud-assets.md) (snapshots, `SyncRemote`, the folder transport) and [0011](0011-lightroom-classic.md) (source providers). Supersedes 0010's choice of a synced folder as the first transport, its per-book sync folder, and its untrusted-remote rule for a user's own backend (with the matching wording of [0006](0006-template-capabilities.md) about templates that arrive over sync); the snapshot model, the engine and the fast-forward-or-keep-both policy stay as they are.
+Status: proposed, 2026-11-23 (revised after review; amended after the CloudKit spike, #286, the same day). Builds on [0010](0010-sync-revisions-and-cloud-assets.md) (snapshots, `SyncRemote`, the folder transport) and [0011](0011-lightroom-classic.md) (source providers). Supersedes 0010's choice of a synced folder as the first transport, its per-book sync folder, and its untrusted-remote rule for a user's own backend (with the matching wording of [0006](0006-template-capabilities.md) about templates that arrive over sync); the snapshot model, the engine and the fast-forward-or-keep-both policy stay as they are.
 
 ## Problem
 
@@ -18,11 +18,11 @@ Sync and source providers were built separately and do not yet read as one desig
 ## Decision
 
 1. **Sync behaviour follows from a photo's source.** A provider declares its reach, and the reach decides what syncs. A book has no sync options.
-2. **The sync backend is a per-Mac app setting**, one at a time: first an S3-compatible bucket, later ImageFlow Cloud. A book only records whether it syncs on this Mac.
+2. **The sync backend is a per-Mac app setting**, one at a time, and **sync is off until the user turns it on** in Settings → Sync and chooses the backend: **iCloud** (the user's private CloudKit database) or an **S3-compatible bucket** they bring. Neither is preselected, and being signed in to iCloud starts nothing. A book only records whether it syncs on this Mac.
 3. **Every trusted book syncs once a backend is configured**, unless it is opted out. A user's personal sync backend sits inside their trust boundary: only trusted books sync, and books downloaded from it arrive trusted.
 4. **Each book has its own prefix on the remote**, with every blob it needs under it.
 5. **The Start window is the library**: books on this Mac and books on the remote in one list, with the actions to download, stop syncing and delete. Storage is managed in Settings.
-6. **Folders in iCloud Drive or Dropbox are no longer offered.** The folder transport stays for tests and development.
+6. **Folders in iCloud Drive or Dropbox are no longer offered.** The folder transport stays for tests and development. iCloud as a backend means CloudKit, not a folder in iCloud Drive.
 
 ## 1. Sync by reach
 
@@ -61,23 +61,25 @@ Where things are configured follows the same split:
 | `head(key)` | Size and presence |
 | `list(prefix)` | Keys with sizes and `lastModified` timestamps |
 | `listPrefixes(prefix)` | Immediate child prefixes (e.g. `books/<bookId>/`), so listing books does not scan every blob |
-| `copy(from, to)` (optional) | Duplicate, without uploading again. A store without a server-side copy leaves it out, and the caller uploads instead |
+| `copy(from, to)` (optional) | Duplicate, without uploading again. A store without a server-side copy (CloudKit) leaves it out, and the caller uploads instead |
 | `delete(keys)` | Deleting a book, the sweep |
+| `changes(bookId, token)` (optional) | What changed in a book since a token. Where a store has it (CloudKit), it replaces listing commits and the commit header cache |
 
 - **S3-compatible bucket:** endpoint, region, bucket and an optional prefix in app settings; the access key and secret are encrypted with `safeStorage` (keychain-backed) and stored in a separate `0600` credentials file, never in `settings.json`. `putIfAbsent` prefers `If-None-Match: *` (with head-then-put fallback if a service lacks conditional writes, since blobs are content-addressed and commit IDs are UUIDs; *unverified until the spike*). Works with S3, R2, B2, MinIO and Wasabi; the connection test checks conditional writes and checksum verification.
-- **ImageFlow Cloud (later):** the same keys, reached through URLs a small service signs after authenticating the user. The client code above the store is unchanged.
+- **iCloud (CloudKit):** the private database of the container `iCloud.ch.wirhabenzeit.imageflow`, through a native addon. One record zone per book and one generic record type `Blob` (bytes up to 256 KB inline, larger ones as an asset, plus `size` and `sha256`); the record name is the key below `books/<bookId>/`. `remote.json` and the tombstones live in an `index` zone, so deleting a book's zone keeps its tombstone. `putIfAbsent` is a save that fails when the record exists, a real conditional write; `listPrefixes` lists zones; deleting a book deletes its zone; zone change tokens give `changes`. The spike (`spikes/cloudkit/README.md`) measured all of this on two Macs. Nothing to set up: the Mac's Apple ID is the login, storage counts against the user's iCloud plan, and a database subscription tells other Macs to pull. It needs a signed build with an embedded provisioning profile and cannot be tested in CI, so the store conformance suite runs against it locally.
+- **ImageFlow Cloud (perhaps later):** the same keys, reached through URLs a small service signs after authenticating the user. The client code above the store is unchanged. iCloud covers what it was for on the Mac; it remains an option for a web companion or another platform.
 - **Folder:** the store over a directory, for tests, development and possibly a NAS or external drive. It is not offered for folders a sync service manages.
 
 ### What a real store changes
 
 - **A finished sync is finished.** A put is durable when it returns and a listing is complete. *Remote still syncing* becomes an error that should not happen for commits, state blobs and previews (an original still uploading from another Mac is surfaced separately as "still uploading", not as a sync error).
 - **Sync can be automatic.** Pull when a book opens or regains focus, push when it has been idle after a save and when it closes. **File → Sync** stays as *Sync Now*. Fast-forward or keep both is unchanged, and automatic sync only fast-forwards or pushes — a divergence (even with a single remote tip) never creates a conflict copy or overwrites the open book without asking.
-- **Listing commits is cached.** Headers are immutable, so a Mac keeps the ones it has read and fetches only keys it has not seen.
+- **Listing commits is cached.** Headers are immutable, so a Mac keeps the ones it has read and fetches only keys it has not seen. A store with `changes` (CloudKit) is asked only for what changed since its token instead: 0.3 s against 9 s for a full listing of 3000 records in the spike.
 - **Originals upload in the background**, after the book state and previews, per-photo resumable across launches and with progress. What is still to upload is derived, not recorded: an original the tip names, that is here, and that the remote's listing lacks. Any Mac holding the file therefore repairs a missing original at its next sync; previews are checked the same way at each push. The other Mac can open the book before the originals have arrived. Single PUT with `x-amz-content-sha256` (or `x-amz-checksum-sha256`, checked in the spike) covers photos far below S3's 5 GB limit while keeping whole-object server-side SHA-256 verification (*multipart is not needed unless the spike finds otherwise*).
 
 ### Remote identity
 
-A remote carries a UUID, written at first use (`remote.json` at its root; a Mac always reads it back after writing and adopts what is there, so two Macs that initialize an empty remote at once agree, also where the store has no conditional write). A book's sync record names the remote it last synced with. A book meeting another remote is asked about ("start syncing here, as a new history?"), so changing the bucket never forks a book silently.
+A remote carries a UUID, written at first use (`remote.json` at its root; a Mac always reads it back after writing and adopts what is there, so two Macs that initialize an empty remote at once agree, also where the store has no conditional write). A book's sync record names the remote it last synced with. A book meeting another remote is asked about ("start syncing here, as a new history?"), so changing the bucket never forks a book silently. With iCloud, each Apple ID has its own private database and so its own `remote.json`: signing in with another Apple ID is meeting another remote. CloudKit's account-change event also fires without a change, so the app compares the iCloud user record ID before treating it as one.
 
 ### Trust
 
@@ -87,6 +89,7 @@ A user's configured sync backend is **inside their trust boundary** (revising AD
 - **Explicit opt-in trusts and syncs.** Choosing **Start Syncing** on an untrusted local book (or selecting it in the first-configuration sheet) asks once to trust and sync it (`trustBook`), giving older or copied books without declared `network` origins a direct path into sync.
 - **Downloaded books arrive trusted.** Because the configured backend holds only the user's own trusted books, `cloneFromRemote` marks the downloaded book trusted and synced template changes stay trusted without re-prompting. The download says once which sites the book's template loads from, as a notice and not a question; a pulled template change that adds a site does the same (the existing notice for trusted books).
 - **Trusted means what `bookTrusted` means today** (`desktop/source-access.ts`): made here, trusted once, or a book for which a site was allowed before. A received book whose map site the user allowed therefore counts as their own and syncs.
+- **iCloud fits this rule best:** the private database is authenticated as the user and reachable only by them.
 - **Assumption:** personal sync credentials belong to the user's own Macs and are not shared with untrusted writers. If shared or multi-user books are added later, they stay outside this boundary and open untrusted.
 
 ## 3. Which books sync
@@ -135,7 +138,7 @@ books/<bookId>/deleted.json
 - *Update* opens Settings → General and checks for updates (or restarts if an update is already ready).
 - **Open from Sync Folder** and **Sync with Folder…** are removed; **File → Sync** offers *Set Up Sync…* when no backend is configured.
 
-**Settings → Sync.** The backend and a connection test, total and per-book storage (computed on demand, not at launch), *Keep originals*, *Sync automatically*, the default books folder, and *Clean Up*.
+**Settings → Sync.** Sync is off at first. Turning it on asks for the backend: iCloud (listed when this build can use it and the Mac is signed in) or an S3-compatible bucket, with neither preselected. Then, for a bucket, a connection test, and for either, total and per-book storage (computed on demand, not at launch), *Keep originals*, *Sync automatically*, the default books folder, and *Clean Up*.
 
 ## Deferred
 
@@ -143,7 +146,7 @@ books/<bookId>/deleted.json
 - Pruning history beyond the blob sweep.
 - Client-side encryption. It conflicts with a web companion that serves previews.
 - ImageFlow Cloud itself: accounts, quotas, the signing service.
-- Shared or multi-user books (which would sit outside the personal trust boundary).
+- Shared or multi-user books (which would sit outside the personal trust boundary). CloudKit zone sharing is a possible path, since a book is a zone.
 - Syncing full-resolution renders of `mac` photos (0011).
 - Named local roots for linked folders (0010).
 - More than one backend at a time.
@@ -153,8 +156,10 @@ books/<bookId>/deleted.json
 - A book carries no sync configuration. What it syncs follows from its sources, and where it syncs follows from the Mac.
 - *Synced* means that the other Mac can get the changes. Automatic sync and a library become possible.
 - Treating a personal sync backend as inside the user's trust boundary removes friction when downloading and syncing books across the user's own Macs, while keeping untrusted books from elsewhere out of sync.
-- Syncing needs a bucket until ImageFlow Cloud exists. That is a higher bar than choosing an iCloud folder, accepted because the folder could not keep the promise.
-- `SyncRemote`, the engine and the snapshot format survive. The work is the object store and its S3 implementation, per-book keys, the remote identity and tombstone, moving the setting, and the library.
+- Sync is opt-in: nothing leaves the Mac until the user turns sync on and chooses a backend. On a Mac signed in to iCloud, choosing iCloud needs no further setup. A bucket serves users without iCloud or who want their own storage; that is a higher bar than choosing an iCloud Drive folder, accepted because the folder could not keep the promise.
+- iCloud sync uses the user's iCloud storage (5 GB on the free plan), works only on Apple platforms, and CloudKit keeps its own cache copy of uploaded and downloaded originals until the system purges it.
+- Signing gains restricted entitlements and an embedded Developer ID provisioning profile. Without the profile the app is killed at launch, so the release checks verify it; a Mac with the profile installed hides its absence.
+- `SyncRemote`, the engine and the snapshot format survive. The work is the object store and its S3 and CloudKit implementations, per-book keys, the remote identity and tombstone, moving the setting, and the library.
 
 ## Implementation order
 
@@ -162,7 +167,8 @@ books/<bookId>/deleted.json
 2. `reach` on the provider contract; engine reads it and syncs updated facts for non-file providers (#279).
 3. Sync backend as a per-Mac setting with remote identity (#280).
 4. S3-compatible object store (starting with the spike), `safeStorage` credentials, commit header cache and Settings → Sync pane (#281).
-5. Every trusted opened book syncs with opt-out; originals upload in the background after the commit (#282).
-6. Start window as the library: covers, download, stop, delete with tombstones; removes the development flag and ships sync (#283).
-7. Automatic pull/push on open, focus, idle and close, with `fastForwardOnly` safety (#284).
-8. On-demand storage figures, *Clean Up* sweep and *Duplicate*/*Save a Copy* server-side copy (#285).
+5. iCloud (CloudKit) object store with the optional change feed, iCloud as a backend choice beside S3, and the signing changes (#292).
+6. Every trusted opened book syncs with opt-out; originals upload in the background after the commit (#282).
+7. Start window as the library: covers, download, stop, delete with tombstones; removes the development flag and ships sync (#283).
+8. Automatic pull/push on open, focus, idle and close, with `fastForwardOnly` safety; for iCloud, a database subscription whose push starts a pull (#284).
+9. On-demand storage figures, *Clean Up* sweep and *Duplicate*/*Save a Copy* server-side copy (#285).
