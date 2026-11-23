@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { ChangeTokenExpiredError } from '../desktop/sync-store';
-import { CloudKitError, CloudKitStore, cloudKitAvailability, cloudKitReason } from '../desktop/sync-store-cloudkit';
+import { CloudKitAccessError, CloudKitError, CloudKitStore, cloudKitAvailability, cloudKitReason, isCloudKitError } from '../desktop/sync-store-cloudkit';
+import { StoreAccessError } from '../desktop/sync-store';
 import type { CloudKitNative } from '../desktop/sync-store-cloudkit';
 import { StoreRemote } from '../desktop/sync-remote';
 import { FakeCloudKit } from './cloudkit-fake';
@@ -92,10 +93,10 @@ test('cloudkit store: what CloudKit asks to retry is retried after the time it n
   assert.deepEqual(await store.get('remote.json'), bytes('{}'));
   // Offline: at once, without waiting.
   native.fail('fetch', 'networkUnavailable', { retryAfter: 3 });
-  await assert.rejects(store.get('remote.json'), (error: unknown) => error instanceof CloudKitError && error.reason === 'offline' && error.message === 'This Mac is offline.');
+  await assert.rejects(store.get('remote.json'), (error: unknown) => error instanceof StoreAccessError && error.reason === 'unavailable' && error instanceof CloudKitAccessError && error.cloudKitReason === 'offline' && error.message === 'This Mac is offline.');
   // A call that keeps failing gives up after the attempts allowed.
   native.fail('fetch', 'serviceUnavailable', { retryAfter: 0, times: 10 });
-  await assert.rejects(store.head('remote.json'), (error: unknown) => error instanceof CloudKitError && error.code === 'serviceUnavailable');
+  await assert.rejects(store.head('remote.json'), (error: unknown) => error instanceof StoreAccessError && isCloudKitError(error) && error.code === 'serviceUnavailable');
 });
 
 test('cloudkit store: iCloud storage full is an error of its own, and nothing is stored', async () => {
@@ -103,7 +104,7 @@ test('cloudkit store: iCloud storage full is an error of its own, and nothing is
   await store.putIfAbsent('books/' + book + '/content/one', bytes('1'));
   native.fail('putIfAbsent', 'quotaExceeded');
   await assert.rejects(store.putIfAbsent('books/' + book + '/originals/big.jpg', bytes('x'.repeat(300_000))),
-    (error: unknown) => error instanceof CloudKitError && error.reason === 'quota' && error.message === 'iCloud storage full.');
+    (error: unknown) => error instanceof CloudKitError && !(error instanceof StoreAccessError) && error.cloudKitReason === 'quota' && error.message === 'iCloud storage full.');
   assert.deepEqual((await store.list('books/')).map(({ key }) => key), ['books/' + book + '/content/one']);
   assert.deepEqual(await readdir(tmpdir()).then((names) => names.filter((name) => name.startsWith('imageflow-icloud-'))), [], 'no staging file stays');
 });
@@ -114,7 +115,7 @@ test('cloudkit store: a zone deleted by another Mac is made again for a write, o
   native.zones.delete(book);
   assert.deepEqual(await store.putIfAbsent('books/' + book + '/content/two', bytes('2')), { existed: false });
   native.userDeletes(book);
-  await assert.rejects(store.putIfAbsent('books/' + book + '/content/three', bytes('3')), (error: unknown) => error instanceof CloudKitError && error.reason === 'deleted');
+  await assert.rejects(store.putIfAbsent('books/' + book + '/content/three', bytes('3')), (error: unknown) => error instanceof CloudKitError && error.cloudKitReason === 'deleted');
   assert.equal(native.zones.has(book), false);
 });
 
@@ -122,7 +123,7 @@ test('cloudkit store: without the entitlements CloudKit is never called', async 
   const { native, store } = make();
   native.statusValue = { entitled: false };
   for (const run of [() => store.putIfAbsent('remote.json', bytes('{}')), () => store.get('remote.json'), () => store.list(''), () => store.listPrefixes('books/'), () => store.changes(book), () => store.userRecordId()]) {
-    await assert.rejects(run(), (error: unknown) => error instanceof CloudKitError && error.reason === 'not-entitled');
+    await assert.rejects(run(), (error: unknown) => error instanceof StoreAccessError && error.reason === 'unavailable' && isCloudKitError(error) && error.cloudKitReason === 'not-entitled');
   }
   assert.deepEqual(new Set(native.calls), new Set(['status']));
   assert.deepEqual(cloudKitAvailability(await store.status()), { available: false, reason: 'not-entitled', message: 'iCloud sync is not available in this build of ImageFlow.' });
@@ -141,6 +142,15 @@ test('cloudkit store: account statuses read as sync statuses', () => {
   assert.equal(cloudKitReason('quotaExceeded'), 'quota');
   assert.equal(cloudKitReason('somethingNew'), 'other');
   assert.match(new CloudKitError('somethingNew', 'Details.').message, /Details\. \(somethingNew\)$/);
+});
+
+test('cloudkit store: iCloud out of reach is a store access error the sync status shows, one that answered is not', async () => {
+  const { native, store } = make();
+  native.fail('fetch', 'notAuthenticated');
+  await assert.rejects(store.get('remote.json'), (error: unknown) => error instanceof StoreAccessError && error.reason === 'sign-in'
+    && error.message === 'Sign in to iCloud, or turn on iCloud for ImageFlow.');
+  native.fail('fetch', 'permissionFailure');
+  await assert.rejects(store.get('remote.json'), (error: unknown) => error instanceof CloudKitError && !(error instanceof StoreAccessError));
 });
 
 test('cloudkit store: the account and its changes come from the addon', async () => {

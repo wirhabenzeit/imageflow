@@ -3,8 +3,8 @@ import { constants, createReadStream } from 'node:fs';
 import { chmod, copyFile, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { ChangeTokenExpiredError, childPrefix, requireStoreKey, requireStorePrefix } from './sync-store';
-import type { PutOptions, StoreChanges, StoreEntry, StoreSource, SyncStore, TransferOptions } from './sync-store';
+import { ChangeTokenExpiredError, childPrefix, requireStoreKey, requireStorePrefix, StoreAccessError } from './sync-store';
+import type { PutOptions, StoreAccessReason, StoreChanges, StoreEntry, StoreSource, SyncStore, TransferOptions } from './sync-store';
 
 /*
  * The iCloud sync store (ADR 0012 as amended after the CloudKit spike; #292): the object store of `SyncStore` over the
@@ -79,16 +79,44 @@ const messages: Record<CloudKitReason, string> = {
 /** The reason behind a CKError name or an account status. */
 export const cloudKitReason = (code: string): CloudKitReason => reasons[code] ?? 'other';
 
-/** An error from CloudKit, with the CKError name as `code` and what it means for sync as `reason`. */
+const messageOf = (code: string, detail?: string) => {
+  const reason = cloudKitReason(code);
+  return reason === 'other' ? messages.other + (detail ? ' ' + detail : '') + ' (' + code + ')' : messages[reason];
+};
+/** What iCloud cannot be used for now maps onto the store access reasons the sync status shows (`StoreAccessError`). */
+const access: Partial<Record<CloudKitReason, StoreAccessReason>> = { 'not-entitled': 'unavailable', 'sign-in': 'sign-in', restricted: 'unavailable', offline: 'unavailable', unavailable: 'unavailable' };
+
+/**
+ * An error CloudKit answered with: storage full, a zone the user deleted, anything else. `code` is the CKError name and
+ * `cloudKitReason` what it means for sync. An iCloud that cannot be used at all is a `CloudKitAccessError` instead.
+ */
 export class CloudKitError extends Error {
-  readonly reason: CloudKitReason;
+  readonly cloudKitReason: CloudKitReason;
   constructor(readonly code: string, detail?: string, readonly retryAfter?: number) {
-    const reason = cloudKitReason(code);
-    super(reason === 'other' ? messages.other + (detail ? ' ' + detail : '') + ' (' + code + ')' : messages[reason]);
+    super(messageOf(code, detail));
     this.name = 'CloudKitError';
-    this.reason = reason;
+    this.cloudKitReason = cloudKitReason(code);
   }
 }
+/**
+ * iCloud cannot be used now (offline, signed out, unavailable, a build without the entitlements): a `StoreAccessError`,
+ * so the sync status reads it like an S3 bucket out of reach or refusing its key.
+ */
+export class CloudKitAccessError extends StoreAccessError {
+  readonly cloudKitReason: CloudKitReason;
+  constructor(readonly code: string, detail?: string, readonly retryAfter?: number) {
+    const reason = cloudKitReason(code);
+    super(access[reason] ?? 'unavailable', messageOf(code, detail));
+    this.name = 'CloudKitAccessError';
+    this.cloudKitReason = reason;
+  }
+}
+export type AnyCloudKitError = CloudKitError | CloudKitAccessError;
+/** The error for a CKError name: an access error where iCloud cannot be used now, a `CloudKitError` otherwise. */
+export function cloudKitError(code: string, detail?: string, retryAfter?: number): AnyCloudKitError {
+  return access[cloudKitReason(code)] ? new CloudKitAccessError(code, detail, retryAfter) : new CloudKitError(code, detail, retryAfter);
+}
+export const isCloudKitError = (error: unknown): error is AnyCloudKitError => error instanceof CloudKitError || error instanceof CloudKitAccessError;
 
 /** Whether this Mac can sync through iCloud now, from `status()`: available, or why not, as the status shows it. */
 export function cloudKitAvailability(status: CloudKitStatus): { available: true } | { available: false; reason: CloudKitReason; message: string } {
@@ -99,7 +127,7 @@ export function cloudKitAvailability(status: CloudKitStatus): { available: true 
 }
 
 const retryable = new Set(['requestRateLimited', 'zoneBusy', 'serviceUnavailable', 'networkFailure']);
-const missingZone = (error: unknown) => error instanceof CloudKitError && error.code === 'zoneNotFound';
+const missingZone = (error: unknown) => isCloudKitError(error) && error.code === 'zoneNotFound';
 
 /** Waits `seconds`, or rejects with the signal's reason once it is aborted. */
 function pause(seconds: number, signal?: AbortSignal) {
@@ -127,7 +155,7 @@ export type CloudKitStoreOptions = {
   attempts?: number;
   /** Seconds to wait before a retry when CloudKit names no time. */
   backoff?: (attempt: number) => number;
-  onRetry?: (error: CloudKitError, seconds: number) => void;
+  onRetry?: (error: AnyCloudKitError, seconds: number) => void;
 };
 
 export class CloudKitStore implements SyncStore {
@@ -137,7 +165,7 @@ export class CloudKitStore implements SyncStore {
   private readonly namespace: string;
   private readonly attempts: number;
   private readonly backoff: (attempt: number) => number;
-  private readonly onRetry?: (error: CloudKitError, seconds: number) => void;
+  private readonly onRetry?: (error: AnyCloudKitError, seconds: number) => void;
   private ready?: Promise<void>;
   private readonly zones = new Map<string, Promise<void>>();
   private nextOperation = 1;
@@ -185,7 +213,7 @@ export class CloudKitStore implements SyncStore {
 
   private open() {
     const ready = this.ready ??= this.native.status().then((status) => {
-      if (!status.entitled) throw new CloudKitError('notEntitled');
+      if (!status.entitled) throw cloudKitError('notEntitled');
     });
     // A failure is not kept: the next call asks again.
     ready.catch(() => { if (this.ready === ready) this.ready = undefined; });
@@ -415,8 +443,8 @@ export class CloudKitStore implements SyncStore {
     let result;
     try { result = await this.call(() => this.native.changes(zone, token)); }
     catch (error) {
-      if (missingZone(error) || (error instanceof CloudKitError && error.code === 'userDeletedZone')) return undefined;
-      if (error instanceof CloudKitError && error.code === 'changeTokenExpired') throw new ChangeTokenExpiredError();
+      if (missingZone(error) || (isCloudKitError(error) && error.code === 'userDeletedZone')) return undefined;
+      if (isCloudKitError(error) && error.code === 'changeTokenExpired') throw new ChangeTokenExpiredError();
       throw error;
     }
     if (!result.token) throw new CloudKitError('missingChangeToken', 'CloudKit returned no change token.');
@@ -426,10 +454,10 @@ export class CloudKitStore implements SyncStore {
   }
 }
 
-/** A `CloudKitError` from whatever the addon rejected with. */
-function translate(error: unknown): CloudKitError {
-  if (error instanceof CloudKitError) return error;
+/** The CloudKit error for whatever the addon rejected with. */
+function translate(error: unknown): AnyCloudKitError {
+  if (isCloudKitError(error)) return error;
   const { code, message, retryAfter } = (error ?? {}) as { code?: unknown; message?: unknown; retryAfter?: unknown };
-  return new CloudKitError(typeof code === 'string' ? code : 'unknown', typeof message === 'string' ? message : String(error),
+  return cloudKitError(typeof code === 'string' ? code : 'unknown', typeof message === 'string' ? message : String(error),
     typeof retryAfter === 'number' && Number.isFinite(retryAfter) && retryAfter >= 0 ? retryAfter : undefined);
 }
