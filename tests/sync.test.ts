@@ -15,7 +15,7 @@ import { acquireProjectLock, bookStateFolder, readSaveLedger } from '../desktop/
 import { importIntoProject, loadProject, updateProject } from '../desktop/project';
 import type { OpenProject } from '../desktop/project';
 import { collectSources, relinkFolder, relocateSource, removeSources, saveDocumentCopy } from '../desktop/source-actions';
-import { cleanUp, planCleanUp, storageReport } from '../desktop/sync-sweep';
+import { cleanUp, cleanUpQuestion, planCleanUp, storageReport } from '../desktop/sync-sweep';
 import { captureBookStateRevision } from '../desktop/revisions';
 import { cloneFromRemote, describeLocalChange, describeSync, downloadName, downloadOriginals, newBookHistory, originalsAway, originalsNotHere, pendingOriginals, pendingUploads, placeOriginals, RemoteSyncingError, stageOriginals, stageSyncPull, syncBook, uploadOriginals } from '../desktop/sync-engine';
 import type { SyncOptions } from '../desktop/sync-engine';
@@ -3573,7 +3573,7 @@ each('Clean Up: an unused original, preview and cover go after the grace period;
   assert.equal((await tips(remote, a)).length, 2);
   assert.deepEqual((await planCleanUp(remote, later(8))).books, [], 'the fork names the photo and the old cover');
   await remove(remote, commitKey(book, fork.commitId));
-  const freed = await cleanUp(remote, await planCleanUp(remote, later(8)));
+  const freed = await cleanUp(remote, await planCleanUp(remote, later(8)), later(8));
   assert.deepEqual(freed, { bytes: plan.bytes, objects: 3 });
   for (const key of unused) assert.equal(await remote.hasBlob(key), false, key);
   // What a tip names stays, and so does every commit and everything under content/ (also the state blob of the commit
@@ -3605,7 +3605,7 @@ each('Clean Up reads the tips again before it deletes: a photo added again meanw
   const again = await importPhoto(a, 'harbour again.jpg', '#225588');
   assert.equal(again.digest, first.digest);
   await sync(a, remote);
-  assert.deepEqual(await cleanUp(remote, plan), { bytes: 0, objects: 0 });
+  assert.deepEqual(await cleanUp(remote, plan, later(8)), { bytes: 0, objects: 0 });
   assert.ok(await remote.hasBlob(original));
   const [tip] = await tips(remote, a);
   const preview = proxyBlobKey(book, first.digest, (await stateOf(remote, tip)).proxies[first.digest].ext);
@@ -3676,6 +3676,15 @@ each('Duplicate of a synced book copies its originals inside the store at the co
   // A store that copies inside itself uploads no original; iCloud, which cannot, uploads them from the files here.
   assert.deepEqual(puts.filter((key) => key.includes('/originals/')).length, remote.store.copy ? 0 : Object.keys(named).length);
   assert.deepEqual(await pendingUploads(copy.folder, remote), []);
+  assert.equal((await readSyncState(copy.folder)).copiedFrom, undefined, 'the hint goes once every original it named is there');
+  // A photo added to the copy later uploads as in any book, with no copy request to the book it was made from.
+  const copies: string[] = [];
+  const copyBlob = remote.copyBlob.bind(remote);
+  remote.copyBlob = (from, to) => { copies.push(from); return copyBlob(from, to); };
+  const added = await importPhoto(copy, 'added.jpg', '#884422');
+  assert.equal((await sync(copy, remote)).action, 'push');
+  assert.equal(sha(await stored(remote, originalBlobKey(copied, added.digest, '.jpg'))), added.digest);
+  assert.deepEqual(copies, []);
 });
 
 each('Duplicate on a Mac that keeps only previews: the copy names the originals and gets them from the book it was copied from', async (t) => {
@@ -3738,7 +3747,77 @@ test('Clean Up over iCloud lists each book in the store itself, never from the k
   assert.deepEqual(plan.books.map(({ blobs }) => blobs.map(({ key }) => key)), [[stray]]);
   const remoteId = await remote.remoteId();
   assert.ok((await keyIndex.read(remoteId, book))!.entries[stray]);
-  await cleanUp(remote, plan);
+  await cleanUp(remote, plan, later(8));
   assert.equal((await keyIndex.read(remoteId, book))!.entries[stray], undefined, 'the kept index no longer has it');
   assert.equal(await remote.hasBlob(stray), false);
+});
+
+each('Clean Up counts the week from the commit that removed a photo, not from the upload', async (t) => {
+  const { a, remote } = await world(t);
+  await sync(a, remote);
+  const photo = await importPhoto(a, 'harbour.jpg', '#225588');
+  await sync(a, remote);
+  const original = originalBlobKey(await bookId(a), photo.digest, '.jpg');
+  // Uploaded long ago and removed (in this test's clock) 7.5 days later: half a day after the removal it stays, so the
+  // other Macs have a week to pull the removal while the original is still there.
+  await on(a, (book) => removeSources(book, ['photo:' + photo.id]));
+  await sync(a, remote, { now: () => later(7.5) });
+  const keys = async (now: Date) => (await planCleanUp(remote, now)).books.flatMap(({ blobs }) => blobs.map(({ key }) => key));
+  assert.equal((await keys(later(8))).includes(original), false);
+  assert.deepEqual(await cleanUp(remote, await planCleanUp(remote, later(8)), later(8)), { bytes: 0, objects: 0 });
+  assert.equal((await keys(later(15))).includes(original), true, 'a week after the removal it goes');
+});
+
+each('a preview a push reused after Clean Up removed it is sent again, so the other Mac can still pull', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  const photo = await importPhoto(a, 'harbour.jpg', '#225588');
+  await sync(a, remote);
+  const [tip] = await tips(remote, a);
+  const preview = proxyBlobKey(tip.bookId, photo.digest, (await stateOf(remote, tip)).proxies[photo.digest].ext);
+  // Lost between Clean Up's last look and the deletion: the next push carries the entry forward and sends the preview again.
+  await remote.deleteBlobs([preview]);
+  await edit(a, caption('shore', 'After the sweep'));
+  assert.equal((await sync(a, remote)).action, 'push');
+  assert.ok(await remote.hasBlob(preview), 'a push sends a preview it carries forward again');
+  // A sync with nothing to push sends it again as well.
+  await remote.deleteBlobs([preview]);
+  assert.equal((await sync(a, remote)).action, 'in-sync');
+  assert.ok(await remote.hasBlob(preview), 'a sync with nothing to push sends it again');
+  assert.equal((await sync(b, remote)).action, 'fast-forward', 'the other Mac pulls');
+});
+
+each('Clean Up keeps an original in the book a duplicate was made from while the duplicate still waits to copy it', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  const [tip] = await tips(remote, a);
+  const named = (await stateOf(remote, tip)).originals;
+  const [id, original] = Object.entries(named)[0];
+  await use(b);
+  const remoteId = await remote.remoteId();
+  const laptop: Mac = { ...b, folder: await cloneFromRemote({ remote, tip, destination: b.folder, remoteId }) };
+  const copy: Mac = { ...b, folder: join(b.base, 'Copy.imageflow') };
+  await on(laptop, (book) => saveDocumentCopy(book, copy.folder, false));
+  await updateSyncState(copy.folder, (state) => ({ ...state, remoteId }));
+  // The duplicate's commit names the original; its upload has not run yet.
+  assert.equal((await commitOnly(copy, remote)).action, 'initial-push');
+  // On the desktop the photo is removed, and a week later Clean Up runs.
+  await on(a, (book) => removeSources(book, ['photo:' + id]));
+  await sync(a, remote);
+  const source = originalBlobKey(tip.bookId, original.digest, original.ext);
+  const keys = async () => (await planCleanUp(remote, later(8))).books.flatMap(({ blobs }) => blobs.map(({ key }) => key));
+  assert.equal((await keys()).includes(source), false, 'kept while the duplicate waits for it');
+  await uploadAll(copy, remote);
+  assert.equal(sha(await stored(remote, originalBlobKey(await bookId(copy), original.digest, original.ext))), original.digest);
+  assert.equal((await keys()).includes(source), true, 'once the duplicate has it, it goes from the book that no longer uses it');
+});
+
+test('Clean Up asks before it deletes: the question names the backend and what it frees', () => {
+  const plan = { books: [{ bookId: randomUUID(), blobs: [{ key: 'k', size: 2_500_000 }], bytes: 2_500_000 }], bytes: 2_500_000, objects: 1, skipped: 0, wanted: [] };
+  const question = cleanUpQuestion(plan, 'books');
+  assert.equal(question.message, 'Clean up “books”?');
+  assert.deepEqual([question.buttons, question.defaultId, question.cancelId], [['Clean Up', 'Cancel'], 1, 1]);
+  assert.match(question.detail, /^Clean Up can free 2\.5 MB: originals, previews and covers unused for a week in 1 book\. They are deleted for every Mac\./);
 });

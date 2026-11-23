@@ -92,7 +92,9 @@ export function registerSyncSettings({ ipcMain, owner, settings, credentials, cl
   /** What the books take up on the configured remote, per book (`storageReport`), computed when asked. */
   usage?: () => Promise<SyncStorage>;
   /** Clean Up (#285): `plan` finds what it would delete and deletes nothing; `run` deletes what the last plan found. */
-  cleanUp?: { plan: () => Promise<SyncCleanUpPlan>; run: () => Promise<{ bytes: number; objects: number }> };
+  cleanUp?: { plan: () => Promise<SyncCleanUpPlan>;
+    /** Asks in the main process, on the window that asked, then deletes; `cancelled` when the user said no. */
+    run: (event: IpcMainInvokeEvent) => Promise<{ bytes: number; objects: number } | { cancelled: true }> };
   owner: (event: IpcMainInvokeEvent) => unknown;
   settings: SettingsStore;
   credentials: () => CredentialStore;
@@ -165,7 +167,7 @@ export function registerSyncSettings({ ipcMain, owner, settings, credentials, cl
   }));
   ipcMain.handle(channels.syncCleanUp, (event) => guard(event, async () => {
     if (!cleanUp || !usableBackend(settings.value.sync)) throw new Error('Sync is off on this Mac.');
-    return cleanUp.run();
+    return cleanUp.run(event);
   }));
 
   ipcMain.handle(channels.testSyncConnection, (event, request: unknown) => guard(event, async (): Promise<SyncConnectionReport> => {

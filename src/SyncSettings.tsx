@@ -2,36 +2,13 @@ import { useEffect, useState } from 'react';
 import type { DesktopApi, SyncBackendState, SyncCleanUpPlan, SyncConnectionReport, SyncSetupBook, SyncStorage } from './desktop';
 import type { AppSettings, S3SyncBackend, SyncBackend } from './settings';
 import { splitEndpoint } from './sync-endpoint';
+import { cleanUpText, formatStorage, storageSummary } from './sync-storage-text';
+
+export { cleanUpText, formatStorage, storageSummary };
 
 type Fields = { endpoint: string; region: string; bucket: string; prefix: string; addressing: '' | 'path' | 'virtual'; accessKeyId: string; secretAccessKey: string };
 const fieldsOf = (backend?: S3SyncBackend): Fields => ({ endpoint: backend?.endpoint ?? '', region: backend?.region ?? '', bucket: backend?.bucket ?? '',
   prefix: backend?.prefix ?? '', addressing: backend?.addressing ?? '', accessKeyId: '', secretAccessKey: '' });
-
-/** A size as Finder and iCloud show it: decimal units, one decimal from MB on. */
-export function formatStorage(bytes: number) {
-  if (bytes < 1000) return bytes + ' bytes';
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let value = bytes / 1000, unit = 0;
-  while (value >= 1000 && unit < units.length - 1) { value /= 1000; unit++; }
-  return (unit === 0 ? Math.round(value) : Math.round(value * 10) / 10) + ' ' + units[unit];
-}
-
-/** The storage figures in a sentence. */
-export function storageSummary(usage: SyncStorage, icloud: boolean) {
-  const books = usage.books.filter(({ deleted }) => !deleted).length;
-  if (!usage.books.length) return icloud ? 'No books are stored in iCloud yet.' : 'No books are stored yet.';
-  return 'ImageFlow uses ' + formatStorage(usage.bytes) + (icloud ? ' of your iCloud storage' : '') + ' for ' + books + (books === 1 ? ' book' : ' books') +
-    (usage.originals ? ', ' + formatStorage(usage.originals) + ' of it originals.' : '.');
-}
-
-/** What Clean Up would free, in words, before it deletes anything. */
-export function cleanUpText(plan: SyncCleanUpPlan) {
-  const skipped = plan.skipped ? ' ' + (plan.skipped === 1 ? '1 book is' : plan.skipped + ' books are') + ' left as it is: what it uses cannot be read now.' : '';
-  if (!plan.objects) return 'There is nothing to clean up.' + skipped;
-  const parts = [plan.books ? 'unused originals, previews and covers of ' + plan.books + (plan.books === 1 ? ' book' : ' books') : '',
-    plan.deletedBooks ? 'what is left of ' + plan.deletedBooks + (plan.deletedBooks === 1 ? ' deleted book' : ' deleted books') : ''].filter(Boolean);
-  return 'Clean Up can free ' + formatStorage(plan.bytes) + ': ' + parts.join(', and ') + '.' + skipped;
-}
 
 /** What Test Connection found, in words. */
 export function describeReport(report: SyncConnectionReport) {
@@ -93,7 +70,10 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
     setCleanUp({ state: 'cleaning', plan });
     const answer = await api.syncCleanUp().catch(() => ({ error: 'ImageFlow could not complete the request.' }));
     if ('error' in answer) { setCleanUp({ state: 'failed', text: answer.error }); return; }
-    setCleanUp({ state: 'done', text: answer.value.objects ? 'Freed ' + formatStorage(answer.value.bytes) + '.' : 'Nothing was deleted: the books use everything they store by now.' });
+    // Not confirmed in the question the app asked: the plan stays shown.
+    const done = answer.value;
+    if ('cancelled' in done) { setCleanUp({ state: 'found', plan }); return; }
+    setCleanUp({ state: 'done', text: done.objects ? 'Freed ' + formatStorage(done.bytes) + '.' : 'Nothing was deleted: the books use everything they store by now.' });
     // The figures shown are out of date now.
     if (usage && usage !== 'counting' && !('error' in usage)) void countStorage();
   }
@@ -322,7 +302,7 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
             <button disabled={!api || cleanUp?.state === 'looking'} onClick={() => void findCleanUp()}>Clean Up…</button>
           </>}
         </div>
-        <p className="settings-note">Clean Up deletes originals, previews and covers no book uses any more, once they are a week old, and what is left of books deleted from sync. Every book’s history stays.</p>
+        <p className="settings-note">Clean Up deletes originals, previews and covers that no book has used for a week, and what is left of books deleted from sync. It asks before it deletes anything. Every book’s text, files and history stay.</p>
       </div>
     </>}
     <span className="settings-label">Downloads:</span>

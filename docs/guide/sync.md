@@ -92,11 +92,11 @@ A book that syncs on this Mac stays in the list, however many books you open; to
 
 Your sync keeps every version of every book, but not every photo. When you remove a photo, or a book gets a new cover, the old original, preview and cover stay in your sync until you choose **Clean Up…**:
 
-- Clean Up first says how much it would free, and deletes nothing until you choose **Clean Up**.
-- It deletes originals, previews and covers that no current version of a book uses, once they are a week old, so a Mac that is in the middle of syncing loses nothing. A book changed on two Macs keeps what either version uses.
+- Clean Up first says how much it would free, and asks once more before it deletes anything, since what it deletes is gone for every Mac.
+- It deletes originals, previews and covers that a book has not used for a week: the week starts when you remove the photo or change the cover, so your other Macs have that week to sync before the original goes. Anything uploaded in the last week stays too, so a Mac that is in the middle of syncing loses nothing. A book changed on two Macs keeps what either version uses, and a duplicate still copying an original keeps it in the book it was duplicated from.
 - It also deletes what is left of books deleted from sync (a bucket only; iCloud removes them whole).
 - A book's text, files, template and history stay. Clean Up leaves a book alone when it cannot read what the book uses (for example, one synced by a newer ImageFlow).
-- If you add a photo back while Clean Up runs, its original stays. In the rare case that one goes anyway, a Mac that has the original uploads it again at its next sync.
+- If you add a photo back while Clean Up runs, its original stays. In the rare case that an original or preview goes anyway, a Mac that has it uploads it again at its next sync.
 
 ### Duplicating a synced book
 

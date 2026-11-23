@@ -329,8 +329,8 @@ export type DesktopApi = {
   syncUsage(): Promise<Result<SyncStorage>>;
   /** Finds what Clean Up would delete, and deletes nothing. */
   syncCleanUpPlan(): Promise<Result<SyncCleanUpPlan>>;
-  /** Deletes what the last plan found, after reading every tip again; answers what was freed. */
-  syncCleanUp(): Promise<Result<{ bytes: number; objects: number }>>;
+  /** Asks in the main process, then deletes what the last plan found after reading every book's commits again. */
+  syncCleanUp(): Promise<Result<{ bytes: number; objects: number } | { cancelled: true }>>;
   /** The recent books for the sheet shown when a backend is first set up, which asks which of them to sync. */
   syncSetupBooks(): Promise<Result<SyncSetupBook[]>>;
   /** The sheet's answer: the books to sync (`sync: true`) and those opted out for this backend. Uploads nothing by itself. */

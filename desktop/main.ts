@@ -55,7 +55,7 @@ import { insideBook, pendingUploadsText, SyncService, UntrustedBookError } from 
 import { cloudKitPush } from './sync-auto';
 import { syncExcludedBook as excludedFrom } from './sync-start';
 import { chooseBooksPatch } from './sync-settings';
-import { cleanUp, planCleanUp, storageReport } from './sync-sweep';
+import { cleanUp, cleanUpQuestion, cleanUpSummary, planCleanUp, storageReport } from './sync-sweep';
 import type { CleanUpPlan } from './sync-sweep';
 import { configureMacHeader, setToolbarDragRegions } from './mac-header';
 import type { RenderSessions } from './document-session';
@@ -2438,13 +2438,20 @@ void app.whenReady().then(async () => {
         const { remote, remoteId } = await syncService.connect();
         const plan = { ...await planCleanUp(remote), remoteId };
         cleanUpPlan = plan;
-        return { bytes: plan.bytes, objects: plan.objects, books: plan.books.filter(({ deleted }) => !deleted).length, deletedBooks: plan.books.filter(({ deleted }) => deleted).length, skipped: plan.skipped };
+        return cleanUpSummary(plan);
       },
-      run: async () => {
-        const { remote, remoteId } = await syncService.connect();
+      // Deleting removes it for every Mac: asked here, in the main process, as Delete from Sync is, never on a window's word.
+      run: async (event) => {
+        const owner = settingsOwner(event);
         const plan = cleanUpPlan;
+        if (!owner || !plan) throw new Error('Look for what Clean Up would free first.');
+        if (!plan.objects) return { cancelled: true as const };
+        const { response } = await dialog.showMessageBox(owner, { type: 'warning', ...cleanUpQuestion(plan, syncService.name ?? 'sync') });
+        if (response !== 0) return { cancelled: true as const };
+        const { remote, remoteId } = await syncService.connect();
+        if (cleanUpPlan !== plan) throw new Error('Look for what Clean Up would free again.');
         cleanUpPlan = undefined;
-        if (!plan || plan.remoteId !== remoteId) throw new Error('Look for what Clean Up would free again: the remote changed since.');
+        if (plan.remoteId !== remoteId) throw new Error('Look for what Clean Up would free again: the remote changed since.');
         return cleanUp(remote, plan);
       },
     },
