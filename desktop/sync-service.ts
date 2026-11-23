@@ -83,7 +83,12 @@ export type SyncServiceDependencies = { credentials?: () => SyncRemoteDependenci
    * Whether the sheet that asks which recent books sync waits for an answer (`AppSettings.syncBooksUnchosen`): until it
    * is answered, no book starts syncing by itself.
    */
-  booksUnchosen?: () => boolean } & Pick<SyncRemoteDependencies, 'headerCache' | 'keyIndex' | 'cloudKit' | 's3'>;
+  booksUnchosen?: () => boolean;
+  /**
+   * Told when CloudKit says the iCloud account changed, which it also does without a change (#284): the app reads the
+   * sync status of the open books again, and never pushes because of it.
+   */
+  accountChanged?: () => void } & Pick<SyncRemoteDependencies, 'headerCache' | 'keyIndex' | 'cloudKit' | 's3'>;
 
 /** The remote a backend setting names. Each kind of backend is one case here. */
 function openBackend(backend: SyncBackend, dependencies: SyncServiceDependencies): Backend {
@@ -104,7 +109,8 @@ function openBackend(backend: SyncBackend, dependencies: SyncServiceDependencies
     }
     case 'icloud': {
       // The account is checked at every use; another Apple ID is another remote (`cloudKitOpener`).
-      const open = cloudKitOpener({ cloudKit: dependencies.cloudKit, cacheFolder: dependencies.cacheFolder, headerCache: dependencies.headerCache, keyIndex: dependencies.keyIndex });
+      const open = cloudKitOpener({ cloudKit: dependencies.cloudKit, cacheFolder: dependencies.cacheFolder, headerCache: dependencies.headerCache, keyIndex: dependencies.keyIndex,
+        accountChanged: dependencies.accountChanged });
       return { name: 'iCloud', open, inside: async () => false };
     }
   }
@@ -153,6 +159,19 @@ export class SyncService {
   get kind() { return this.setting()?.kind; }
   /** The name of the configured backend, for the sync status and dialogs. */
   get name() { return this.backend()?.backend.name; }
+  /** Whether the first-configuration sheet waits for an answer: until it is, nothing syncs by itself (#282, #284). */
+  get booksUnchosen() { return !!this.dependencies.booksUnchosen?.(); }
+
+  /**
+   * Asks the configured remote to tell this Mac about changes (iCloud: a database subscription with silent pushes,
+   * #284). Throws where it cannot (a bucket, a build or account without CloudKit); the app then keeps to open, focus
+   * and idle.
+   */
+  async subscribe() {
+    const { remote } = await this.connect();
+    if (!remote.subscribe) throw new Error('This sync backend does not tell other Macs about changes.');
+    await remote.subscribe();
+  }
 
   /**
    * The configured remote and its identity, for the book in `book` when given. Throws when none is configured, it
@@ -355,7 +374,7 @@ export class SyncService {
    * rejects when an upload failed (the next sync tries again).
    */
   async upload(folder: string): Promise<UploadOutcome | undefined> {
-    if (!this.configured) return undefined;
+    if (!this.configured || this.closed) return undefined;
     const key = folder;
     const running = this.uploads.get(key);
     if (running) { running.again = true; return running.task; }
@@ -388,6 +407,16 @@ export class SyncService {
     return entry.task;
   }
 
+  /**
+   * The upload after a sync committed (#284): as `upload`, except that an automatic sync does not start one that a full
+   * remote paused. That one waits for a sync the user asks for (Sync Now) or the book's next open, so an idle push does
+   * not try the same original again each time.
+   */
+  uploadAfterSync(folder: string, { automatic = false }: { automatic?: boolean } = {}) {
+    if (automatic && this.settled.get(folder)?.full) return Promise.resolve(undefined);
+    return this.upload(folder);
+  }
+
   /** Stops a book's background upload; the original going up is cancelled cleanly, and the next sync resumes. */
   async cancelUpload(folder: string) {
     const running = this.uploads.get(folder);
@@ -399,6 +428,16 @@ export class SyncService {
   pendingUploads() {
     return [...this.uploads].map(([folder, { progress }]) => ({ folder, left: Math.max(0, progress.total - progress.done) }));
   }
+
+  /**
+   * Quit: cancels every background upload and starts none after it (the push of a book that closes names originals
+   * that resume at its next open).
+   */
+  async shutdown() {
+    this.closed = true;
+    await this.cancelUploads();
+  }
+  private closed = false;
 
   /** Cancels every background upload and waits until each has stopped; nothing half-uploaded is left on the remote. */
   async cancelUploads() {

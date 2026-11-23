@@ -122,6 +122,45 @@ export interface SyncRemote {
    * an upload that was under way does not bring it back.
    */
   deleteBook(bookId: string, now?: Date): Promise<BookTombstone>;
+  /** Asks the store to tell this Mac about changes (`SyncStore.subscribe`); throws where it cannot. Optional. */
+  subscribe?(): Promise<void>;
+}
+
+/**
+ * The remote as a sync bounded by `signal` sees it (the push when a book closes, #284): once the signal is aborted, every
+ * call rejects with its reason at once, also one that is running, so the sync stops at its next request instead of
+ * waiting for a remote that is slow or out of reach. A transfer is given the signal as well, which stops it cleanly. A
+ * request already sent may still complete; what it stores is harmless (content-addressed blobs). The one exception is
+ * `putCommit`: once sent it is waited for (until the store gives up), so the sync records its commit. A `prepareSync`
+ * that completes after the abort is ended at once.
+ */
+export function abortableRemote(remote: SyncRemote, signal?: AbortSignal): SyncRemote {
+  if (!signal) return remote;
+  const race = <T>(name: string, running: Promise<T>) => new Promise<T>((resolve, reject) => {
+    const stop = () => reject(signal.reason);
+    signal.addEventListener('abort', stop, { once: true });
+    running.then((value) => {
+      signal.removeEventListener('abort', stop);
+      if (signal.aborted && name === 'prepareSync' && typeof value === 'function') (value as () => void)();
+      resolve(value);
+    }, (error: unknown) => { signal.removeEventListener('abort', stop); reject(error); });
+  });
+  return new Proxy(remote, {
+    get(target, name, receiver) {
+      const value = Reflect.get(target, name, receiver) as unknown;
+      if (typeof value !== 'function' || typeof name !== 'string') return value;
+      return (...args: unknown[]) => {
+        signal.throwIfAborted();
+        // Uploads and downloads stop with the signal themselves.
+        if (name === 'putBlob' || name === 'downloadBlob') args[2] = { ...(args[2] as object | undefined), signal };
+        const result = (value as (...values: unknown[]) => unknown).apply(target, args);
+        // A commit that was sent is waited for, and the sync records it: one left to land unrecorded while the user
+        // edits on would come back as a second tip next to this Mac's next push, a fork of its own making.
+        if (name === 'putCommit') return result;
+        return result instanceof Promise ? race(name, result) : result;
+      };
+    },
+  });
 }
 
 /** A book's commits on a remote. Throws `NewerSyncFormatError` for one a newer version wrote. */
@@ -338,6 +377,10 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     this.noteStored(key, size);
   }
   async getBlob(key: string) { return this.store.get(requireBlobKey(key)); }
+  async subscribe() {
+    if (!this.store.subscribe) throw new Error('This sync backend does not tell other Macs about changes.');
+    await this.store.subscribe();
+  }
   async downloadBlob(key: string, destination: string, options?: TransferOptions) { return this.store.download(requireBlobKey(key), destination, options); }
   async copyBlob(from: string, to: string) {
     // Only the book may differ: the same part, digest and extension, so a copy can never put other bytes under a key.

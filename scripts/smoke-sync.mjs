@@ -33,7 +33,9 @@ const elsewhereQuestion = 'This book last synced somewhere else.';
 
 // Downloaded books go to the "laptop"'s folder, never to the real Documents folder.
 await mkdir(join(work, 'profile'));
-await writeFile(join(work, 'profile', 'settings.json'), JSON.stringify({ booksFolder: join(work, 'Laptop') }));
+// Every sync here is asked for: automatic sync (#284) has a smoke of its own (smoke-sync-auto), and pulls or pushes by
+// itself would race with the steps below.
+await writeFile(join(work, 'profile', 'settings.json'), JSON.stringify({ booksFolder: join(work, 'Laptop'), syncAutomatically: false }));
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
   env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1', IMAGEFLOW_SYNC_FOLDER: '1' } });
 const stderr = [];

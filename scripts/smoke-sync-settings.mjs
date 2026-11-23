@@ -57,6 +57,13 @@ try {
   await settings.getByRole('tab', { name: 'Sync', selected: true }).waitFor();
   // Keep originals moved here from General.
   await settings.getByRole('checkbox', { name: 'Keep originals of synced books on this Mac' }).waitFor();
+  // Sync automatically (#284) is on by default, an ordinary preference: unchecking it is saved as `false`.
+  const automatic = settings.getByRole('checkbox', { name: 'Sync automatically' });
+  assert.equal(await automatic.isChecked(), true);
+  await automatic.uncheck();
+  await waitForPage(settings, async () => (await window.imageflow.getSettings()).value?.syncAutomatically === false);
+  await automatic.check();
+  await waitForPage(settings, async () => (await window.imageflow.getSettings()).value?.syncAutomatically === undefined);
   // Sync is off, and no backend is preselected (ADR 0012): the bucket is chosen first. Neither iCloud nor a folder is
   // offered without its flag.
   await settings.getByText('Sync is off: books do not sync on this Mac.', { exact: true }).waitFor();

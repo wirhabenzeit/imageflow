@@ -283,5 +283,11 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
         <input type="checkbox" checked={settings?.keepOriginals !== false} disabled={!settings}
           onChange={(event) => void choose({ keepOriginals: event.target.checked })} />Keep originals of synced books on this Mac</label>
     </div>
+    <span className="settings-label">Automatic:</span>
+    <div className="settings-control">
+      <label className="pc-switch" title="Books take changes from your other Macs when they open or come to the front, and send their own after you stop editing and when they close. A book changed on two Macs waits for File → Sync → Sync Now.">
+        <input type="checkbox" checked={settings?.syncAutomatically !== false} disabled={!settings}
+          onChange={(event) => void choose({ syncAutomatically: event.target.checked })} />Sync automatically</label>
+    </div>
   </div>;
 }

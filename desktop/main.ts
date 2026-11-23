@@ -27,11 +27,12 @@ import { assetPageLabels, assetUsage, usageLabel } from '../src/asset-usage';
 import { importFeedback } from '../src/import-feedback';
 import { configureSourceStore, pruneSourceCache, SourceStore } from './source-store';
 import { bookTrusted, configureSourceAccess, trustBook } from './source-access';
-import { app, autoUpdater, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, powerMonitor, protocol, safeStorage, shell } from 'electron';
+import { app, autoUpdater, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, powerMonitor, protocol, pushNotifications, safeStorage, shell } from 'electron';
 import type { BaseWindow, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { networkInterfaces } from 'node:os';
 import { cp, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, isAbsolute, parse, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -51,6 +52,7 @@ import { BookDeletedError, BookDeleteError, BookNotDeletedError, remoteTips } fr
 import { readSyncState, SyncElsewhereError } from './sync-pull';
 import { deleteFromSyncQuestion, libraryBook, libraryListing, limited, syncsWithRemote } from './sync-library';
 import { insideBook, pendingUploadsText, SyncService, UntrustedBookError } from './sync-service';
+import { cloudKitPush } from './sync-auto';
 import { syncExcludedBook as excludedFrom } from './sync-start';
 import { chooseBooksPatch } from './sync-settings';
 import { configureMacHeader, setToolbarDragRegions } from './mac-header';
@@ -141,7 +143,10 @@ let cloudKitNative: CloudKitNative | undefined | null = null;
 const cloudKit = () => (cloudKitNative === null ? (cloudKitNative = loadCloudKitNative()) : cloudKitNative);
 // A setting that names iCloud in a build started without its flag leaves sync off (`usableBackend`).
 const syncService = new SyncService(() => usableBackend(settings?.value.sync), { credentials: () => syncCredentials(), cacheFolder: () => app.getPath('userData'), cloudKit,
-  booksUnchosen: () => !!settings?.value.syncBooksUnchosen });
+  booksUnchosen: () => !!settings?.value.syncBooksUnchosen,
+  // CloudKit's account-change event (also sent without a change) reads the status of the open books again; it never
+  // pushes (#284).
+  accountChanged: () => { for (const document of documents.values()) void document.refreshSync().catch((error) => console.warn('ImageFlow could not read the sync status', error)); } });
 let recents: RecentDocuments;
 let library: TemplateLibrary;
 let trust: TemplateTrust;
@@ -606,6 +611,9 @@ async function openDocument(path: string): Promise<DocumentSession | undefined> 
       };
       document.announceSites = downloadedBooks.delete(folder);
       document.syncService = syncService;
+      document.syncAutomatically = () => settings.value.syncAutomatically !== false;
+      const editing = document;
+      document.textEditorsOpen = () => markdownWindows.windows().some((window) => markdownWindows.documentFor(window) === editing);
       document.syncExcluded = await syncExcludedBook(folder);
       const asking = document;
       asking.syncElsewhere = async () => { if (await offerSyncHere(asking)) void asking.syncNow().catch((error) => report(asking.window, error)); };
@@ -1118,12 +1126,55 @@ async function revertOpened(document: DocumentSession) {
   const result = await document.run(async () => document.notify({ value: document.activate(await document.projectSession.revertOpened()) }));
   if ('error' in result) throw new Error(result.error);
 }
-/** Coming back to a book that syncs looks at the remote again, at most every few seconds (#251). */
+/**
+ * Coming back to a book that syncs looks at the remote again, at most every few seconds (#251): with Sync
+ * automatically it pulls a fast-forward and pushes what waits, otherwise it reads the status (#284).
+ */
 const syncLooked = new WeakMap<DocumentSession, number>();
 function refreshSyncOnFocus(document: DocumentSession) {
   if (!document.syncView || Date.now() - (syncLooked.get(document) ?? 0) < 5000) return;
   syncLooked.set(document, Date.now());
-  void document.refreshSync().catch((error) => console.warn('ImageFlow could not read the sync status', error));
+  document.focused();
+}
+
+/**
+ * The network this Mac is on, as a signature that changes when it does (an interface or address comes or goes, or
+ * the Mac goes offline): automatic syncs that back off after failures try again at once (#284).
+ */
+function networkSignature() {
+  const addresses = Object.entries(networkInterfaces()).flatMap(([name, entries]) => (entries ?? []).filter((entry) => !entry.internal).map((entry) => name + ' ' + entry.address)).sort();
+  return (net.isOnline() ? 'online' : 'offline') + '\n' + addresses.join('\n');
+}
+let networkSeen = '';
+function watchNetwork() {
+  networkSeen = networkSignature();
+  const timer = setInterval(() => {
+    const next = networkSignature();
+    if (next === networkSeen) return;
+    networkSeen = next;
+    for (const document of documents.values()) document.autoSync.networkChanged();
+  }, 10_000);
+  timer.unref();
+}
+
+/**
+ * Pushes from iCloud (#284): a database subscription with silent pushes, and the app registered for remote
+ * notifications. A push names the database, not a book, so every open book looks at the remote, as on focus; a book's
+ * look over iCloud reads only what changed in its zone. Inert where it fails: a bucket, an unsigned or unentitled
+ * build, an iCloud that cannot be reached. Tried again when the backend changes to iCloud.
+ */
+let pushesRegistered: Promise<boolean> | undefined;
+function registerSyncPushes() {
+  if (process.platform !== 'darwin' || syncService.kind !== 'icloud' || pushesRegistered) return;
+  const registering = pushesRegistered = (async () => {
+    await pushNotifications.registerForAPNSNotifications();
+    await syncService.subscribe();
+    return true;
+  })().catch((error: unknown) => {
+    console.warn('ImageFlow syncs without pushes from iCloud', error);
+    if (pushesRegistered === registering) pushesRegistered = undefined;
+    return false;
+  });
 }
 
 /**
@@ -1329,7 +1380,10 @@ async function libraryAction(owner: BrowserWindow, request: LibraryAction) {
     if (response !== 0) return;
     const open = [...documents.values()].filter((document) => !document.closing && document.book.project.bookId === bookId);
     const folders = [...new Set([...local, ...open.map((document) => document.book.folder)])];
-    await syncService.deleteBook(bookId, { folders, settle: async () => { await Promise.all(open.map((document) => document.settleSync())); } });
+    // Nothing pushes the book by itself while it is deleted, also not when it closes meanwhile.
+    for (const document of open) document.deleting = true;
+    try { await syncService.deleteBook(bookId, { folders, settle: async () => { await Promise.all(open.map((document) => document.settleSync())); } }); }
+    finally { for (const document of open) document.deleting = false; }
     libraryCache = undefined;
     for (const folder of folders) await recents.track(folder, false).catch(() => {});
     for (const document of open) void document.refreshSync().catch((error) => console.warn('ImageFlow could not read the sync status', error));
@@ -1379,6 +1433,7 @@ function syncBackendChanged() {
   for (const document of documents.values()) {
     if (!document.closing) void document.refreshSync().catch((error) => console.warn('ImageFlow could not read the sync status', error));
   }
+  registerSyncPushes();
   updateMenus();
 }
 
@@ -1849,7 +1904,18 @@ void app.whenReady().then(async () => {
   sourceMaintenance.unref();
   await pruneRenditions(renditions).catch((error) => console.warn('ImageFlow could not prune image previews', error));
   await pruneProxies();
-  powerMonitor.on('resume', () => { for (const document of documents.values()) document.projectSession.inputs.invalidate(); });
+  // Tests of automatic sync wait less for a book to be idle; a packaged app always waits 30 s.
+  const idle = Number(process.env.IMAGEFLOW_SYNC_IDLE_MS);
+  if (!app.isPackaged && Number.isFinite(idle) && idle > 0) DocumentSession.autoSyncTiming = { ...DocumentSession.autoSyncTiming, idle };
+  const slow = Number(process.env.IMAGEFLOW_SYNC_TEST_SLOW_MS);
+  if (!app.isPackaged && Number.isFinite(slow) && slow > 0) DocumentSession.automaticSyncDelay = slow;
+  powerMonitor.on('resume', () => { for (const document of documents.values()) { document.projectSession.inputs.invalidate(); document.autoSync.networkChanged(); } });
+  watchNetwork();
+  if (process.platform === 'darwin') pushNotifications.on('received-apns-notification', (_event, userInfo) => {
+    if (!cloudKitPush(userInfo) || syncService.kind !== 'icloud') return;
+    for (const document of documents.values()) document.notified();
+  });
+  registerSyncPushes();
   app.on('browser-window-focus', () => { updateMenus(); publishUpdates(); });
   if (!app.isPackaged && process.env.IMAGEFLOW_BENCHMARK === '1') {
     Object.defineProperty(globalThis, 'imageflowBenchmarkInputs', { value: () => lastDocument?.projectSession.inputs.metrics });
@@ -1954,8 +2020,9 @@ void app.whenReady().then(async () => {
     if (quitReady) return;
     event.preventDefault();
     quitCleanup ??= (async () => {
-      // Uploads of originals stop cleanly: what is half-sent is never stored, and the next open resumes them.
-      await syncService.cancelUploads();
+      // Uploads of originals stop cleanly: what is half-sent is never stored, and the next open resumes them. None starts
+      // after this, also not for a book whose bounded push on closing (below) names new originals.
+      await syncService.shutdown();
       await connectionSettingsQueue;
       await disableMcp();
       // The plugin sees the bridge file go and waits for the next run of ImageFlow.

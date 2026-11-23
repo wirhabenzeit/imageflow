@@ -114,8 +114,10 @@ export function s3Opener(backend: S3SyncBackend, { credentials, cacheFolder, hea
  * used with another's. Its identity (`remote.json`) is then the other account's, and every book that synced reads as
  * synced somewhere else and is asked about. Throws a `CloudKitAccessError` when iCloud cannot be used now.
  */
-export function cloudKitOpener({ cloudKit, cacheFolder, headerCache, keyIndex, namespace }: { cloudKit?: () => CloudKitNative | undefined; cacheFolder?: () => string;
-  headerCache?: CommitHeaderCache; keyIndex?: KeyIndexCache; namespace?: string }) {
+export function cloudKitOpener({ cloudKit, cacheFolder, headerCache, keyIndex, namespace, accountChanged }: { cloudKit?: () => CloudKitNative | undefined; cacheFolder?: () => string;
+  headerCache?: CommitHeaderCache; keyIndex?: KeyIndexCache; namespace?: string;
+  /** Told when CloudKit says the account changed (also when it did not), after the user is forgotten: the app reads the status again. */
+  accountChanged?: () => void }) {
   const headers = headerCache ?? (cacheFolder ? new FileHeaderCache(join(cacheFolder(), 'Sync Cache')) : undefined);
   const indexes = keyIndex ?? (cacheFolder ? new FileKeyIndexCache(join(cacheFolder(), 'Sync Cache')) : undefined);
   let store: { native: CloudKitNative; store: CloudKitStore; user?: Promise<string> } | undefined;
@@ -128,7 +130,7 @@ export function cloudKitOpener({ cloudKit, cacheFolder, headerCache, keyIndex, n
       store = opened;
       // The user is read again only after CloudKit says the account changed (also when it did not, which costs one
       // read). Commits check the user each time (`beforeCommit` below), so a late event never lets one through.
-      await opened.store.onAccountChange(() => { opened.user = undefined; }).catch(() => {});
+      await opened.store.onAccountChange(() => { opened.user = undefined; accountChanged?.(); }).catch(() => {});
     }
     const current = store;
     const status = await current.store.status();

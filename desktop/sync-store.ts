@@ -61,6 +61,11 @@ export interface SyncStore {
    * without one.
    */
   changes?(bookId: string, token?: string): Promise<StoreChanges | undefined>;
+  /**
+   * Asks the store to tell this Mac when anything changes (iCloud: a database subscription with silent pushes, #284).
+   * Optional: a bucket has no push, and its books sync on open, focus and idle alone.
+   */
+  subscribe?(): Promise<void>;
 }
 
 /** Objects added or replaced (`changed`) and keys removed (`deleted`) since a token, and the token to ask with next. */

@@ -673,6 +673,32 @@ static napi_value DeleteRecords(napi_env env, napi_callback_info info) {
   return promise;
 }
 
+// saveSubscription(id): a database subscription for every change in the private database, with silent pushes
+// (content-available, no alert), so another Mac's push wakes this one to pull (#284). Saving one that exists replaces it.
+// The pushes reach the app only once it registered for remote notifications (Electron's pushNotifications) in a build
+// with the aps-environment entitlement. The push names the database, not the zone: the app looks at its open books.
+static napi_value SaveSubscription(napi_env env, napi_callback_info info) {
+  size_t argc = 1; napi_value argv[1] = {nullptr};
+  CHECK(napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr));
+  if (!requireContainer(env)) return nullptr;
+  NSString *name = argString(env, argv[0]);
+  if (!requireStrings(env, {name})) return nullptr;
+  napi_value promise;
+  PendingRef pending = newPending(env, &promise, nullptr);
+  CKDatabaseSubscription *subscription = [[CKDatabaseSubscription alloc] initWithSubscriptionID:name];
+  CKNotificationInfo *notification = [[CKNotificationInfo alloc] init];
+  notification.shouldSendContentAvailable = YES;
+  subscription.notificationInfo = notification;
+  CKModifySubscriptionsOperation *operation = [[CKModifySubscriptionsOperation alloc] initWithSubscriptionsToSave:@[subscription] subscriptionIDsToDelete:nil];
+  configure(operation);
+  operation.modifySubscriptionsCompletionBlock = ^(NSArray *, NSArray *, NSError *error) {
+    if (error) return rejectWith(pending, itemError(error));
+    resolveUndefined(pending);
+  };
+  [database addOperation:operation];
+  return promise;
+}
+
 // cancel(id): cancels a running putIfAbsent or fetch, whose promise then rejects with operationCancelled.
 static napi_value Cancel(napi_env env, napi_callback_info info) {
   size_t argc = 1; napi_value argv[1] = {nullptr};
@@ -721,6 +747,7 @@ static napi_value Init(napi_env env, napi_value exports) {
     {"fetch", nullptr, Fetch, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"changes", nullptr, Changes, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"deleteRecords", nullptr, DeleteRecords, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"saveSubscription", nullptr, SaveSubscription, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"cancel", nullptr, Cancel, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"onAccountChange", nullptr, OnAccountChange, nullptr, nullptr, nullptr, napi_default, nullptr},
   };

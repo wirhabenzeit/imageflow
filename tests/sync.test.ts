@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test as runTest } from 'node:test';
 import type { TestContext } from 'node:test';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { cp, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -39,6 +39,7 @@ import { bookTrusted, distrustBook, trustBook } from '../desktop/source-access';
 import { readSyncState, SyncElsewhereError, SyncHalfPulledError, takeAbandonedAtOpen, updateSyncState } from '../desktop/sync-pull';
 import { insideBook, pendingUploadsText, SyncService, UntrustedBookError } from '../desktop/sync-service';
 import { FirstSync, syncExcludedBook } from '../desktop/sync-start';
+import { AutomaticRuns, AutoSync, autoSyncTiming, SyncInterruptedError } from '../desktop/sync-auto';
 import { SettingsStore } from '../desktop/settings';
 import { chooseBooksPatch, syncPatchError } from '../desktop/sync-settings';
 import type { FolderSyncBackend, S3SyncBackend, SyncBackend } from '../src/settings';
@@ -2792,7 +2793,17 @@ test('a first sync by itself that failed is tried again after the next save, and
   await second.run();
   second.saved();
   assert.equal(started, false);
-  first.stop(); second.stop();
+  // A save made while an attempt runs (the edit that interrupted an automatic first sync) is the save a failure waits for.
+  let attempts = 0;
+  let fail = (_: Error) => {};
+  const third = new FirstSync(() => { attempts++; return attempts === 1 ? new Promise<void>((_, reject) => { fail = reject; }) : Promise.resolve(); }, 10, () => {});
+  const running = third.run();
+  third.saved();
+  fail(new Error('interrupted'));
+  await assert.rejects(running);
+  for (let attempt = 0; attempts < 2 && attempt < 500; attempt++) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(attempts, 2, 'tried again without another save');
+  first.stop(); second.stop(); third.stop();
 });
 
 test('Quit names the books whose originals are still uploading, and an upload that fails before it could read the remote still shows', async (t) => {
@@ -3258,4 +3269,261 @@ each('an original carried forward from a snapshot without a record of who named 
   assert.equal((await stateOf(remote, next)).originals.shore?.digest, ghost, 'and carried the original forward');
   const named = (await stateOf(remote, next)).named ?? {};
   assert.notEqual(named.shore?.by, 'Laptop', 'the laptop does not have that file, so it does not name it');
+});
+
+// Automatic sync (#284): the engine's fast-forward-only and push-only modes, and the scheduler over the fake CloudKit.
+
+test('an automatic sync applies only a fast-forward: a divergence with one tip or several, also by a race with another Mac, is left as it is', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  // Edit on one Mac, and the other fast-forwards by itself.
+  await edit(a, caption('shore', 'From the desktop'));
+  await sync(a, remote, { fastForwardOnly: true });
+  const pulled = await sync(b, remote, { fastForwardOnly: true });
+  assert.deepEqual([pulled.action, pulled.changed], ['fast-forward', true]);
+  assert.equal((await manifests(b)).photos.shore.caption, 'From the desktop');
+  // Both edit while offline: one remote tip, and this Mac's version differs. Nothing is copied, pulled or overwritten.
+  await edit(a, caption('shore', 'Desktop, offline'));
+  await sync(a, remote);
+  await edit(b, caption('shore', 'Laptop, offline'));
+  const siblings = async () => (await readdir(b.base)).filter((name) => name.endsWith('.imageflow'));
+  for (const options of [{ fastForwardOnly: true }, { pushOnly: true }]) {
+    const diverged = await sync(b, remote, options);
+    assert.deepEqual([diverged.action, diverged.pulled, diverged.conflictCopy, diverged.pushed, diverged.changed], ['diverged', undefined, undefined, [], false]);
+    assert.equal(diverged.tips?.length, 1);
+  }
+  assert.equal((await manifests(b)).photos.shore.caption, 'Laptop, offline', 'the open book is not overwritten');
+  assert.deepEqual(await siblings(), ['Book.imageflow'], 'no conflict copy');
+  assert.equal((await describeSync(b.folder, remote)).state, 'diverged');
+  // Sync Now keeps both, as before, once the user asks.
+  assert.ok((await sync(b, remote)).conflictCopy);
+  assert.equal((await siblings()).length, 2);
+  await sync(a, remote);
+  // A race: another Mac commits between this Mac's listing and its commit. The push makes a second tip, and nothing
+  // is merged or kept both; the next automatic sync on either Mac leaves the fork for the user.
+  await edit(a, caption('shore', 'Desktop again'));
+  let raced = false;
+  const racing = new Proxy(remote, { get: (target, name, receiver) => (name !== 'putCommit' ? Reflect.get(target, name, receiver) : async (header: CommitHeader) => {
+    if (!raced) { raced = true; await target.putCommit({ ...header, commitId: randomUUID(), bookStateRevision: 'e'.repeat(64) }); }
+    return target.putCommit(header);
+  }) });
+  assert.equal((await sync(a, racing, { fastForwardOnly: true })).action, 'push');
+  assert.equal((await tips(remote, a)).length, 2);
+  for (const mac of [a, b]) {
+    const forked = await sync(mac, remote, { fastForwardOnly: true });
+    assert.deepEqual([forked.action, forked.pulled, forked.pushed.length, forked.tips?.length], ['diverged', undefined, 0, 2]);
+  }
+  assert.equal((await tips(remote, a)).length, 2, 'no commit closed the fork');
+  assert.equal((await siblings()).length, 2, 'and no second copy');
+});
+
+test('a push that must not change the book defers a pull, and a bounded push stops at once when the remote does not answer', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  await edit(a, caption('shore', 'Waiting for the editor'));
+  await sync(a, remote);
+  const before = await manifests(b);
+  const deferred = await sync(b, remote, { pushOnly: true });
+  assert.deepEqual([deferred.action, deferred.changed, deferred.pushed], ['deferred', false, []]);
+  assert.deepEqual(await manifests(b), before);
+  assert.equal((await sync(b, remote, { fastForwardOnly: true })).action, 'fast-forward', 'once nothing blocks it, it pulls');
+  // A remote that never answers: the push gives up as soon as its bound is reached, and the book is unchanged.
+  await edit(b, caption('shore', 'Closing'));
+  const hanging = new Proxy(remote, { get: (target, name, receiver) => (name === 'listCommits' ? () => new Promise(() => {}) : Reflect.get(target, name, receiver)) });
+  const job = new AbortController();
+  setTimeout(() => job.abort(new Error('The book closed before it finished syncing.')), 50);
+  const started = Date.now();
+  await assert.rejects(sync(b, hanging, { pushOnly: true, signal: job.signal }), /closed before it finished/);
+  assert.ok(Date.now() - started < 2000);
+  assert.equal((await tips(remote, a))[0].bookStateRevision, (await readSyncState(b.folder)).lastSynced!.bookStateRevision, 'nothing was pushed');
+  assert.equal((await sync(b, remote, { pushOnly: true })).action, 'push', 'the next sync pushes');
+});
+
+test('an automatic pull keeps an older original until its replacement is listed, and an automatic push never sends it back', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  const old = sha(await readFile(join(b.folder, 'photos', 'shore.jpg')));
+  // The desktop re-exports the owned photo and commits, and quits before its original has gone up.
+  await image(join(a.folder, 'photos', 'shore.jpg'), '#ee0000', 200, 100);
+  const replaced = sha(await readFile(join(a.folder, 'photos', 'shore.jpg')));
+  assert.equal((await commitOnly(a, remote, { fastForwardOnly: true })).action, 'push');
+  assert.equal((await commitOnly(b, remote, { fastForwardOnly: true })).action, 'fast-forward');
+  assert.equal(sha(await readFile(join(b.folder, 'photos', 'shore.jpg'))), old, 'the laptop keeps its older original');
+  // The laptop edits and pushes by itself: the snapshot keeps the desktop's version, and the old file is not uploaded.
+  await edit(b, caption('shore', 'Laptop caption'));
+  assert.equal((await commitOnly(b, remote, { pushOnly: true })).action, 'push');
+  const [tip] = await tips(remote, a);
+  const state = await stateOf(remote, tip);
+  assert.equal(state.originals.shore.digest, replaced);
+  assert.equal(state.assetsMeta.assets.shore.digest, replaced);
+  assert.deepEqual(await pendingUploads(b.folder, remote), [], 'the older file is not to upload');
+  assert.equal(sha(await readFile(join(b.folder, 'photos', 'shore.jpg'))), old);
+});
+
+test('a full remote pauses the upload of originals for automatic syncs: the same original is not tried again at every idle', async (t) => {
+  const { a } = await world(t);
+  const native = new FakeCloudKit();
+  const service = new SyncService(() => ({ kind: 'icloud' }), { cloudKit: () => native });
+  native.fail('putIfAbsent', 'quotaExceeded', { times: Infinity, name: (name) => name.startsWith('originals/') });
+  await ownBook(a);
+  await on(a, (book) => service.sync({ book }));
+  let originals = 0;
+  native.onCall = (op, _zone, record) => { if (op === 'putIfAbsent' && record?.startsWith('originals/')) originals++; };
+  assert.ok((await service.upload(a.folder))?.full);
+  assert.equal(originals, 1, 'the queue stops at the first original that does not fit');
+  // Idle pushes: each commits the book, and none starts the paused upload again.
+  for (const text of ['One', 'Two']) {
+    await edit(a, caption('shore', text));
+    assert.equal((await on(a, (book) => service.sync({ book, fastForwardOnly: true }))).action, 'push');
+    assert.equal(await service.uploadAfterSync(a.folder, { automatic: true }), undefined);
+  }
+  assert.equal(originals, 1, 'no original was tried again');
+  assert.ok(service.uploadState(a.folder).full, 'the status still says the remote is full');
+  // Sync Now asks again.
+  assert.ok((await service.uploadAfterSync(a.folder))?.full);
+  assert.equal(originals, 2);
+});
+
+test('a push from iCloud fast-forwards the open book, and waits like a focus while an editor is open', async (t) => {
+  const { a, b } = await world(t);
+  const native = new FakeCloudKit();
+  const remote = new StoreRemote(new CloudKitStore(native, { backoff: () => 0 }));
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  await remote.subscribe();
+  assert.deepEqual([...native.subscriptions], ['books'], 'one database subscription');
+  let editorOpen = true;
+  const auto = new AutoSync({
+    allowed: async () => true,
+    blocked: () => (editorOpen ? 'A text of the book is open in its editor.' : undefined),
+    start: async () => {},
+    look: async () => { await use(b); const { state } = await describeSync(b.folder, remote); return state === 'behind' ? 'pull' : state === 'ahead' ? 'push' : 'none'; },
+    edited: async () => true,
+    sync: async ({ pushOnly, signal }) => { const outcome = await commitOnly(b, remote, { fastForwardOnly: true, pushOnly, signal }); return outcome.action === 'deferred' ? 'deferred' : undefined; },
+    failure: () => 'retry',
+  }, { ...autoSyncTiming, notified: 1, gate: 10 });
+  t.after(() => auto.close());
+  await edit(a, caption('shore', 'Pushed from the desktop'));
+  await sync(a, remote);
+  // The push arrives while a Markdown editor of the book is open: the pull waits.
+  auto.notified();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await auto.settled();
+  assert.equal(auto.state.waitingForGate, true);
+  assert.notEqual((await manifests(b)).photos.shore.caption, 'Pushed from the desktop');
+  editorOpen = false;
+  for (let attempt = 0; attempt < 100 && (await manifests(b)).photos.shore.caption !== 'Pushed from the desktop'; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await auto.settled();
+  }
+  assert.equal((await manifests(b)).photos.shore.caption, 'Pushed from the desktop');
+});
+
+test('what an automatic look costs over a bucket: a status read is one listing of the commits, and a sync only when it shows something to do', async (t) => {
+  const { root, a } = await world(t);
+  const { fake, backend } = await bucketWorld(t, root);
+  const credentials = new MemoryCredentialStore();
+  await credentials.write(credentialScope(backend), fakeCredentials);
+  const service = new SyncService(() => backend, { credentials: () => credentials, cacheFolder: () => join(root, 'Support'), s3: { retryDelay: 1 } });
+  await ownBook(a);
+  await syncWith(a, service);
+  const { remote } = await service.connect();
+  const described = (requests: typeof fake.requests) => requests.map(({ method, key, query }) => method + ' ' + key + (query.size ? '?' + query : '')).join(', ');
+  // A focus with nothing to do: the status alone. The first read after the push takes what it has not seen yet.
+  assert.equal((await describeSync(a.folder, remote)).state, 'in-sync');
+  fake.requests.length = 0;
+  assert.equal((await describeSync(a.folder, remote)).state, 'in-sync');
+  assert.deepEqual(fake.requests.map(({ method }) => method), ['GET'], described(fake.requests));
+  assert.match(fake.requests[0].query.get('prefix') ?? '', /\/snapshots\/$/, 'a listing of the commits');
+  // A sync, which an automatic look starts only when the status shows something to do: one listing of the whole book.
+  fake.requests.length = 0;
+  assert.equal((await on(a, (book) => syncBook({ remote, book, fastForwardOnly: true }))).action, 'in-sync');
+  assert.ok(fake.requests.length <= 3, described(fake.requests));
+});
+
+test('the pull gate is read again as a fast-forward is applied: an editor opened while the sync read the remote defers it, with nothing lost', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  await edit(a, caption('shore', 'Opened an editor meanwhile'));
+  await sync(a, remote);
+  const before = await manifests(b);
+  let asked = 0;
+  const deferred = await sync(b, remote, { fastForwardOnly: true, beforeApply: () => { asked++; return false; } });
+  assert.deepEqual([deferred.action, deferred.changed, asked], ['deferred', false, 1]);
+  assert.deepEqual(await manifests(b), before, 'the book is as it was');
+  assert.equal((await readSyncState(b.folder)).pull, undefined, 'and no pull is marked');
+  assert.equal((await describeSync(b.folder, remote)).state, 'behind');
+  const applied = await sync(b, remote, { fastForwardOnly: true, beforeApply: () => true });
+  assert.equal(applied.action, 'fast-forward');
+  assert.equal((await manifests(b)).photos.shore.caption, 'Opened an editor meanwhile');
+});
+
+test('an edit during an automatic push stops it and is kept; one during a pull being applied waits for it', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  const runs = new AutomaticRuns();
+  // A push that takes a while at the remote, as the edit comes in: stopped before its commit.
+  const slowAt = (method: string) => {
+    let started!: () => void;
+    const reached = new Promise<void>((resolve) => { started = resolve; });
+    const slowed = new Proxy(remote, { get: (target, name, receiver) => (name !== method ? Reflect.get(target, name, receiver)
+      : async (...args: unknown[]) => { started(); await new Promise((resolve) => setTimeout(resolve, 300));
+        return (Reflect.get(target, name, receiver) as (...values: unknown[]) => unknown).apply(target, args); }) });
+    return { slowed, reached };
+  };
+  let holding = true;
+  const automaticPush = (via: SyncRemote) => {
+    const begun = runs.begin();
+    holding = true;
+    return commitOnly(b, via, { pushOnly: true, signal: begun.run.job.signal, beforeApply: () => begun.mayApply(() => false) })
+      .finally(() => { holding = false; begun.end(); });
+  };
+  await edit(b, caption('shore', 'First edit'));
+  const atBlob = slowAt('putBlob');
+  const pushing = automaticPush(atBlob.slowed);
+  await atBlob.reached;
+  assert.equal(await runs.yieldTo(() => holding), true);
+  await assert.rejects(pushing, SyncInterruptedError);
+  const tipBefore = (await tips(remote, a))[0].commitId;
+  // The edit goes ahead and is kept; the next push sends both.
+  await edit(b, caption('segla', 'Second edit, during the push'));
+  assert.equal((await manifests(b)).photos.segla.caption, 'Second edit, during the push');
+  // An edit that comes while the commit is being sent waits for it: the commit is recorded, and nothing forks.
+  const atCommit = slowAt('putCommit');
+  const committing = automaticPush(atCommit.slowed);
+  await atCommit.reached;
+  assert.equal(await runs.yieldTo(() => holding), true);
+  assert.equal((await committing).action, 'push');
+  await edit(b, caption('segla', 'Third edit, during the commit'));
+  assert.equal((await sync(b, remote, { pushOnly: true })).action, 'push');
+  const after = await tips(remote, a);
+  assert.equal(after.length, 1, 'no fork of this Mac’s own making');
+  assert.notEqual(after[0].commitId, tipBefore);
+  await sync(a, remote, { fastForwardOnly: true });
+  assert.deepEqual([(await manifests(a)).photos.shore.caption, (await manifests(a)).photos.segla.caption], ['First edit', 'Third edit, during the commit']);
+  // A pull that began to be applied finishes; the edit waits and then finds the pulled book.
+  await edit(a, caption('shore', 'Pulled while editing'));
+  await sync(a, remote);
+  const pull = runs.begin();
+  holding = true;
+  let applying!: () => void;
+  const applyingNow = new Promise<void>((resolve) => { applying = resolve; });
+  const pulling = commitOnly(b, remote, { fastForwardOnly: true, signal: pull.run.job.signal,
+    beforeApply: () => { const may = pull.mayApply(() => false); applying(); return may; } }).finally(() => { holding = false; pull.end(); });
+  await applyingNow;
+  assert.equal(await runs.yieldTo(() => holding), true);
+  assert.equal((await pulling).action, 'fast-forward');
+  assert.equal(pull.run.job.signal.aborted, false);
+  assert.equal((await manifests(b)).photos.shore.caption, 'Pulled while editing');
 });

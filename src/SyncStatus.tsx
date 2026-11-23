@@ -11,7 +11,7 @@ const explanations: Record<Status['state'], string> = {
   'in-sync': 'This book matches its synced version.',
   'ahead': 'This Mac has changes the remote does not have yet.',
   'behind': 'Another Mac synced changes this book does not have yet.',
-  'diverged': 'The book changed here and on another Mac. Sync keeps this Mac’s version as a separate copy and continues with the other.',
+  'diverged': 'The book changed here and on another Mac, so it does not sync by itself. Sync keeps this Mac’s version as a separate copy and continues with the other.',
   'remote-syncing': 'The remote does not have everything another Mac synced yet. Sync again once it has caught up.',
   'abandoned': 'The last sync could not be finished, so the book may be partly updated. Sync again to continue with the version on the remote.',
   'newer': 'A newer version of ImageFlow synced this book.',

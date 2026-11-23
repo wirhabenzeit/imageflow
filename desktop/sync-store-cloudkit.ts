@@ -44,6 +44,11 @@ export interface CloudKitNative {
   deleteRecords(zone: string, names: string[]): Promise<void>;
   cancel(id: number): boolean;
   onAccountChange(listener: () => void): void;
+  /**
+   * Saves a database subscription with silent pushes for every change in the private database (#284). Missing from an
+   * addon built before it.
+   */
+  saveSubscription?(id: string): Promise<void>;
 }
 
 /** The addon of this build, or undefined where there is none (not a Mac, or not staged). */
@@ -230,6 +235,20 @@ export class CloudKitStore implements SyncStore {
     await this.open();
     this.native.onAccountChange(listener);
   }
+
+  /**
+   * Asks CloudKit to tell this Mac when anything in the database changes (#284): a database subscription with silent
+   * pushes, which reach the app once it registered for remote notifications. Saved once per store; a failure is not kept.
+   */
+  async subscribe() {
+    await this.open();
+    const save = this.native.saveSubscription?.bind(this.native);
+    if (!save) throw new Error('This build of ImageFlow cannot subscribe to iCloud changes.');
+    const saving = this.subscribed ??= this.call(() => save(this.namespace + 'books'));
+    saving.catch(() => { if (this.subscribed === saving) this.subscribed = undefined; });
+    return saving;
+  }
+  private subscribed?: Promise<void>;
 
   private open() {
     const ready = this.ready ??= this.native.status().then((status) => {
