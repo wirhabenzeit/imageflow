@@ -27,7 +27,7 @@ import { assetPageLabels, assetUsage, usageLabel } from '../src/asset-usage';
 import { importFeedback } from '../src/import-feedback';
 import { configureSourceStore, pruneSourceCache, SourceStore } from './source-store';
 import { bookTrusted, configureSourceAccess, distrustBook, trustBook } from './source-access';
-import { app, autoUpdater, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, powerMonitor, protocol, shell } from 'electron';
+import { app, autoUpdater, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, powerMonitor, protocol, safeStorage, shell } from 'electron';
 import type { BaseWindow, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -55,6 +55,9 @@ import type { RenderSessions } from './document-session';
 import { AssetFacts } from './asset-facts';
 import { createDocument, documentIdentity, documentPath, isDocument, RecentDocuments } from './documents';
 import { SettingsStore } from './settings';
+import { FileCredentialStore, MemoryCredentialStore } from './sync-credentials';
+import type { CredentialStore } from './sync-credentials';
+import { registerSyncSettings, syncBackendsEnabled, syncPatchError } from './sync-settings';
 import { AuthoringError } from './authoring-service';
 import { createMcpConnection } from './mcp-connection';
 import { addToCodex, bridgeLaunch, claudeCodeCommand, claudeExtension, findCodex, skillArchive } from './mcp-setup';
@@ -1547,6 +1550,19 @@ function revealSettings(owner: BrowserWindow) {
 }
 
 /** Opens Settings, switching to `pane` when given. Without one, an open window keeps its current pane. */
+/**
+ * The sync backend's credentials (#281): encrypted with `safeStorage` in their own `0600` file, never in settings.json.
+ * Development builds may keep them in memory instead (`IMAGEFLOW_SYNC_CREDENTIALS=memory`), so tests and unsigned
+ * builds never wait on a Keychain prompt.
+ */
+let credentialStore: CredentialStore | undefined;
+function syncCredentials() {
+  credentialStore ??= !app.isPackaged && process.env.IMAGEFLOW_SYNC_CREDENTIALS === 'memory' ? new MemoryCredentialStore()
+    : new FileCredentialStore(join(app.getPath('userData'), 'sync-credentials.json'), {
+      available: () => safeStorage.isEncryptionAvailable(), encrypt: (text) => safeStorage.encryptString(text), decrypt: (data) => safeStorage.decryptString(data) });
+  return credentialStore;
+}
+
 function showSettings(pane?: SettingsPane) {
   const hidden = !!process.env.IMAGEFLOW_HIDE_WINDOW;
   settingsPane = pane ?? (settingsWindow && !settingsWindow.isDestroyed() ? settingsPane : 'general');
@@ -2098,9 +2114,14 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.dismissUpdate, (event) => { if (updateOwner(event)) updates.dismissNotice(); });
   ipcMain.handle(channels.checkUpdates, (event) => { if (updateOwner(event) && !preparingQuit && !quitting) updates.check(); });
   ipcMain.handle(channels.restartUpdate, (event) => { if (updateOwner(event) && !preparingQuit && !quitting) updates.restart(); });
+  registerSyncSettings({ ipcMain, owner: settingsOwner, settings, credentials: syncCredentials,
+    changed: (value) => { for (const owner of appWindows()) if (!owner.isDestroyed()) owner.webContents.send(channels.settingsChanged, value); } });
   ipcMain.handle(channels.settings, (event) => appOwner(event) ? { value: settings.value } : { error: 'Request is only available to an app window.' });
   ipcMain.handle(channels.updateSettings, async (event, patch: unknown) => {
     if (!appOwner(event)) return { error: 'Request is only available to an app window.' };
+    // A sync backend is set only through Settings → Sync; a window may only turn sync off, with the flag.
+    const syncRefused = syncPatchError(patch);
+    if (syncRefused) return { error: syncRefused };
     try {
       if (patch && typeof patch === 'object' && 'updateChannel' in patch && patch.updateChannel !== settings.value.updateChannel &&
           ['checking', 'downloading', 'ready'].includes(updates.state.status)) throw new Error('Finish the current update before changing channels.');
@@ -2150,6 +2171,8 @@ void app.whenReady().then(async () => {
   }));
   ipcMain.handle(channels.showSettings, (event, pane: SettingsPane) => {
     if ((appOwner(event) || pickerOwner(event)) && (pane === 'general' || pane === 'sources' || pane === 'agents')) showSettings(pane);
+    // Settings → Sync exists behind the development flag; without it, Keep originals is in General.
+    else if (appOwner(event) && pane === 'sync') showSettings(syncBackendsEnabled() ? 'sync' : 'general');
   });
   ipcMain.handle(channels.templatePreview, async (event, id: unknown, hash: unknown) => {
     if ((!templatesOwner(event) && !pickerOwner(event)) || typeof id !== 'string' || typeof hash !== 'string')

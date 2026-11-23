@@ -28,6 +28,7 @@ import { bookPath, finishPull, preflightPull, readSyncState, stagingFolder, upda
 import type { PullMarker } from './sync-pull';
 import { remoteCommits } from './sync-remote';
 import type { SyncRemote } from './sync-remote';
+import { StoreAccessError } from './sync-store';
 
 /**
  * The Milestone 1 sync engine (ADR 0010): fast-forward or keep both, over any `SyncRemote`.
@@ -57,6 +58,8 @@ export type SyncOptions = {
   fetchOriginals?: boolean;
   /** Asks which tip to continue from when the remote holds several; undefined leaves the book as it is. */
   chooseTip?: (tips: CommitHeader[]) => Promise<string | undefined>;
+  /** Originals uploaded by a push so far, of those it uploads; reported before the first and after each. */
+  uploadProgress?: (progress: { done: number; total: number }) => void;
   now?: () => Date;
 };
 export type SyncOutcome = {
@@ -274,6 +277,7 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
     return fact ? [[id, fact]] : [];
   }));
   const originals: StateBlob['originals'] = {};
+  const uploads = new Map<string, { path: string; digest: string }>();
   for (const [id, photo] of Object.entries(state.photos)) {
     // Only photos whose source reaches the book sync as originals (ADR 0012, Sync by reach).
     const owned = syncedOriginalPath(photo);
@@ -282,12 +286,17 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
     if (here?.path !== undefined && here.digest === assets[id]?.digest) {
       const entry = { digest: here.digest, ext: extname(owned).toLowerCase() };
       const key = originalBlobKey(bookId, entry.digest, entry.ext);
-      if (!await remote.hasBlob(key)) {
-        if (await fileDigest(here.path) !== here.digest) throw new Error('A photo changed during sync. Sync again.');
-        await remote.putBlob(key, { file: here.path }, { sha256: here.digest });
-      }
+      if (!uploads.has(key) && !await remote.hasBlob(key)) uploads.set(key, { path: here.path, digest: here.digest });
       originals[id] = entry;
     } else if (base?.originals[id]) originals[id] = base.originals[id];
+  }
+  // Counted first, so the status bar can say how many of how many have gone up.
+  let uploaded = 0;
+  if (uploads.size) context.options.uploadProgress?.({ done: 0, total: uploads.size });
+  for (const [key, { path, digest }] of uploads) {
+    if (await fileDigest(path) !== digest) throw new Error('A photo changed during sync. Sync again.');
+    await remote.putBlob(key, { file: path }, { sha256: digest });
+    context.options.uploadProgress?.({ done: ++uploaded, total: uploads.size });
   }
   const proxies: StateBlob['proxies'] = {};
   const local = await proxyStore();
@@ -797,6 +806,10 @@ export async function describeSync(folder: string, remote: SyncRemote): Promise<
       ...(remoteState ? { remote: remoteState } : {}) };
   } catch (error) {
     if (error instanceof NewerSyncFormatError) return { state: 'newer', detail: error.message, pendingOriginals: 0 };
+    // A bucket that refuses this Mac's access key: Settings → Sync fixes it, so the status says where.
+    if (error instanceof StoreAccessError && error.reason === 'sign-in') return { state: 'unavailable', detail: error.message, signIn: true, pendingOriginals: 0 };
+    // A missing bucket, a wrong region or endpoint: also fixed in Settings → Sync.
+    if (error instanceof StoreAccessError && error.reason === 'settings') return { state: 'unavailable', detail: error.message, checkSettings: true, pendingOriginals: 0 };
     return { state: 'unavailable', detail: error instanceof Error ? error.message : String(error), pendingOriginals: 0 };
   }
 }

@@ -24,6 +24,7 @@ import { FolderStore, folderRemote } from '../desktop/sync-store-folder';
 import { MemoryStore } from '../desktop/sync-store';
 import type { SyncStore } from '../desktop/sync-store';
 import { storeConformance } from './sync-store-conformance';
+import { s3Remote } from './s3-remote';
 import { readCommitHeaderV1 } from './sync-v1-reader';
 import { bookTrusted } from '../desktop/source-access';
 import { readSyncState, SyncElsewhereError, SyncHalfPulledError, takeAbandonedAtOpen, updateSyncState } from '../desktop/sync-pull';
@@ -71,14 +72,15 @@ async function world(t: { after: (fn: () => Promise<void>) => void }) {
 }
 
 // The engine tests (`each`) run against every store behind the same `StoreRemote`: the memory store here, and the
-// folder store in a process of its own (tests/sync-folder-store.test.ts), so the two runs go side by side. Every other
-// test (`test`) runs once, here.
+// folder and S3 stores in processes of their own (tests/sync-folder-store.test.ts, tests/sync-s3-store.test.ts), so
+// the runs go side by side. Every other test (`test`) runs once, here.
 type Remote = StoreRemote;
-const store = process.env.IMAGEFLOW_SYNC_TEST_STORE === 'folder' ? 'folder' : 'memory';
+const store = (['folder', 's3'] as const).find((name) => name === process.env.IMAGEFLOW_SYNC_TEST_STORE) ?? 'memory';
 const test: typeof runTest = store === 'memory' ? runTest : ((() => {}) as unknown as typeof runTest);
 const each = (name: string, run: (t: TestContext) => Promise<void>) => runTest(name + ' (' + store + ' store)', run);
 async function newRemote(root: string, name = 'Remote'): Promise<Remote> {
   if (store === 'memory') return memoryRemote();
+  if (store === 's3') return s3Remote();
   await mkdir(join(root, name), { recursive: true });
   return folderRemote(join(root, name));
 }

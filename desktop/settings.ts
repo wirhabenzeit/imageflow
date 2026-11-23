@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute } from 'node:path';
+import { normalizeS3Backend, s3BackendError } from './sync-backend';
 import { isUpdateChannel } from '../src/update-feed';
 import { defaultSettings } from '../src/settings';
 import type { AppSettings, SyncBackend } from '../src/settings';
@@ -10,6 +11,13 @@ function syncBackend(value: unknown): SyncBackend {
   switch (backend && typeof backend === 'object' ? backend.kind : undefined) {
     case 'folder':
       if (Object.keys(backend!).length === 2 && typeof backend!.path === 'string' && isAbsolute(backend!.path) && backend!.path.length <= 4096) return { kind: 'folder', path: backend!.path };
+      break;
+    case 's3':
+      if (Object.keys(backend!).every((key) => ['kind', 'endpoint', 'region', 'bucket', 'prefix', 'addressing'].includes(key))) {
+        const problem = s3BackendError(backend!);
+        if (problem) throw new Error('Invalid sync setting: ' + problem);
+        return normalizeS3Backend(backend as SyncBackend & { kind: 's3' });
+      }
       break;
   }
   throw new Error('Invalid sync setting.');

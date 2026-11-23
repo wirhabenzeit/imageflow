@@ -3,6 +3,8 @@ import { canonicalJson } from '../src/canonical-json';
 import { blobKeyPattern, bookIdOfPrefix, bookPrefix, booksPrefix, bookTombstoneSchema, commitHeaderSchema, commitKey, deriveTips, NewerSyncFormatError, readBookTombstone,
   readCommitHeader, readRemoteIdentity, remoteIdentityKey, remoteIdentitySchema, snapshotsPrefix, tombstoneKey } from '../src/sync-snapshot';
 import type { BookTombstone, CommitHeader } from '../src/sync-snapshot';
+import { entryTag } from './sync-header-cache';
+import type { CachedHeader, CommitHeaderCache } from './sync-header-cache';
 import { MemoryStore } from './sync-store';
 import type { PutOptions, StoreEntry, StoreSource, SyncStore, TransferOptions } from './sync-store';
 
@@ -95,7 +97,9 @@ const encode = (value: unknown) => new TextEncoder().encode(canonicalJson(value)
  * transport implements only `SyncStore`.
  */
 export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRemote {
-  constructor(readonly store: Store) {}
+  /** `headerCache` keeps the commit headers read, per remote and book, so `listCommits` fetches only new ones. */
+  constructor(readonly store: Store, private readonly options: { headerCache?: CommitHeaderCache } = {}) {}
+  private identity?: string;
 
   /** A small JSON object as stored, or undefined for one that is missing or not whole JSON. */
   private async json(key: string): Promise<unknown> {
@@ -115,14 +119,33 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     return this.json(commitKey(bookId, commitId));
   }
   async listCommits(bookId: string) {
-    const headers: unknown[] = [];
     // Anything a sync service put beside the headers (its conflict copy `<id> (1).json` holds an immutable header too)
     // is read like one; the engine decides what it is.
-    for (const { key } of await this.store.list(snapshotsPrefix(bookId))) {
-      const value = key.endsWith('.json') ? await this.json(key) : undefined;
-      if (value !== undefined) headers.push(value);
+    const listed = (await this.store.list(snapshotsPrefix(bookId))).filter(({ key }) => key.endsWith('.json'));
+    const cache = this.options.headerCache;
+    // Cached by the remote's identity; a remote without one yet is read whole, and none is written by reading.
+    const remoteId = cache && listed.length ? await this.knownRemoteId() : undefined;
+    const cached = remoteId ? await cache!.read(remoteId, bookId).catch(() => new Map<string, CachedHeader>()) : new Map<string, CachedHeader>();
+    const values: unknown[] = new Array(listed.length);
+    const missing = listed.flatMap((entry, index) => {
+      const hit = cached.get(entry.key);
+      if (hit && hit.tag === entryTag(entry)) { values[index] = hit.value; return []; }
+      return [index];
+    });
+    // A few at a time: over a bucket each is a request.
+    for (let start = 0; start < missing.length; start += 8) {
+      await Promise.all(missing.slice(start, start + 8).map(async (index) => { values[index] = await this.json(listed[index].key); }));
     }
-    return headers;
+    if (remoteId && (missing.length || cached.size !== listed.length)) {
+      const entries = new Map(listed.flatMap((entry, index) => (values[index] === undefined ? [] : [[entry.key, { tag: entryTag(entry), value: values[index] }] as const])));
+      await cache!.write(remoteId, bookId, entries).catch((error) => console.warn('ImageFlow could not keep the commits it read', error));
+    }
+    return values.filter((value) => value !== undefined);
+  }
+  /** The remote's identity if it has one, without writing it. */
+  private async knownRemoteId() {
+    this.identity ??= readRemoteIdentity(await this.json(remoteIdentityKey))?.remoteId;
+    return this.identity;
   }
 
   async hasBlob(key: string) { return !!await this.store.head(requireBlobKey(key)); }
@@ -156,13 +179,13 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
   async remoteId() {
     const read = async () => readRemoteIdentity(await this.json(remoteIdentityKey))?.remoteId;
     const found = await read();
-    if (found) return found;
+    if (found) return this.identity = found;
     // Always read back and adopt what is there: whichever Mac wrote first wins, also where the store cannot say
     // reliably whether the object existed.
     await this.store.putIfAbsent(remoteIdentityKey, encode(remoteIdentitySchema.parse({ version: 1, remoteId: randomUUID() })));
     const adopted = await read();
     if (!adopted) throw new Error('The identity of the sync remote (' + remoteIdentityKey + ') cannot be read.');
-    return adopted;
+    return this.identity = adopted;
   }
 
   async bookTombstone(bookId: string) {

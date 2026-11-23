@@ -344,7 +344,9 @@ export class DocumentSession {
         (await readSyncState(this.book.folder).catch(() => undefined))?.lastSynced?.commitId ?? ''].join(':');
       const before = await mark();
       try {
-        const outcome = await syncBook({ remote, book: this.book, fetchOriginals: options.fetchOriginals, chooseTip: (tips) => this.chooseTip(tips) });
+        const outcome = await syncBook({ remote, book: this.book, fetchOriginals: options.fetchOriginals, chooseTip: (tips) => this.chooseTip(tips),
+          // The originals going up show in the status bar while the sync runs; the status after it has none.
+          uploadProgress: (uploading) => { if (this.syncView?.syncing) this.publishSync({ ...this.syncView, uploading }); } });
         if (outcome.changed) this.notify({ value: this.activate(await loadProject(this.book.folder, this.cache), true) });
         return outcome;
       } catch (error) {
