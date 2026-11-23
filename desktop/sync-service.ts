@@ -3,9 +3,10 @@ import { basename, isAbsolute, relative, sep } from 'node:path';
 import type { SyncBackend } from '../src/settings';
 import { cloudKitOpener, s3Opener } from './sync-backend';
 import type { SyncRemoteDependencies } from './sync-backend';
-import { syncBook } from './sync-engine';
-import type { SyncOptions } from './sync-engine';
-import { bookSync, readSyncState, startSyncing, stopSyncing } from './sync-pull';
+import { bookTrusted, distrustBook, trustBook } from './source-access';
+import { syncBook, uploadOriginals } from './sync-engine';
+import type { SyncOptions, UploadOutcome } from './sync-engine';
+import { bookSync, readSyncState, startSyncing, stopSyncing, syncedElsewhere, updateSyncState } from './sync-pull';
 import type { BookSync } from './sync-pull';
 import type { SyncRemote } from './sync-remote';
 import { StoreAccessError } from './sync-store';
@@ -37,6 +38,25 @@ async function contains(folder: string, path: string) {
   const between = relative(outer, inner);
   return between === '' || (!between.startsWith('..' + sep) && between !== '..' && !isAbsolute(between));
 }
+/**
+ * A book that is not trusted on this Mac (ADR 0012, section 2) does not start syncing until the user trusts it: Start
+ * Syncing asks once, and trusting it (`trustBook`) then makes it sync.
+ */
+export class UntrustedBookError extends Error {
+  readonly code = 'SYNC_UNTRUSTED';
+  constructor() {
+    super('This book is not trusted on this Mac, so it does not sync. Trust it to start syncing it.');
+    this.name = 'UntrustedBookError';
+  }
+}
+
+/**
+ * A book's background upload of originals (`uploadOriginals`), as the status bar shows it: how many went up of those
+ * pending while it runs (`uploading`), and after it, why originals are left: the remote is full (`full`, paused until a
+ * later sync finds room) or the upload failed (`failed`).
+ */
+export type UploadState = { uploading?: { done: number; total: number }; full?: { message: string; left: number }; failed?: { message: string; left: number } };
+
 /** Whether a folder is, or lies inside, a book package. */
 export const insideBook = (path: string) => path.split(sep).some((part) => /\.imageflow$/i.test(part));
 
@@ -84,6 +104,10 @@ function openBackend(backend: SyncBackend, dependencies: SyncServiceDependencies
 export class SyncService {
   private current?: { key: string; backend: Backend; identity?: Promise<string> };
   constructor(private readonly setting: () => SyncBackend | undefined, private readonly dependencies: SyncServiceDependencies = {}) {}
+  /** The background uploads running, by book folder (as the open book has it), and how the last one of each book ended. */
+  private readonly uploads = new Map<string, { job: AbortController; task: Promise<UploadOutcome | undefined>; again: boolean; progress: { done: number; total: number } }>();
+  private readonly settled = new Map<string, Omit<UploadState, 'uploading'>>();
+  private readonly listeners = new Set<(folder: string) => void>();
 
   private backend() {
     const setting = this.setting();
@@ -131,14 +155,154 @@ export class SyncService {
     }
   }
 
-  /** Makes a book sync here (`startSyncing`); with `newHistory`, also one that last synced somewhere else. */
-  async start(folder: string, options: { newHistory?: boolean } = {}) {
+  /**
+   * Makes a book sync here (`startSyncing`); with `newHistory`, also one that last synced somewhere else. A book that is
+   * not trusted starts only with `trust`, which trusts it first (`UntrustedBookError` otherwise).
+   */
+  async start(folder: string, options: { newHistory?: boolean; trust?: boolean } = {}) {
     const { remoteId } = await this.connect(folder);
+    await this.optIn(folder, options);
     await startSyncing(folder, remoteId, options);
   }
 
-  /** Stops syncing a book on this Mac; the remote is left as it is. */
-  stop(folder: string) { return stopSyncing(folder); }
+  /**
+   * The trust boundary of choosing Start Syncing (ADR 0012, section 2): only a trusted book syncs. An untrusted one
+   * throws `UntrustedBookError`, so the caller asks once; with `trust` it is trusted (`trustBook`), which gives older or
+   * copied books without declared sites a direct path into sync.
+   */
+  async optIn(folder: string, { trust = false }: { trust?: boolean } = {}) {
+    if (await bookTrusted(folder)) return;
+    if (!trust) throw new UntrustedBookError();
+    await trustBook(folder);
+  }
+
+  /**
+   * Whether a book that was just opened or created starts syncing by itself, without any setup (ADR 0012, section 3):
+   * with a backend configured, a trusted book that has no sync state for this remote, or one that was chosen to sync
+   * here and never synced yet. Never a book the caller `excluded` (the sample book, template previews, read-only opens),
+   * an untrusted one, one stopped on this Mac (`enabled: false`, also by the first-configuration sheet) or one that last
+   * synced somewhere else (asked about instead). Writes nothing; the caller syncs, which records the start.
+   */
+  async startsOnOpen(folder: string, { excluded = false, readOnly = false }: { excluded?: boolean; readOnly?: boolean } = {}) {
+    if (excluded || readOnly || !this.configured) return false;
+    if (!await bookTrusted(folder)) return false;
+    const state = await readSyncState(folder);
+    if (state.enabled === false) return false;
+    const { remoteId } = await this.connect(folder);
+    const standing = bookSync(state, remoteId);
+    return standing === 'off' || (standing === 'syncing' && !state.lastSynced && !state.pull && !state.abandoned);
+  }
+
+  /**
+   * The first-configuration sheet's answer (ADR 0012, section 3): the books chosen sync, each from its next open (or
+   * now, for one that is open), and the others are opted out for this remote, `{ enabled: false, remoteId }`, so opening
+   * them later does not start them. A chosen book that is not trusted is trusted (the sheet says so). Nothing is
+   * uploaded here. A book that last synced with another remote keeps that remote's record and is only stopped, so it
+   * still asks before it starts a new history here.
+   */
+  async chooseBooks(choices: readonly { folder: string; sync: boolean }[]) {
+    const { remoteId } = await this.connect();
+    for (const { folder, sync } of choices) {
+      if (sync) {
+        await trustBook(folder);
+        await updateSyncState(folder, (state) => {
+          if (state.enabled !== false || syncedElsewhere(state, remoteId)) return state;
+          const { enabled: _, ...rest } = state;
+          return rest;
+        });
+      } else {
+        await this.cancelUpload(folder);
+        await updateSyncState(folder, (state) => (syncedElsewhere(state, remoteId) ? (state.enabled === false ? state : { ...state, enabled: false })
+          : state.enabled === false && state.remoteId === remoteId ? state : { ...state, remoteId, enabled: false }));
+      }
+    }
+  }
+
+  /** Stops syncing a book on this Mac, and its upload of originals; the remote is left as it is. */
+  async stop(folder: string) {
+    await this.cancelUpload(folder);
+    await stopSyncing(folder);
+  }
+
+  /**
+   * Templates → Stop Trusting This Book's Template…: an untrusted book never continues syncing, so it also stops here
+   * (`enabled: false`). Local to this Mac: other Macs keep the book trusted and syncing.
+   */
+  async distrust(folder: string) {
+    await distrustBook(folder);
+    await this.stop(folder);
+  }
+
+  /** Calls `listener` with a book's folder whenever its background upload changes (`uploadState`). */
+  onUploads(listener: (folder: string) => void) {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+  private tell(folder: string) { for (const listener of this.listeners) listener(folder); }
+
+  /** How a book's background upload stands: running, or why originals are left after the last one. */
+  uploadState(folder: string): UploadState {
+    const running = this.uploads.get(folder);
+    return { ...this.settled.get(folder), ...(running ? { uploading: { ...running.progress } } : {}) };
+  }
+
+  /**
+   * Uploads a book's pending originals in the background (`uploadOriginals`), after a sync committed them, and again
+   * after a restart: what is pending is derived, so an upload that stopped resumes where it was. One upload per book at
+   * a time; asking while one runs makes it look again once it is done. The remote is taken from `connect` for each photo.
+   * A full remote pauses it (`UploadState.full`) until a later sync finds room: each sync asks again, and the first
+   * original that does not fit stops the queue. Resolves with how it ended, undefined without a backend; rejects when an
+   * upload failed (the next sync tries again).
+   */
+  async upload(folder: string): Promise<UploadOutcome | undefined> {
+    if (!this.configured) return undefined;
+    const key = folder;
+    const running = this.uploads.get(key);
+    if (running) { running.again = true; return running.task; }
+    const job = new AbortController();
+    const entry = { job, again: false, progress: { done: 0, total: 0 }, task: Promise.resolve<UploadOutcome | undefined>(undefined) };
+    entry.task = (async () => {
+      let outcome: UploadOutcome;
+      try {
+        do {
+          entry.again = false;
+          outcome = await uploadOriginals({ folder: key, connect: () => this.connect(key), signal: job.signal,
+            progress: (done, total) => { entry.progress = { done, total }; this.tell(key); } });
+        } while (entry.again && !job.signal.aborted && !outcome.full && !outcome.stopped);
+      } catch (error) {
+        if (job.signal.aborted) return undefined;
+        this.settled.set(key, { failed: { message: message(error), left: Math.max(0, entry.progress.total - entry.progress.done) } });
+        throw error;
+      }
+      this.settled.set(key, outcome.full ? { full: { message: outcome.full.message, left: outcome.left } } : {});
+      return outcome;
+    })().finally(() => {
+      if (this.uploads.get(key) === entry) this.uploads.delete(key);
+      this.tell(key);
+    });
+    this.uploads.set(key, entry);
+    this.tell(key);
+    return entry.task;
+  }
+
+  /** Stops a book's background upload; the original going up is cancelled cleanly, and the next sync resumes. */
+  async cancelUpload(folder: string) {
+    const running = this.uploads.get(folder);
+    running?.job.abort();
+    await running?.task.catch(() => {});
+  }
+
+  /** The books with originals still uploading in the background, and how many are left of each: for Quit. */
+  pendingUploads() {
+    return [...this.uploads].map(([folder, { progress }]) => ({ folder, left: Math.max(0, progress.total - progress.done) }));
+  }
+
+  /** Cancels every background upload and waits until each has stopped; nothing half-uploaded is left on the remote. */
+  async cancelUploads() {
+    const running = [...this.uploads.values()];
+    for (const { job } of running) job.abort();
+    await Promise.allSettled(running.map(({ task }) => task));
+  }
 
   /**
    * Syncs an open, writable book through the configured remote (`syncBook`, whose conditions apply). A book that does

@@ -167,6 +167,17 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     const bookId = key.split('/')[1];
     return this.indexes.get((this.identity ?? '') + '/' + bookId);
   }
+  /**
+   * Keeps what a listing of a book found, over a store without a change feed, in place of what an earlier listing of
+   * the same prefix found: a sync lists its book once (`syncBook`), and `hasBlob` then answers from it, so a push over
+   * a bucket sends no request per content file or preview that is there already.
+   */
+  private noteListed(bookId: string, prefix: string, listed: readonly StoreEntry[]) {
+    const slot = (this.identity ?? '') + '/' + bookId;
+    const entries = new Map([...this.indexes.get(slot)?.entries ?? []].filter(([key]) => !key.startsWith(prefix)));
+    for (const entry of listed) entries.set(entry.key, entry);
+    this.indexes.set(slot, { entries });
+  }
   /** Notes an object this remote stored, so a check later in the same sync needs no request. */
   private noteStored(key: string, size: number) {
     const index = this.indexOf(key);
@@ -227,8 +238,9 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
   }
 
   async hasBlob(key: string) {
-    // Blobs are immutable and only Clean Up or deleting the book removes them: one the key index has is there. One it
-    // lacks may have arrived since, so the store is asked.
+    // Blobs are immutable and only Clean Up or deleting the book removes them: one the key index has is there (over a
+    // store without a change feed, one the last listing of the book had). One it lacks may have arrived since, so the
+    // store is asked.
     if (this.indexOf(requireBlobKey(key))?.entries.has(key)) return true;
     return !!await this.store.head(key);
   }
@@ -249,7 +261,11 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
 
   async listBook(bookId: string, folder?: BookFolder, { full = false }: { full?: boolean } = {}) {
     const prefix = bookPrefix(bookId) + (folder ? folder + '/' : '');
-    if (full || !this.store.changes) return this.store.list(prefix);
+    if (full || !this.store.changes) {
+      const listed = await this.store.list(prefix);
+      if (!this.store.changes) this.noteListed(bookId, prefix, listed);
+      return listed;
+    }
     const entries = (await this.bookKeys(bookId)).filter(({ key }) => key.startsWith(prefix));
     // The feed leaves the tombstone out (it outlives the book's objects); a listing of the whole book has it.
     const tombstone = folder ? undefined : await this.store.head(tombstoneKey(bookId));

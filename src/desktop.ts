@@ -51,7 +51,7 @@ export const channels = {
   syncState: 'project:sync-state', syncChanged: 'project:sync-changed', syncAction: 'project:sync-action',
   syncOffered: 'app:sync-offered', chooseSyncFolder: 'app:choose-sync-folder',
   lightroom: 'lightroom:state', lightroomChanged: 'lightroom:changed', lightroomInstall: 'lightroom:install', lightroomLaunch: 'lightroom:launch',
-  syncBackend: 'sync:backend', saveSyncBackend: 'sync:save-backend', testSyncConnection: 'sync:test-connection', syncUsage: 'sync:usage',
+  syncBackend: 'sync:backend', saveSyncBackend: 'sync:save-backend', testSyncConnection: 'sync:test-connection', syncUsage: 'sync:usage', syncSetupBooks: 'sync:setup-books', chooseSyncBooks: 'sync:choose-books',
 } as const;
 
 export type OpenAction = 'open' | 'new' | 'reload';
@@ -70,6 +70,8 @@ export type SyncStatus = {
   remote?: 'same' | 'moved' | 'forked';
   /** Owned originals that are only proxies on this Mac. */
   pendingOriginals: number;
+  /** Of those, the ones another Mac has not uploaded yet: they are still uploading there, which is no sync error. */
+  notUploaded?: number;
   /** With `unavailable`: the remote refused this Mac's credentials, which Settings → Sync fixes. */
   signIn?: true;
   /** With `unavailable`: the settings name no bucket there (missing, another region or endpoint); Settings → Sync fixes it. */
@@ -81,12 +83,16 @@ export type SyncStatus = {
  * background has fetched; Cancel stops it (`cancel-download`).
  */
 export type SyncView = { folder: string; status?: SyncStatus; syncing?: boolean; message?: string; downloading?: { done: number; total: number };
-  /** Originals a running sync has uploaded, of those it uploads. */
+  /**
+   * Owned originals of this book still uploading from this Mac, in the background after the commit that named them:
+   * how many went up of those pending. The book itself has synced.
+   */
   uploading?: { done: number; total: number };
   /**
-   * The remote was full at the last sync (iCloud storage full), in the store's words: `notUploaded` owned originals
-   * left for later while the book synced, or none when the sync itself failed because its commit or a preview did not
-   * fit. `manage` when the remote is iCloud, whose storage System Settings manages (`manage-storage`).
+   * The remote is full (iCloud storage full), in the store's words: `notUploaded` owned originals wait for room while
+   * the book itself synced (the background upload is paused until the next sync finds room), or none when the sync
+   * itself failed because its commit or a preview did not fit. `manage` when the remote is iCloud, whose storage
+   * System Settings manages (`manage-storage`).
    */
   storageFull?: { message: string; notUploaded?: number; manage?: true } };
 /** `start` makes the book sync on this Mac (asking first when it last synced somewhere else), `stop` stops that. */
@@ -144,6 +150,12 @@ export type SyncBackendState = { available: boolean; credentials?: { stored: tru
 export type SyncCredentialsInput = { accessKeyId: string; secretAccessKey: string };
 export type SyncBackendRequest = { backend: S3SyncBackend; credentials?: SyncCredentialsInput } | { backend: ICloudSyncBackend };
 /** What Test Connection found: see `ConnectionReport` in desktop/sync-store-s3.ts. */
+/**
+ * A recent book in the first-configuration sheet: what its owned originals take up on this Mac (`bytes`, what syncing
+ * it uploads at most), whether it is trusted here (only trusted books sync; choosing an untrusted one trusts it), and
+ * whether it syncs with the backend already.
+ */
+export type SyncSetupBook = { id: string; title: string; bytes: number; trusted: boolean; syncing: boolean };
 export type SyncConnectionReport = { conditionalWrites: 'enforced' | 'ignored' | 'unsupported'; checksums: 'verified' | 'not-verified'; addressing: 'path' | 'virtual' };
 export type HistoryState = { undo?: string; redo?: string };
 // How an MCP client starts ImageFlow's stdio bridge. It does not change when the connection is enabled again.
@@ -265,6 +277,10 @@ export type DesktopApi = {
   testSyncConnection(request: SyncBackendRequest): Promise<Result<SyncConnectionReport>>;
   /** What the books stored through the configured backend take up there, in bytes (Settings → Sync shows it for iCloud). */
   syncUsage(): Promise<Result<{ bytes: number; books: number }>>;
+  /** The recent books for the sheet shown when a backend is first set up, which asks which of them to sync. */
+  syncSetupBooks(): Promise<Result<SyncSetupBook[]>>;
+  /** The sheet's answer: the books to sync (`sync: true`) and those opted out for this backend. Uploads nothing by itself. */
+  chooseSyncBooks(choices: { id: string; sync: boolean }[]): Promise<Result<void>>;
   // The window's panel and canvas layout state, so the View menu can show it.
   setBookMenuState(state: BookMenuState): Promise<void>;
   openProject(action: OpenAction): Promise<Result<ProjectSummary | null>>;

@@ -295,7 +295,7 @@ export async function saveDocumentCopy(source: OpenProject, destination: string,
     await cp(book.folder, stage, { recursive: true, dereference: true, filter: async (path) => {
       // Installed packages are not part of the book; it uses the saved bundle in template/vendor (ADR 0006).
       // A Git repository, at any depth, can hold deleted captions and metadata, as .imageflow/ can.
-      if (basename(path) === '.imageflow' || basename(path) === 'node_modules' || basename(path) === '.git' || basename(path).startsWith('.imageflow-write-')) return false;
+      if (basename(path) === '.imageflow' || basename(path) === 'node_modules' || basename(path) === '.git' || basename(path).startsWith('.imageflow-write-') || basename(path).startsWith('.imageflow-upload-')) return false;
       const actual = await realpath(path);
       if (actual !== book.folder && !within(book.folder, actual)) throw new Error('The package contains a link outside the book: ' + path);
       return true;
