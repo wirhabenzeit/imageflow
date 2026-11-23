@@ -45,10 +45,10 @@ export function SyncStatus({ api, notice }: { api?: DesktopApi; notice: (message
   const download = view.downloading && <span className="sync-download" role="status"><TaskStatus progress={{ text: 'Downloading originals', ...view.downloading }}
     cancel={() => void api.syncAction('cancel-download')} /></span>;
   const upload = view.syncing && view.uploading && <span className="sync-download" role="status"><TaskStatus progress={{ text: 'Uploading originals', ...view.uploading }} /></span>;
-  // iCloud storage full: the book synced, some originals wait for room; System Settings is where to make some.
-  const left = !view.syncing && view.notUploaded;
+  // iCloud storage full: originals wait for room, or the sync itself did not fit; System Settings is where to make some.
+  const left = !view.syncing && view.storageFull;
   const full = left && <span className="sync-download sync-full" role="status">
-    <span>{left.message.replace(/\.$/, '')}: {left.count} {left.count === 1 ? 'original' : 'originals'} not uploaded</span>
+    <span>{left.notUploaded ? left.message.replace(/\.$/, '') + ': ' + left.notUploaded + (left.notUploaded === 1 ? ' original' : ' originals') + ' not uploaded' : left.message}</span>
     {left.manage && <button type="button" className="sync-manage" onClick={() => void api.syncAction('manage-storage').then((result) => { if ('error' in result) notice(result.error); })}>Manage Storage…</button>}
   </span>;
   return <>{download}{upload}{full}<button type="button" className={'sync-status' + (status && !view.syncing ? ' sync-' + status.state : '')} title={title} aria-label={label + '. ' + title}

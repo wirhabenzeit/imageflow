@@ -39,15 +39,23 @@ export class FakeCloudKit implements CloudKitNative {
   }
   /** Ends failures set up with `fail`. */
   recover() { this.failures.length = 0; }
-  /** Deletes a zone as the user does in System Settings: later calls in it fail with `userDeletedZone`. */
+  /**
+   * Deletes a zone as the user does in System Settings: calls in it fail with `userDeletedZone` (records in it read as
+   * missing, as the addon reports them) until it is saved again.
+   */
   userDeletes(zone: string) { this.zones.delete(zone); this.userDeleted.add(zone); }
+  /** System Settings → iCloud → Manage Storage → Delete: every zone of the app, `index` too. */
+  userDeletesAll() { for (const zone of [...this.zones.keys()]) this.userDeletes(zone); }
   private readonly userDeleted = new Set<string>();
   /** Signs in as another Apple ID (or the same one again) and sends the account-change event. */
   signIn(user: string) { this.user = user; this.changeAccount(); }
   changeAccount() { for (const listener of this.accountListeners) listener(); }
 
+  /** Called at the start of every call, so a test can change the account in the middle of a sync. */
+  onCall?: (op: string, zone?: string, record?: string) => void;
   private async begin(op: string, zone?: string, record?: string) {
     this.calls.push(op);
+    this.onCall?.(op, zone, record);
     if (!this.statusValue.entitled) throw failure('notInitialized');
     await tick();
     const index = this.failures.findIndex((entry) => entry.op === op && (entry.zone === undefined || entry.zone === zone)

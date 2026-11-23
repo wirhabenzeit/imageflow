@@ -14,17 +14,22 @@ const entitlements = { 'com.apple.security.cs.allow-jit': true, 'com.apple.appli
   'com.apple.developer.icloud-container-identifiers': ['iCloud.' + bundleId], 'com.apple.developer.icloud-services': ['CloudKit'],
   'com.apple.developer.icloud-container-environment': 'Production', 'com.apple.developer.aps-environment': 'production' };
 // As the Developer ID profile of the App ID has them (Production as a string, every iCloud service).
-const profile = { TeamIdentifier: [team], ProvisionsAllDevices: true, ExpirationDate: '2044-11-18T05:46:53Z', Entitlements: {
+const certificate = Buffer.from('the Developer ID certificate').toString('base64');
+const profile = { TeamIdentifier: [team], ProvisionsAllDevices: true, ExpirationDate: '2044-11-18T05:46:53Z', DeveloperCertificates: [certificate], Entitlements: {
   'com.apple.application-identifier': team + '.' + bundleId, 'com.apple.developer.team-identifier': team, 'com.apple.developer.icloud-container-identifiers': ['iCloud.' + bundleId],
   'com.apple.developer.icloud-services': '*', 'com.apple.developer.icloud-container-environment': 'Production', 'com.apple.developer.aps-environment': 'production' } };
-const check = (changes: { profile?: object; entitlements?: object; bundleId?: string; now?: Date } = {}) =>
-  provisioningProfileProblem('profile' in changes ? changes.profile : profile, { ...entitlements, ...changes.entitlements }, { team, bundleId: changes.bundleId ?? bundleId, now: changes.now ?? new Date('2026-11-23T00:00:00Z') });
+const check = (changes: { profile?: object; entitlements?: object; bundleId?: string; now?: Date; certificate?: string } = {}) =>
+  provisioningProfileProblem('profile' in changes ? changes.profile : profile, { ...entitlements, ...changes.entitlements },
+    { team, bundleId: changes.bundleId ?? bundleId, certificate: changes.certificate ?? certificate, now: changes.now ?? new Date('2026-11-23T00:00:00Z') });
 
 test('a release that claims iCloud needs the Developer ID profile of its App ID in the bundle', () => {
   assert.equal(check(), undefined);
   assert.match(check({ profile: undefined }), /no embedded provisioning profile.*killed at launch/);
   assert.match(check({ bundleId: bundleId + '.upgrade-test' }), /profile is for .*, not .*upgrade-test/);
   assert.match(check({ profile: { ...profile, TeamIdentifier: ['OTHER'] } }), /another team/);
+  // A renewed Developer ID certificate of the same team needs a new profile.
+  assert.match(check({ certificate: Buffer.from('the renewed certificate').toString('base64') }), /another Developer ID certificate/);
+  assert.equal(check({ profile: { ...profile, DeveloperCertificates: ['b3RoZXI=', certificate] } }), undefined, 'one of several is enough');
   assert.match(check({ profile: { ...profile, ProvisionsAllDevices: false } }), /not a Developer ID profile/);
   assert.match(check({ now: new Date('2045-01-01T00:00:00Z') }), /expired/);
   assert.match(check({ entitlements: { 'com.apple.developer.icloud-container-environment': 'Development' } }), /Production/);

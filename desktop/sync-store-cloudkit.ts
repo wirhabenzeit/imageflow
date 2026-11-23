@@ -140,7 +140,14 @@ export function cloudKitAvailability(status: CloudKitStatus): { available: true 
 }
 
 const retryable = new Set(['requestRateLimited', 'zoneBusy', 'serviceUnavailable', 'networkFailure']);
-const missingZone = (error: unknown) => isCloudKitError(error) && error.code === 'zoneNotFound';
+/**
+ * A zone that is not there: never made, deleted by a Mac deleting its book, or deleted by the user (System Settings →
+ * iCloud → Manage Storage, `userDeletedZone`). All read as holding nothing. A write makes the zone again: what guards
+ * against writing into a database the user emptied is the remote's identity, not the store. Emptying it removes
+ * `remote.json` too, so the next use reads a new identity, every book that synced reads as synced elsewhere and is
+ * asked about, and nothing is written for it until the user agrees.
+ */
+const missingZone = (error: unknown) => isCloudKitError(error) && (error.code === 'zoneNotFound' || error.code === 'userDeletedZone');
 
 /** Waits `seconds`, or rejects with the signal's reason once it is aborted. */
 function pause(seconds: number, signal?: AbortSignal) {
@@ -295,8 +302,17 @@ export class CloudKitStore implements SyncStore {
         } else {
           // An object that is there is not uploaded again.
           if (await this.head(key)) return { existed: true };
-          staging = join(tmpdir(), 'imageflow-icloud-' + randomUUID());
-          await copyFile(source.file, staging, constants.COPYFILE_FICLONE | constants.COPYFILE_EXCL);
+          // A clone beside the source: on APFS it takes no space and no copying, also for a book on another volume
+          // than the startup disk. The name is one a book ignores and sweeps after a crash. Where the source's folder
+          // cannot be written, the clone goes to the temporary folder instead.
+          staging = join(dirname(source.file), '.imageflow-write-' + randomUUID() + '.tmp');
+          try { await copyFile(source.file, staging, constants.COPYFILE_FICLONE | constants.COPYFILE_EXCL); }
+          catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            if (code !== 'EACCES' && code !== 'EPERM' && code !== 'EROFS') throw error;
+            staging = join(tmpdir(), 'imageflow-icloud-' + randomUUID());
+            await copyFile(source.file, staging, constants.COPYFILE_FICLONE | constants.COPYFILE_EXCL);
+          }
           signal?.throwIfAborted();
           size = (await stat(staging)).size;
           value = { file: staging, sha256: await fileSha(staging) };
@@ -314,8 +330,8 @@ export class CloudKitStore implements SyncStore {
       let created: boolean;
       try { ({ created } = await this.call(put, signal)); }
       catch (error) {
-        // A zone deleted since this store created it (by another Mac deleting the book) is created again for this write;
-        // one the user deleted (`userDeletedZone`) is not.
+        // A zone deleted since this store created it (another Mac deleting the book, the user emptying iCloud) is
+        // made again for this write (`missingZone` says why that is safe).
         if (!missingZone(error)) throw error;
         this.zones.delete(zone);
         await this.ensureZone(zone);
@@ -456,7 +472,7 @@ export class CloudKitStore implements SyncStore {
     let result;
     try { result = await this.call(() => this.native.changes(zone, token)); }
     catch (error) {
-      if (missingZone(error) || (isCloudKitError(error) && error.code === 'userDeletedZone')) return undefined;
+      if (missingZone(error)) return undefined;
       if (isCloudKitError(error) && error.code === 'changeTokenExpired') throw new ChangeTokenExpiredError();
       throw error;
     }

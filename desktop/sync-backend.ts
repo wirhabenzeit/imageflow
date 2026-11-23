@@ -118,21 +118,38 @@ export function cloudKitOpener({ cloudKit, cacheFolder, headerCache, keyIndex, n
   headerCache?: CommitHeaderCache; keyIndex?: KeyIndexCache; namespace?: string }) {
   const headers = headerCache ?? (cacheFolder ? new FileHeaderCache(join(cacheFolder(), 'Sync Cache')) : undefined);
   const indexes = keyIndex ?? (cacheFolder ? new FileKeyIndexCache(join(cacheFolder(), 'Sync Cache')) : undefined);
-  let store: { native: CloudKitNative; store: CloudKitStore } | undefined;
+  let store: { native: CloudKitNative; store: CloudKitStore; user?: Promise<string> } | undefined;
   let built: { user: string; remote: StoreRemote<CloudKitStore> } | undefined;
   return async () => {
     const native = cloudKit?.();
     if (!native) throw new CloudKitAccessError('notEntitled');
-    if (store?.native !== native) store = { native, store: new CloudKitStore(native, { namespace }) };
-    const status = await store.store.status();
+    if (store?.native !== native) {
+      const opened: NonNullable<typeof store> = { native, store: new CloudKitStore(native, { namespace }) };
+      store = opened;
+      // The user is read again only after CloudKit says the account changed (also when it did not, which costs one
+      // read). Commits check the user each time (`beforeCommit` below), so a late event never lets one through.
+      await opened.store.onAccountChange(() => { opened.user = undefined; }).catch(() => {});
+    }
+    const current = store;
+    const status = await current.store.status();
     if (!status.entitled) throw new CloudKitAccessError('notEntitled');
     if (status.accountStatus !== 'available') throw new CloudKitAccessError(status.accountStatus);
-    const user = await store.store.userRecordId();
+    const reading = current.user ??= current.store.userRecordId();
+    reading.catch(() => { if (current.user === reading) current.user = undefined; });
+    const user = await reading;
     if (built?.user !== user) {
       // The identity the former remote read last is the one its indexes are kept under.
       const former = built && await built.remote.knownIdentity();
       if (former) await indexes?.forget(former).catch((error) => console.warn('ImageFlow could not forget the keys of the former iCloud account', error));
-      built = { user, remote: new StoreRemote(store.store, { headerCache: headers, keyIndex: indexes }) };
+      // A sync still running when another Apple ID signs in must not finish in that account's database: before each
+      // commit, the user is read again, and a commit for another user is refused.
+      const beforeCommit = async () => {
+        if (await current.store.userRecordId() !== user) {
+          current.user = undefined;
+          throw new StoreAccessError('unavailable', 'The iCloud account changed during the sync. Sync again.');
+        }
+      };
+      built = { user, remote: new StoreRemote(current.store, { headerCache: headers, keyIndex: indexes, beforeCommit }) };
     }
     return built.remote;
   };

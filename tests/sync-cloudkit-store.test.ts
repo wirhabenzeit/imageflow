@@ -119,14 +119,23 @@ test('cloudkit store: iCloud storage full is an error of its own, and nothing is
   assert.deepEqual(await readdir(tmpdir()).then((names) => names.filter((name) => name.startsWith('imageflow-icloud-'))), [], 'no staging file stays');
 });
 
-test('cloudkit store: a zone deleted by another Mac is made again for a write, one the user deleted is not', async () => {
+test('cloudkit store: a zone deleted on the server reads as empty and is made again for a write, also one the user deleted', async () => {
   const { native, store } = make();
   await store.putIfAbsent('books/' + book + '/content/one', bytes('1'));
   native.zones.delete(book);
   assert.deepEqual(await store.putIfAbsent('books/' + book + '/content/two', bytes('2')), { existed: false });
-  native.userDeletes(book);
-  await assert.rejects(store.putIfAbsent('books/' + book + '/content/three', bytes('3')), (error: unknown) => error instanceof CloudKitError && error.cloudKitReason === 'deleted');
-  assert.equal(native.zones.has(book), false);
+  // System Settings → iCloud → Manage Storage: every zone, the index too, answers userDeletedZone.
+  await store.putIfAbsent('remote.json', bytes('{}'));
+  native.userDeletesAll();
+  assert.equal(await store.get('remote.json'), undefined, 'remote.json is missing, so a new identity can be written');
+  assert.equal(await store.head('books/' + book + '/content/two'), undefined);
+  assert.deepEqual(await store.list(''), []);
+  assert.deepEqual(await store.listPrefixes('books/'), []);
+  await store.delete(['books/' + book + '/content/two']);
+  assert.equal(await store.changes(book), undefined);
+  assert.deepEqual(await store.putIfAbsent('remote.json', bytes('{"new":true}')), { existed: false });
+  assert.deepEqual(await store.putIfAbsent('books/' + book + '/content/three', bytes('3')), { existed: false });
+  assert.deepEqual((await store.list('')).map(({ key }) => key), ['books/' + book + '/content/three', 'remote.json']);
 });
 
 test('cloudkit store: without the entitlements CloudKit is never called', async () => {

@@ -2165,8 +2165,8 @@ test('iCloud: an account or build that cannot use it reads as unavailable, with 
   assert.equal((await without.standing(a.folder)).error, 'iCloud sync is not available in this build of ImageFlow.');
 });
 
-test('iCloud storage full: the book and its previews sync, its originals wait for room, and a full commit fails the sync', async (t) => {
-  const { a } = await world(t);
+test('iCloud storage full: the book and its previews sync, its originals wait for room without an edit, and a full commit fails the sync', async (t) => {
+  const { a, b } = await world(t);
   const native = new FakeCloudKit();
   const service = new SyncService(() => ({ kind: 'icloud' }), { cloudKit: () => native });
   native.fail('putIfAbsent', 'quotaExceeded', { times: Infinity, name: (name) => name.startsWith('originals/') });
@@ -2174,22 +2174,78 @@ test('iCloud storage full: the book and its previews sync, its originals wait fo
   assert.equal(first.action, 'initial-push');
   assert.ok(first.notUploaded && first.notUploaded.count > 0);
   assert.equal(first.notUploaded.message, 'iCloud storage full.');
+  const owed = first.notUploaded.count;
   const remote = (await service.connect()).remote as Remote;
   const [tip] = await tips(remote, a);
   const state = await stateOf(remote, tip);
   assert.deepEqual(state.originals, {}, 'the snapshot leaves out what did not go up, so no Mac waits for it');
   assert.ok(Object.keys(state.proxies).length > 0, 'the previews went up');
-  // Room again: the next sync derives the pending uploads and sends them.
+  // Another Mac shows those photos as it shows one still uploading: a preview, nothing to download.
+  await use(b);
+  const listed = (await remoteBooks(remote)).find((book) => book.bookId === tip.bookId)!;
+  await cloneFromRemote({ remote, tip: listed.tips[0], destination: b.folder, remoteId: (await service.connect()).remoteId });
+  assert.deepEqual(await pendingOriginals(b.folder, remote), []);
+  await on(b, async (book) => assert.equal(book.sources!['photo:shore'].state, 'missing'));
+  // Still full, nothing edited: the sync says so again and makes no commit for nothing.
+  const still = await syncWith(a, service);
+  assert.equal(still.action, 'in-sync');
+  assert.equal(still.notUploaded?.count, owed);
+  assert.deepEqual((await tips(remote, a)).map(({ commitId }) => commitId), [tip.commitId]);
+  // Room again, still nothing edited: Sync Now derives what is owed, uploads it and records it.
   native.recover();
-  await edit(a, caption('shore', 'Room again'));
   const second = await syncWith(a, service);
+  assert.equal(second.action, 'push');
   assert.equal(second.notUploaded, undefined);
   const [next] = await tips(remote, a);
   const shore = (await stateOf(remote, next)).originals.shore;
   assert.ok(shore && await remote.hasBlob(originalBlobKey(next.bookId, shore.digest, shore.ext)));
+  assert.equal((await syncWith(a, service)).action, 'in-sync', 'and then nothing is owed');
+  // The other Mac now has the originals to download, every one that was owed.
+  assert.equal((await syncWith(b, service)).action, 'fast-forward');
+  assert.equal((await pendingOriginals(b.folder, remote)).length, owed);
+  assert.ok((await pendingOriginals(b.folder, remote)).includes('shore'));
   // When the book's own state does not fit, the sync fails with the same words and the remote keeps its tip.
   await edit(a, caption('shore', 'Full again'));
   native.fail('putIfAbsent', 'quotaExceeded', { times: Infinity });
   await assert.rejects(syncWith(a, service), (error: unknown) => error instanceof StoreFullError && error.message === 'iCloud storage full.');
   assert.deepEqual((await tips(remote, a)).map(({ commitId }) => commitId), [next.commitId]);
+});
+
+test('iCloud emptied in System Settings: the books that synced ask first, nothing goes up before, and a new history syncs', async (t) => {
+  const { a } = await world(t);
+  const native = new FakeCloudKit();
+  const service = new SyncService(() => ({ kind: 'icloud' }), { cloudKit: () => native, keyIndex: new MemoryKeyIndexCache() });
+  await syncWith(a, service);
+  const before = (await service.connect()).remoteId;
+  await edit(a, caption('shore', 'After the wipe'));
+  // Manage Storage → Delete: every zone, the index with remote.json too, answers userDeletedZone from now on.
+  native.userDeletesAll();
+  const after = await service.connect();
+  assert.notEqual(after.remoteId, before, 'an emptied iCloud is another remote');
+  assert.equal((await service.standing(a.folder)).sync, 'elsewhere', 'so the book is asked about');
+  await assert.rejects(syncWith(a, service), SyncElsewhereError);
+  assert.deepEqual(await remoteBooks(after.remote), [], 'and nothing went up without asking');
+  // Agreed: the book starts a new history in the emptied iCloud.
+  await service.start(a.folder, { newHistory: true });
+  assert.equal((await syncWith(a, service)).action, 'initial-push');
+  assert.equal((await service.standing(a.folder)).sync, 'syncing');
+  assert.equal((await remoteBooks(after.remote)).length, 1);
+});
+
+test('iCloud: a sync running when another Apple ID signs in writes no commit there, and connecting reads the user only after an account change', async (t) => {
+  const { a } = await world(t);
+  const native = new FakeCloudKit();
+  const service = new SyncService(() => ({ kind: 'icloud' }), { cloudKit: () => native });
+  await syncWith(a, service);
+  native.calls.length = 0;
+  for (let index = 0; index < 3; index++) await service.connect();
+  assert.equal(native.calls.filter((call) => call === 'userRecordId').length, 0, 'the user is kept until the account changes');
+  // Another Apple ID signs in while the sync uploads, and CloudKit's event has not arrived yet: its commit is refused.
+  await edit(a, caption('shore', 'During the switch'));
+  native.onCall = (op, _zone, record) => { if (op === 'putIfAbsent' && record?.startsWith('content/')) { native.user = '_user-two'; native.onCall = undefined; } };
+  await assert.rejects(syncWith(a, service), (error: unknown) => error instanceof StoreAccessError && /account changed during the sync/.test(error.message));
+  native.user = '_user-two';
+  const other = await service.connect();
+  assert.deepEqual(await remoteBooks(other.remote), [], 'no commit of the book reached the other account');
+  assert.equal((await service.standing(a.folder)).sync, 'elsewhere');
 });

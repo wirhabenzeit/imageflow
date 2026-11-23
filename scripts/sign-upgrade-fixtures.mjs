@@ -14,5 +14,5 @@ for (const [index, version] of plan.versions.entries()) {
   const app = join(root, '.build/upgrade-test', String(index), `ImageFlow-darwin-${process.arch}`, 'ImageFlow.app');
   await verifyMacVersion(app, version);
   await sign({ app, platform: 'darwin', version: metadata.devDependencies.electron, ...macSigningOptions(root, { ...options, provisioningProfile: undefined }) });
-  await verifyMacSigning(app, options.identity);
+  await verifyMacSigning(app, options.identity, { icloud: false });
 }

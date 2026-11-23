@@ -49,6 +49,7 @@ import type { CopyOptions } from './source-actions';
 import { rebuildTemplateDependencies } from './dependency-install';
 import type { DependencyRebuild } from './dependency-install';
 import { AssetFacts } from './asset-facts';
+import { StoreFullError } from './sync-store';
 import { describeLocalChange, describeSync, pendingOriginals, placeOriginals, stageOriginals, syncBook, unavailableStatus } from './sync-engine';
 import type { SyncOptions, SyncOutcome } from './sync-engine';
 import type { SyncRemote } from './sync-remote';
@@ -337,7 +338,9 @@ export class DocumentSession {
    * watcher is paused while the engine pushes or pulls, and a pull is adopted as an external change, which resets
    * Undo and Redo. With several remote tips the user picks the one to continue from.
    */
-  async sync(remote: SyncRemote, options: Pick<SyncOptions, 'fetchOriginals'> & { remoteId?: string } = {}) {
+  async sync(remote: SyncRemote, options: Pick<SyncOptions, 'fetchOriginals'> & { remoteId?: string;
+    /** Told when the sync fails because the remote is full (its commit or a preview did not fit). */
+    full?: (error: StoreFullError) => void } = {}) {
     return this.run(async () => {
       // Syncing turns on only once the sync holds the book: one that finds it busy changes nothing.
       if (options.remoteId) await startSyncing(this.book.folder, options.remoteId);
@@ -353,6 +356,7 @@ export class DocumentSession {
         if (outcome.changed) this.notify({ value: this.activate(await loadProject(this.book.folder, this.cache), true) });
         return outcome;
       } catch (error) {
+        if (error instanceof StoreFullError) options.full?.(error);
         // A sync can fail after it changed the book (a pull, then a failed push or fork commit): the editor takes what
         // is on disk now, so its next edit does not fail as a change made outside ImageFlow.
         if (await mark() !== before) {
@@ -398,11 +402,11 @@ export class DocumentSession {
   /** The photos whose originals the last sync has and this Mac does not yet: their problem says so (`marked`). */
   private notDownloaded = new Set<string>();
   /** What the last sync left for later because the remote is full; every published view carries it until a sync ends without. */
-  private notUploaded?: SyncView['notUploaded'];
+  private storageFull?: SyncView['storageFull'];
   private publishSync(view: SyncView | undefined) {
     if (view) {
-      const { downloading: _, notUploaded: __, ...rest } = view;
-      view = { ...rest, ...(this.downloading ? { downloading: this.downloading } : {}), ...(this.notUploaded ? { notUploaded: this.notUploaded } : {}) };
+      const { downloading: _, storageFull: __, ...rest } = view;
+      view = { ...rest, ...(this.downloading ? { downloading: this.downloading } : {}), ...(this.storageFull ? { storageFull: this.storageFull } : {}) };
     }
     this.syncView = view;
     if (!this.closing && !this.window.isDestroyed()) this.window.webContents.send(channels.syncChanged, view ?? null);
@@ -482,11 +486,12 @@ export class DocumentSession {
     let message: string | undefined;
     try {
       // Originals come after the sync, in the background (`downloadSyncedOriginals`), so the book stays usable.
-      const result = await this.sync(connection.remote, { remoteId: connection.remoteId });
+      const manage = this.syncService.kind === 'icloud' ? { manage: true as const } : {};
+      const result = await this.sync(connection.remote, { remoteId: connection.remoteId, full: (error) => { this.storageFull = { message: error.message, ...manage }; } });
       if ('error' in result) throw new Error(result.error);
       message = describeOutcome(result.value);
       const left = result.value.notUploaded;
-      this.notUploaded = left && { ...left, ...(this.syncService.kind === 'icloud' ? { manage: true as const } : {}) };
+      this.storageFull = left && { message: left.message, notUploaded: left.count, ...manage };
       return result.value;
     } finally {
       this.syncing = false;

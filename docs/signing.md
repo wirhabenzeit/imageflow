@@ -84,6 +84,12 @@ The iCloud sync backend (#292) uses CloudKit, which needs entitlements that a De
 
 **A Developer ID app that claims iCloud without a matching embedded profile is killed at launch** ("Launchd job spawn failed"), and a Mac with the profile *installed* (double-clicked, System Settings → General → Device Management) hides that, because macOS then uses the installed copy. So whenever the main app claims iCloud, `verify-mac-signing.mjs` checks the profile inside the bundle before notarization: present, for this App ID and team, a Developer ID profile (every Mac), Production, covering the container and push, and not expired. Do not install the profile on the Macs that test releases.
 
+The check also requires the profile to name the certificate the app is signed with: a renewed Developer ID certificate needs a new profile. A build signed with a profile must claim iCloud, and one that embeds a profile without claiming iCloud fails too, so a release never ships without iCloud by accident.
+
+**RunAsNode and iCloud.** The RunAsNode fuse stays on (see Verification): the MCP bridge and template typechecking run ImageFlow's executable in Node mode. Such a process carries the app's entitlements, so with iCloud any local process that can run the executable that way can reach ImageFlow's data in the user's private CloudKit database, as it could already read the user's books on disk. `npm run test:cloudkit` relies on this. Turning the fuse off needs another way to run the bridge and the typechecker first.
+
+**Updating from a build without iCloud** keeps the designated requirement (Developer ID, team, bundle ID), so automatic updates and the keychain key behind the encrypted sync credentials should keep working. This is not tested yet: run the signed upgrade test (`npm run test:upgrade:signed`) from a release without the profile to one with it before the first release that carries iCloud.
+
 A new App ID–container link takes minutes to reach CloudKit; until then, saves fail with `permissionFailure` "Invalid bundle ID for container". The CloudKit schema (record type `Blob` with `data`, `asset`, `size`, `sha256`) must be deployed to Production in the CloudKit Console.
 
 ## Verification

@@ -84,10 +84,11 @@ export type SyncView = { folder: string; status?: SyncStatus; syncing?: boolean;
   /** Originals a running sync has uploaded, of those it uploads. */
   uploading?: { done: number; total: number };
   /**
-   * Owned originals the last sync left for later because the remote is full (iCloud storage full), with the store's
-   * words; `manage` when the remote is iCloud, whose storage System Settings manages (`manage-storage`).
+   * The remote was full at the last sync (iCloud storage full), in the store's words: `notUploaded` owned originals
+   * left for later while the book synced, or none when the sync itself failed because its commit or a preview did not
+   * fit. `manage` when the remote is iCloud, whose storage System Settings manages (`manage-storage`).
    */
-  notUploaded?: { count: number; message: string; manage?: true } };
+  storageFull?: { message: string; notUploaded?: number; manage?: true } };
 /** `start` makes the book sync on this Mac (asking first when it last synced somewhere else), `stop` stops that. */
 export type SyncAction = 'sync' | 'download' | 'cancel-download' | 'start' | 'stop' | 'manage-storage';
 // The main canvas shows spreads in one vertical column, or a row-by-row grid with this many columns.

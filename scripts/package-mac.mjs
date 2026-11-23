@@ -103,5 +103,5 @@ if (options.notarization) {
   await notarizeMacRelease({ root, version: metadata.version, ...options }, packageApp);
 } else {
   const app = await packageApp();
-  if (options.identity) await verifyMacSigning(app, options.identity);
+  if (options.identity) await verifyMacSigning(app, options.identity, { icloud: !fixture && !!options.provisioningProfile });
 }

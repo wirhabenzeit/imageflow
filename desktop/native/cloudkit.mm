@@ -16,6 +16,7 @@
 #import <Security/Security.h>
 #include <copyfile.h>
 #include <node_api.h>
+#include <memory>
 #include <mutex>
 #include <string>
 
@@ -47,17 +48,21 @@ static NSString *entitledContainer() {
 
 // ---------- Promises
 //
-// A pending call owns a thread-safe function. Progress and the result are queued on it under `lock`; once settled,
-// nothing more is queued and the function is released. Node calls `finishPending` on the JavaScript thread after the
-// last queued call has run, which frees the call and its progress callback.
+// A pending call is shared: CloudKit's blocks hold it as long as they may run, and Node's finalizer only marks it
+// closed. Progress and the result are queued on its thread-safe function under `lock`; once settled, nothing more is
+// queued and the function is released, and Node finalizes it after the last queued call has run. At quit, Node may
+// finalize it first, while CloudKit still holds the call: a completion that arrives later finds it closed and touches
+// nothing of Node's.
 
 struct Pending {
   napi_deferred deferred = nullptr;
   napi_threadsafe_function tsfn = nullptr;
   napi_ref progress = nullptr;
-  std::mutex lock;
+  std::recursive_mutex lock;
   bool settled = false;
+  bool closed = false;
 };
+typedef std::shared_ptr<Pending> PendingRef;
 
 static void callJs(napi_env env, napi_value, void *, void *data) {
   JSWork work = (__bridge_transfer JSWork)data;
@@ -65,52 +70,58 @@ static void callJs(napi_env env, napi_value, void *, void *data) {
 }
 
 static void finishPending(napi_env env, void *data, void *) {
-  Pending *pending = static_cast<Pending *>(data);
-  if (pending->progress) napi_delete_reference(env, pending->progress);
-  delete pending;
+  PendingRef *holder = static_cast<PendingRef *>(data);
+  {
+    std::lock_guard<std::recursive_mutex> guard((*holder)->lock);
+    (*holder)->closed = true;
+    if ((*holder)->progress && env) napi_delete_reference(env, (*holder)->progress);
+    (*holder)->progress = nullptr;
+  }
+  delete holder;
 }
 
-static Pending *newPending(napi_env env, napi_value *promise, napi_value progress) {
-  Pending *pending = new Pending();
+static PendingRef newPending(napi_env env, napi_value *promise, napi_value progress) {
+  PendingRef pending = std::make_shared<Pending>();
   napi_create_promise(env, &pending->deferred, promise);
   napi_value name;
   napi_create_string_utf8(env, "cloudkit", NAPI_AUTO_LENGTH, &name);
-  napi_create_threadsafe_function(env, nullptr, nullptr, name, 0, 1, pending, finishPending, nullptr, callJs, &pending->tsfn);
+  napi_create_threadsafe_function(env, nullptr, nullptr, name, 0, 1, new PendingRef(pending), finishPending, nullptr, callJs, &pending->tsfn);
   napi_valuetype type = napi_undefined;
   if (progress) napi_typeof(env, progress, &type);
   if (type == napi_function) napi_create_reference(env, progress, 1, &pending->progress);
   return pending;
 }
 
-static void enqueue(Pending *pending, JSWork work) {
+/** Queues work for the JavaScript thread; the caller holds `lock` and has checked that the call is not closed. */
+static void enqueue(const PendingRef &pending, JSWork work) {
   napi_call_threadsafe_function(pending->tsfn, (__bridge_retained void *)[work copy], napi_tsfn_nonblocking);
 }
 
-/** Resolves or rejects once; later calls are ignored. `build` runs on the JavaScript thread. */
-static void settle(Pending *pending, bool reject, Builder build) {
-  napi_threadsafe_function tsfn;
-  {
-    std::lock_guard<std::mutex> guard(pending->lock);
-    if (pending->settled) return;
-    pending->settled = true;
-    tsfn = pending->tsfn;
-    Builder kept = [build copy];
-    enqueue(pending, ^(napi_env env) {
-      napi_value value = kept(env);
-      if (reject) napi_reject_deferred(env, pending->deferred, value);
-      else napi_resolve_deferred(env, pending->deferred, value);
-    });
-  }
-  // Outside the lock: once released, Node may free `pending` as soon as the result has run.
-  napi_release_threadsafe_function(tsfn, napi_tsfn_release);
+/** Resolves or rejects once; later calls, and calls after Node finalized it, are ignored. `build` runs on the JavaScript thread. */
+static void settle(const PendingRef &pending, bool reject, Builder build) {
+  std::lock_guard<std::recursive_mutex> guard(pending->lock);
+  if (pending->settled || pending->closed) return;
+  pending->settled = true;
+  Builder kept = [build copy];
+  PendingRef held = pending;
+  enqueue(pending, ^(napi_env env) {
+    napi_value value = kept(env);
+    if (reject) napi_reject_deferred(env, held->deferred, value);
+    else napi_resolve_deferred(env, held->deferred, value);
+  });
+  // Under the lock, so the finalizer cannot run in between; it runs later, on the JavaScript thread.
+  napi_release_threadsafe_function(pending->tsfn, napi_tsfn_release);
 }
 
-static void reportProgress(Pending *pending, double fraction) {
-  std::lock_guard<std::mutex> guard(pending->lock);
-  if (pending->settled || !pending->progress) return;
+static void reportProgress(const PendingRef &pending, double fraction) {
+  std::lock_guard<std::recursive_mutex> guard(pending->lock);
+  if (pending->settled || pending->closed || !pending->progress) return;
+  PendingRef held = pending;
   enqueue(pending, ^(napi_env env) {
+    std::lock_guard<std::recursive_mutex> inner(held->lock);
+    if (!held->progress) return;
     napi_value fn, global, argument;
-    napi_get_reference_value(env, pending->progress, &fn);
+    napi_get_reference_value(env, held->progress, &fn);
     napi_get_global(env, &global);
     napi_create_double(env, fraction, &argument);
     napi_call_function(env, global, fn, 1, &argument, nullptr);
@@ -194,11 +205,11 @@ static napi_value errorValue(napi_env env, NSError *error) {
   return result;
 }
 
-static void rejectWith(Pending *pending, NSError *error) {
+static void rejectWith(const PendingRef &pending, NSError *error) {
   settle(pending, true, ^napi_value(napi_env env) { return errorValue(env, error); });
 }
 
-static void resolveUndefined(Pending *pending) {
+static void resolveUndefined(const PendingRef &pending) {
   settle(pending, false, ^napi_value(napi_env env) { return undefinedValue(env); });
 }
 
@@ -308,7 +319,7 @@ static napi_value describeRecord(napi_env env, CKRecord *record) {
 // status(): { entitled: false } or { entitled: true, container, environment, accountStatus }.
 static napi_value Status(napi_env env, napi_callback_info) {
   napi_value promise;
-  Pending *pending = newPending(env, &promise, nullptr);
+  PendingRef pending = newPending(env, &promise, nullptr);
   NSString *identifier = entitledContainer();
   if (!identifier) {
     settle(pending, false, ^napi_value(napi_env env) {
@@ -354,7 +365,7 @@ static napi_value Status(napi_env env, napi_callback_info) {
 static napi_value UserRecordId(napi_env env, napi_callback_info) {
   if (!requireContainer(env)) return nullptr;
   napi_value promise;
-  Pending *pending = newPending(env, &promise, nullptr);
+  PendingRef pending = newPending(env, &promise, nullptr);
   [container fetchUserRecordIDWithCompletionHandler:^(CKRecordID *recordID, NSError *error) {
     if (error) return rejectWith(pending, error);
     NSString *name = recordID.recordName;
@@ -365,7 +376,7 @@ static napi_value UserRecordId(napi_env env, napi_callback_info) {
 
 static napi_value ModifyZones(napi_env env, NSArray<CKRecordZone *> *save, NSArray<CKRecordZoneID *> *remove) {
   napi_value promise;
-  Pending *pending = newPending(env, &promise, nullptr);
+  PendingRef pending = newPending(env, &promise, nullptr);
   CKModifyRecordZonesOperation *operation = [[CKModifyRecordZonesOperation alloc] initWithRecordZonesToSave:save recordZoneIDsToDelete:remove];
   configure(operation);
   operation.modifyRecordZonesCompletionBlock = ^(NSArray *, NSArray *, NSError *error) {
@@ -400,7 +411,7 @@ static napi_value DeleteZones(napi_env env, napi_callback_info info) {
 static napi_value ListZones(napi_env env, napi_callback_info) {
   if (!requireContainer(env)) return nullptr;
   napi_value promise;
-  Pending *pending = newPending(env, &promise, nullptr);
+  PendingRef pending = newPending(env, &promise, nullptr);
   CKFetchRecordZonesOperation *operation = [CKFetchRecordZonesOperation fetchAllRecordZonesOperation];
   configure(operation);
   operation.fetchRecordZonesCompletionBlock = ^(NSDictionary<CKRecordZoneID *, CKRecordZone *> *zones, NSError *error) {
@@ -450,7 +461,7 @@ static napi_value PutIfAbsent(napi_env env, napi_callback_info info) {
   }
   if (shaValue) record[@"sha256"] = argString(env, shaValue);
   napi_value promise;
-  Pending *pending = newPending(env, &promise, prop(env, argv[3], "onProgress"));
+  PendingRef pending = newPending(env, &promise, prop(env, argv[3], "onProgress"));
   CKModifyRecordsOperation *operation = [[CKModifyRecordsOperation alloc] initWithRecordsToSave:@[record] recordIDsToDelete:nil];
   operation.savePolicy = CKRecordSaveIfServerRecordUnchanged;
   operation.atomic = NO;
@@ -478,7 +489,8 @@ static napi_value PutIfAbsent(napi_env env, napi_callback_info info) {
 }
 
 // fetch(zone, name, { mode: 'head' | 'bytes' | 'file', file?, id?, onProgress? }):
-//   head  → { name, size, lastModified, sha256? }, or undefined when there is no such record or zone
+//   head  → { name, size, lastModified, sha256? }, or undefined when there is no such record or zone (also one the
+//           user deleted)
 //   bytes → the same with `bytes: Buffer`
 //   file  → the same after writing the blob to `file`, which must not exist. Only the data is copied: CloudKit's asset
 //           files carry com.apple.quarantine, which must not reach the originals in a book.
@@ -496,7 +508,7 @@ static napi_value Fetch(napi_env env, napi_callback_info info) {
     return nullptr;
   }
   napi_value promise;
-  Pending *pending = newPending(env, &promise, prop(env, argv[2], "onProgress"));
+  PendingRef pending = newPending(env, &promise, prop(env, argv[2], "onProgress"));
   CKRecordID *recordID = [[CKRecordID alloc] initWithRecordName:name zoneID:zoneID(zone)];
   CKFetchRecordsOperation *operation = [[CKFetchRecordsOperation alloc] initWithRecordIDs:@[recordID]];
   if ([mode isEqualToString:@"head"]) operation.desiredKeys = @[@"size", @"sha256"];
@@ -527,7 +539,10 @@ static napi_value Fetch(napi_env env, napi_callback_info info) {
   };
   operation.fetchRecordsCompletionBlock = ^(NSDictionary *, NSError *error) {
     NSError *cause = recordError ?: itemError(error);
-    bool missing = cause && [cause.domain isEqualToString:CKErrorDomain] && (cause.code == CKErrorUnknownItem || cause.code == CKErrorZoneNotFound);
+    // A zone the user deleted (System Settings → iCloud → Manage Storage) holds nothing either: its records are missing,
+    // so the store can see that remote.json is gone and start another remote instead of failing for good.
+    bool missing = cause && [cause.domain isEqualToString:CKErrorDomain] &&
+      (cause.code == CKErrorUnknownItem || cause.code == CKErrorZoneNotFound || cause.code == CKErrorUserDeletedZone);
     if (missing) return resolveUndefined(pending);
     if (cause) return rejectWith(pending, cause);
     if (!found) return resolveUndefined(pending);
@@ -566,7 +581,7 @@ static napi_value Changes(napi_env env, napi_callback_info info) {
     if (!token) {
       // A token that cannot be read is treated like one CloudKit no longer accepts.
       napi_value promise;
-      Pending *pending = newPending(env, &promise, nullptr);
+      PendingRef pending = newPending(env, &promise, nullptr);
       rejectWith(pending, [NSError errorWithDomain:CKErrorDomain code:CKErrorChangeTokenExpired userInfo:@{NSLocalizedDescriptionKey: @"The change token cannot be read."}]);
       return promise;
     }
@@ -575,7 +590,7 @@ static napi_value Changes(napi_env env, napi_callback_info info) {
   napi_value limitValue = prop(env, argv[2], "limit");
   if (limitValue) napi_get_value_int64(env, limitValue, &limit);
   napi_value promise;
-  Pending *pending = newPending(env, &promise, nullptr);
+  PendingRef pending = newPending(env, &promise, nullptr);
   CKFetchRecordZoneChangesConfiguration *configuration = [CKFetchRecordZoneChangesConfiguration new];
   configuration.previousServerChangeToken = token;
   configuration.desiredKeys = @[@"size", @"sha256"];
@@ -589,8 +604,14 @@ static napi_value Changes(napi_env env, napi_callback_info info) {
   __block CKServerChangeToken *latest = nil;
   __block NSError *zoneError = nil;
   __block BOOL more = NO;
-  operation.recordWasChangedBlock = ^(CKRecordID *, CKRecord *record, NSError *) {
-    if (record) @synchronized (changed) { [changed addObject:record]; }
+  // A record the feed reports with an error fails the whole request, so the caller keeps its old token and asks again:
+  // the token must never move past a key the index did not get.
+  __block NSError *recordError = nil;
+  operation.recordWasChangedBlock = ^(CKRecordID *, CKRecord *record, NSError *error) {
+    @synchronized (changed) {
+      if (error) { if (!recordError) recordError = error; }
+      else if (record) [changed addObject:record];
+    }
   };
   operation.recordWithIDWasDeletedBlock = ^(CKRecordID *recordID, CKRecordType) {
     @synchronized (deleted) { [deleted addObject:recordID.recordName]; }
@@ -602,7 +623,7 @@ static napi_value Changes(napi_env env, napi_callback_info info) {
     more = moreComing;
   };
   operation.fetchRecordZoneChangesCompletionBlock = ^(NSError *error) {
-    NSError *cause = zoneError ?: itemError(error);
+    NSError *cause = zoneError ?: recordError ?: itemError(error);
     if (cause) return rejectWith(pending, cause);
     NSData *tokenData = latest ? [NSKeyedArchiver archivedDataWithRootObject:latest requiringSecureCoding:YES error:nil] : nil;
     NSString *tokenString = [tokenData base64EncodedStringWithOptions:0];
@@ -635,7 +656,7 @@ static napi_value DeleteRecords(napi_env env, napi_callback_info info) {
   NSMutableArray<CKRecordID *> *ids = [NSMutableArray array];
   for (NSString *name in argStrings(env, argv[1])) [ids addObject:[[CKRecordID alloc] initWithRecordName:name zoneID:zoneID(zone)]];
   napi_value promise;
-  Pending *pending = newPending(env, &promise, nullptr);
+  PendingRef pending = newPending(env, &promise, nullptr);
   CKModifyRecordsOperation *operation = [[CKModifyRecordsOperation alloc] initWithRecordsToSave:nil recordIDsToDelete:ids];
   operation.atomic = NO;
   configure(operation);

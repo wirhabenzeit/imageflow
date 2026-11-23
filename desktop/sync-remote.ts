@@ -111,7 +111,9 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
    * `headerCache` keeps the commit headers read, per remote and book, so `listCommits` fetches only new ones.
    * `keyIndex` keeps the key index of each book over a store with a change feed, so it outlives the app.
    */
-  constructor(readonly store: Store, private readonly options: { headerCache?: CommitHeaderCache; keyIndex?: KeyIndexCache } = {}) {}
+  constructor(readonly store: Store, private readonly options: { headerCache?: CommitHeaderCache; keyIndex?: KeyIndexCache;
+    /** Runs before each commit is stored and refuses it by throwing: the iCloud remote checks that the account is still its own. */
+    beforeCommit?: () => Promise<void> } = {}) {}
   private identity?: string;
   /** The key indexes read or kept up to date while this remote is used, by remote identity and book. */
   private readonly indexes = new Map<string, { token?: string; entries: Map<string, StoreEntry> }>();
@@ -180,6 +182,7 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
 
   async putCommit(header: CommitHeader) {
     const parsed = commitHeaderSchema.parse(header);
+    await this.options.beforeCommit?.();
     const bytes = encode(parsed);
     const { existed } = await this.store.putIfAbsent(commitKey(parsed.bookId, parsed.commitId), bytes);
     if (!existed) { this.noteStored(commitKey(parsed.bookId, parsed.commitId), bytes.length); return; }
