@@ -75,8 +75,13 @@ export type BookSync = 'syncing' | 'stopped' | 'elsewhere' | 'off';
 export function bookSync(state: SyncState, remoteId: string): BookSync {
   if (state.enabled === false) return 'stopped';
   if (state.remoteId === remoteId) return 'syncing';
-  return state.lastSynced ? 'elsewhere' : 'off';
+  return syncedElsewhere(state, remoteId) ? 'elsewhere' : 'off';
 }
+/**
+ * Whether the record holds a sync with another remote than `remoteId`, so starting there is a new history: what it
+ * last synced, or a pull it gave up there (which forgot `lastSynced`, and may have left the book half-done).
+ */
+export const syncedElsewhere = (state: SyncState, remoteId: string) => (!!state.lastSynced || !!state.pull || !!state.abandoned) && state.remoteId !== remoteId;
 export type PullMarker = NonNullable<SyncState['pull']>;
 
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -148,31 +153,54 @@ export class SyncElsewhereError extends Error {
   }
 }
 
-/** Whether `lastSynced` belongs to another remote than `remoteId`, so starting there is a new history. */
-const syncedElsewhere = (state: SyncState, remoteId: string) => !!state.lastSynced && state.remoteId !== remoteId;
+/**
+ * The last sync of a book could not be finished, so it may be only partly updated. On the remote it last synced with,
+ * the next sync pulls again and keeps this Mac's version as a copy if it was edited since (`keepBoth`); a new history
+ * on another remote would start from it, so it does not start until that sync was finished.
+ */
+export class SyncHalfPulledError extends Error {
+  readonly code = 'SYNC_HALF_PULLED';
+  constructor(detail: string) {
+    super('The last sync of this book could not be finished (' + detail.replace(/\.$/, '') + '), so it may be only partly updated. ' +
+      'Switch back to the sync it last used and sync it there first, or duplicate the book (File → Duplicate…) and sync the duplicate.');
+    this.name = 'SyncHalfPulledError';
+  }
+}
 
 /**
  * Makes a book sync on this Mac with the remote `remoteId`, again after Stop Syncing with the history it had. A book
  * that last synced with another remote (or a sync folder before ADR 0012) starts there only with `newHistory`, and
- * throws `SyncElsewhereError` otherwise: an interrupted pull is finished first (or given up, `finishPull`), then what
- * it last synced is forgotten, so its first sync here pushes it or keeps both. Finishing a pull needs the writer lock.
+ * throws `SyncElsewhereError` otherwise. A new history forgets everything the record knows of the other remote:
+ * `lastSynced`, and the trace of a pull given up there (`abandoned`), which says nothing about this remote. It never
+ * starts from a book a pull may have left half-done: an interrupted pull is finished first, and one that cannot be
+ * finished (it is given up, `finishPull`, as at every other place) or that was given up before throws
+ * `SyncHalfPulledError` and starts nothing. Finishing a pull needs the writer lock.
  */
 export async function startSyncing(folder: string, remoteId: string, { newHistory = false }: { newHistory?: boolean } = {}) {
   const before = await readSyncState(folder);
   if (syncedElsewhere(before, remoteId)) {
     if (!newHistory) throw new SyncElsewhereError();
-    if (before.pull) await finishPull(folder, before.pull).catch((error) => console.warn('ImageFlow gave up an interrupted sync before syncing elsewhere', error));
+    if (before.pull) {
+      try { await finishPull(folder, before.pull); }
+      catch (error) { throw new SyncHalfPulledError(error instanceof Error ? error.message : String(error)); }
+    }
+    const { abandoned } = await readSyncState(folder);
+    if (abandoned) throw new SyncHalfPulledError(abandoned.error);
   }
   await updateSyncState(folder, (state) => {
     if (state.remoteId === remoteId && state.enabled === true) return state;
     if (!syncedElsewhere(state, remoteId)) return { ...state, remoteId, enabled: true };
     if (!newHistory) throw new SyncElsewhereError();
-    const { lastSynced: _, pull: _pull, ...rest } = state;
+    if (state.pull || state.abandoned) throw new SyncHalfPulledError(state.abandoned?.error ?? 'a sync started meanwhile');
+    const { lastSynced: _, ...rest } = state;
     return { ...rest, remoteId, enabled: true };
   });
 }
 
-/** Stops syncing a book on this Mac. What it last synced stays, so starting again continues its history. */
+/**
+ * Stops syncing a book on this Mac: no traffic with the remote for it until Start Syncing, neither syncs nor
+ * downloads of originals. What it last synced stays, so starting again continues its history.
+ */
 export async function stopSyncing(folder: string) {
   await updateSyncState(folder, (state) => (state.enabled === false ? state : { ...state, enabled: false }));
 }

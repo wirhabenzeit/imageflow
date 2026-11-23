@@ -83,6 +83,11 @@ try {
   };
 
   await expectStatus('');
+  // Sync is behind a development flag (IMAGEFLOW_SYNC): without it, no sync action does anything, nor is it offered.
+  for (const action of ['sync', 'start', 'stop', 'download']) {
+    assert.deepEqual(await window.evaluate((action) => window.imageflow.syncAction(action), action), { error: 'Sync is not available.' });
+  }
+  assert.equal(await instance.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('sync-now')), null);
   await window.waitForFunction(() => document.querySelector('iframe.book-frame-book[data-current][data-ready]'));
   const previewLines = await window.frameLocator('iframe.book-frame-book[data-current]').locator('[data-box="story"]').evaluate((box) => {
     const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);

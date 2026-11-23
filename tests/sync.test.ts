@@ -26,8 +26,8 @@ import type { SyncStore } from '../desktop/sync-store';
 import { storeConformance } from './sync-store-conformance';
 import { readCommitHeaderV1 } from './sync-v1-reader';
 import { bookTrusted } from '../desktop/source-access';
-import { readSyncState, SyncElsewhereError, takeAbandonedAtOpen, updateSyncState } from '../desktop/sync-pull';
-import { SyncService } from '../desktop/sync-service';
+import { readSyncState, SyncElsewhereError, SyncHalfPulledError, takeAbandonedAtOpen, updateSyncState } from '../desktop/sync-pull';
+import { insideBook, SyncService } from '../desktop/sync-service';
 import type { SyncBackend } from '../src/settings';
 import { blobKeyPattern, commitKey, contentBlobKey, coverBlobKey, decideSync, readBookTombstone, readCommitHeader, readRemoteIdentity, NewerSyncFormatError, deriveTips, isUnlocatedPath, originalBlobKey, portableManifests,
   projectManifests, proxyBlobKey, stateBlobSchema, tombstoneKey } from '../src/sync-snapshot';
@@ -1883,4 +1883,132 @@ test('an old sync record that names a folder loads, reads as not syncing, and a 
   assert.equal((await describeSync(a.folder, remote)).state, 'in-sync');
   // Writing the record never writes a folder again.
   assert.equal('folder' in JSON.parse(await readFile(await syncPath(a), 'utf8')), false);
+});
+
+/** Holds a book's writer lock without opening it, so an interrupted pull is not finished or given up by the open. */
+async function locked<T>(mac: Mac, step: () => Promise<T>) {
+  await use(mac);
+  const release = await acquireProjectLock(mac.folder);
+  try { return await step(); } finally { await release(); }
+}
+
+/**
+ * The laptop was interrupted in a pull from the first backend (the desktop's caption and a template file, one file of
+ * it written), while the desktop already syncs the book on the other backend at a version of its own.
+ */
+async function interruptedPull(t: TestContext) {
+  const { root, a, b } = await world(t);
+  const backends = { first: await folderBackend(root, 'First'), other: await folderBackend(root, 'Other'), empty: await folderBackend(root, 'Empty') };
+  let backend = backends.first;
+  const service = new SyncService(() => backend);
+  await syncWith(a, service);
+  await copyBook(a, b);
+  assert.equal((await syncWith(b, service)).action, 'adopt');
+  await writeFile(join(a.folder, 'template', 'notes.txt'), 'new');
+  await edit(a, caption('shore', 'On the first remote'));
+  await syncWith(a, service);
+  const first = await service.connect();
+  const [tip] = await tips(first.remote, a);
+  await on(b, (book) => stageSyncPull(first.remote, book, tip));
+  await writeFile(join(b.folder, 'template', 'notes.txt'), 'new');
+  assert.equal((await readSyncState(b.folder)).pull?.targetCommit, tip.commitId);
+  backend = backends.other;
+  await on(a, () => service.start(a.folder, { newHistory: true }));
+  await edit(a, caption('shore', 'On the other remote'));
+  assert.equal((await syncWith(a, service)).action, 'initial-push');
+  const use = (name: keyof typeof backends) => { backend = backends[name]; return service.connect(); };
+  return { a, b, service, tip, first, use };
+}
+
+for (const target of ['other', 'empty'] as const) {
+  test('a new history on a remote that ' + (target === 'other' ? 'has' : 'lacks') + ' the book starts from an interrupted pull only once it is finished', async (t) => {
+    const { b, service, tip, use } = await interruptedPull(t);
+    const { remote, remoteId } = await use(target);
+    assert.equal((await service.standing(b.folder)).sync, 'elsewhere');
+    await locked(b, () => service.start(b.folder, { newHistory: true }));
+    const state = await readSyncState(b.folder);
+    assert.deepEqual([state.remoteId, state.enabled, state.pull, state.lastSynced, state.abandoned], [remoteId, true, undefined, undefined, undefined]);
+    assert.equal(await captureBookStateRevision(b.folder), tip.bookStateRevision, 'the pull was finished first');
+    const outcome = await syncWith(b, service);
+    if (target === 'empty') {
+      assert.equal(outcome.action, 'initial-push');
+      assert.equal((await tips(remote, b))[0].bookStateRevision, tip.bookStateRevision, 'what is pushed is the whole pull');
+    } else {
+      // This Mac's version differs from the other remote's: it is kept as a copy, and the book continues with it.
+      assert.equal(outcome.action, 'diverged');
+      assert.ok(outcome.conflictCopy);
+      assert.equal(JSON.parse(await readFile(join(outcome.conflictCopy, 'photos.json'), 'utf8')).shore.caption, 'On the first remote');
+      assert.equal((await manifests(b)).photos.shore.caption, 'On the other remote');
+    }
+  });
+}
+
+test('a book whose pull could not be finished starts no new history, on a remote with the book or without it, until it synced where it last did', async (t) => {
+  const { b, service, use } = await interruptedPull(t);
+  // The pull cannot be finished: a blob it staged is lost, and the book does not have that file yet.
+  await rm(join(b.folder, 'template', 'notes.txt'));
+  const staged = sha(new TextEncoder().encode('new'));
+  for (const name of await readdir(persistenceRoot)) await rm(join(persistenceRoot, name, 'sync', 'staged', staged), { force: true });
+  const halfDone = await captureBookStateRevision(b.folder);
+  const other = await use('other');
+  const commits = await commitCount(other.remote as Remote);
+  await assert.rejects(locked(b, () => service.start(b.folder, { newHistory: true })), SyncHalfPulledError);
+  // It was given up, as when the book opens, and the record still belongs to the first remote.
+  const state = await readSyncState(b.folder);
+  assert.equal(state.pull, undefined);
+  assert.ok(state.abandoned);
+  assert.notEqual(state.remoteId, other.remoteId);
+  // A pull given up there keeps it synced elsewhere, on either remote: never a plain first push of the half-done book.
+  for (const target of ['other', 'empty'] as const) {
+    await use(target);
+    assert.equal((await service.standing(b.folder)).sync, 'elsewhere');
+    await assert.rejects(syncWith(b, service), SyncElsewhereError);
+    await assert.rejects(locked(b, () => service.start(b.folder, { newHistory: true })), SyncHalfPulledError);
+    await assert.rejects(locked(b, () => service.start(b.folder)), SyncElsewhereError);
+  }
+  assert.equal(await commitCount((await use('other')).remote as Remote), commits, 'nothing was pushed to the other remote');
+  assert.deepEqual(await (await use('empty')).remote.listBooks(), [], 'nor to the empty one');
+  assert.equal(await captureBookStateRevision(b.folder), halfDone, 'and the book is as the pull left it');
+  // Where it last synced, the next sync pulls again; then it may start a new history.
+  await use('first');
+  assert.equal((await syncWith(b, service)).action, 'diverged');
+  assert.equal((await readSyncState(b.folder)).abandoned, undefined);
+  await use('other');
+  await locked(b, () => service.start(b.folder, { newHistory: true }));
+  assert.ok((await syncWith(b, service)).conflictCopy, 'this Mac’s version is kept beside the other remote’s');
+});
+
+test('the remote’s identity is read at every use: a backend emptied while the app runs gets a new one, and its books ask again', async (t) => {
+  const { root, a } = await world(t);
+  const backend = await folderBackend(root, 'Sync');
+  const service = new SyncService(() => backend);
+  // Uses that start together share one identity.
+  const ids = new Set((await Promise.all(Array.from({ length: 8 }, () => service.connect()))).map((connection) => connection.remoteId));
+  assert.equal(ids.size, 1);
+  const [before] = ids;
+  await syncWith(a, service);
+  assert.equal((await service.standing(a.folder)).sync, 'syncing');
+  // The folder is emptied and another Mac starts it again.
+  await rm(backend.path, { recursive: true });
+  await mkdir(backend.path);
+  const other = await new SyncService(() => ({ ...backend })).connect();
+  assert.notEqual(other.remoteId, before);
+  assert.equal((await service.connect()).remoteId, other.remoteId);
+  assert.equal((await service.standing(a.folder)).sync, 'elsewhere', 'the book does not push under the old identity');
+  await assert.rejects(syncWith(a, service), SyncElsewhereError);
+});
+
+test('a sync folder inside a book is refused', async (t) => {
+  const { a } = await world(t);
+  const backend: SyncBackend = { kind: 'folder', path: join(a.folder, 'files', 'Sync') };
+  await mkdir(backend.path, { recursive: true });
+  assert.equal(insideBook(backend.path), true);
+  assert.equal(insideBook(join(a.base, 'Sync')), false);
+  const service = new SyncService(() => backend);
+  const standing = await service.standing(a.folder);
+  assert.notEqual(standing.sync, 'syncing');
+  assert.match(standing.error ?? '', /inside this book/);
+  await assert.rejects(syncWith(a, service), /inside this book/);
+  await assert.rejects(service.start(a.folder), /inside this book/);
+  assert.equal((await readSyncState(a.folder)).remoteId, undefined);
 });

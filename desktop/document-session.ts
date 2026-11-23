@@ -52,7 +52,7 @@ import { AssetFacts } from './asset-facts';
 import { describeLocalChange, describeSync, pendingOriginals, placeOriginals, stageOriginals, syncBook } from './sync-engine';
 import type { SyncOptions, SyncOutcome } from './sync-engine';
 import type { SyncRemote } from './sync-remote';
-import { readSyncState, startSyncing, takeAbandonedAtOpen, updateSyncState } from './sync-pull';
+import { bookSync, readSyncState, startSyncing, SyncElsewhereError, syncedElsewhere, takeAbandonedAtOpen, updateSyncState } from './sync-pull';
 import type { SyncService, SyncStanding } from './sync-service';
 import type { CommitHeader } from '../src/sync-snapshot';
 import type { SyncView } from '../src/desktop';
@@ -334,15 +334,17 @@ export class DocumentSession {
    * watcher is paused while the engine pushes or pulls, and a pull is adopted as an external change, which resets
    * Undo and Redo. With several remote tips the user picks the one to continue from.
    */
-  async sync(remote: SyncRemote, options: Pick<SyncOptions, 'fetchOriginals'> = {}) {
+  async sync(remote: SyncRemote, options: Pick<SyncOptions, 'fetchOriginals'> & { remoteId?: string } = {}) {
     return this.run(async () => {
+      // Syncing turns on only once the sync holds the book: one that finds it busy changes nothing.
+      if (options.remoteId) await startSyncing(this.book.folder, options.remoteId);
       this.stopWatch();
       // What a pull changes: the book state, or (photos only) the commit this Mac last synced.
       const mark = async () => [await captureBookStateRevision(this.book.folder).catch(() => ''),
         (await readSyncState(this.book.folder).catch(() => undefined))?.lastSynced?.commitId ?? ''].join(':');
       const before = await mark();
       try {
-        const outcome = await syncBook({ remote, book: this.book, ...options, chooseTip: (tips) => this.chooseTip(tips) });
+        const outcome = await syncBook({ remote, book: this.book, fetchOriginals: options.fetchOriginals, chooseTip: (tips) => this.chooseTip(tips) });
         if (outcome.changed) this.notify({ value: this.activate(await loadProject(this.book.folder, this.cache), true) });
         return outcome;
       } catch (error) {
@@ -401,16 +403,18 @@ export class DocumentSession {
   /** How the book stands with the configured remote, as last read; the app's menus follow it. */
   bookSync: SyncStanding['sync'] = 'unconfigured';
   /**
-   * Asks whether a book that last synced somewhere else starts here as a new history. The session asks once, when it
-   * first finds the book so; declining stops syncing it on this Mac, so it does not ask at every open.
+   * Asks whether a book that last synced somewhere else starts here as a new history, and saves the answer: declining
+   * stops syncing it on this Mac, so it is not asked again. Rejects when the answer could not be saved, and the book is
+   * then asked about again at its next look at the remote.
    */
   syncElsewhere?: () => Promise<void>;
-  private askedElsewhere = false;
-  /** The configured remote, for a book whose last sync it holds. */
+  private askingElsewhere = false;
+  /** The configured remote, for a book that syncs with it on this Mac. A stopped book has no traffic with it. */
   private async syncedRemote() {
     if (!this.syncService) throw new Error('Sync is not available.');
-    const connection = await this.syncService.connect();
-    if ((await readSyncState(this.book.folder)).remoteId !== connection.remoteId) throw new Error('This book does not sync with “' + connection.name + '” on this Mac.');
+    const connection = await this.syncService.connect(this.book.folder);
+    const state = await readSyncState(this.book.folder);
+    if (state.remoteId !== connection.remoteId || state.enabled === false) throw new Error('This book does not sync with “' + connection.name + '” on this Mac. Choose File → Sync → Start Syncing first.');
     return connection.remote;
   }
   /**
@@ -425,9 +429,11 @@ export class DocumentSession {
     const abandoned = this.syncing ? undefined : await takeAbandonedAtOpen(this.book.folder).catch(() => undefined);
     const notice = message ?? (abandoned ? 'The last sync could not be finished: ' + abandoned.error.replace(/\.?$/, '.') +
       ' Sync again to continue with the version on the remote; this Mac’s version is kept if it holds anything new.' : undefined);
-    if (standing.sync === 'elsewhere' && !this.askedElsewhere && !this.book.readOnly && this.syncElsewhere) {
-      this.askedElsewhere = true;
-      void this.syncElsewhere().catch((error) => { if (!this.window.isDestroyed()) this.window.webContents.send(channels.appNotice, errorMessage(error)); });
+    // Not while a sync runs: the answer needs the book. Once it is saved, the book no longer reads as synced elsewhere.
+    if (standing.sync === 'elsewhere' && !this.syncing && !this.askingElsewhere && !this.book.readOnly && this.syncElsewhere) {
+      this.askingElsewhere = true;
+      void this.syncElsewhere().catch((error) => { if (!this.window.isDestroyed()) this.window.webContents.send(channels.appNotice, errorMessage(error)); })
+        .finally(() => { this.askingElsewhere = false; });
     }
     if (standing.sync !== 'syncing' && standing.sync !== 'unavailable') {
       if (notice && !this.window.isDestroyed()) this.window.webContents.send(channels.appNotice, notice);
@@ -449,20 +455,25 @@ export class DocumentSession {
     if (!this.syncing) this.publishSync({ folder: name, status, ...(notice ? { message: notice } : {}) });
   }
   /**
-   * Syncs with the configured remote and says what happened in the status bar; a book that does not sync here yet
-   * starts. Errors are thrown for the app to show: `SyncElsewhereError`, before anything is pushed, for a book that last
-   * synced somewhere else, so the app asks first.
+   * Syncs with the configured remote and says what happened in the status bar. Only a book that syncs here, unless
+   * `start`, which makes one that does not sync here start (Start Syncing). Errors are thrown for the app to show:
+   * `SyncElsewhereError`, before anything is written or pushed, for a book that last synced somewhere else, so the app
+   * asks first. The book's record changes only once the sync holds the book.
    */
-  async syncNow() {
+  async syncNow({ start = false }: { start?: boolean } = {}) {
     if (!this.syncService) throw new Error('Sync is not available.');
-    const connection = await this.syncService.connect();
-    await startSyncing(this.book.folder, connection.remoteId);
+    const connection = await this.syncService.connect(this.book.folder);
+    const state = await readSyncState(this.book.folder);
+    const standing = bookSync(state, connection.remoteId);
+    // A stopped book whose last sync belongs to another remote starts here only as a new history, too.
+    if (standing === 'elsewhere' || (start && standing === 'stopped' && syncedElsewhere(state, connection.remoteId))) throw new SyncElsewhereError();
+    if (standing !== 'syncing' && !start) throw new Error('This book does not sync on this Mac. Choose File → Sync → Start Syncing.');
     this.syncing = true;
     this.publishSync({ ...this.syncView, folder: connection.name, syncing: true, message: undefined });
     let message: string | undefined;
     try {
       // Originals come after the sync, in the background (`downloadSyncedOriginals`), so the book stays usable.
-      const result = await this.sync(connection.remote);
+      const result = await this.sync(connection.remote, { remoteId: connection.remoteId });
       if ('error' in result) throw new Error(result.error);
       message = describeOutcome(result.value);
       return result.value;
@@ -483,12 +494,13 @@ export class DocumentSession {
     if ('error' in result) throw new Error(result.error);
     await this.refreshSync();
   }
-  /** Stops syncing on this Mac; the remote and the book are left as they are. */
+  /**
+   * Stops syncing on this Mac; the remote and the book are left as they are. It changes only the sync record, which is
+   * serialized on its own (`updateSyncState`), so it does not wait for the book.
+   */
   async stopSyncing() {
-    const service = this.syncService;
-    if (!service) throw new Error('Sync is not available.');
-    const result = await this.run(() => service.stop(this.book.folder));
-    if ('error' in result) throw new Error(result.error);
+    if (!this.syncService) throw new Error('Sync is not available.');
+    await this.syncService.stop(this.book.folder);
     await this.refreshSync();
   }
   /**

@@ -32,7 +32,7 @@ import type { BaseWindow, IpcMainInvokeEvent, MenuItemConstructorOptions } from 
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, isAbsolute, parse } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
@@ -49,7 +49,7 @@ import { chooseSyncTip, DocumentSession } from './document-session';
 import { cloneFromRemote } from './sync-engine';
 import { remoteBooks } from './sync-remote';
 import { SyncElsewhereError } from './sync-pull';
-import { SyncService } from './sync-service';
+import { insideBook, SyncService } from './sync-service';
 import { configureMacHeader, setToolbarDragRegions } from './mac-header';
 import type { RenderSessions } from './document-session';
 import { AssetFacts } from './asset-facts';
@@ -569,7 +569,7 @@ async function openDocument(path: string): Promise<DocumentSession | undefined> 
       document.syncChanged = () => updateMenus();
       document.syncService = syncService;
       const asking = document;
-      asking.syncElsewhere = () => offerSyncHere(asking);
+      asking.syncElsewhere = async () => { if (await offerSyncHere(asking)) void asking.syncNow().catch((error) => report(asking.window, error)); };
       document.dependencyCache = dependencyCache();
       document.authoringTypes = join(__dirname, 'authoring-types');
       document.authoringSkills = join(__dirname, 'skills');
@@ -1086,33 +1086,35 @@ function refreshSyncOnFocus(document: DocumentSession) {
 }
 
 /**
- * Syncs the focused book through the configured remote (ADR 0012); a book that does not sync here yet starts. Without
- * a backend, Settings opens where it is set up. A book that last synced somewhere else is asked about first.
+ * Syncs the focused book through the configured remote (ADR 0012): Sync Now for a book that syncs here, and with
+ * `start` (Start Syncing) one that does not. Without a backend, Settings opens where it is set up. A book that last
+ * synced somewhere else is asked about first.
  */
-async function syncDocument(document: DocumentSession) {
+async function syncDocument(document: DocumentSession, start: boolean) {
   if (!syncService.configured) { showSettings('general'); return; }
-  try { await document.syncNow(); }
+  try { await document.syncNow({ start }); }
   catch (error) {
     if (!(error instanceof SyncElsewhereError)) throw error;
-    await offerSyncHere(document);
+    if (await offerSyncHere(document)) await document.syncNow();
   }
 }
 
 /**
  * A book that last synced with another remote (another backend, or a sync folder before ADR 0012) does not sync by
- * itself: this asks whether it starts here as a new history. Declining stops syncing it on this Mac, so it is not
- * asked again at every open; Start Syncing asks again.
+ * itself: this asks whether it starts here as a new history and saves the answer, rejecting when it cannot. Declining
+ * stops syncing it on this Mac, so it is not asked again at every open; Start Syncing asks again. True when the book
+ * now syncs here, for the caller to sync it.
  */
 async function offerSyncHere(document: DocumentSession) {
-  if (document.closing || document.window.isDestroyed()) return;
+  if (document.closing || document.window.isDestroyed()) return false;
   const { response } = await dialog.showMessageBox(document.window, { type: 'question', buttons: ['Start Syncing Here', 'Don’t Sync'], defaultId: 0, cancelId: 1,
     message: 'This book last synced somewhere else.',
     detail: 'Start syncing “' + bookName(document.book.folder) + '” with “' + (syncService.name ?? 'this Mac’s sync') + '”, as a new history? What it synced before stays where it is. ' +
       'If you don’t, it does not sync on this Mac until you choose File → Sync → Start Syncing.' });
-  if (document.closing) return;
-  if (response !== 0) { await document.stopSyncing(); return; }
+  if (document.closing) return false;
+  if (response !== 0) { await document.stopSyncing(); return false; }
   await document.startSyncing({ newHistory: true });
-  await document.syncNow();
+  return true;
 }
 
 async function stopSyncingDocument(document: DocumentSession) {
@@ -1162,7 +1164,8 @@ async function openFromSync(owner: BrowserWindow | undefined) {
 }
 
 async function syncCommand(document: DocumentSession, action: SyncAction) {
-  if (action === 'sync' || action === 'start') await syncDocument(document);
+  if (!syncOffered) throw new Error('Sync is not available.');
+  if (action === 'sync' || action === 'start') await syncDocument(document, action === 'start');
   else if (action === 'download') await document.downloadSyncedOriginals();
   else if (action === 'cancel-download') document.cancelDownload();
   else if (action === 'stop') await stopSyncingDocument(document);
@@ -2061,6 +2064,8 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.syncAction, async (event, action: unknown): Promise<Result<void>> => {
     const document = editorOwner(event);
     if (!document || quitting) return { error: 'Request is only available to an open book.' };
+    // Without the development flag no sync action does anything, not even writing a book's sync record.
+    if (!syncOffered) return { error: 'Sync is not available.' };
     if (action !== 'sync' && action !== 'download' && action !== 'cancel-download' && action !== 'start' && action !== 'stop') return { error: 'Unknown sync action.' };
     try { await syncCommand(document, action); return { value: undefined }; }
     catch (error) { return { error: errorMessage(error) }; }
@@ -2125,6 +2130,8 @@ void app.whenReady().then(async () => {
       const choice = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
       const path = choice.filePaths[0];
       if (choice.canceled || !path) return { value: null };
+      // A book's own files are no place for the sync of every book (and a sync folder inside one is refused per book).
+      if (insideBook(await realpath(path).catch(() => path)) || insideBook(path)) throw new Error('Choose a folder outside every book.');
       const previousSync = JSON.stringify(settings.value.sync);
       const value = await settings.update({ sync: { kind: 'folder', path } });
       if (JSON.stringify(value.sync) !== previousSync) syncBackendChanged();

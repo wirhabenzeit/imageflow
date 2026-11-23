@@ -104,6 +104,11 @@ try {
   assert.equal(await menuEnabled('sync-setup'), true, 'without a backend, File → Sync offers Set Up Sync…');
   assert.equal(await menuEnabled('sync-start'), false);
 
+  // A folder inside a book is no sync folder.
+  await mkdir(join(desktopBook, 'files', 'Sync'), { recursive: true });
+  await choosePaths({ open: join(desktopBook, 'files', 'Sync') });
+  assert.match((await desktop.evaluate(() => window.imageflow.chooseSyncFolder())).error ?? '', /outside every book/);
+  await rm(join(desktopBook, 'files', 'Sync'), { recursive: true });
   // The backend is the Mac's: one folder, chosen in Settings. Then Start Syncing pushes the book, with no question.
   await choosePaths({ open: folder });
   const configured = await desktop.evaluate(() => window.imageflow.chooseSyncFolder());
@@ -216,6 +221,10 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.deepEqual((await readdir(otherFolder)).filter((name) => name === 'books'), [], 'nothing was pushed');
+  // A stopped book has no traffic with the remote: Sync Now (the status bar's action) and Download Originals refuse.
+  assert.match((await sync(desktop)).error ?? '', /does not sync on this Mac/);
+  assert.match((await sync(desktop, 'download')).error ?? '', /does not sync with/);
+  assert.deepEqual((await readdir(otherFolder)).filter((name) => name === 'books'), []);
   // Declining is remembered: looking at the backend again (turned off and on) does not ask again.
   assert.deepEqual((await desktop.evaluate(() => window.imageflow.updateSettings({ sync: undefined }))).value?.sync, undefined);
   await choosePaths({ open: otherFolder });
