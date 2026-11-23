@@ -88,7 +88,8 @@ async function packageApp() {
       icon: join(root, 'resources', 'ImageFlow.icns'),
       prune: false,
       overwrite: true,
-      osxSign: macSigningOptions(root, options),
+      // A fixture has another bundle ID, which the profile does not cover.
+      osxSign: macSigningOptions(root, fixture ? { ...options, provisioningProfile: undefined } : options),
     });
     const app = join(output, 'ImageFlow.app');
     console.log('Mac app: ' + app);

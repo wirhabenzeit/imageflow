@@ -69,3 +69,13 @@ test('release credentials are normalized before they reach signing and Apple too
     notarization: { appleApiKey: '/private/test/AuthKey.p8', appleApiKeyId: 'EXAMPLE123', appleApiIssuer: 'example-issuer' },
   });
 });
+
+test('the provisioning profile that lets a build use iCloud needs a Developer ID identity', () => {
+  const adhoc = options({ env: { APPLE_PROVISIONING_PROFILE: '/private/test/ImageFlow.provisionprofile' }, arch: 'arm64', hostArch: 'arm64' });
+  assert.notEqual(adhoc.status, 0);
+  assert.ok(adhoc.stderr.includes('APPLE_SIGNING_IDENTITY'));
+  const signed = options({ env: { APPLE_SIGNING_IDENTITY: 'Developer ID Application: Test (TEAM)', APPLE_PROVISIONING_PROFILE: '/private/test/ImageFlow.provisionprofile' }, arch: 'arm64', hostArch: 'arm64' });
+  assert.equal(signed.status, 0, signed.stderr);
+  assert.equal(JSON.parse(signed.stdout).provisioningProfile, '/private/test/ImageFlow.provisionprofile');
+  assert.equal(JSON.parse(options({ env: {}, arch: 'arm64', hostArch: 'arm64' }).stdout).provisioningProfile, undefined);
+});

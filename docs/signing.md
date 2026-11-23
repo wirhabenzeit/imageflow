@@ -2,7 +2,7 @@
 
 Use a Mac matching the target architecture (arm64 for v1). Xcode Command Line Tools provide `codesign`, `notarytool`, `stapler`, `ditto` and `hdiutil`. Poppler is required by the packaged PDF smoke checks.
 
-Staging compiles the small AppKit document-header module with Xcode Command Line Tools and the Node-API headers included in official Node.js distributions. For installations with separate headers, set `NODE_INCLUDE_DIR` to the directory containing `node_api.h`. The module is unpacked and signed with the app; no compiler or Node installation is needed to run the packaged app.
+Staging compiles the small AppKit document-header module and the CloudKit bridge of the iCloud sync backend with Xcode Command Line Tools and the Node-API headers included in official Node.js distributions. For installations with separate headers, set `NODE_INCLUDE_DIR` to the directory containing `node_api.h`. The module is unpacked and signed with the app; no compiler or Node installation is needed to run the packaged app.
 
 ## Build commands
 
@@ -38,6 +38,7 @@ For API key authentication, create an App Store Connect **team API key** with no
 | --- | --- |
 | `APPLE_SIGNING_IDENTITY` | Full `Developer ID Application: … (TEAMID)` identity name |
 | `APPLE_SIGNING_KEYCHAIN` | Optional path to a dedicated signing keychain |
+| `APPLE_PROVISIONING_PROFILE` | Optional path to the Developer ID provisioning profile; see [iCloud](#icloud) |
 | `APPLE_API_KEY` | Path to the downloaded `.p8` file |
 | `APPLE_API_KEY_ID` | API Key ID |
 | `APPLE_API_ISSUER` | Team API key's Issuer ID |
@@ -56,6 +57,7 @@ In Keychain Access, export only the Developer ID Application identity, including
 | `APPLE_API_KEY_BASE64` | Base64-encoded `.p8` file |
 | `APPLE_API_KEY_ID` | API Key ID |
 | `APPLE_API_ISSUER` | Issuer ID |
+| `APPLE_PROVISIONING_PROFILE_BASE64` | Base64-encoded Developer ID provisioning profile; see [iCloud](#icloud) |
 
 Configure `release` to allow only **tags matching `v*`**, require approval from `wirhabenzeit`, and disable administrator bypass. Self-review is allowed so the sole maintainer can approve their own release tags; an explicit approval is still required. Remove all repository-level copies of these secrets. Adding `environment: release` to YAML does not configure those GitHub protection settings by itself.
 
@@ -71,6 +73,19 @@ Credential access is limited to individual steps:
 
 The helper passes neither the encoded certificate/key secrets nor the certificate password to the signing/notarization child process. Cleanup failures fail the job while still attempting to remove every temporary credential file. The signing and notarization libraries remain trusted tools that necessarily use the signing identity; the release environment's human approval is the credential-access boundary.
 
+## iCloud
+
+The iCloud sync backend (#292) uses CloudKit, which needs entitlements that a Developer ID app may only claim with a **provisioning profile** embedded in its bundle. The App ID `ch.wirhabenzeit.imageflow` (team `DX96FWY9AX`) has iCloud with CloudKit and the container `iCloud.ch.wirhabenzeit.imageflow`, and Push Notifications; its **Developer ID** profile (Certificates, Identifiers & Profiles → Profiles, type *Developer ID*) covers both, in the Production environment.
+
+- With `APPLE_PROVISIONING_PROFILE` and a Developer ID identity, signing embeds the profile, and the main app alone gets `resources/entitlements.icloud.mac.plist`: JIT, `application-identifier`, `team-identifier`, `icloud-container-identifiers`, `icloud-services: CloudKit`, `icloud-container-environment: Production` and `aps-environment: production`. The Electron helpers keep the JIT entitlement only; the CloudKit addon runs in the main process.
+- Without a profile, nothing claims iCloud and no profile is embedded (`preEmbedProvisioningProfile` is off, so a stray `.provisionprofile` in the working directory is never picked up). Such builds, ad-hoc builds and `npm run dev` work as before and report iCloud as unavailable in Settings → Sync: the addon reads its own entitlements and never touches CloudKit without them, since CloudKit traps a process that lacks them.
+- Upgrade-test fixtures have another bundle ID and are always signed without the profile.
+- In the release workflow, `mac-credentials.mjs sign` writes `APPLE_PROVISIONING_PROFILE_BASE64` to a temporary file for the signing step only. A release without that secret is built without iCloud.
+
+**A Developer ID app that claims iCloud without a matching embedded profile is killed at launch** ("Launchd job spawn failed"), and a Mac with the profile *installed* (double-clicked, System Settings → General → Device Management) hides that, because macOS then uses the installed copy. So whenever the main app claims iCloud, `verify-mac-signing.mjs` checks the profile inside the bundle before notarization: present, for this App ID and team, a Developer ID profile (every Mac), Production, covering the container and push, and not expired. Do not install the profile on the Macs that test releases.
+
+A new App ID–container link takes minutes to reach CloudKit; until then, saves fail with `permissionFailure` "Invalid bundle ID for container". The CloudKit schema (record type `Blob` with `data`, `asset`, `size`, `sha256`) must be deployed to Production in the CloudKit Console.
+
 ## Verification
 
 Release builds fail if signing, notarization, stapling or Gatekeeper assessment fails. To inspect a built app manually:
@@ -84,6 +99,6 @@ xcrun stapler validate out/ImageFlow-<version>-arm64.dmg
 spctl --assess --verbose=4 --type open --context context:primary-signature out/ImageFlow-<version>-arm64.dmg
 ```
 
-Gatekeeper should report `accepted` and `source=Notarized Developer ID`. Main and helper apps use hardened runtime and the JIT entitlement. Unsigned executable memory, disabled library validation and debugger access are not granted. The RunAsNode fuse remains enabled because both the MCP bridge and template typechecking use ImageFlow's own executable; the packaged MCP smoke test exercises that path.
+Gatekeeper should report `accepted` and `source=Notarized Developer ID`. Main and helper apps use hardened runtime and the JIT entitlement; with the profile, the main app also has the iCloud entitlements (`codesign --display --entitlements :- …/ImageFlow.app`, and `security cms -D -i …/ImageFlow.app/Contents/embedded.provisionprofile` for the profile). Unsigned executable memory, disabled library validation and debugger access are not granted. The RunAsNode fuse remains enabled because both the MCP bridge and template typechecking use ImageFlow's own executable; the packaged MCP smoke test exercises that path.
 
 References: [Apple's Developer ID certificates](https://developer.apple.com/help/account/certificates/create-developer-id-certificates/), [Apple's notarization workflow](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution), [Electron notarization](https://github.com/electron/notarize), [GitHub's temporary signing keychain setup](https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications).
