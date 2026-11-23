@@ -299,7 +299,7 @@ try {
   await until(() => app.windows().some((window) => window.url() === 'imageflow://editor/start'));
   const welcome = app.windows().find((window) => window.url() === 'imageflow://editor/start');
   const recent = welcome.locator('.recent-books li').filter({ hasText: 'Details' }); await recent.waitFor();
-  await popup('recent-remove'); await recent.click({ button: 'right' });
+  await popup(undefined, 'Remove from Recents'); await recent.click({ button: 'right' });
   await recent.waitFor({ state: 'detached' });
   console.log('Photo dates, shared view preferences, grouping, asset actions, compact Markdown controls and canvas context menus passed:', work);
 } finally { await closeApp(app); }
