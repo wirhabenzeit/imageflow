@@ -7,14 +7,14 @@ import { S3Store } from './sync-store-s3';
 import type { SettingsStore } from './settings';
 import { channels } from '../src/desktop';
 import type { Result, SyncBackendRequest, SyncBackendState, SyncConnectionReport } from '../src/desktop';
-import type { AppSettings, S3SyncBackend } from '../src/settings';
+import type { AppSettings, S3SyncBackend, SyncBackend } from '../src/settings';
 
 /**
  * The development flag of sync (ADR 0012; #280–#283 ship behind it until the library does), the same as #280's:
  * Settings → Sync and its requests exist only when ImageFlow starts with `IMAGEFLOW_SYNC=1`, in a development or a
  * packaged build (`IMAGEFLOW_SYNC=1 /Applications/ImageFlow.app/Contents/MacOS/ImageFlow`).
  */
-export const syncBackendsEnabled = () => process.env.IMAGEFLOW_SYNC === '1';
+export const syncFlag = () => process.env.IMAGEFLOW_SYNC === '1';
 
 /**
  * Why a settings patch from a window may not carry `sync`, or undefined. A backend is set only through Settings → Sync
@@ -22,10 +22,20 @@ export const syncBackendsEnabled = () => process.env.IMAGEFLOW_SYNC === '1';
  * patch may only turn sync off (`null` or `undefined`), and only with the flag. Settings read from disk are not patches
  * from a window and keep their backend.
  */
-export function syncPatchError(patch: unknown, enabled = syncBackendsEnabled()) {
+export function syncPatchError(patch: unknown, enabled = syncFlag()) {
   if (!patch || typeof patch !== 'object' || !('sync' in patch)) return undefined;
   const value = (patch as { sync?: unknown }).sync;
   return enabled && (value === null || value === undefined) ? undefined : 'Choose the sync backend in Settings → Sync.';
+}
+
+/**
+ * One backend at a time: when the setting moves from a bucket to anything else (another bucket, a folder, off), the
+ * key stored for that bucket is forgotten.
+ */
+export async function forgetOtherCredentials(store: CredentialStore, previous: SyncBackend | undefined, next: SyncBackend | undefined) {
+  if (previous?.kind !== 's3') return;
+  if (next?.kind === 's3' && credentialScope(next) === credentialScope(previous)) return;
+  await store.remove(credentialScope(previous));
 }
 
 const message = (error: unknown) => (error instanceof Error ? error.message : 'ImageFlow could not complete the request.');
@@ -62,29 +72,31 @@ export function registerSyncSettings({ ipcMain, owner, settings, credentials, ch
   };
   const guard = async <T>(event: IpcMainInvokeEvent, run: () => Promise<T>): Promise<Result<T>> => {
     if (!owner(event)) return { error: 'Request is only available to Settings.' };
-    if (!syncBackendsEnabled()) return { error: 'Sync backends are not available in this version.' };
+    if (!syncFlag()) return { error: 'Sync backends are not available in this version.' };
     try { return { value: await run() }; } catch (error) { return { error: message(error) }; }
   };
 
   ipcMain.handle(channels.syncBackend, (event): Promise<Result<SyncBackendState>> => {
-    if (owner(event) && !syncBackendsEnabled()) return Promise.resolve({ value: { available: false } });
+    if (owner(event) && !syncFlag()) return Promise.resolve({ value: { available: false } });
     return guard(event, state);
   });
 
   ipcMain.handle(channels.saveSyncBackend, (event, request: unknown) => guard(event, async () => {
     const previous = settings.value.sync;
     if (request === null) {
-      changed(await settings.update({ sync: null }));
+      const value = await settings.update({ sync: null });
       await credentials().remove();
+      changed(value);
       return state();
     }
     const { backend, credentials: entered } = parseRequest(request);
     const scope = credentialScope(backend);
     if (entered) await credentials().write(scope, entered);
     else if (!await credentials().read(scope)) throw new Error('Enter the access key ID and the secret access key for this bucket.');
-    changed(await settings.update({ sync: backend }));
-    // The key of a bucket no longer configured is forgotten.
-    if (previous?.kind === 's3' && credentialScope(previous) !== scope) await credentials().remove(credentialScope(previous));
+    const value = await settings.update({ sync: backend });
+    await forgetOtherCredentials(credentials(), previous, value.sync);
+    // Told also when only the key changed: the books look at the bucket again with it.
+    changed(value);
     return state();
   }));
 

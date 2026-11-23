@@ -29,6 +29,7 @@ import type { PullMarker } from './sync-pull';
 import { remoteCommits } from './sync-remote';
 import type { SyncRemote } from './sync-remote';
 import { StoreAccessError } from './sync-store';
+import type { StoreAccessReason } from './sync-store';
 
 /**
  * The Milestone 1 sync engine (ADR 0010): fast-forward or keep both, over any `SyncRemote`.
@@ -806,12 +807,18 @@ export async function describeSync(folder: string, remote: SyncRemote): Promise<
       ...(remoteState ? { remote: remoteState } : {}) };
   } catch (error) {
     if (error instanceof NewerSyncFormatError) return { state: 'newer', detail: error.message, pendingOriginals: 0 };
-    // A bucket that refuses this Mac's access key: Settings → Sync fixes it, so the status says where.
-    if (error instanceof StoreAccessError && error.reason === 'sign-in') return { state: 'unavailable', detail: error.message, signIn: true, pendingOriginals: 0 };
-    // A missing bucket, a wrong region or endpoint: also fixed in Settings → Sync.
-    if (error instanceof StoreAccessError && error.reason === 'settings') return { state: 'unavailable', detail: error.message, checkSettings: true, pendingOriginals: 0 };
+    if (error instanceof StoreAccessError) return unavailableStatus(error.message, error.reason);
     return { state: 'unavailable', detail: error instanceof Error ? error.message : String(error), pendingOriginals: 0 };
   }
+}
+
+/**
+ * The status of a remote that cannot be used. A key the bucket refuses (`sign-in`) and a bucket, region or endpoint
+ * that is wrong (`settings`) are fixed in Settings → Sync, so the status bar points there; a clock that is off and a
+ * remote out of reach only say why.
+ */
+export function unavailableStatus(detail: string, access?: StoreAccessReason): SyncStatus {
+  return { state: 'unavailable', detail, pendingOriginals: 0, ...(access === 'sign-in' ? { signIn: true as const } : access === 'settings' ? { checkSettings: true as const } : {}) };
 }
 
 /**

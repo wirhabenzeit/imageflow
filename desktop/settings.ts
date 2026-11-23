@@ -3,20 +3,20 @@ import { dirname, isAbsolute } from 'node:path';
 import { normalizeS3Backend, s3BackendError } from './sync-backend';
 import { isUpdateChannel } from '../src/update-feed';
 import { defaultSettings } from '../src/settings';
-import type { AppSettings, SyncBackend } from '../src/settings';
+import type { AppSettings, FolderSyncBackend, S3SyncBackend, SyncBackend } from '../src/settings';
 
 /** A sync backend as stored, checked per kind (ADR 0012). */
 function syncBackend(value: unknown): SyncBackend {
-  const backend = value as Partial<SyncBackend> | null;
+  const backend = value as (Partial<Omit<FolderSyncBackend, 'kind'>> & { kind?: string }) | null;
   switch (backend && typeof backend === 'object' ? backend.kind : undefined) {
     case 'folder':
       if (Object.keys(backend!).length === 2 && typeof backend!.path === 'string' && isAbsolute(backend!.path) && backend!.path.length <= 4096) return { kind: 'folder', path: backend!.path };
       break;
     case 's3':
       if (Object.keys(backend!).every((key) => ['kind', 'endpoint', 'region', 'bucket', 'prefix', 'addressing'].includes(key))) {
-        const problem = s3BackendError(backend!);
+        const problem = s3BackendError(backend as unknown as Partial<S3SyncBackend>);
         if (problem) throw new Error('Invalid sync setting: ' + problem);
-        return normalizeS3Backend(backend as SyncBackend & { kind: 's3' });
+        return normalizeS3Backend(backend as unknown as S3SyncBackend);
       }
       break;
   }

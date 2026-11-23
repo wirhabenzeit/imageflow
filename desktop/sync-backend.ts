@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { credentialScope } from './sync-credentials';
 import type { CredentialStore } from './sync-credentials';
@@ -69,17 +70,38 @@ export type SyncRemoteDependencies = {
 };
 
 /** The S3 store of a setting, with the credentials stored for it; `sign-in` when there are none. */
-export async function s3StoreFor(backend: S3SyncBackend, { credentials, s3 }: Pick<SyncRemoteDependencies, 'credentials' | 's3'>) {
+export async function s3StoreFor(backend: S3SyncBackend, { credentials, s3 }: { credentials?: CredentialStore; s3?: SyncRemoteDependencies['s3'] }) {
   const problem = s3BackendError(backend);
   if (problem) throw new Error(problem);
-  const stored = await credentials.read(credentialScope(backend));
+  const stored = await credentials?.read(credentialScope(backend));
   if (!stored) throw new StoreAccessError('sign-in', 'Sign-in needed: enter the access key for the bucket “' + backend.bucket + '” in Settings → Sync.');
   return new S3Store({ ...normalizeS3Backend(backend), ...s3, credentials: stored });
 }
 
-/** The sync remote of a backend setting. */
+/**
+ * Opens the remote of an S3 setting at each use, for the app's sync service (desktop/sync-service.ts): the
+ * credentials are read every time (a small file, no request), and the store is made again only when they changed, so
+ * a key saved in Settings → Sync counts at the next use without a restart, while a store that learned something about
+ * its service (that the bucket exists, whether it takes conditional writes) keeps it. One header cache serves every
+ * store of the setting. Without credentials it throws `sign-in`.
+ */
+export function s3Opener(backend: S3SyncBackend, { credentials, cacheFolder, headerCache, s3 }: { credentials: () => CredentialStore | undefined; cacheFolder?: () => string;
+  headerCache?: CommitHeaderCache; s3?: SyncRemoteDependencies['s3'] }) {
+  const cache = headerCache ?? (cacheFolder ? new FileHeaderCache(join(cacheFolder(), 'Sync Cache')) : undefined);
+  let built: { fingerprint: string; remote: StoreRemote<S3Store> } | undefined;
+  return async () => {
+    const store = credentials();
+    const stored = await store?.read(credentialScope(backend));
+    if (!stored) throw new StoreAccessError('sign-in', 'Sign-in needed: enter the access key for the bucket “' + backend.bucket + '” in Settings → Sync.');
+    // Compared by digest, so no copy of the secret is kept besides the store's own.
+    const fingerprint = createHash('sha256').update(stored.accessKeyId + '\0' + stored.secretAccessKey).digest('hex');
+    if (built?.fingerprint !== fingerprint) built = { fingerprint, remote: new StoreRemote(await s3StoreFor(backend, { credentials: store, s3 }), { headerCache: cache }) };
+    return built.remote;
+  };
+}
+
+/** The sync remote of a backend setting, once. */
 export async function syncRemoteFor(backend: SyncBackend, dependencies: SyncRemoteDependencies): Promise<StoreRemote> {
   if (backend.kind === 'folder') return new StoreRemote(new FolderStore(backend.path));
-  const headerCache = dependencies.headerCache ?? (dependencies.cacheFolder ? new FileHeaderCache(join(dependencies.cacheFolder, 'Sync Cache')) : undefined);
-  return new StoreRemote(await s3StoreFor(backend, dependencies), { headerCache });
+  return s3Opener(backend, { ...dependencies, credentials: () => dependencies.credentials, cacheFolder: dependencies.cacheFolder ? () => dependencies.cacheFolder! : undefined })();
 }

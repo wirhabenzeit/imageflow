@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { DesktopApi, SyncBackendState, SyncConnectionReport } from './desktop';
-import type { AppSettings, S3SyncBackend } from './settings';
+import type { AppSettings, S3SyncBackend, SyncBackend } from './settings';
 import { splitEndpoint } from './sync-endpoint';
 
 type Fields = { endpoint: string; region: string; bucket: string; prefix: string; addressing: '' | 'path' | 'virtual'; accessKeyId: string; secretAccessKey: string };
@@ -18,9 +18,10 @@ export function describeReport(report: SyncConnectionReport) {
 }
 
 /**
- * Settings → Sync (#281, behind the development flag): an S3-compatible bucket, its access key, Test Connection, and
- * Keep originals. The secret access key is sent to the main process when saved or tested and then cleared here; the
- * main process never sends it back.
+ * Settings → Sync (#281, behind the development flag): the one backend this Mac syncs through (ADR 0012), off until one
+ * is chosen and none preselected: an S3-compatible bucket with its access key and Test Connection, or a folder (for
+ * development and tests, chosen in the app's own dialog). Keep originals is here too. The secret access key is sent to
+ * the main process when saved or tested and then cleared here; the main process never sends it back.
  */
 export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; settings?: AppSettings; choose: (patch: Partial<AppSettings>) => Promise<void> }) {
   const configured = settings?.sync?.kind === 's3' ? settings.sync : undefined;
@@ -28,6 +29,10 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
   const [state, setState] = useState<SyncBackendState>();
   const [busy, setBusy] = useState<'' | 'test' | 'save' | 'remove'>('');
   const [result, setResult] = useState<{ text: string; error?: boolean }>();
+  // The kind of backend shown: the configured one, or the one picked to set up. Nothing is preselected.
+  const [kind, setKind] = useState<'' | SyncBackend['kind']>(settings?.sync?.kind ?? '');
+  const configuredKind = settings?.sync?.kind;
+  useEffect(() => { if (configuredKind) setKind(configuredKind); }, [configuredKind]);
   const configuredKey = JSON.stringify(configured ?? null);
   useEffect(() => { setFields((current) => ({ ...fieldsOf(configured), accessKeyId: current.accessKeyId, secretAccessKey: current.secretAccessKey })); }, [configuredKey]);
   useEffect(() => {
@@ -60,22 +65,35 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
   const sameBucket = !!configured && !('error' in typed) && configured.endpoint === typed.endpoint && configured.bucket === (fields.bucket.trim() || typed.bucket);
   const stored = sameBucket ? state?.credentials : undefined;
 
-  async function act(kind: 'test' | 'save' | 'remove') {
+  async function chooseFolder() {
     if (!api) return;
-    setBusy(kind);
+    setBusy('save');
     setResult(undefined);
     try {
-      if (kind === 'test') {
+      const answer = await api.chooseSyncFolder();
+      if ('error' in answer) setResult({ text: answer.error, error: true });
+    } catch {
+      setResult({ text: 'ImageFlow could not complete the request.', error: true });
+    } finally { setBusy(''); }
+  }
+
+  async function act(action: 'test' | 'save' | 'off') {
+    if (!api) return;
+    setBusy(action === 'off' ? 'remove' : action);
+    setResult(undefined);
+    try {
+      if (action === 'test') {
         const answer = await api.testSyncConnection({ backend: backend(), ...(entered ? { credentials: entered } : {}) });
         setResult('error' in answer ? { text: answer.error, error: true } : { text: describeReport(answer.value) });
         return;
       }
-      const answer = await api.saveSyncBackend(kind === 'remove' ? null : { backend: backend(), ...(entered ? { credentials: entered } : {}) });
+      const answer = await api.saveSyncBackend(action === 'off' ? null : { backend: backend(), ...(entered ? { credentials: entered } : {}) });
       if ('error' in answer) { setResult({ text: answer.error, error: true }); return; }
       setState(answer.value);
       // Stored in the main process: nothing of the key stays here.
       setFields((current) => ({ ...current, accessKeyId: '', secretAccessKey: '' }));
-      setResult({ text: kind === 'remove' ? 'This Mac no longer syncs through a bucket.' : 'Saved.' });
+      if (action === 'off') setKind('');
+      setResult({ text: action === 'off' ? 'Sync is off on this Mac.' : 'Saved.' });
     } catch {
       setResult({ text: 'ImageFlow could not complete the request.', error: true });
     } finally { setBusy(''); }
@@ -84,7 +102,29 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
   if (state && !state.available) return null;
   const disabled = !api || !settings || !!busy;
   const complete = !!fields.endpoint.trim() && !!fields.region.trim() && !!fields.bucket.trim() && (!!stored || (!!entered?.accessKeyId && !!entered.secretAccessKey));
+  const folder = settings?.sync?.kind === 'folder' ? settings.sync.path : undefined;
+  const current = settings?.sync ? (settings.sync.kind === 'folder' ? '“' + (folder!.split('/').filter(Boolean).at(-1) ?? folder) + '”' : 'the bucket “' + settings.sync.bucket + '”') : undefined;
   return <div className="settings-form sync-settings">
+    <span className="settings-label" id="sync-through-label">Sync through:</span>
+    <div className="settings-control">
+      <div className="appearance-options" role="radiogroup" aria-labelledby="sync-through-label">
+        <label><input type="radio" name="sync-kind" value="s3" disabled={disabled} checked={kind === 's3'} onChange={() => { setKind('s3'); setResult(undefined); }} /><span>S3-compatible bucket</span></label>
+        <label><input type="radio" name="sync-kind" value="folder" disabled={disabled} checked={kind === 'folder'} onChange={() => { setKind('folder'); setResult(undefined); }} /><span>Folder</span></label>
+      </div>
+      <p className="settings-note sync-backend" title={folder}>{current ? 'Books sync through ' + current + '.' : 'Sync is off: books do not sync on this Mac.'}</p>
+      {settings?.sync && <div className="settings-update-actions"><button disabled={disabled} onClick={() => void act('off')}>Turn Off</button></div>}
+      {kind !== 's3' && result && <p role={result.error ? 'alert' : 'status'} className={result.error ? 'error-text' : 'settings-note sync-test-result'}>{result.text}</p>}
+    </div>
+    {kind === 'folder' && <>
+      <span className="settings-label">Folder:</span>
+      <div className="settings-control">
+        <div className="settings-update-actions" style={{ marginTop: 0 }}>
+          <button disabled={disabled} onClick={() => void chooseFolder()}>{folder ? 'Change Folder…' : 'Choose Folder…'}</button>
+        </div>
+        <p className="settings-note">For development and tests: a folder outside every book, not one iCloud Drive or Dropbox manages.</p>
+      </div>
+    </>}
+    {kind === 's3' && <>
     <span className="settings-label">Bucket:</span>
     <div className="settings-control sync-fields">
       <input aria-label="Endpoint" placeholder="https://s3.us-east-1.amazonaws.com" value={fields.endpoint} disabled={disabled} onChange={set('endpoint')} spellCheck={false} autoComplete="off"
@@ -117,10 +157,10 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
       <div className="settings-update-actions">
         <button disabled={disabled || !complete} onClick={() => void act('test')}>{busy === 'test' ? 'Testing…' : 'Test Connection'}</button>
         <button className="primary" disabled={disabled || !complete} onClick={() => void act('save')}>Save</button>
-        {configured && <button disabled={disabled} onClick={() => void act('remove')}>Remove</button>}
       </div>
       {result && <p role={result.error ? 'alert' : 'status'} className={result.error ? 'error-text' : 'settings-note sync-test-result'}>{result.text}</p>}
     </div>
+    </>}
     <span className="settings-label">Originals:</span>
     <div className="settings-control">
       <label className="pc-switch" title="Synced books download their originals in the background. Off: only previews, until File → Sync → Download Originals.">

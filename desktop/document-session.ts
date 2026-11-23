@@ -49,7 +49,7 @@ import type { CopyOptions } from './source-actions';
 import { rebuildTemplateDependencies } from './dependency-install';
 import type { DependencyRebuild } from './dependency-install';
 import { AssetFacts } from './asset-facts';
-import { describeLocalChange, describeSync, pendingOriginals, placeOriginals, stageOriginals, syncBook } from './sync-engine';
+import { describeLocalChange, describeSync, pendingOriginals, placeOriginals, stageOriginals, syncBook, unavailableStatus } from './sync-engine';
 import type { SyncOptions, SyncOutcome } from './sync-engine';
 import type { SyncRemote } from './sync-remote';
 import { bookSync, readSyncState, startSyncing, SyncElsewhereError, syncedElsewhere, takeAbandonedAtOpen, updateSyncState } from './sync-pull';
@@ -445,8 +445,7 @@ export class DocumentSession {
     const name = this.syncService?.name ?? '';
     if (this.syncing) { this.publishSync({ ...this.syncView, folder: name, syncing: true, message: notice }); return; }
     const remote = standing.connection?.remote;
-    const status = remote ? await describeSync(this.book.folder, remote)
-      : { state: 'unavailable' as const, detail: standing.error ?? 'The remote cannot be read.', pendingOriginals: 0 };
+    const status = remote ? await describeSync(this.book.folder, remote) : unavailableStatus(standing.error ?? 'The remote cannot be read.', standing.access);
     const ids = remote && status.pendingOriginals ? await pendingOriginals(this.book.folder, remote).catch(() => [] as string[]) : [];
     if (ids.join() !== [...this.notDownloaded].join()) {
       this.notDownloaded = new Set(ids);
