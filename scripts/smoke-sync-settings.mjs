@@ -169,6 +169,17 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   await statusIs('in-sync');
+  // Storage (#285), counted only when asked: the book with what its originals take, and Clean Up, which finds nothing
+  // a week old that no book uses, so it deletes nothing and asks nothing.
+  await settings.getByRole('button', { name: 'Show Storage' }).click();
+  await settings.getByText(/^ImageFlow uses .+ for 1 book, .+ of it originals\.$/).waitFor();
+  await settings.getByRole('list', { name: 'Storage by book' }).getByText('Edited before Sync Now', { exact: true }).waitFor();
+  await settings.getByRole('button', { name: 'Clean Up…' }).click();
+  await settings.getByText('There is nothing to clean up.', { exact: true }).waitFor();
+  assert.equal(await settings.getByRole('button', { name: 'Clean Up', exact: true }).count(), 0, 'nothing to confirm');
+  for (const request of ['syncUsage', 'syncCleanUpPlan', 'syncCleanUp']) {
+    assert.match((await start.evaluate((name) => window.imageflow[name](), request)).error, /only available to Settings/);
+  }
   // A wrong key saved in Settings: the book's status says sign-in needed at once, and a corrected key clears it,
   // with no restart.
   await settings.getByRole('textbox', { name: 'Access key ID' }).fill(fake.credentials.accessKeyId);
