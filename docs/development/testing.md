@@ -13,6 +13,28 @@ The smoke runner defaults to invisible windows: no native focus, fullscreen, Doc
 
 Packaged checks cover document registration, Finder open events, proof and print export, linked sources and the MCP bridge. Use `npm run test:packaged:existing` to test an existing build. Packaged checks include Finder integration and the visible MCP context test, so run them on an isolated desktop too.
 
+## Sync through an S3-compatible bucket
+
+The S3 store (`desktop/sync-store-s3.ts`) is tested against an in-process fake server (`tests/s3-fake.ts`) that checks every request's SigV4 signature and payload SHA-256 and injects failures; `npm run test:unit` runs the store conformance suite and the sync engine scenarios against it.
+
+The same tests run against a real bucket when these variables name one, which is how the spike of #281 is run against R2, B2, MinIO or S3. Use a bucket (or a prefix) for tests only and a key limited to it; each run writes below `<prefix>run-<uuid>/` and deletes what it wrote at the end.
+
+```sh
+export IMAGEFLOW_S3_TEST_ENDPOINT=https://<account>.r2.cloudflarestorage.com   # https, or http://127.0.0.1:9000 for a local MinIO
+export IMAGEFLOW_S3_TEST_REGION=auto                     # us-east-1, auto for R2, the bucket's region for B2 (us-west-004, …)
+export IMAGEFLOW_S3_TEST_BUCKET=imageflow-test
+export IMAGEFLOW_S3_TEST_ACCESS_KEY_ID=…
+export IMAGEFLOW_S3_TEST_SECRET_ACCESS_KEY=…
+export IMAGEFLOW_S3_TEST_PREFIX=imageflow-test/          # optional
+export IMAGEFLOW_S3_TEST_ADDRESSING=path                 # optional: path or virtual
+export IMAGEFLOW_S3_TEST_REPORT=s3-spike-r2.json         # optional: the spike's answers as JSON
+npm run test:unit
+```
+
+`tests/sync-s3-real.test.ts` answers the spike's questions (conditional writes, checksum verification, addressing, listing right after a put, a large single PUT) as test diagnostics and in the report file. Never commit the variables or the report's endpoint if it names an account.
+
+In the app, Settings → Sync exists only when ImageFlow starts with `IMAGEFLOW_SYNC=1` (the development flag of ADR 0012, shared with #280). Development builds can keep the bucket's access key in memory instead of the keychain with `IMAGEFLOW_SYNC_CREDENTIALS=memory`.
+
 ## Flaky tests
 
 CI's hosted Macs have a few slow cores, so a test that waits for the wrong thing, or an app timeout that is too tight, fails there now and then while passing locally. To make such failures show up on a fast Mac, run the scripts at background priority, which keeps them on the efficiency cores (three to four times slower, about like CI), again and again:

@@ -22,7 +22,7 @@ The built-in sample books share their photographs. The files live once in `sampl
 
 Set `IMAGEFLOW_TEMPLATES` to use another template library folder.
 
-Set `IMAGEFLOW_SYNC=1` to offer sync, which stays behind this development flag until the library ships ([ADR 0012](../decisions/0012-sync-backend-and-library.md)): **Settings → General → Sync** chooses the folder this Mac syncs every book through, **File → Sync** starts and stops syncing a book, and **File → Open Synced Book…** makes a book from one on that folder. Without the flag no book syncs, whatever the settings hold.
+Set `IMAGEFLOW_SYNC=1` to offer sync, which stays behind this development flag until the library ships ([ADR 0012](../decisions/0012-sync-backend-and-library.md)): **Settings → Sync** chooses the backend this Mac syncs every book through (an S3-compatible bucket with its access key and Test Connection, or a folder for development and tests), **File → Sync** starts and stops syncing a book, and **File → Open Synced Book…** makes a book from one on that backend. `IMAGEFLOW_SYNC_CREDENTIALS=memory` keeps a bucket's key in memory instead of the keychain in a development build. Without the flag no book syncs, whatever the settings hold.
 
 ## Build the app
 

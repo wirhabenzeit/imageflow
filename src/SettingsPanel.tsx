@@ -1,14 +1,16 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AgentSettings } from './AgentSettings';
 import { LightroomSettings } from './LightroomSettings';
+import { SyncSettings } from './SyncSettings';
 import { Icon } from './Icon';
 import type { UpdateChannel } from './update-feed';
 import type { UpdateState } from './updates';
 import type { DesktopApi } from './desktop';
 import type { AppSettings, Appearance, SettingsPane } from './settings';
 
-const panes = [{ value: 'general', label: 'General', icon: 'settings' },
+const allPanes = [{ value: 'general', label: 'General', icon: 'settings' },
   { value: 'sources', label: 'Sources', icon: 'sources' },
+  { value: 'sync', label: 'Sync', icon: 'sync' },
   { value: 'agents', label: 'Agents', icon: 'agent' }] as const satisfies readonly { value: SettingsPane; label: string; icon: string }[];
 
 const appearances: { value: Appearance; label: string }[] = [
@@ -31,7 +33,7 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
   const [pane, setPane] = useState<SettingsPane>();
   const [requestedPane, setRequestedPane] = useState<SettingsPane>();
   const content = useRef<HTMLDivElement>(null);
-  // Sync is offered only with the development flag until the library ships (ADR 0012).
+  // Sync is offered only with the development flag until the library ships (ADR 0012): then it has a pane of its own.
   const [syncOffered, setSyncOffered] = useState(false);
   useEffect(() => {
     if (!api) return;
@@ -39,6 +41,7 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
     void api.syncOffered().then((offered) => { if (active) setSyncOffered(offered); }, () => {});
     return () => { active = false; };
   }, [api]);
+  const panes = allPanes.filter(({ value }) => value !== 'sync' || syncOffered);
   useEffect(() => {
     if (!api) { setRequestedPane('general'); return; }
     let active = true;
@@ -89,14 +92,6 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
     } finally { pending.current--; }
   }
 
-  async function chooseSyncFolder() {
-    if (!api) return;
-    setError('');
-    const result = await api.chooseSyncFolder().catch(() => ({ error: 'Could not save settings. Please try again.' }));
-    if ('error' in result) setError(result.error);
-    else if (result.value) setSettings(result.value);
-  }
-
   const tab = (value: SettingsPane) => 'settings-tab-' + value;
   return <main className="studio settings-window" aria-label="Settings" aria-busy={requestedPane !== pane}>
     <div ref={content}>
@@ -141,23 +136,10 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
               update?.status === 'initializing' ? 'Preparing update checks…' : update?.status === 'checking' ? 'Checking for updates…' : update?.status === 'downloading' ? 'Downloading update…' :
               update?.status === 'ready' ? 'An update is ready to install.' : update?.message ?? ''}</p>
           </div>
-          {syncOffered && <>
-            <span className="settings-label">Sync:</span>
-            <div className="settings-control">
-              <div className="settings-update-actions">
-                <button disabled={!settings} onClick={() => void chooseSyncFolder()}>{settings?.sync ? 'Change Folder…' : 'Choose Folder…'}</button>
-                {settings?.sync && <button disabled={!settings} onClick={() => void choose({ sync: undefined })}>Turn Off</button>}
-              </div>
-              <p className="settings-note sync-backend" title={settings?.sync?.path}>{settings?.sync?.kind === 'folder'
-                ? 'Books sync through “' + (settings.sync.path.split('/').filter(Boolean).at(-1) ?? settings.sync.path) + '”.' : 'Books do not sync on this Mac.'}</p>
-              <label className="pc-switch" title="Synced books download their originals in the background. Off: only previews, until File → Sync → Download Originals.">
-                <input type="checkbox" checked={settings?.keepOriginals !== false} disabled={!settings}
-                  onChange={(event) => void choose({ keepOriginals: event.target.checked })} />Keep originals of synced books on this Mac</label>
-            </div>
-          </>}
           {error && <p role="alert" className="error-text settings-control">{error}</p>}
         </div>}
         {pane === 'sources' && <div className="source-cards"><LightroomSettings api={api} /></div>}
+        {pane === 'sync' && <SyncSettings api={api} settings={settings} choose={choose} />}
         {pane === 'agents' && <AgentSettings api={api} />}
       </div>}
     </div>

@@ -13,7 +13,8 @@ import { dirname, join } from 'node:path';
  */
 export type StoreSource = Uint8Array | { file: string };
 export type StoreObject = { size: number; lastModified: Date };
-export type StoreEntry = StoreObject & { key: string };
+/** `etag`, where the store has one, changes whenever the object under the key is replaced (S3's ETag). */
+export type StoreEntry = StoreObject & { key: string; etag?: string };
 export type TransferOptions = {
   /** Stops the transfer, also one that is running; it then rejects with the signal's reason and leaves nothing behind:
    * no object, no file, no temporary file. A transfer that had finished by then stays. */
@@ -50,6 +51,20 @@ export interface SyncStore {
    * Optional: a store without a server-side copy leaves it out, and a caller then uploads instead.
    */
   copy?(from: string, to: string): Promise<boolean>;
+}
+
+/**
+ * A store that cannot be used now, as opposed to one that answered: offline or timed out (`unavailable`), one that
+ * refuses this Mac's credentials (`sign-in`), one whose settings name no bucket there (`settings`: a missing bucket, a
+ * wrong region or endpoint), or a Mac whose clock is too far off for signed requests (`clock`). Settings → Sync fixes
+ * `sign-in` and `settings`. The message says so in words for the status bar, and never carries a credential.
+ */
+export type StoreAccessReason = 'unavailable' | 'sign-in' | 'settings' | 'clock';
+export class StoreAccessError extends Error {
+  constructor(readonly reason: StoreAccessReason, message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'StoreAccessError';
+  }
 }
 
 const segmentOk = (part: string) => !!part && !part.startsWith('.') && !/[\\\0]/.test(part);

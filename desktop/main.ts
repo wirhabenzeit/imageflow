@@ -27,7 +27,7 @@ import { assetPageLabels, assetUsage, usageLabel } from '../src/asset-usage';
 import { importFeedback } from '../src/import-feedback';
 import { configureSourceStore, pruneSourceCache, SourceStore } from './source-store';
 import { bookTrusted, configureSourceAccess, distrustBook, trustBook } from './source-access';
-import { app, autoUpdater, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, powerMonitor, protocol, shell } from 'electron';
+import { app, autoUpdater, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, powerMonitor, protocol, safeStorage, shell } from 'electron';
 import type { BaseWindow, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -55,6 +55,9 @@ import type { RenderSessions } from './document-session';
 import { AssetFacts } from './asset-facts';
 import { createDocument, documentIdentity, documentPath, isDocument, RecentDocuments } from './documents';
 import { SettingsStore } from './settings';
+import { FileCredentialStore, MemoryCredentialStore } from './sync-credentials';
+import type { CredentialStore } from './sync-credentials';
+import { forgetOtherCredentials, registerSyncSettings, syncFlag, syncPatchError } from './sync-settings';
 import { AuthoringError } from './authoring-service';
 import { createMcpConnection } from './mcp-connection';
 import { addToCodex, bridgeLaunch, claudeCodeCommand, claudeExtension, findCodex, skillArchive } from './mcp-setup';
@@ -127,9 +130,10 @@ let cache: string;
 let settings: SettingsStore;
 // Sync stays behind a development flag until the library ships (ADR 0012, #283): IMAGEFLOW_SYNC=1 offers the sync
 // backend in Settings, File → Sync and Open Synced Book. Without it, no book syncs, whatever the settings hold.
-const syncOffered = process.env.IMAGEFLOW_SYNC === '1';
-// The one backend every book syncs through on this Mac (`AppSettings.sync`).
-const syncService = new SyncService(() => (syncOffered ? settings?.value.sync : undefined));
+const syncOffered = syncFlag();
+// The one backend every book syncs through on this Mac (`AppSettings.sync`): a bucket with the credentials stored for
+// it (read at each use, so a key saved in Settings → Sync counts at once) and the commit headers this Mac has read.
+const syncService = new SyncService(() => (syncOffered ? settings?.value.sync : undefined), { credentials: () => syncCredentials(), cacheFolder: () => app.getPath('userData') });
 let recents: RecentDocuments;
 let library: TemplateLibrary;
 let trust: TemplateTrust;
@@ -1091,7 +1095,7 @@ function refreshSyncOnFocus(document: DocumentSession) {
  * synced somewhere else is asked about first.
  */
 async function syncDocument(document: DocumentSession, start: boolean) {
-  if (!syncService.configured) { showSettings('general'); return; }
+  if (!syncService.configured) { showSettings('sync'); return; }
   try { await document.syncNow({ start }); }
   catch (error) {
     if (!(error instanceof SyncElsewhereError)) throw error;
@@ -1130,7 +1134,7 @@ async function stopSyncingDocument(document: DocumentSession) {
 async function openFromSync(owner: BrowserWindow | undefined) {
   const parent = owner && !owner.isDestroyed() ? owner : undefined;
   const ask = <T extends Electron.MessageBoxOptions>(options: T) => parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options);
-  if (!syncService.configured) { showSettings('general'); return; }
+  if (!syncService.configured) { showSettings('sync'); return; }
   const { remote, remoteId, name } = await syncService.connect();
   // A book deleted from sync is not offered.
   const books = (await remoteBooks(remote)).filter((book) => !book.deleted);
@@ -1232,7 +1236,7 @@ function installMenu() {
             if (document && !document.closing) void syncCommand(document, action).catch((error) => report(document.window, error));
           } }]),
         { type: 'separator' as const },
-        { id: 'sync-setup', label: 'Set Up Sync…', click: () => showSettings('general') },
+        { id: 'sync-setup', label: 'Set Up Sync…', click: () => showSettings('sync') },
       ] }] : [],
       { type: 'separator' }, registered('reveal-book'),
     ] },
@@ -1547,6 +1551,19 @@ function revealSettings(owner: BrowserWindow) {
 }
 
 /** Opens Settings, switching to `pane` when given. Without one, an open window keeps its current pane. */
+/**
+ * The sync backend's credentials (#281): encrypted with `safeStorage` in their own `0600` file, never in settings.json.
+ * Development builds may keep them in memory instead (`IMAGEFLOW_SYNC_CREDENTIALS=memory`), so tests and unsigned
+ * builds never wait on a Keychain prompt.
+ */
+let credentialStore: CredentialStore | undefined;
+function syncCredentials() {
+  credentialStore ??= !app.isPackaged && process.env.IMAGEFLOW_SYNC_CREDENTIALS === 'memory' ? new MemoryCredentialStore()
+    : new FileCredentialStore(join(app.getPath('userData'), 'sync-credentials.json'), {
+      available: () => safeStorage.isEncryptionAvailable(), encrypt: (text) => safeStorage.encryptString(text), decrypt: (data) => safeStorage.decryptString(data) });
+  return credentialStore;
+}
+
 function showSettings(pane?: SettingsPane) {
   const hidden = !!process.env.IMAGEFLOW_HIDE_WINDOW;
   settingsPane = pane ?? (settingsWindow && !settingsWindow.isDestroyed() ? settingsPane : 'general');
@@ -2098,19 +2115,28 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.dismissUpdate, (event) => { if (updateOwner(event)) updates.dismissNotice(); });
   ipcMain.handle(channels.checkUpdates, (event) => { if (updateOwner(event) && !preparingQuit && !quitting) updates.check(); });
   ipcMain.handle(channels.restartUpdate, (event) => { if (updateOwner(event) && !preparingQuit && !quitting) updates.restart(); });
+  // A bucket and its key are saved in Settings → Sync; every open book then looks at the remote again, also when only
+  // the key changed (a corrected key clears "Sign-in needed" without a restart).
+  registerSyncSettings({ ipcMain, owner: settingsOwner, settings, credentials: syncCredentials,
+    changed: (value) => { syncBackendChanged(); for (const owner of appWindows()) if (!owner.isDestroyed()) owner.webContents.send(channels.settingsChanged, value); } });
   ipcMain.handle(channels.settings, (event) => appOwner(event) ? { value: settings.value } : { error: 'Request is only available to an app window.' });
   ipcMain.handle(channels.updateSettings, async (event, patch: unknown) => {
     if (!appOwner(event)) return { error: 'Request is only available to an app window.' };
+    // A sync backend is set only through Settings → Sync; a window may only turn sync off, with the flag.
+    const syncRefused = syncPatchError(patch);
+    if (syncRefused) return { error: syncRefused };
     try {
       if (patch && typeof patch === 'object' && 'updateChannel' in patch && patch.updateChannel !== settings.value.updateChannel &&
           ['checking', 'downloading', 'ready'].includes(updates.state.status)) throw new Error('Finish the current update before changing channels.');
       if (patch && typeof patch === 'object' && 'agentAccess' in patch) throw new Error('Change agent access in Settings → Agents.');
-      // A window may turn sync off; a folder to sync through is chosen in a dialog of the app's own (`chooseSyncFolder`).
-      if (patch && typeof patch === 'object' && 'sync' in patch && (patch.sync !== undefined || !syncOffered)) throw new Error('Choose the sync folder in Settings.');
       const previousChannel = settings.value.updateChannel;
-      const previousSync = JSON.stringify(settings.value.sync);
+      const previous = settings.value.sync;
       const value = await settings.update(patch);
-      if (JSON.stringify(value.sync) !== previousSync) syncBackendChanged();
+      if (JSON.stringify(value.sync) !== JSON.stringify(previous)) {
+        // Turned off: the key of a bucket no longer configured is forgotten, as Settings → Sync does.
+        await forgetOtherCredentials(syncCredentials(), previous, value.sync).catch((error) => console.warn('ImageFlow could not forget the key of the former sync bucket', error));
+        syncBackendChanged();
+      }
       nativeTheme.themeSource = value.appearance;
       updates.setAutomatic(value.automaticUpdates);
       if (value.updateChannel !== previousChannel && value.automaticUpdates) updates.check();
@@ -2132,9 +2158,11 @@ void app.whenReady().then(async () => {
       if (choice.canceled || !path) return { value: null };
       // A book's own files are no place for the sync of every book (and a sync folder inside one is refused per book).
       if (insideBook(await realpath(path).catch(() => path)) || insideBook(path)) throw new Error('Choose a folder outside every book.');
-      const previousSync = JSON.stringify(settings.value.sync);
+      const previous = settings.value.sync;
       const value = await settings.update({ sync: { kind: 'folder', path } });
-      if (JSON.stringify(value.sync) !== previousSync) syncBackendChanged();
+      // One backend at a time: a bucket the folder replaces has its key forgotten.
+      await forgetOtherCredentials(syncCredentials(), previous, value.sync).catch((error) => console.warn('ImageFlow could not forget the key of the former sync bucket', error));
+      if (JSON.stringify(value.sync) !== JSON.stringify(previous)) syncBackendChanged();
       for (const window of appWindows()) if (!window.isDestroyed()) window.webContents.send(channels.settingsChanged, value);
       return { value };
     } catch (error) { return { error: errorMessage(error) }; }
@@ -2150,6 +2178,8 @@ void app.whenReady().then(async () => {
   }));
   ipcMain.handle(channels.showSettings, (event, pane: SettingsPane) => {
     if ((appOwner(event) || pickerOwner(event)) && (pane === 'general' || pane === 'sources' || pane === 'agents')) showSettings(pane);
+    // Settings → Sync exists behind the development flag; without it, Keep originals is in General.
+    else if (appOwner(event) && pane === 'sync') showSettings(syncOffered ? 'sync' : 'general');
   });
   ipcMain.handle(channels.templatePreview, async (event, id: unknown, hash: unknown) => {
     if ((!templatesOwner(event) && !pickerOwner(event)) || typeof id !== 'string' || typeof hash !== 'string')

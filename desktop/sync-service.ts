@@ -1,11 +1,15 @@
 import { lstat, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, relative, sep } from 'node:path';
 import type { SyncBackend } from '../src/settings';
+import { s3Opener } from './sync-backend';
+import type { SyncRemoteDependencies } from './sync-backend';
 import { syncBook } from './sync-engine';
 import type { SyncOptions } from './sync-engine';
 import { bookSync, readSyncState, startSyncing, stopSyncing } from './sync-pull';
 import type { BookSync } from './sync-pull';
 import type { SyncRemote } from './sync-remote';
+import { StoreAccessError } from './sync-store';
+import type { StoreAccessReason } from './sync-store';
 import { folderRemote } from './sync-store-folder';
 
 /** The configured remote, with its identity and the name the app shows for it. */
@@ -14,9 +18,16 @@ export type SyncConnection = { remote: SyncRemote; remoteId: string; name: strin
  * How a book stands on this Mac: as `bookSync` says against the configured remote, or `unconfigured` without a
  * backend, or `unavailable` for a book that syncs while the remote cannot be read (`error` says why).
  */
-export type SyncStanding = { sync: BookSync | 'unconfigured' | 'unavailable'; connection?: SyncConnection; error?: string };
+export type SyncStanding = { sync: BookSync | 'unconfigured' | 'unavailable'; connection?: SyncConnection; error?: string;
+  /** Why the remote cannot be used, where it says (`StoreAccessError`): the status bar points at Settings for some. */
+  access?: StoreAccessReason };
 
-type Backend = { remote: SyncRemote; name: string; reachable(): Promise<void>;
+type Backend = { name: string;
+  /**
+   * The remote, ready to use: throws when it cannot be used now (a folder that is not there, a bucket without stored
+   * credentials). Sends no request; reading the identity at `connect` is the first.
+   */
+  open(): Promise<SyncRemote>;
   /** Whether the backend lies inside a book's folder, which it must not sync through. */
   inside(book: string): Promise<boolean> };
 
@@ -29,15 +40,28 @@ async function contains(folder: string, path: string) {
 /** Whether a folder is, or lies inside, a book package. */
 export const insideBook = (path: string) => path.split(sep).some((part) => /\.imageflow$/i.test(part));
 
+/**
+ * What the service needs besides the setting: for a bucket, the credential store, and where the commit headers it read
+ * are kept (`<userData>/Sync Cache`). Functions, so the app can make them once it is ready.
+ */
+export type SyncServiceDependencies = { credentials?: () => SyncRemoteDependencies['credentials']; cacheFolder?: () => string } & Pick<SyncRemoteDependencies, 'headerCache' | 's3'>;
+
 /** The remote a backend setting names. Each kind of backend is one case here. */
-function openBackend(backend: SyncBackend): Backend {
+function openBackend(backend: SyncBackend, dependencies: SyncServiceDependencies): Backend {
   switch (backend.kind) {
     case 'folder': {
       const name = basename(backend.path);
-      return { remote: folderRemote(backend.path), name, reachable: async () => {
+      const remote = folderRemote(backend.path);
+      return { name, open: async () => {
         // A folder on a drive that is not connected is not made again on the startup disk.
-        if (!(await lstat(backend.path).catch(() => undefined))?.isDirectory()) throw new Error('The sync folder “' + name + '” is not available. Connect its drive, or choose it again in Settings.');
+        if (!(await lstat(backend.path).catch(() => undefined))?.isDirectory()) throw new Error('The sync folder “' + name + '” is not available. Connect its drive, or choose it again in Settings → Sync.');
+        return remote;
       }, inside: (book) => contains(book, backend.path) };
+    }
+    case 's3': {
+      // The credentials are read at every use (a file, no request), so a key saved in Settings counts at once.
+      const open = s3Opener(backend, { credentials: () => dependencies.credentials?.(), cacheFolder: dependencies.cacheFolder, headerCache: dependencies.headerCache, s3: dependencies.s3 });
+      return { name: backend.bucket, open, inside: async () => false };
     }
   }
 }
@@ -54,13 +78,13 @@ function openBackend(backend: SyncBackend): Backend {
  */
 export class SyncService {
   private current?: { key: string; backend: Backend; identity?: Promise<string> };
-  constructor(private readonly setting: () => SyncBackend | undefined) {}
+  constructor(private readonly setting: () => SyncBackend | undefined, private readonly dependencies: SyncServiceDependencies = {}) {}
 
   private backend() {
     const setting = this.setting();
     if (!setting) { this.current = undefined; return undefined; }
     const key = JSON.stringify(setting);
-    if (this.current?.key !== key) this.current = { key, backend: openBackend(setting) };
+    if (this.current?.key !== key) this.current = { key, backend: openBackend(setting, this.dependencies) };
     return this.current;
   }
 
@@ -75,10 +99,11 @@ export class SyncService {
    */
   async connect(book?: string): Promise<SyncConnection> {
     const current = this.backend();
-    if (!current) throw new Error('Sync is not set up on this Mac. Set it up in Settings.');
-    const { remote, name } = current.backend;
-    if (book && await current.backend.inside(book)) throw new Error('The sync folder “' + name + '” is inside this book. Choose a sync folder outside every book in Settings.');
-    await current.backend.reachable();
+    if (!current) throw new Error('Sync is not set up on this Mac. Set it up in Settings → Sync.');
+    const { name } = current.backend;
+    if (book && await current.backend.inside(book)) throw new Error('The sync folder “' + name + '” is inside this book. Choose a sync folder outside every book in Settings → Sync.');
+    const remote = await current.backend.open();
+    // Read at every use, never kept (see above); only uses that run at once share the read.
     const identity = current.identity ??= remote.remoteId().finally(() => { if (current.identity === identity) current.identity = undefined; });
     return { remote, remoteId: await identity, name };
   }
@@ -94,7 +119,8 @@ export class SyncService {
       return { sync: bookSync(state, connection.remoteId), connection };
     } catch (error) {
       // Which remote a book synced with is known only once the remote is read; one that syncs is shown unavailable.
-      return { sync: state.enabled === false ? 'stopped' : state.remoteId ? 'unavailable' : 'off', error: message(error) };
+      return { sync: state.enabled === false ? 'stopped' : state.remoteId ? 'unavailable' : 'off', error: message(error),
+        ...(error instanceof StoreAccessError ? { access: error.reason } : {}) };
     }
   }
 

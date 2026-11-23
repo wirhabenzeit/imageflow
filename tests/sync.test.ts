@@ -24,11 +24,17 @@ import { FolderStore, folderRemote } from '../desktop/sync-store-folder';
 import { MemoryStore } from '../desktop/sync-store';
 import type { SyncStore } from '../desktop/sync-store';
 import { storeConformance } from './sync-store-conformance';
+import { s3Remote } from './s3-remote';
+import { FakeS3, fakeCredentials } from './s3-fake';
+import { credentialScope, MemoryCredentialStore } from '../desktop/sync-credentials';
+import { unavailableStatus } from '../desktop/sync-engine';
+import { S3Store } from '../desktop/sync-store-s3';
+import { StoreAccessError } from '../desktop/sync-store';
 import { readCommitHeaderV1 } from './sync-v1-reader';
 import { bookTrusted } from '../desktop/source-access';
 import { readSyncState, SyncElsewhereError, SyncHalfPulledError, takeAbandonedAtOpen, updateSyncState } from '../desktop/sync-pull';
 import { insideBook, SyncService } from '../desktop/sync-service';
-import type { SyncBackend } from '../src/settings';
+import type { FolderSyncBackend, S3SyncBackend, SyncBackend } from '../src/settings';
 import { blobKeyPattern, commitKey, contentBlobKey, coverBlobKey, decideSync, readBookTombstone, readCommitHeader, readRemoteIdentity, NewerSyncFormatError, deriveTips, isUnlocatedPath, originalBlobKey, portableManifests,
   projectManifests, proxyBlobKey, stateBlobSchema, tombstoneKey } from '../src/sync-snapshot';
 import type { CommitHeader, StateBlob } from '../src/sync-snapshot';
@@ -71,14 +77,15 @@ async function world(t: { after: (fn: () => Promise<void>) => void }) {
 }
 
 // The engine tests (`each`) run against every store behind the same `StoreRemote`: the memory store here, and the
-// folder store in a process of its own (tests/sync-folder-store.test.ts), so the two runs go side by side. Every other
-// test (`test`) runs once, here.
+// folder and S3 stores in processes of their own (tests/sync-folder-store.test.ts, tests/sync-s3-store.test.ts), so
+// the runs go side by side. Every other test (`test`) runs once, here.
 type Remote = StoreRemote;
-const store = process.env.IMAGEFLOW_SYNC_TEST_STORE === 'folder' ? 'folder' : 'memory';
+const store = (['folder', 's3'] as const).find((name) => name === process.env.IMAGEFLOW_SYNC_TEST_STORE) ?? 'memory';
 const test: typeof runTest = store === 'memory' ? runTest : ((() => {}) as unknown as typeof runTest);
 const each = (name: string, run: (t: TestContext) => Promise<void>) => runTest(name + ' (' + store + ' store)', run);
 async function newRemote(root: string, name = 'Remote'): Promise<Remote> {
   if (store === 'memory') return memoryRemote();
+  if (store === 's3') return s3Remote();
   await mkdir(join(root, name), { recursive: true });
   return folderRemote(join(root, name));
 }
@@ -1755,7 +1762,7 @@ each('a sync record names the book its commit belongs to, and originals are foun
 
 // The sync backend is a setting of the Mac (ADR 0012, #280): the service builds the remote from it, and a book records
 // only whether it syncs here and which remote it last synced with.
-async function folderBackend(root: string, name: string): Promise<SyncBackend> {
+async function folderBackend(root: string, name: string): Promise<FolderSyncBackend> {
   const path = join(root, name);
   await mkdir(path, { recursive: true });
   return { kind: 'folder', path };
@@ -2000,7 +2007,7 @@ test('the remote’s identity is read at every use: a backend emptied while the 
 
 test('a sync folder inside a book is refused', async (t) => {
   const { a } = await world(t);
-  const backend: SyncBackend = { kind: 'folder', path: join(a.folder, 'files', 'Sync') };
+  const backend: FolderSyncBackend = { kind: 'folder', path: join(a.folder, 'files', 'Sync') };
   await mkdir(backend.path, { recursive: true });
   assert.equal(insideBook(backend.path), true);
   assert.equal(insideBook(join(a.base, 'Sync')), false);
@@ -2011,4 +2018,95 @@ test('a sync folder inside a book is refused', async (t) => {
   await assert.rejects(syncWith(a, service), /inside this book/);
   await assert.rejects(service.start(a.folder), /inside this book/);
   assert.equal((await readSyncState(a.folder)).remoteId, undefined);
+});
+
+/** A bucket on a fake S3 server of the test's own, and one Mac's view of it: its settings, key and Application Support. */
+async function bucketWorld(t: TestContext, root: string) {
+  const fake = await new FakeS3().start();
+  t.after(() => fake.close());
+  fake.bucket('books');
+  const backend: S3SyncBackend = { kind: 's3', endpoint: fake.url, region: fake.region, bucket: 'books', prefix: 'ImageFlow/' };
+  const mac = async (name: string, secretAccessKey = fakeCredentials.secretAccessKey) => {
+    const credentials = new MemoryCredentialStore();
+    await credentials.write(credentialScope(backend), { ...fakeCredentials, secretAccessKey });
+    const support = join(root, name + ' Application Support');
+    // Each Mac reads its own copy of the setting, as from its own settings.json.
+    const service = new SyncService(() => ({ ...backend }), { credentials: () => credentials, cacheFolder: () => support, s3: { retryDelay: 1 } });
+    return { service, credentials, support };
+  };
+  return { fake, backend, mac };
+}
+
+test('two Macs sync a book with owned originals through a bucket, and a wrong key on one shows sign-in until it is corrected, without a restart', async (t) => {
+  const { root, a, b } = await world(t);
+  const { fake, backend, mac } = await bucketWorld(t, root);
+  const desktop = await mac('Desktop');
+  const laptop = await mac('Laptop', 'a secret typed wrong');
+  // The desktop pushes the book, with its owned original, to the bucket.
+  assert.equal((await syncWith(a, desktop.service)).action, 'initial-push');
+  const id = await bookId(a);
+  const keys = [...fake.bucket('books').keys()];
+  assert.ok(keys.includes('ImageFlow/remote.json'));
+  assert.ok(keys.some((key) => key.startsWith('ImageFlow/books/' + id + '/originals/')), 'the owned original is in the bucket');
+  const { remoteId } = await desktop.service.connect();
+  // The laptop's key is wrong: its service says sign-in needed, which the status bar shows and points at Settings.
+  const refused = await laptop.service.connect().catch((error) => error);
+  assert.ok(refused instanceof StoreAccessError && refused.reason === 'sign-in', String(refused));
+  assert.match(refused.message, /SignatureDoesNotMatch/);
+  // Corrected in Settings (the credential store): the next use takes it, with the same service.
+  await laptop.credentials.write(credentialScope(backend), fakeCredentials);
+  const connection = await laptop.service.connect();
+  assert.equal(connection.remoteId, remoteId);
+  await use(b);
+  const listed = (await remoteBooks(connection.remote)).find((book) => book.bookId === id)!;
+  await cloneFromRemote({ remote: connection.remote, tip: listed.tips[0], destination: b.folder, remoteId: connection.remoteId });
+  // Every owned original the desktop sent comes down to the laptop, whole (the engine checks each digest).
+  const downloaded = await on(b, (book) => downloadOriginals({ remote: connection.remote, book }));
+  const sent = keys.filter((key) => key.startsWith('ImageFlow/books/' + id + '/originals/'));
+  assert.ok(downloaded.includes('shore'));
+  assert.ok(downloaded.length >= sent.length && sent.length > 0, downloaded.length + ' downloaded, ' + sent.length + ' in the bucket');
+  assert.equal((await laptop.service.standing(b.folder)).sync, 'syncing');
+  // The key goes wrong again on the laptop: a book that syncs reads as unavailable with sign-in, and its status says so.
+  await laptop.credentials.write(credentialScope(backend), { ...fakeCredentials, secretAccessKey: 'changed elsewhere' });
+  const standing = await laptop.service.standing(b.folder);
+  assert.deepEqual([standing.sync, standing.access], ['unavailable', 'sign-in']);
+  assert.equal(unavailableStatus(standing.error!, standing.access).signIn, true);
+  // A remote the bucket refuses once it is in use (describeSync reads its commits) gives the same status.
+  const refusedRemote = new StoreRemote(new S3Store({ ...backend, credentials: { ...fakeCredentials, secretAccessKey: 'wrong' }, retryDelay: 1 }));
+  const wrongStatus = await describeSync(b.folder, refusedRemote);
+  assert.deepEqual([wrongStatus.state, wrongStatus.signIn], ['unavailable', true]);
+  await laptop.credentials.write(credentialScope(backend), fakeCredentials);
+  assert.equal((await laptop.service.standing(b.folder)).sync, 'syncing');
+  // Edits both ways: the laptop pushes, the desktop fast-forwards.
+  await edit(b, caption('shore', 'From the laptop, through the bucket'));
+  assert.equal((await syncWith(b, laptop.service)).action, 'push');
+  assert.equal((await syncWith(a, desktop.service)).action, 'fast-forward');
+  assert.equal((await manifests(a)).photos.shore.caption, 'From the laptop, through the bucket');
+  // Each Mac keeps the commit headers it read in its own Application Support, by remote and book.
+  for (const { support } of [desktop, laptop]) assert.deepEqual(await readdir(join(support, 'Sync Cache', remoteId)), [id + '.json']);
+  // And reads only headers it has not seen: the next sync fetches none it has.
+  fake.requests.length = 0;
+  assert.equal((await syncWith(a, desktop.service)).action, 'in-sync');
+  assert.equal(fake.requests.filter(({ method, key }) => method === 'GET' && key.includes('/snapshots/')).length, 0);
+});
+
+test('a bucket emptied and set up again while the app runs gets a new identity at the next use, and its books ask again', async (t) => {
+  const { root, a } = await world(t);
+  const { fake, mac } = await bucketWorld(t, root);
+  const desktop = await mac('Desktop');
+  await syncWith(a, desktop.service);
+  const before = (await desktop.service.connect()).remoteId;
+  assert.equal((await desktop.service.standing(a.folder)).sync, 'syncing');
+  // The bucket is emptied and another Mac writes a new remote.json.
+  fake.bucket('books').clear();
+  const other = await (await mac('Other')).service.connect();
+  assert.notEqual(other.remoteId, before);
+  // The running service reads it at its next use, also though its remote read the old one before.
+  assert.equal((await desktop.service.connect()).remoteId, other.remoteId);
+  assert.equal((await desktop.service.standing(a.folder)).sync, 'elsewhere', 'the book does not push under the old identity');
+  await assert.rejects(syncWith(a, desktop.service), SyncElsewhereError);
+  // Only remote.json changed: the store of the old remote.json is the same, and a new one under it is read too.
+  await fake.bucket('books').delete('ImageFlow/remote.json');
+  const third = await (await mac('Third')).service.connect();
+  assert.equal((await desktop.service.connect()).remoteId, third.remoteId);
 });
