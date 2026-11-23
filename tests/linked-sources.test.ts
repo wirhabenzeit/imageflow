@@ -508,6 +508,9 @@ test('Locate Folder reapproves exact originals with no approvals or cache, but n
   const f = await fixture(t);
   const added = await importIntoProject(f.book, { kind: 'photo', mode: 'link' }, [f.photo]);
   const id = added.imported[0];
+  // The import's background digest still writes the source registry. Configuring the store again below forgets that
+  // store, so nothing would wait for it later and its write could land while the test's folder is removed.
+  await SourceStore.drain();
   await rm(join(f.root, 'source-access'), { recursive: true });
   await rm(join(f.root, 'source-cache'), { recursive: true });
   configureSourceAccess(join(f.root, 'source-access'));

@@ -899,7 +899,10 @@ test('an online photo syncs its locator whole with facts and a preview, never an
   assert.deepEqual(server.materialized, []);
 });
 
-test('two Macs that both read an online photo agree: a change both see is not pushed back, and an older view never overrides a newer fact', async (t) => {
+const outcome = (mac: Mac, remote: SyncRemote) => sync(mac, remote).then(({ action, pushed }) => ({ action, pushed: pushed.length }));
+const webFact = async (remote: MemoryRemote, mac: Mac) => stateOf(remote, (await tips(remote, mac))[0]).assetsMeta.assets.web;
+
+test('a fact of an online photo that a pull changed is never pushed back, however often a Mac that sees an older version syncs', async (t) => {
   const { a, b, remote } = await world(t);
   const server = onlineServer(t);
   server.assets.set(harbour, dawn);
@@ -909,8 +912,12 @@ test('two Macs that both read an online photo agree: a change both see is not pu
   const d1 = await digest(a);
   // Laptop: a copy of the book that reads the server itself and makes the same preview.
   await copyBook(a, b);
-  assert.deepEqual(await sync(b, remote).then(({ action, pushed }) => ({ action, pushed })), { action: 'adopt', pushed: [] });
+  assert.deepEqual(await outcome(b, remote), { action: 'adopt', pushed: 0 });
   assert.equal(await digest(b), d1);
+  // A sync record from before `localKeys` loads, and compares the photo by its digest until a sync records what it saw.
+  assert.ok((await readSyncState(b.folder)).lastSynced?.localKeys?.web);
+  await updateSyncState(b.folder, (state) => { const { localKeys: _, ...lastSynced } = state.lastSynced!; return { ...state, lastSynced }; });
+  assert.equal((await readSyncState(b.folder)).lastSynced?.localKeys, undefined);
 
   // The photo changes and the desktop pushes it. The laptop still sees the version before, behind a cache.
   const dusk = { ...dawn, revision: 'r2', content: 'c2', color: '#223366', title: 'Harbour at dusk' };
@@ -918,12 +925,17 @@ test('two Macs that both read an online photo agree: a change both see is not pu
   assert.equal((await sync(a, remote)).action, 'push');
   const d2 = await digest(a);
   server.lagging = new Map([[harbour, dawn]]);
-  assert.deepEqual(await sync(b, remote).then(({ action, pushed }) => ({ action, pushed })), { action: 'fast-forward', pushed: [] }, 'a fact unchanged here since the last sync is not ahead');
-  assert.equal(await digest(b), d2, 'the snapshot’s fact replaces it');
-  assert.equal((await readSyncState(b.folder)).lastSynced?.localDigests?.web, d2, 'and is what this Mac holds from now on');
-  // Once the laptop sees the change too, it has nothing to add.
+  assert.deepEqual(await outcome(b, remote), { action: 'fast-forward', pushed: 0 }, 'what the laptop sees did not change since it last synced');
+  assert.equal(await digest(b), d2, 'the snapshot’s fact replaces its own');
+  // The laptop then draws what its own view shows again, which differs from the snapshot. That is no change here.
+  for (const round of [1, 2, 3]) {
+    assert.deepEqual(await outcome(b, remote), { action: 'in-sync', pushed: 0 }, 'sync ' + round + ' while lagging pushes nothing');
+    assert.equal((await webFact(remote, a)).digest, d2, 'and the remote keeps the newer fact');
+  }
+  assert.equal(await digest(b), d1, 'the laptop shows what it can read');
+  // Once the laptop sees the change too, it has nothing to add, and counts from that version on.
   server.lagging = undefined;
-  assert.deepEqual(await sync(b, remote).then(({ action, pushed }) => ({ action, pushed })), { action: 'in-sync', pushed: [] });
+  assert.deepEqual(await outcome(b, remote), { action: 'in-sync', pushed: 0 });
   assert.equal(await digest(b), d2);
 
   // A third version, which the laptop again sees late: its fact of the second is merely older, and loses.
@@ -931,13 +943,57 @@ test('two Macs that both read an online photo agree: a change both see is not pu
   assert.equal((await sync(a, remote)).action, 'push');
   const d3 = await digest(a);
   server.lagging = new Map([[harbour, dusk]]);
-  assert.deepEqual(await sync(b, remote).then(({ action, pushed }) => ({ action, pushed })), { action: 'fast-forward', pushed: [] }, 'the second version is not pushed back over the third');
-  assert.equal(await digest(b), d3);
+  assert.deepEqual(await outcome(b, remote), { action: 'fast-forward', pushed: 0 }, 'the second version is not pushed back over the third');
+  assert.deepEqual(await outcome(b, remote), { action: 'in-sync', pushed: 0 });
   server.lagging = undefined;
   assert.equal((await sync(a, remote)).action, 'in-sync');
   assert.equal((await sync(b, remote)).action, 'in-sync');
   assert.equal((await tips(remote, a)).length, 1);
+  assert.equal((await webFact(remote, a)).digest, d3);
   assert.equal(await digest(a), d3);
+  assert.equal(await digest(b), d3);
+});
+
+test('two Macs that see different versions of an online photo for good stop pushing once each has synced', async (t) => {
+  const { a, b, remote } = await world(t);
+  const server = onlineServer(t);
+  const dusk = { ...dawn, revision: 'r2', content: 'c2', color: '#223366', title: 'Harbour at dusk' };
+  // The desktop always sees the photo at dawn, the laptop at dusk: two copies of one catalog, say.
+  const desktop = () => { server.lagging = undefined; return a; };
+  const laptop = () => { server.lagging = new Map([[harbour, dusk]]); return b; };
+  server.assets.set(harbour, dawn);
+  await edit(desktop(), (files) => { files.photoIndex.web = { online: { url: harbour } } as never; });
+  await sync(desktop(), remote);
+  await copyBook(a, b);
+  // Each syncs once. The laptop has no record yet of what it saw, so its other version counts as newer, once.
+  assert.deepEqual(await outcome(laptop(), remote), { action: 'adopt', pushed: 1 });
+  assert.deepEqual(await outcome(desktop(), remote), { action: 'fast-forward', pushed: 0 }, 'the desktop’s own view did not change');
+  const settled = { commits: remote.commits.size, fact: await webFact(remote, a) };
+  assert.equal(settled.fact.provided?.title, 'Harbour at dusk');
+  // From then on neither pushes, though each draws its own version and so differs from the snapshot or the other.
+  for (const round of [1, 2, 3]) {
+    assert.deepEqual(await outcome(desktop(), remote), { action: 'in-sync', pushed: 0 }, 'desktop, round ' + round);
+    assert.deepEqual(await outcome(laptop(), remote), { action: 'in-sync', pushed: 0 }, 'laptop, round ' + round);
+  }
+  // An edit of the book still syncs both ways, and carries the photo's fact forward as it is.
+  await edit(desktop(), caption('shore', 'From the desktop'));
+  assert.deepEqual(await outcome(desktop(), remote), { action: 'push', pushed: 1 });
+  assert.deepEqual(await outcome(laptop(), remote), { action: 'fast-forward', pushed: 0 });
+  await edit(laptop(), caption('segla', 'From the laptop'));
+  assert.deepEqual(await outcome(laptop(), remote), { action: 'push', pushed: 1 });
+  assert.deepEqual(await outcome(desktop(), remote), { action: 'fast-forward', pushed: 0 });
+  for (const mac of [desktop, laptop, desktop, laptop]) assert.deepEqual(await outcome(mac(), remote), { action: 'in-sync', pushed: 0 });
+  assert.equal(remote.commits.size, settled.commits + 2, 'only the two edits made commits');
+  assert.equal((await tips(remote, a)).length, 1);
+  assert.deepEqual(await webFact(remote, a), settled.fact);
+
+  // A real change on one side is still pushed, once, and the other takes it without answering.
+  server.assets.set(harbour, { ...dawn, revision: 'r3', content: 'c3', color: '#114422', title: 'Harbour at night' });
+  assert.deepEqual(await outcome(desktop(), remote), { action: 'push', pushed: 1 });
+  assert.equal((await webFact(remote, a)).provided?.title, 'Harbour at night');
+  assert.deepEqual(await outcome(laptop(), remote), { action: 'fast-forward', pushed: 0 });
+  for (const mac of [desktop, laptop, desktop, laptop]) assert.deepEqual(await outcome(mac(), remote), { action: 'in-sync', pushed: 0 });
+  assert.equal((await webFact(remote, a)).provided?.title, 'Harbour at night');
 });
 
 const conflictCopies = async (mac: Mac) => (await readdir(mac.base)).filter((name) => name.includes('(Conflict '));

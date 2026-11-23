@@ -23,7 +23,7 @@ import { captureBookStateRevision, ignoredName } from './revisions';
  */
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
 const syncedSchema = z.object({ commitId: z.uuid(), bookId: z.uuid().optional(), bookStateRevision: sha256, stateDigest: sha256, photoDigests: z.record(z.string(), sha256),
-  localDigests: z.record(z.string(), sha256).optional() }).strict();
+  localDigests: z.record(z.string(), sha256).optional(), localKeys: z.record(z.string(), sha256).optional() }).strict();
 const syncStateSchema = z.object({
   version: z.literal(1),
   // The sync folder this book syncs through on this Mac (#251). Per Mac: another Mac may keep it elsewhere.
@@ -32,12 +32,13 @@ const syncStateSchema = z.object({
   // A pull that started touching the book. `staleOriginals` are owned originals here that the snapshot replaced and
   // that go (by path, with their stale digest), so the photo shows its new proxy until its new original is downloaded.
   // `keepLocal` are the photos whose original here changed since the last sync, so their local fact wins;
-  // `localDigests` the originals' digests after the pull. `conflictCopy` is the copy Keep Both made before it.
+  // `localDigests` the originals' digests after the pull, `localKeys` what this Mac's providers showed of photos
+  // without a file (`SyncedCommit.localKeys`). `conflictCopy` is the copy Keep Both made before it.
   // Owned originals never pass through a pull: they are downloaded after it, beside their target (`downloadOriginals`).
   pull: z.object({
     targetCommit: z.uuid(), previousCommit: z.uuid().optional(), stateDigest: sha256, bookStateRevision: sha256,
     templateChanged: z.boolean(), staleOriginals: z.record(z.string(), sha256).default({}), keepLocal: z.array(z.string()).default([]),
-    localDigests: z.record(z.string(), sha256).default({}), conflictCopy: z.string().max(4096).optional(),
+    localDigests: z.record(z.string(), sha256).default({}), localKeys: z.record(z.string(), sha256).default({}), conflictCopy: z.string().max(4096).optional(),
   }).strict().optional(),
   // A marked pull that could not be finished and was given up (`abandonPull`): what it pulled, why it failed, the
   // revision the half-pulled book had then (absent when it did not load), the copy Keep Both made before it, and
@@ -290,7 +291,8 @@ export async function applyStagedPull(folder: string, marker: PullMarker) {
   const photoDigests = Object.fromEntries(Object.entries(blob.assetsMeta.assets).filter(([id]) => photos[id]).map(([id, fact]) => [id, fact.digest]));
   await updateSyncState(root, ({ abandoned: _, ...state }) => ({ ...state, pull: undefined,
     lastSynced: { commitId: marker.targetCommit, ...(project.bookId ? { bookId: project.bookId } : {}), bookStateRevision: marker.bookStateRevision, stateDigest: marker.stateDigest, photoDigests,
-      localDigests: Object.fromEntries(Object.entries(marker.localDigests).filter(([id]) => photos[id])) },
+      localDigests: Object.fromEntries(Object.entries(marker.localDigests).filter(([id]) => photos[id])),
+      localKeys: Object.fromEntries(Object.entries(marker.localKeys).filter(([id]) => photos[id])) },
     ...(marker.templateChanged || state.networkReview ? { networkReview: true as const } : {}) }));
   await rm(await stagingFolder(root), { recursive: true, force: true });
   return { blob, project, photos };

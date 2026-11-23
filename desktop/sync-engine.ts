@@ -19,6 +19,8 @@ import { holdsProjectLock, persistProjectManifests } from './persistence';
 import { photoDetails, photoFile } from './photos';
 import { loadProject } from './project';
 import type { OpenProject } from './project';
+import { contentKey } from './provided-photos';
+import { providerOf } from './providers';
 import { proxyStore } from './proxy-store';
 import { captureBookState, captureBookStateRevision } from './revisions';
 import { saveDocumentCopy } from './source-actions';
@@ -89,11 +91,11 @@ const schemas = { project: projectSchema, photos: photoIndexSchema };
 
 type Context = { root: string; remote: SyncRemote; book: OpenProject; stale: boolean; options: SyncOptions;
   /**
-   * Photos this Mac can read now, with the verified digest of what it read: an original's file and its digest, or, for
-   * a photo without a file (ADR 0011), the digest of the preview stored for the fact its provider reported. Only a
-   * photo with a file has a `path`.
+   * Photos this Mac can read now, with the verified digest of what it read: an original's file (`path`) and its
+   * digest, or, for a photo without a file (ADR 0011), the digest of the preview stored for the fact its provider
+   * reported and `key`, a key of the content the provider shows now. A photo has one of `path` and `key`.
    */
-  here: Record<string, { path?: string; digest: string }> };
+  here: Record<string, { path?: string; key?: string; digest: string }> };
 
 /**
  * The path in the book of a photo whose original syncs (reach `book`, ADR 0012); undefined for any other photo, whose
@@ -119,10 +121,14 @@ async function refreshFacts(context: Context) {
     if (!resolved.stored) {
       // A photo without a file, which its provider answers for now. What the provider reported was recorded with its
       // revisions and the digest of its preview when the book loaded or the provider reported a change
-      // (desktop/provided-photos.ts). With that preview still here, the fact is this Mac's observation of the photo,
-      // so a change of it counts like a re-exported original (`factsAhead`) and is pushed with its preview.
+      // (desktop/provided-photos.ts). The fact is this Mac's observation of the photo only while it is of the content
+      // the provider shows now (a pull may have put another Mac's fact in its place) and its preview is here. Whether
+      // the photo changed here is then told by that content, not by the fact (`SyncedCommit.localKeys`).
       const fact = facts.get(source.id);
-      if (fact?.revisions && await proxies?.path(fact.digest)) context.here[source.id] = { digest: fact.digest };
+      if (!fact?.revisions) continue;
+      const [observed] = await providerOf(source.locator).observe(root, [{ id: source.id, locator: source.locator, known: { ...fact.revisions } }]).catch(() => []);
+      if (observed?.state !== 'available' || !observed.facts || contentKey(observed.revisions) !== contentKey(fact.revisions)) continue;
+      if (await proxies?.path(fact.digest)) context.here[source.id] = { digest: fact.digest, key: sha(Buffer.from(contentKey(observed.revisions))) };
       continue;
     }
     if (!resolved.status.digest) { await store.digested(); resolved = await store.resolve(root, source); }
@@ -137,6 +143,13 @@ async function refreshFacts(context: Context) {
 }
 
 const hereDigests = (context: Context) => Object.fromEntries(Object.entries(context.here).map(([id, { digest }]) => [id, digest]));
+const hereKeys = (context: Context) => Object.fromEntries(Object.entries(context.here).flatMap(([id, { key }]) => key === undefined ? [] : [[id, key]]));
+/**
+ * What this Mac's providers show of the photos without a file, for the sync record: as now for those it can read, and
+ * as at the sync before for the others, so a photo that cannot be read for a while is still compared with what it was.
+ */
+const syncedKeys = (context: Context, synced: SyncedCommit | undefined, photos: Record<string, unknown>, except: ReadonlySet<string> = new Set()) =>
+  Object.fromEntries(Object.entries({ ...synced?.localKeys, ...Object.fromEntries(Object.entries(hereKeys(context)).filter(([id]) => !except.has(id))) }).filter(([id]) => photos[id]));
 const photoFacts = (facts: Record<string, AssetFact>, photos: PhotoIndex) => Object.fromEntries(Object.entries(facts).filter(([id]) => photos[id]));
 const digestsOf = (facts: Record<string, AssetFact>) => Object.fromEntries(Object.entries(facts).map(([id, fact]) => [id, fact.digest]));
 
@@ -251,7 +264,7 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
   }
   // A photo's fact from here goes up only when its original changed here since the last sync (or the snapshot lacks
   // one); an original merely left at an older digest never pushes that digest back over another Mac's re-export.
-  const changed = changedOriginals(hereDigests(context), synced);
+  const changed = changedOriginals(hereDigests(context), synced, hereKeys(context));
   const remoteFacts = photoFacts(base?.assetsMeta.assets ?? {}, state.photos);
   const assets = Object.fromEntries(Object.keys(state.photos).flatMap((id) => {
     const fact = (changed.has(id) ? facts[id] : remoteFacts[id]) ?? facts[id] ?? remoteFacts[id];
@@ -306,7 +319,8 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
     createdAt: (context.options.now?.() ?? new Date()).toISOString(), title: state.project.title.slice(0, 400), stateDigest });
   await remote.putCommit(header);
   await recordSynced(root, { commitId: header.commitId, bookId, bookStateRevision: header.bookStateRevision, stateDigest, photoDigests: digestsOf(assets),
-    localDigests: Object.fromEntries(Object.entries(hereDigests(context)).filter(([id]) => assets[id]?.digest === context.here[id].digest)) });
+    localDigests: Object.fromEntries(Object.entries(context.here).filter(([id, { path, digest }]) => path !== undefined && assets[id]?.digest === digest).map(([id, { digest }]) => [id, digest])),
+    localKeys: syncedKeys(context, synced, state.photos) });
   return { header, blob };
 }
 
@@ -384,7 +398,7 @@ async function stagePull(context: Context, tip: CommitHeader) {
   const here = hereDigests(context);
   // Photos whose original changed here since the last sync keep their local fact; every other original here that
   // differs from the snapshot is stale.
-  const keepLocal = new Set([...changedOriginals(here, synced)].filter((id) => projected[id]));
+  const keepLocal = new Set([...changedOriginals(here, synced, hereKeys(context))].filter((id) => projected[id]));
   const proxies = await fetchProxies(remote, tip.bookId, await missingProxies(blob, projected, here, keepLocal));
   const staleOriginals: PullMarker['staleOriginals'] = {};
   const localDigests: PullMarker['localDigests'] = {};
@@ -409,16 +423,17 @@ async function stagePull(context: Context, tip: CommitHeader) {
     if (!local || keepLocal.has(id)) continue;
     // An owned original the snapshot replaced goes, so the photo shows the new proxy until its new original is downloaded.
     if (path !== undefined && original && original.digest !== local.digest && local.path === target) { staleOriginals[path] = local.digest; continue; }
-    // An original left here keeps its digest. A photo without a file leaves nothing behind: its fact here becomes the
-    // snapshot's, which is then what this Mac holds, and a later change of it here is measured against that.
-    localDigests[id] = local.path === undefined ? blob.assetsMeta.assets[id]?.digest ?? local.digest : local.digest;
+    // A photo without a file leaves no original behind: what this Mac saw of it is recorded as `localKeys`.
+    if (local.path !== undefined) localDigests[id] = local.digest;
   }
   await storeProxies(proxies);
   const current = await captureBookState(root).catch(() => undefined);
   const templates = (content: Record<string, string>) => JSON.stringify(Object.entries(content).filter(([path]) => path.startsWith('template/')).sort());
   const marker: PullMarker = { targetCommit: tip.commitId, ...(synced ? { previousCommit: synced.commitId } : {}), stateDigest: tip.stateDigest,
     bookStateRevision: tip.bookStateRevision, templateChanged: !current || templates(current.contentDigests) !== templates(blob.content),
-    staleOriginals, keepLocal: [...keepLocal], localDigests };
+    staleOriginals, keepLocal: [...keepLocal], localDigests,
+    // What a kept local fact was compared with stays as it is, so the fact counts as changed until a push carries it.
+    localKeys: syncedKeys(context, synced, projected, keepLocal) };
   await preflightPull(root, marker);
   return { blob, marker };
 }
@@ -517,7 +532,7 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
   const commits = await remoteCommits(options.remote, bookId);
   const tips = deriveTips(commits);
   const synced = state.lastSynced;
-  const factsChanged = !!synced && factsAhead(hereDigests(context), synced);
+  const factsChanged = !!synced && factsAhead(hereDigests(context), synced, hereKeys(context));
   const decision = decideSync({ pullInProgress: false, tips, commits, lastSynced: synced, localRevision: local.revision, factsChanged });
   switch (decision.action) {
     case 'resume': throw new Error('The interrupted sync could not be finished.');
@@ -534,6 +549,9 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
     case 'in-sync': {
       const blob = await fetchState(options.remote, bookId, decision.tip.stateDigest).catch(() => undefined);
       if (blob) await refetchProxies(context, bookId, blob);
+      // A photo without a file that this Mac now sees as the snapshot has it is compared with that from here on.
+      const agreed = Object.entries(context.here).filter(([id, { key, digest }]) => key !== undefined && key !== synced!.localKeys?.[id] && synced!.photoDigests[id] === digest);
+      if (agreed.length) await recordSynced(root, { ...synced!, localKeys: { ...synced!.localKeys, ...Object.fromEntries(agreed.map(([id, { key }]) => [id, key!])) } });
       return { action: 'in-sync', pushed: [], changed };
     }
     case 'adopt': {
@@ -541,10 +559,12 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
       const photoDigests = digestsOf(photoFacts(blob.assetsMeta.assets, local.photos));
       // Without a record of its own, every original here that differs from the snapshot counts as newer.
       const adopted = { commitId: decision.tip.commitId, bookId, bookStateRevision: decision.tip.bookStateRevision, stateDigest: decision.tip.stateDigest, photoDigests };
-      await recordSynced(root, { ...adopted, localDigests: Object.fromEntries(Object.entries(hereDigests(context)).filter(([id, digest]) => photoDigests[id] === digest)) });
+      const same = Object.entries(context.here).filter(([id, { digest }]) => photoDigests[id] === digest);
+      await recordSynced(root, { ...adopted, localDigests: Object.fromEntries(same.filter(([, { path }]) => path !== undefined).map(([id, { digest }]) => [id, digest])),
+        localKeys: Object.fromEntries(same.flatMap(([id, { key }]) => key === undefined ? [] : [[id, key]])) });
       await refetchProxies(context, bookId, blob);
       // Facts this Mac knows better than the snapshot go back with a commit of the same book state.
-      if (factsAhead(hereDigests(context), adopted)) {
+      if (factsAhead(hereDigests(context), adopted, hereKeys(context))) {
         const { header } = await push(context, [decision.tip.commitId], blob, facts, adopted);
         return { action: 'adopt', pushed: [header.commitId], changed };
       }
@@ -554,7 +574,7 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
       const blob = await pull(context, decision.tip);
       const now = (await readSyncState(root)).lastSynced!;
       // The merge kept the facts of originals that changed here; they go back, never stale ones.
-      if (factsAhead(hereDigests(context), now)) {
+      if (factsAhead(hereDigests(context), now, hereKeys(context))) {
         const { header } = await push(context, [decision.tip.commitId], blob, await readAssetFacts(root), now);
         return { action: 'fast-forward', pushed: [header.commitId], pulled: decision.tip.commitId, changed: true };
       }
