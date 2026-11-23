@@ -2793,7 +2793,17 @@ test('a first sync by itself that failed is tried again after the next save, and
   await second.run();
   second.saved();
   assert.equal(started, false);
-  first.stop(); second.stop();
+  // A save made while an attempt runs (the edit that interrupted an automatic first sync) is the save a failure waits for.
+  let attempts = 0;
+  let fail = (_: Error) => {};
+  const third = new FirstSync(() => { attempts++; return attempts === 1 ? new Promise<void>((_, reject) => { fail = reject; }) : Promise.resolve(); }, 10, () => {});
+  const running = third.run();
+  third.saved();
+  fail(new Error('interrupted'));
+  await assert.rejects(running);
+  for (let attempt = 0; attempts < 2 && attempt < 500; attempt++) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(attempts, 2, 'tried again without another save');
+  first.stop(); second.stop(); third.stop();
 });
 
 test('Quit names the books whose originals are still uploading, and an upload that fails before it could read the remote still shows', async (t) => {

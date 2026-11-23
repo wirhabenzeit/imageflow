@@ -24,7 +24,8 @@ export async function syncExcludedBook(folder: string, roots: readonly (string |
  * The first sync of a book that starts by itself. `attempt` decides again each time whether the book starts (the sync
  * service's `startsOnOpen`: exclusions, trust, opt-out, the unanswered first-configuration sheet, a book synced
  * elsewhere being asked about) and syncs it when it does. One that fails (the book was busy, the remote could not be
- * read) is tried again after the book's next save (`saved`), once per save and after `delay`, never in a loop.
+ * read) is tried again after the book's next save (`saved`), once per save and after `delay`, never in a loop. A save
+ * made while the attempt was still running counts as that save.
  */
 export class FirstSync {
   private pending = false;
@@ -35,13 +36,23 @@ export class FirstSync {
 
   /** Runs the attempt now, or joins the one that runs. Rejects with its error, and it is then tried after the next save. */
   run() {
-    this.running ??= this.attempt().catch((error: unknown) => { this.pending = true; throw error; })
-      .finally(() => { this.running = undefined; });
+    if (!this.running) {
+      this.savedMeanwhile = false;
+      this.running = this.attempt().catch((error: unknown) => {
+        this.pending = true;
+        // A save made while the attempt ran (the edit that interrupted it, #284) is the save it waits for.
+        if (this.savedMeanwhile) this.saved();
+        throw error;
+      }).finally(() => { this.running = undefined; });
+    }
     return this.running;
   }
+  /** A save came while an attempt ran: when that attempt fails, the save counts. */
+  private savedMeanwhile = false;
 
   /** The book was saved: an attempt that failed is tried again, after `delay`. */
   saved() {
+    if (this.running) this.savedMeanwhile = true;
     if (!this.pending || this.timer) return;
     this.pending = false;
     this.timer = setTimeout(() => {
