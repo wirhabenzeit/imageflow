@@ -7,6 +7,15 @@ type Fields = { endpoint: string; region: string; bucket: string; prefix: string
 const fieldsOf = (backend?: S3SyncBackend): Fields => ({ endpoint: backend?.endpoint ?? '', region: backend?.region ?? '', bucket: backend?.bucket ?? '',
   prefix: backend?.prefix ?? '', addressing: backend?.addressing ?? '', accessKeyId: '', secretAccessKey: '' });
 
+/** A size as Finder and iCloud show it: decimal units, one decimal from MB on. */
+export function formatStorage(bytes: number) {
+  if (bytes < 1000) return bytes + ' bytes';
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes / 1000, unit = 0;
+  while (value >= 1000 && unit < units.length - 1) { value /= 1000; unit++; }
+  return (unit === 0 ? Math.round(value) : Math.round(value * 10) / 10) + ' ' + units[unit];
+}
+
 /** What Test Connection found, in words. */
 export function describeReport(report: SyncConnectionReport) {
   return ['Connected.',
@@ -41,6 +50,18 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
     void api.syncBackendState().then((answer) => { if (active && 'value' in answer) setState(answer.value); });
     return () => { active = false; };
   }, [api, configuredKey]);
+
+  // What the books take up in iCloud: asked when iCloud is the backend, from the key indexes after the first time.
+  const [usage, setUsage] = useState<{ bytes: number; books: number } | { error: string } | 'counting'>();
+  const usesICloud = settings?.sync?.kind === 'icloud';
+  useEffect(() => {
+    if (!api || !usesICloud) { setUsage(undefined); return; }
+    let active = true;
+    setUsage('counting');
+    void api.syncUsage().then((answer) => { if (active) setUsage('value' in answer ? answer.value : { error: answer.error }); },
+      () => { if (active) setUsage({ error: 'ImageFlow could not complete the request.' }); });
+    return () => { active = false; };
+  }, [api, usesICloud]);
 
   const set = (name: keyof Fields) => (event: { target: { value: string } }) => { setFields({ ...fields, [name]: event.target.value }); setResult(undefined); };
   /**
@@ -77,6 +98,20 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
     } finally { setBusy(''); }
   }
 
+  async function useICloud() {
+    if (!api) return;
+    setBusy('save');
+    setResult(undefined);
+    try {
+      const answer = await api.saveSyncBackend({ backend: { kind: 'icloud' } });
+      if ('error' in answer) { setResult({ text: answer.error, error: true }); return; }
+      setState(answer.value);
+      setResult({ text: 'Saved.' });
+    } catch {
+      setResult({ text: 'ImageFlow could not complete the request.', error: true });
+    } finally { setBusy(''); }
+  }
+
   async function act(action: 'test' | 'save' | 'off') {
     if (!api) return;
     setBusy(action === 'off' ? 'remove' : action);
@@ -103,11 +138,16 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
   const disabled = !api || !settings || !!busy;
   const complete = !!fields.endpoint.trim() && !!fields.region.trim() && !!fields.bucket.trim() && (!!stored || (!!entered?.accessKeyId && !!entered.secretAccessKey));
   const folder = settings?.sync?.kind === 'folder' ? settings.sync.path : undefined;
-  const current = settings?.sync ? (settings.sync.kind === 'folder' ? '“' + (folder!.split('/').filter(Boolean).at(-1) ?? folder) + '”' : 'the bucket “' + settings.sync.bucket + '”') : undefined;
+  const current = !settings?.sync ? undefined : settings.sync.kind === 'folder' ? '“' + (folder!.split('/').filter(Boolean).at(-1) ?? folder) + '”'
+    : settings.sync.kind === 'icloud' ? 'iCloud' : 'the bucket “' + settings.sync.bucket + '”';
+  // iCloud is listed only by a build entitled to it (or while it is the setting), beside the bucket, neither preselected.
+  const icloud = state?.icloud;
+  const icloudListed = !!icloud || settings?.sync?.kind === 'icloud';
   return <div className="settings-form sync-settings">
     <span className="settings-label" id="sync-through-label">Sync through:</span>
     <div className="settings-control">
       <div className="appearance-options" role="radiogroup" aria-labelledby="sync-through-label">
+        {icloudListed && <label><input type="radio" name="sync-kind" value="icloud" disabled={disabled} checked={kind === 'icloud'} onChange={() => { setKind('icloud'); setResult(undefined); }} /><span>iCloud</span></label>}
         <label><input type="radio" name="sync-kind" value="s3" disabled={disabled} checked={kind === 's3'} onChange={() => { setKind('s3'); setResult(undefined); }} /><span>S3-compatible bucket</span></label>
         <label><input type="radio" name="sync-kind" value="folder" disabled={disabled} checked={kind === 'folder'} onChange={() => { setKind('folder'); setResult(undefined); }} /><span>Folder</span></label>
       </div>
@@ -115,6 +155,20 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
       {settings?.sync && <div className="settings-update-actions"><button disabled={disabled} onClick={() => void act('off')}>Turn Off</button></div>}
       {kind !== 's3' && result && <p role={result.error ? 'alert' : 'status'} className={result.error ? 'error-text' : 'settings-note sync-test-result'}>{result.text}</p>}
     </div>
+    {kind === 'icloud' && <>
+      <span className="settings-label">iCloud:</span>
+      <div className="settings-control">
+        <p className="settings-note">{icloud?.available === false ? icloud.message
+          : 'Books sync through your private iCloud database, with the Apple ID this Mac is signed in to. Their originals count toward your iCloud storage.'}</p>
+        {usesICloud && usage && <p className="settings-note sync-usage" role="status">{usage === 'counting' ? 'Counting what ImageFlow stores in iCloud…'
+          : 'error' in usage ? 'What ImageFlow stores in iCloud cannot be counted now: ' + usage.error
+          : usage.books ? 'ImageFlow uses ' + formatStorage(usage.bytes) + ' of your iCloud storage for ' + usage.books + (usage.books === 1 ? ' book.' : ' books.')
+          : 'No books are stored in iCloud yet.'}</p>}
+        {settings?.sync?.kind !== 'icloud' && <div className="settings-update-actions">
+          <button className="primary" disabled={disabled || !icloud?.available} onClick={() => void useICloud()}>Use iCloud</button>
+        </div>}
+      </div>
+    </>}
     {kind === 'folder' && <>
       <span className="settings-label">Folder:</span>
       <div className="settings-control">

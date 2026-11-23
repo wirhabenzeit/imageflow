@@ -69,6 +69,7 @@ const api: DesktopApi = {
   syncBackendState: () => ipcRenderer.invoke(channels.syncBackend),
   saveSyncBackend: (request) => ipcRenderer.invoke(channels.saveSyncBackend, request),
   testSyncConnection: (request) => ipcRenderer.invoke(channels.testSyncConnection, request),
+  syncUsage: () => ipcRenderer.invoke(channels.syncUsage),
   setBookMenuState: (state) => ipcRenderer.invoke(channels.bookMenu, state),
   openProject: (action) => ipcRenderer.invoke(channels.open, action),
   saveProject: (id, files, label) => ipcRenderer.invoke(channels.save, id, files, label),

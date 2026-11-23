@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The main app's entitlements in a build with the Developer ID provisioning profile embedded (#292, docs/signing.md):
+  JIT as everywhere, plus iCloud (CloudKit, Production) and push for the sync backend. Only with the profile: a
+  Developer ID app that claims these without one is killed at launch. Electron's helpers keep entitlements.mac.plist.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.application-identifier</key>
+    <string>DX96FWY9AX.ch.wirhabenzeit.imageflow</string>
+    <key>com.apple.developer.team-identifier</key>
+    <string>DX96FWY9AX</string>
+    <key>com.apple.developer.icloud-container-identifiers</key>
+    <array>
+      <string>iCloud.ch.wirhabenzeit.imageflow</string>
+    </array>
+    <key>com.apple.developer.icloud-services</key>
+    <array>
+      <string>CloudKit</string>
+    </array>
+    <key>com.apple.developer.icloud-container-environment</key>
+    <string>Production</string>
+    <key>com.apple.developer.aps-environment</key>
+    <string>production</string>
+  </dict>
+</plist>

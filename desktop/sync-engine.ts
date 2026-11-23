@@ -28,7 +28,7 @@ import { bookPath, finishPull, preflightPull, readSyncState, stagingFolder, upda
 import type { PullMarker } from './sync-pull';
 import { remoteCommits } from './sync-remote';
 import type { SyncRemote } from './sync-remote';
-import { StoreAccessError } from './sync-store';
+import { StoreAccessError, StoreFullError } from './sync-store';
 import type { StoreAccessReason } from './sync-store';
 
 /**
@@ -76,6 +76,12 @@ export type SyncOutcome = {
   /** Whether the book's files changed, so the host reloads it. */
   changed: boolean;
   /**
+   * Owned originals not uploaded because the remote is full (iCloud storage full), and the store's words for it. The
+   * book's state and previews synced; the snapshot leaves these originals out, so other Macs show them as not uploaded,
+   * and a later sync uploads them once there is room.
+   */
+  notUploaded?: { count: number; message: string };
+  /**
    * With `fetchOriginals`: the originals downloaded after the sync, and why the rest are still pending. A failed
    * download never fails the sync, which had succeeded by then; the next sync or an explicit download retries.
    */
@@ -98,7 +104,9 @@ type Context = { root: string; remote: SyncRemote; book: OpenProject; stale: boo
    * digest, or, for a photo without a file (ADR 0011), the digest of the preview stored for the fact its provider
    * reported and `key`, a key of the content the provider shows now. A photo has one of `path` and `key`.
    */
-  here: Record<string, { path?: string; key?: string; digest: string }> };
+  here: Record<string, { path?: string; key?: string; digest: string }>;
+  /** Originals a push left for later because the remote is full, and the store's words for it. */
+  notUploaded?: { count: number; message: string } };
 
 /**
  * The path in the book of a photo whose original syncs (reach `book`, ADR 0012); undefined for any other photo, whose
@@ -294,11 +302,24 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
   // Counted first, so the status bar can say how many of how many have gone up.
   let uploaded = 0;
   if (uploads.size) context.options.uploadProgress?.({ done: 0, total: uploads.size });
+  // A remote that is full takes no more originals in this sync; the book's state and previews still go up.
+  let full: StoreFullError | undefined;
+  const skipped = new Set<string>();
   for (const [key, { path, digest }] of uploads) {
+    if (full) { skipped.add(key); continue; }
     if (await fileDigest(path) !== digest) throw new Error('A photo changed during sync. Sync again.');
-    await remote.putBlob(key, { file: path }, { sha256: digest });
+    try { await remote.putBlob(key, { file: path }, { sha256: digest }); }
+    catch (error) {
+      if (!(error instanceof StoreFullError)) throw error;
+      full = error;
+      skipped.add(key);
+      continue;
+    }
     context.options.uploadProgress?.({ done: ++uploaded, total: uploads.size });
   }
+  // Left out of the snapshot, as for an original still uploading; the next push finds them missing and tries again.
+  for (const [id, entry] of Object.entries(originals)) if (skipped.has(originalBlobKey(bookId, entry.digest, entry.ext))) delete originals[id];
+  context.notUploaded = full ? { count: skipped.size, message: full.message } : undefined;
   const proxies: StateBlob['proxies'] = {};
   const local = await proxyStore();
   for (const [id, fact] of Object.entries(assets)) {
@@ -335,6 +356,45 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
     localDigests: Object.fromEntries(Object.entries(context.here).filter(([id, { path, digest }]) => path !== undefined && assets[id]?.digest === digest).map(([id, { digest }]) => [id, digest])),
     localKeys: syncedKeys(context, synced, state.photos) });
   return { header, blob };
+}
+
+/**
+ * Owned originals here that a snapshot lacks although it has their photo at this very digest: left out by a push
+ * that found the remote full (or one whose upload never finished). Derived, never recorded, so a sync with nothing
+ * else to push still owes them.
+ */
+async function owedOriginals(context: Context, blob: StateBlob) {
+  const photos = (await captureBookState(context.root)).photos;
+  return Object.entries(photos).flatMap(([id, photo]) => {
+    const owned = syncedOriginalPath(photo);
+    const here = context.here[id];
+    if (owned === undefined || here?.path === undefined || blob.originals[id] || blob.assetsMeta.assets[id]?.digest !== here.digest) return [];
+    return [{ id, path: here.path, digest: here.digest, ext: extname(owned).toLowerCase() }];
+  });
+}
+
+/**
+ * Uploads the originals a snapshot owes (`owedOriginals`), so the push that follows records them; the number that went
+ * up. A remote that is still full keeps the rest owed and says so in the outcome, and no commit is made for nothing.
+ */
+async function uploadOwed(context: Context, bookId: string, blob: StateBlob) {
+  const owed = await owedOriginals(context, blob);
+  let uploaded = 0;
+  if (owed.length) context.options.uploadProgress?.({ done: 0, total: owed.length });
+  for (const [index, { path, digest, ext }] of owed.entries()) {
+    const key = originalBlobKey(bookId, digest, ext);
+    if (await context.remote.hasBlob(key)) { uploaded++; continue; }
+    if (await fileDigest(path) !== digest) throw new Error('A photo changed during sync. Sync again.');
+    try { await context.remote.putBlob(key, { file: path }, { sha256: digest }); }
+    catch (error) {
+      if (!(error instanceof StoreFullError)) throw error;
+      context.notUploaded = { count: owed.length - index, message: error.message };
+      break;
+    }
+    uploaded++;
+    context.options.uploadProgress?.({ done: uploaded, total: owed.length });
+  }
+  return uploaded;
 }
 
 async function recordSynced(root: string, synced: SyncedCommit) {
@@ -512,7 +572,8 @@ export async function syncBook(options: SyncOptions): Promise<SyncOutcome> {
   const registered = AssetFacts.registered(root);
   const context: Context = { root, remote: options.remote, book: options.book, stale: false, options, here: {} };
   try {
-    const outcome = await decideAndSync(context);
+    const decided = await decideAndSync(context);
+    const outcome = context.notUploaded ? { ...decided, notUploaded: context.notUploaded } : decided;
     // The sync has succeeded; originals kept on this Mac come after it and never fail it.
     if (!options.fetchOriginals || (outcome.action === 'diverged' && !outcome.pulled)) return outcome;
     try {
@@ -562,6 +623,11 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
     case 'in-sync': {
       const blob = await fetchState(options.remote, bookId, decision.tip.stateDigest).catch(() => undefined);
       if (blob) await refetchProxies(context, bookId, blob);
+      // Originals an earlier push left out (the remote was full) go up now, with a commit that records them.
+      if (blob && await uploadOwed(context, bookId, blob)) {
+        const { header } = await push(context, [decision.tip.commitId], blob, facts, synced);
+        return { action: 'push', pushed: [header.commitId], changed };
+      }
       // A photo without a file is compared from here on with what this Mac sees of it now, where it reads the photo
       // for the first time or sees it as the snapshot has it.
       const agreed = Object.entries(context.here).filter(([id, { key, digest }]) => key !== undefined && key !== synced!.localKeys?.[id] &&
@@ -578,8 +644,9 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
       await recordSynced(root, { ...adopted, localDigests: Object.fromEntries(same.filter(([, { path }]) => path !== undefined).map(([id, { digest }]) => [id, digest])),
         localKeys: Object.fromEntries(Object.entries(hereKeys(context)).filter(([id]) => photoDigests[id])) });
       await refetchProxies(context, bookId, blob);
-      // Facts this Mac knows better than the snapshot go back with a commit of the same book state.
-      if (factsAhead(hereDigests(context), adopted, hereKeys(context))) {
+      // Facts this Mac knows better than the snapshot go back with a commit of the same book state, and so do
+      // originals the snapshot owes.
+      if (factsAhead(hereDigests(context), adopted, hereKeys(context)) || await uploadOwed(context, bookId, blob)) {
         const { header } = await push(context, [decision.tip.commitId], blob, facts, adopted);
         return { action: 'adopt', pushed: [header.commitId], changed };
       }
@@ -589,7 +656,7 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
       const blob = await pull(context, decision.tip);
       const now = (await readSyncState(root)).lastSynced!;
       // The merge kept the facts of originals that changed here; they go back, never stale ones.
-      if (factsAhead(hereDigests(context), now, hereKeys(context))) {
+      if (factsAhead(hereDigests(context), now, hereKeys(context)) || await uploadOwed(context, bookId, blob)) {
         const { header } = await push(context, [decision.tip.commitId], blob, await readAssetFacts(root), now);
         return { action: 'fast-forward', pushed: [header.commitId], pulled: decision.tip.commitId, changed: true };
       }

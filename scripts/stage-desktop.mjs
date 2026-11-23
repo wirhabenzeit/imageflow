@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import metadata from '../package.json' with { type: 'json' };
 import { buildMcp } from './build-mcp.mjs';
-import { buildMacHeader } from './build-mac-header.mjs';
+import { buildCloudKit, buildMacHeader } from './build-mac-header.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 export const desktop = join(root, '.build', 'desktop');
@@ -53,6 +53,7 @@ export async function stageDesktop({ packaged = false, dev = false, destination 
     packaged ? Promise.resolve() : cp(lightroomPlugin, join(destination, 'ImageFlow.lrplugin'), { recursive: true }),
     buildMcp(join(destination, 'mcp-bridge.cjs')),
     buildMacHeader(destination),
+    buildCloudKit(destination),
     build(mainBuild(destination, updateTest)),
   ]);
 }

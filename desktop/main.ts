@@ -58,6 +58,8 @@ import { SettingsStore } from './settings';
 import { FileCredentialStore, MemoryCredentialStore } from './sync-credentials';
 import type { CredentialStore } from './sync-credentials';
 import { forgetOtherCredentials, registerSyncSettings, syncFlag, syncPatchError } from './sync-settings';
+import { loadCloudKitNative } from './sync-store-cloudkit';
+import type { CloudKitNative } from './sync-store-cloudkit';
 import { AuthoringError } from './authoring-service';
 import { createMcpConnection } from './mcp-connection';
 import { addToCodex, bridgeLaunch, claudeCodeCommand, claudeExtension, findCodex, skillArchive } from './mcp-setup';
@@ -133,7 +135,11 @@ let settings: SettingsStore;
 const syncOffered = syncFlag();
 // The one backend every book syncs through on this Mac (`AppSettings.sync`): a bucket with the credentials stored for
 // it (read at each use, so a key saved in Settings → Sync counts at once) and the commit headers this Mac has read.
-const syncService = new SyncService(() => (syncOffered ? settings?.value.sync : undefined), { credentials: () => syncCredentials(), cacheFolder: () => app.getPath('userData') });
+// iCloud (#292) goes through the CloudKit addon, loaded once; it reports a build without the entitlements and never
+// touches CloudKit there.
+let cloudKitNative: CloudKitNative | undefined | null = null;
+const cloudKit = () => (cloudKitNative === null ? (cloudKitNative = loadCloudKitNative()) : cloudKitNative);
+const syncService = new SyncService(() => (syncOffered ? settings?.value.sync : undefined), { credentials: () => syncCredentials(), cacheFolder: () => app.getPath('userData'), cloudKit });
 let recents: RecentDocuments;
 let library: TemplateLibrary;
 let trust: TemplateTrust;
@@ -1167,12 +1173,15 @@ async function openFromSync(owner: BrowserWindow | undefined) {
   if (document && settings.value.keepOriginals !== false) void document.downloadSyncedOriginals().catch((error) => report(document.window, error));
 }
 
+/** System Settings → Apple Account → iCloud, where its storage is managed; the Apple Account pane where that scene is unknown. */
+const manageICloudStorage = 'x-apple.systempreferences:com.apple.systempreferences.AppleIDSettings:icloud';
 async function syncCommand(document: DocumentSession, action: SyncAction) {
   if (!syncOffered) throw new Error('Sync is not available.');
   if (action === 'sync' || action === 'start') await syncDocument(document, action === 'start');
   else if (action === 'download') await document.downloadSyncedOriginals();
   else if (action === 'cancel-download') document.cancelDownload();
   else if (action === 'stop') await stopSyncingDocument(document);
+  else if (action === 'manage-storage') await shell.openExternal(manageICloudStorage);
   else throw new Error('Unknown sync action.');
 }
 
@@ -2083,7 +2092,7 @@ void app.whenReady().then(async () => {
     if (!document || quitting) return { error: 'Request is only available to an open book.' };
     // Without the development flag no sync action does anything, not even writing a book's sync record.
     if (!syncOffered) return { error: 'Sync is not available.' };
-    if (action !== 'sync' && action !== 'download' && action !== 'cancel-download' && action !== 'start' && action !== 'stop') return { error: 'Unknown sync action.' };
+    if (action !== 'sync' && action !== 'download' && action !== 'cancel-download' && action !== 'start' && action !== 'stop' && action !== 'manage-storage') return { error: 'Unknown sync action.' };
     try { await syncCommand(document, action); return { value: undefined }; }
     catch (error) { return { error: errorMessage(error) }; }
   });
@@ -2117,7 +2126,8 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.restartUpdate, (event) => { if (updateOwner(event) && !preparingQuit && !quitting) updates.restart(); });
   // A bucket and its key are saved in Settings → Sync; every open book then looks at the remote again, also when only
   // the key changed (a corrected key clears "Sign-in needed" without a restart).
-  registerSyncSettings({ ipcMain, owner: settingsOwner, settings, credentials: syncCredentials,
+  registerSyncSettings({ ipcMain, owner: settingsOwner, settings, credentials: syncCredentials, cloudKit: async () => cloudKit()?.status(),
+    usage: async () => (await syncService.connect()).remote.usage(),
     changed: (value) => { syncBackendChanged(); for (const owner of appWindows()) if (!owner.isDestroyed()) owner.webContents.send(channels.settingsChanged, value); } });
   ipcMain.handle(channels.settings, (event) => appOwner(event) ? { value: settings.value } : { error: 'Request is only available to an app window.' });
   ipcMain.handle(channels.updateSettings, async (event, patch: unknown) => {

@@ -6,7 +6,7 @@ import type { ControlItem } from './controls';
 import type { PageSide, ProjectFiles, Values } from './project';
 import type { AuthoringCheckRequest, AuthoringCheckResult } from './authoring-check';
 import type { ImportMode, SourceStatus } from './source-locations';
-import type { AppSettings, S3SyncBackend, SettingsPane } from './settings';
+import type { AppSettings, ICloudSyncBackend, S3SyncBackend, SettingsPane } from './settings';
 import type { LibraryEntry, LibraryImportResult, NewBookChoice } from './library';
 import type { CoverFormat, CoverResolution } from './cover';
 
@@ -51,7 +51,7 @@ export const channels = {
   syncState: 'project:sync-state', syncChanged: 'project:sync-changed', syncAction: 'project:sync-action',
   syncOffered: 'app:sync-offered', chooseSyncFolder: 'app:choose-sync-folder',
   lightroom: 'lightroom:state', lightroomChanged: 'lightroom:changed', lightroomInstall: 'lightroom:install', lightroomLaunch: 'lightroom:launch',
-  syncBackend: 'sync:backend', saveSyncBackend: 'sync:save-backend', testSyncConnection: 'sync:test-connection',
+  syncBackend: 'sync:backend', saveSyncBackend: 'sync:save-backend', testSyncConnection: 'sync:test-connection', syncUsage: 'sync:usage',
 } as const;
 
 export type OpenAction = 'open' | 'new' | 'reload';
@@ -82,9 +82,15 @@ export type SyncStatus = {
  */
 export type SyncView = { folder: string; status?: SyncStatus; syncing?: boolean; message?: string; downloading?: { done: number; total: number };
   /** Originals a running sync has uploaded, of those it uploads. */
-  uploading?: { done: number; total: number } };
+  uploading?: { done: number; total: number };
+  /**
+   * The remote was full at the last sync (iCloud storage full), in the store's words: `notUploaded` owned originals
+   * left for later while the book synced, or none when the sync itself failed because its commit or a preview did not
+   * fit. `manage` when the remote is iCloud, whose storage System Settings manages (`manage-storage`).
+   */
+  storageFull?: { message: string; notUploaded?: number; manage?: true } };
 /** `start` makes the book sync on this Mac (asking first when it last synced somewhere else), `stop` stops that. */
-export type SyncAction = 'sync' | 'download' | 'cancel-download' | 'start' | 'stop';
+export type SyncAction = 'sync' | 'download' | 'cancel-download' | 'start' | 'stop' | 'manage-storage';
 // The main canvas shows spreads in one vertical column, or a row-by-row grid with this many columns.
 export type CanvasLayout = { mode: 'vertical' | 'grid'; columns: number };
 export const gridColumns = [1, 2, 3, 4] as const;
@@ -130,9 +136,13 @@ export type Result<T> = { value: T } | { error: string; code?: 'BOOK_BUSY' };
  * Settings → Sync (#281), behind the development flag (`available`). The renderer sends an access key to the main
  * process when it is entered and never gets it back: only whether one is stored, and the last characters of its ID.
  */
-export type SyncBackendState = { available: boolean; credentials?: { stored: true; accessKeyEnd: string } };
+/**
+ * `icloud` is there only in a build entitled to iCloud (#292): whether this Mac can use it now, and why not (signed
+ * out, iCloud off for ImageFlow, restricted) when it cannot.
+ */
+export type SyncBackendState = { available: boolean; credentials?: { stored: true; accessKeyEnd: string }; icloud?: { available: boolean; message?: string } };
 export type SyncCredentialsInput = { accessKeyId: string; secretAccessKey: string };
-export type SyncBackendRequest = { backend: S3SyncBackend; credentials?: SyncCredentialsInput };
+export type SyncBackendRequest = { backend: S3SyncBackend; credentials?: SyncCredentialsInput } | { backend: ICloudSyncBackend };
 /** What Test Connection found: see `ConnectionReport` in desktop/sync-store-s3.ts. */
 export type SyncConnectionReport = { conditionalWrites: 'enforced' | 'ignored' | 'unsupported'; checksums: 'verified' | 'not-verified'; addressing: 'path' | 'virtual' };
 export type HistoryState = { undo?: string; redo?: string };
@@ -253,6 +263,8 @@ export type DesktopApi = {
   /** Saves the backend with credentials when given (otherwise those stored for it); null removes both. */
   saveSyncBackend(request: SyncBackendRequest | null): Promise<Result<SyncBackendState>>;
   testSyncConnection(request: SyncBackendRequest): Promise<Result<SyncConnectionReport>>;
+  /** What the books stored through the configured backend take up there, in bytes (Settings → Sync shows it for iCloud). */
+  syncUsage(): Promise<Result<{ bytes: number; books: number }>>;
   // The window's panel and canvas layout state, so the View menu can show it.
   setBookMenuState(state: BookMenuState): Promise<void>;
   openProject(action: OpenAction): Promise<Result<ProjectSummary | null>>;

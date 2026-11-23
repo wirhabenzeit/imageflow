@@ -21,5 +21,8 @@ export function macBuildOptions({ env = process.env, arch = process.arch, hostAr
       appleApiIssuer: value('APPLE_API_ISSUER'),
     };
   }
-  return { arch, identity, keychain: value('APPLE_SIGNING_KEYCHAIN'), notarization };
+  // The Developer ID provisioning profile that lets the app use iCloud (#292); optional, and only with an identity.
+  const provisioningProfile = value('APPLE_PROVISIONING_PROFILE');
+  if (provisioningProfile && !identity) throw new Error('APPLE_PROVISIONING_PROFILE needs APPLE_SIGNING_IDENTITY: an ad-hoc build cannot use iCloud.');
+  return { arch, identity, keychain: value('APPLE_SIGNING_KEYCHAIN'), ...(provisioningProfile ? { provisioningProfile: resolve(provisioningProfile) } : {}), notarization };
 }

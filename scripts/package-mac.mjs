@@ -80,7 +80,7 @@ async function packageApp() {
         }],
       },
       // Agents run the MCP bridge with ImageFlow's executable in Node mode; keep it a plain file outside app.asar.
-      asar: { unpackDir: 'node_modules/@img', unpack: '**/{mcp-bridge.cjs,mac-header.node}' },
+      asar: { unpackDir: 'node_modules/@img', unpack: '**/{mcp-bridge.cjs,mac-header.node,cloudkit.node}' },
       // Document icons and the compiled Icon Composer app icon; the classic app icon comes from `icon` below.
       // Sources and generator: resources/brand/, npm run build:icons.
       // The Lightroom Classic plugin goes to Contents/Resources/ImageFlow.lrplugin, which Settings installs from (ADR 0011).
@@ -88,7 +88,8 @@ async function packageApp() {
       icon: join(root, 'resources', 'ImageFlow.icns'),
       prune: false,
       overwrite: true,
-      osxSign: macSigningOptions(root, options),
+      // A fixture has another bundle ID, which the profile does not cover.
+      osxSign: macSigningOptions(root, fixture ? { ...options, provisioningProfile: undefined } : options),
     });
     const app = join(output, 'ImageFlow.app');
     console.log('Mac app: ' + app);
@@ -102,5 +103,5 @@ if (options.notarization) {
   await notarizeMacRelease({ root, version: metadata.version, ...options }, packageApp);
 } else {
   const app = await packageApp();
-  if (options.identity) await verifyMacSigning(app, options.identity);
+  if (options.identity) await verifyMacSigning(app, options.identity, { icloud: !fixture && !!options.provisioningProfile });
 }

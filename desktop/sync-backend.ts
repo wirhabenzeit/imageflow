@@ -6,6 +6,10 @@ import { FileHeaderCache } from './sync-header-cache';
 import type { CommitHeaderCache } from './sync-header-cache';
 import { StoreRemote } from './sync-remote';
 import { StoreAccessError } from './sync-store';
+import { CloudKitAccessError, CloudKitStore } from './sync-store-cloudkit';
+import type { CloudKitNative } from './sync-store-cloudkit';
+import { FileKeyIndexCache } from './sync-key-index';
+import type { KeyIndexCache } from './sync-key-index';
 import { FolderStore } from './sync-store-folder';
 import { endpointError, S3Store } from './sync-store-s3';
 import type { S3StoreOptions } from './sync-store-s3';
@@ -65,6 +69,9 @@ export type SyncRemoteDependencies = {
   /** Where commit headers that were read are kept (`<userData>/Sync Cache` in the app). */
   cacheFolder?: string;
   headerCache?: CommitHeaderCache;
+  keyIndex?: KeyIndexCache;
+  /** The CloudKit addon of this build (`loadCloudKitNative`), or a fake in tests; without it iCloud is unavailable. */
+  cloudKit?: () => CloudKitNative | undefined;
   /** Retries, timeouts and page size of the S3 store, for tests. */
   s3?: Partial<Pick<S3StoreOptions, 'retries' | 'retryDelay' | 'timeout' | 'pageSize'>>;
 };
@@ -100,8 +107,57 @@ export function s3Opener(backend: S3SyncBackend, { credentials, cacheFolder, hea
   };
 }
 
+/**
+ * Opens the iCloud remote at each use (#292): checks that this build may use CloudKit and that the account is available,
+ * then reads the iCloud user. The remote belongs to that user: when another Apple ID signs in, the remote is made again,
+ * and the key indexes of the former one are forgotten, so nothing this Mac learned about one account's database is
+ * used with another's. Its identity (`remote.json`) is then the other account's, and every book that synced reads as
+ * synced somewhere else and is asked about. Throws a `CloudKitAccessError` when iCloud cannot be used now.
+ */
+export function cloudKitOpener({ cloudKit, cacheFolder, headerCache, keyIndex, namespace }: { cloudKit?: () => CloudKitNative | undefined; cacheFolder?: () => string;
+  headerCache?: CommitHeaderCache; keyIndex?: KeyIndexCache; namespace?: string }) {
+  const headers = headerCache ?? (cacheFolder ? new FileHeaderCache(join(cacheFolder(), 'Sync Cache')) : undefined);
+  const indexes = keyIndex ?? (cacheFolder ? new FileKeyIndexCache(join(cacheFolder(), 'Sync Cache')) : undefined);
+  let store: { native: CloudKitNative; store: CloudKitStore; user?: Promise<string> } | undefined;
+  let built: { user: string; remote: StoreRemote<CloudKitStore> } | undefined;
+  return async () => {
+    const native = cloudKit?.();
+    if (!native) throw new CloudKitAccessError('notEntitled');
+    if (store?.native !== native) {
+      const opened: NonNullable<typeof store> = { native, store: new CloudKitStore(native, { namespace }) };
+      store = opened;
+      // The user is read again only after CloudKit says the account changed (also when it did not, which costs one
+      // read). Commits check the user each time (`beforeCommit` below), so a late event never lets one through.
+      await opened.store.onAccountChange(() => { opened.user = undefined; }).catch(() => {});
+    }
+    const current = store;
+    const status = await current.store.status();
+    if (!status.entitled) throw new CloudKitAccessError('notEntitled');
+    if (status.accountStatus !== 'available') throw new CloudKitAccessError(status.accountStatus);
+    const reading = current.user ??= current.store.userRecordId();
+    reading.catch(() => { if (current.user === reading) current.user = undefined; });
+    const user = await reading;
+    if (built?.user !== user) {
+      // The identity the former remote read last is the one its indexes are kept under.
+      const former = built && await built.remote.knownIdentity();
+      if (former) await indexes?.forget(former).catch((error) => console.warn('ImageFlow could not forget the keys of the former iCloud account', error));
+      // A sync still running when another Apple ID signs in must not finish in that account's database: before each
+      // commit, the user is read again, and a commit for another user is refused.
+      const beforeCommit = async () => {
+        if (await current.store.userRecordId() !== user) {
+          current.user = undefined;
+          throw new StoreAccessError('unavailable', 'The iCloud account changed during the sync. Sync again.');
+        }
+      };
+      built = { user, remote: new StoreRemote(current.store, { headerCache: headers, keyIndex: indexes, beforeCommit }) };
+    }
+    return built.remote;
+  };
+}
+
 /** The sync remote of a backend setting, once. */
 export async function syncRemoteFor(backend: SyncBackend, dependencies: SyncRemoteDependencies): Promise<StoreRemote> {
   if (backend.kind === 'folder') return new StoreRemote(new FolderStore(backend.path));
+  if (backend.kind === 'icloud') return cloudKitOpener({ ...dependencies, cacheFolder: dependencies.cacheFolder ? () => dependencies.cacheFolder! : undefined })();
   return s3Opener(backend, { ...dependencies, credentials: () => dependencies.credentials, cacheFolder: dependencies.cacheFolder ? () => dependencies.cacheFolder! : undefined })();
 }

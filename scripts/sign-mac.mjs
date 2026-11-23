@@ -15,4 +15,4 @@ if (!options.identity) throw new Error('APPLE_SIGNING_IDENTITY is required to si
 const app = packagedMacApp(root, options.arch);
 await verifyMacVersion(app, metadata.version);
 await sign({ app, platform: 'darwin', version: metadata.devDependencies.electron, ...macSigningOptions(root, options) });
-await verifyMacSigning(app, options.identity);
+await verifyMacSigning(app, options.identity, { icloud: !!options.provisioningProfile });

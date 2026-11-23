@@ -9,7 +9,9 @@ export type SettingsPane = 'general' | 'sources' | 'agents' | 'sync';
  */
 export type FolderSyncBackend = { kind: 'folder'; path: string };
 export type S3SyncBackend = { kind: 's3'; endpoint: string; region: string; bucket: string; prefix?: string; addressing?: 'path' | 'virtual' };
-export type SyncBackend = FolderSyncBackend | S3SyncBackend;
+/** The user's private iCloud database (#292): nothing to set up on a Mac signed in to iCloud, in a build entitled to it. */
+export type ICloudSyncBackend = { kind: 'icloud' };
+export type SyncBackend = FolderSyncBackend | S3SyncBackend | ICloudSyncBackend;
 
 // App preferences belong to this computer, independently of any open book. `agentAccess` remembers that the user
 // allowed agents to use open books, so the connection starts again with the app; only the Agents pane changes it.

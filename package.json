@@ -22,6 +22,7 @@
     "test:packaged": "npm run package:mac && npm run test:packaged:existing",
     "package:mac:release": "npm run build && node scripts/package-mac.mjs --release",
     "notarize:mac": "node scripts/notarize-mac.mjs",
+    "test:cloudkit": "node scripts/test-cloudkit.mjs",
     "test:packaged:existing": "node scripts/smoke-document-registration.mjs && node scripts/smoke-linked-sources.mjs --packaged && node scripts/smoke-desktop.mjs --packaged && node scripts/smoke-draft.mjs --packaged && node scripts/smoke-mcp.mjs --packaged && node scripts/smoke-mcp-context.mjs --packaged --visible",
     "generate:authoring": "node scripts/generate-authoring.mjs",
     "screenshots:templates": "npm run build && node scripts/stage-desktop.mjs && node scripts/generate-template-screenshots.mjs",

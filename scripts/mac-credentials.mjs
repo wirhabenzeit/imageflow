@@ -55,7 +55,13 @@ export async function withMacCredentials({ mode, env = process.env, temporary = 
     await security(['set-key-partition-list', '-S', 'apple-tool:,apple:,codesign:', '-s', '-k', password, keychain]);
     await security(['list-keychains', '-d', 'user', '-s', keychain, ...previous]);
     const childEnv = { ...env, APPLE_SIGNING_IDENTITY: identity, APPLE_SIGNING_KEYCHAIN: keychain };
-    for (const name of ['APPLE_CERTIFICATE_PASSWORD', 'APPLE_CERTIFICATE_P12_BASE64', 'APPLE_API_KEY_BASE64', 'APPLE_API_KEY', 'APPLE_API_KEY_ID', 'APPLE_API_ISSUER']) delete childEnv[name];
+    for (const name of ['APPLE_CERTIFICATE_PASSWORD', 'APPLE_CERTIFICATE_P12_BASE64', 'APPLE_API_KEY_BASE64', 'APPLE_API_KEY', 'APPLE_API_KEY_ID', 'APPLE_API_ISSUER',
+      'APPLE_PROVISIONING_PROFILE_BASE64', 'APPLE_PROVISIONING_PROFILE']) delete childEnv[name];
+    // The Developer ID provisioning profile (#292), when the release has one: signing embeds it, which lets the app use iCloud.
+    if (mode === 'sign' && env.APPLE_PROVISIONING_PROFILE_BASE64?.trim()) {
+      childEnv.APPLE_PROVISIONING_PROFILE = join(folder, 'ImageFlow.provisionprofile');
+      await writeFile(childEnv.APPLE_PROVISIONING_PROFILE, decodeSecret(env, 'APPLE_PROVISIONING_PROFILE_BASE64'), { mode: 0o600 });
+    }
     if (mode === 'notarize') {
       childEnv.APPLE_API_KEY = join(folder, 'AuthKey.p8');
       await writeFile(childEnv.APPLE_API_KEY, decodeSecret(env, 'APPLE_API_KEY_BASE64'), { mode: 0o600 });
