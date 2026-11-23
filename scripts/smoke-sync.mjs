@@ -1,8 +1,9 @@
-// Manual sync through the Mac's sync backend (#251, #280), end to end in the app with the development flag: the folder
-// backend chosen in Settings, Start Syncing, Open Synced Book (an untrusted copy on "another Mac"), a normal sync that
-// reloads the editor, a sync that fails after its pull and still reloads it, the tip chooser with five tips including
-// Cancel, the network question after a pulled template change in a trusted book, and a changed backend, which asks
-// once before a synced book starts a new history there. Both "Macs" are windows of one app with one backend.
+// Sync through the Mac's sync backend (#251, #280, #282), end to end in the app with the development flag: the folder
+// backend chosen in Settings, Start Syncing, a trusted duplicate that starts syncing by itself when it opens and
+// uploads its originals after the commit, Open Synced Book (an untrusted copy on "another Mac"), a normal sync that
+// reloads the editor, a pulled template change in a trusted book (allowed, with a notice and no question), a sync that
+// fails after its pull and still reloads it, the tip chooser with five tips including Cancel, and a changed backend,
+// which asks once before a synced book starts a new history there. The "Macs" are windows of one app with one backend.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -17,6 +18,7 @@ import { copySample } from '../desktop/sample-book.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await realpath(await mkdtemp(join(root, '.build/sync-smoke-')));
 const desktopBook = join(work, 'Desktop', 'Sync Book.imageflow');
+const duplicateBook = join(work, 'Desktop', 'Sync Book Copy.imageflow');
 const laptopBook = join(work, 'Laptop', 'Sync Book.imageflow');
 const folder = join(work, 'Sync Folder');
 const otherFolder = join(work, 'Other Sync Folder');
@@ -89,7 +91,9 @@ try {
       const options = args.at(-1);
       globalThis.syncPrompts.push({ message: options.message, detail: options.detail, buttons: options.buttons, cancelId: options.cancelId, window: args.length > 1 ? args[0].id : undefined });
       const response = globalThis.syncAnswers[options.message];
-      return { response: response === 'cancel' ? options.cancelId : response ?? 0, checkboxChecked: false };
+      // `{ not }` picks the first button that is neither that one nor Cancel.
+      const chosen = response && typeof response === 'object' ? options.buttons.findIndex((button, index) => button !== response.not && index !== options.cancelId) : response;
+      return { response: chosen === 'cancel' ? options.cancelId : chosen ?? 0, checkboxChecked: false };
     };
   });
   const desktop = await testBook(app, desktopBook);
@@ -124,10 +128,39 @@ try {
   const bookId = (await current(desktop)).project.bookId;
   assert.ok(bookId, 'the first sync gave the book its lineage ID');
   assert.equal((await tips(bookId)).length, 1);
+  // Its owned originals went up after the commit, in the background.
+  for (let attempt = 0; !(await readdir(join(folder, 'books', bookId, 'originals')).catch(() => [])).length; attempt++) {
+    assert.ok(attempt < 400, 'the originals upload after the commit');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+
+  // A duplicate of the trusted book is trusted too and has no sync state: it starts syncing by itself when it opens,
+  // without a question, and its originals follow the commit.
+  await choosePaths({ save: duplicateBook });
+  const beforeDuplicate = new Set(app.windows());
+  assert.deepEqual(await desktop.evaluate(() => window.imageflow.saveCopy(true)), { value: null });
+  let duplicate;
+  for (let attempt = 0; !(duplicate = app.windows().find((page) => !beforeDuplicate.has(page) && page.url() === 'imageflow://editor/')); attempt++) {
+    assert.ok(attempt < 400, 'the duplicate opens');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  await ready(duplicate);
+  await statusIs(duplicate, 'in-sync');
+  const duplicateId = (await current(duplicate)).project.bookId;
+  assert.notEqual(duplicateId, bookId);
+  assert.equal((await tips(duplicateId)).length, 1, 'the duplicate synced on its own');
+  for (let attempt = 0; !(await readdir(join(folder, 'books', duplicateId, 'originals')).catch(() => [])).length; attempt++) {
+    assert.ok(attempt < 400, 'the duplicate’s originals upload after its commit');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal(await timesAsked(elsewhereQuestion, await windowId(duplicate)), 0);
+  await duplicate.close();
 
   // Open Synced Book on the "laptop": it lists the configured backend, and makes an untrusted copy, which asks before
   // reaching the template's sites.
   await answer(trustQuestion, 1);
+  // The remote holds the duplicate too: the laptop opens the desktop's book.
+  await answer('Which book do you want to open?', { not: 'Sync Book Copy' });
   await choosePaths({ open: '/nonexistent', save: laptopBook });
   const beforeLaptop = new Set(app.windows());
   await app.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('open-sync-folder').click());
@@ -157,16 +190,26 @@ try {
   await captionIs(desktop, 'shore', 'From the laptop');
   await statusIs(desktop, 'in-sync');
 
-  // A pulled template change in a trusted book: the sites it newly declares are asked about all the same.
+  // A pulled template change in a trusted book: only trusted books sync (#282), so the site it newly declares is
+  // allowed as for the book's own edits, and named in a notice instead of a question.
   const laptopIndex = join(laptopBook, 'template', 'index.tsx');
   const laptopTemplate = await readFile(laptopIndex, 'utf8');
   assert.ok(laptopTemplate.includes('network: [mapOrigin, elevationOrigin]'));
   await writeFile(laptopIndex, laptopTemplate.replace('network: [mapOrigin, elevationOrigin]', "network: [mapOrigin, elevationOrigin, 'https://sync-smoke.example.org']"));
   assert.deepEqual(await sync(laptop), { value: undefined });
-  await answer(trustQuestion, 0);
+  await app.evaluate(({ BrowserWindow }, id) => {
+    globalThis.syncNotices = [];
+    const contents = BrowserWindow.fromId(id).webContents;
+    const send = contents.send.bind(contents);
+    contents.send = (channel, ...args) => { if (channel === 'app:notice') globalThis.syncNotices.push(String(args[0])); return send(channel, ...args); };
+  }, desktopWindow);
   assert.deepEqual(await sync(desktop), { value: undefined });
-  const asked = await waitForPrompt((prompt) => prompt.message === trustQuestion && prompt.window === desktopWindow && prompt.detail.includes('sync-smoke.example.org'));
-  assert.ok(asked, 'the trusted desktop asks about the site the pulled template added');
+  for (let attempt = 0; !(await app.evaluate(() => globalThis.syncNotices)).some((text) => text.includes('sync-smoke.example.org')); attempt++) {
+    assert.ok(attempt < 600, 'the desktop names the site the pulled template added: ' + JSON.stringify(await app.evaluate(() => globalThis.syncNotices)));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal((await prompts()).filter((prompt) => prompt.message === trustQuestion && prompt.window === desktopWindow && prompt.detail.includes('sync-smoke.example.org')).length, 0,
+    'and asks nothing about it');
 
   // A sync that fails after its pull: the desktop's original changed here, so after taking the laptop's caption it
   // pushes its new facts, which the sync folder refuses. The editor still shows what was pulled.
@@ -240,6 +283,6 @@ try {
   const otherTips = await readdir(join(otherFolder, 'books', bookId, 'snapshots'));
   assert.equal(otherTips.filter((name) => name.endsWith('.json')).length, 1, 'a new history on the other backend');
   assert.ok(JSON.parse(await readFile(join(otherFolder, 'remote.json'), 'utf8')).remoteId, 'the backend has its identity');
-  console.log('The folder backend in Settings, Start Syncing, Open Synced Book, reloads after sync and after a failed push, the five-tip chooser, the pulled-template network question and a changed backend passed.');
+  console.log('The folder backend in Settings, Start Syncing, a duplicate that syncs on open with originals after the commit, Open Synced Book, reloads after sync and after a failed push, the five-tip chooser, a pulled template change in a trusted book and a changed backend passed.');
 } catch (error) { console.error(stderr.join('\n')); throw error; }
 finally { await closeApp(app); await rm(work, { recursive: true, force: true }); }

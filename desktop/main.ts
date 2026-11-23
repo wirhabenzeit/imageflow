@@ -1358,7 +1358,8 @@ function updateMenus() {
   const standing = document && !document.closing ? document.bookSync : 'unconfigured';
   const syncs = standing === 'syncing' || standing === 'unavailable';
   const syncEnabled: Record<string, boolean> = { 'sync-now': state.document && state.writable && syncs && !sync?.syncing,
-    'sync-download': !!sync && !sync.syncing && !sync.downloading && (sync.status?.pendingOriginals ?? 0) > 0,
+    // Originals another Mac is still uploading cannot be downloaded yet.
+    'sync-download': !!sync && !sync.syncing && !sync.downloading && (sync.status?.pendingOriginals ?? 0) > (sync.status?.notUploaded ?? 0),
     'sync-start': state.document && state.writable && (standing === 'off' || standing === 'stopped' || standing === 'elsewhere'),
     'sync-stop': syncs && !sync?.syncing, 'sync-setup': !syncService.configured, 'open-sync-folder': syncService.configured };
   for (const [id, enabled] of Object.entries(syncEnabled)) { const item = menu?.getMenuItemById(id); if (item) item.enabled = enabled; }
