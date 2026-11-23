@@ -8,7 +8,7 @@ import { cloudKitAvailability } from './sync-store-cloudkit';
 import type { CloudKitStatus } from './sync-store-cloudkit';
 import type { SettingsStore } from './settings';
 import { channels } from '../src/desktop';
-import type { Result, SyncBackendState, SyncConnectionReport, SyncCredentialsInput } from '../src/desktop';
+import type { Result, SyncBackendState, SyncCleanUpPlan, SyncConnectionReport, SyncCredentialsInput, SyncStorage } from '../src/desktop';
 import type { AppSettings, S3SyncBackend, SyncBackend } from '../src/settings';
 
 /**
@@ -88,12 +88,16 @@ export async function chooseBooksPatch(previous: SyncBackend | undefined, next: 
   return { syncBooksUnchosen: (await booksToChoose?.().catch(() => 1) ?? 0) > 0 ? true as const : null };
 }
 
-export function registerSyncSettings({ ipcMain, owner, settings, credentials, cloudKit, usage, changed, booksToChoose }: {
+export function registerSyncSettings({ ipcMain, owner, settings, credentials, cloudKit, usage, cleanUp, changed, booksToChoose }: {
   ipcMain: IpcMain;
   /** What the CloudKit addon says about this build and account; undefined where there is no addon (#292). */
   cloudKit?: () => Promise<CloudKitStatus | undefined>;
-  /** What the books take up on the configured remote (`SyncRemote.usage`). */
-  usage?: () => Promise<{ bytes: number; books: unknown[] }>;
+  /** What the books take up on the configured remote, per book (`storageReport`), computed when asked. */
+  usage?: () => Promise<SyncStorage>;
+  /** Clean Up (#285): `plan` finds what it would delete and deletes nothing; `run` deletes what the last plan found. */
+  cleanUp?: { plan: () => Promise<SyncCleanUpPlan>;
+    /** Asks in the main process, on the window that asked, then deletes; `cancelled` when the user said no. */
+    run: (event: IpcMainInvokeEvent) => Promise<{ bytes: number; objects: number } | { cancelled: true }> };
   owner: (event: IpcMainInvokeEvent) => unknown;
   settings: SettingsStore;
   credentials: () => CredentialStore;
@@ -156,8 +160,16 @@ export function registerSyncSettings({ ipcMain, owner, settings, credentials, cl
 
   ipcMain.handle(channels.syncUsage, (event) => guard(event, async () => {
     if (!usage || !usableBackend(settings.value.sync)) throw new Error('Sync is off on this Mac.');
-    const { bytes, books } = await usage();
-    return { bytes, books: books.length };
+    return usage();
+  }));
+
+  ipcMain.handle(channels.syncCleanUpPlan, (event) => guard(event, async () => {
+    if (!cleanUp || !usableBackend(settings.value.sync)) throw new Error('Sync is off on this Mac.');
+    return cleanUp.plan();
+  }));
+  ipcMain.handle(channels.syncCleanUp, (event) => guard(event, async () => {
+    if (!cleanUp || !usableBackend(settings.value.sync)) throw new Error('Sync is off on this Mac.');
+    return cleanUp.run(event);
   }));
 
   ipcMain.handle(channels.testSyncConnection, (event, request: unknown) => guard(event, async (): Promise<SyncConnectionReport> => {

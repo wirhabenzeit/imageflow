@@ -1,20 +1,14 @@
 import { useEffect, useState } from 'react';
-import type { DesktopApi, SyncBackendState, SyncConnectionReport, SyncSetupBook } from './desktop';
+import type { DesktopApi, SyncBackendState, SyncCleanUpPlan, SyncConnectionReport, SyncSetupBook, SyncStorage } from './desktop';
 import type { AppSettings, S3SyncBackend, SyncBackend } from './settings';
 import { splitEndpoint } from './sync-endpoint';
+import { cleanUpText, formatStorage, storageSummary } from './sync-storage-text';
+
+export { cleanUpText, formatStorage, storageSummary };
 
 type Fields = { endpoint: string; region: string; bucket: string; prefix: string; addressing: '' | 'path' | 'virtual'; accessKeyId: string; secretAccessKey: string };
 const fieldsOf = (backend?: S3SyncBackend): Fields => ({ endpoint: backend?.endpoint ?? '', region: backend?.region ?? '', bucket: backend?.bucket ?? '',
   prefix: backend?.prefix ?? '', addressing: backend?.addressing ?? '', accessKeyId: '', secretAccessKey: '' });
-
-/** A size as Finder and iCloud show it: decimal units, one decimal from MB on. */
-export function formatStorage(bytes: number) {
-  if (bytes < 1000) return bytes + ' bytes';
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let value = bytes / 1000, unit = 0;
-  while (value >= 1000 && unit < units.length - 1) { value /= 1000; unit++; }
-  return (unit === 0 ? Math.round(value) : Math.round(value * 10) / 10) + ' ' + units[unit];
-}
 
 /** What Test Connection found, in words. */
 export function describeReport(report: SyncConnectionReport) {
@@ -53,17 +47,36 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
     return () => { active = false; };
   }, [api, configuredKey]);
 
-  // What the books take up in iCloud: asked when iCloud is the backend, from the key indexes after the first time.
-  const [usage, setUsage] = useState<{ bytes: number; books: number } | { error: string } | 'counting'>();
-  const usesICloud = settings?.sync?.kind === 'icloud';
-  useEffect(() => {
-    if (!api || !usesICloud) { setUsage(undefined); return; }
-    let active = true;
+  // What the books take up on the remote, and Clean Up (#285): computed only when asked, since over a bucket each book
+  // is a listing of everything it stores. Forgotten when the backend changes.
+  const [usage, setUsage] = useState<SyncStorage | { error: string } | 'counting'>();
+  const [cleanUp, setCleanUp] = useState<{ state: 'looking' } | { state: 'found'; plan: SyncCleanUpPlan } | { state: 'cleaning'; plan: SyncCleanUpPlan }
+    | { state: 'done'; text: string } | { state: 'failed'; text: string }>();
+  useEffect(() => { setUsage(undefined); setCleanUp(undefined); }, [configuredKey, settings?.sync?.kind]);
+  async function countStorage() {
+    if (!api) return;
     setUsage('counting');
-    void api.syncUsage().then((answer) => { if (active) setUsage('value' in answer ? answer.value : { error: answer.error }); },
-      () => { if (active) setUsage({ error: 'ImageFlow could not complete the request.' }); });
-    return () => { active = false; };
-  }, [api, usesICloud]);
+    const answer = await api.syncUsage().catch(() => ({ error: 'ImageFlow could not complete the request.' }));
+    setUsage('value' in answer ? answer.value : { error: answer.error });
+  }
+  async function findCleanUp() {
+    if (!api) return;
+    setCleanUp({ state: 'looking' });
+    const answer = await api.syncCleanUpPlan().catch(() => ({ error: 'ImageFlow could not complete the request.' }));
+    setCleanUp('value' in answer ? { state: 'found', plan: answer.value } : { state: 'failed', text: answer.error });
+  }
+  async function runCleanUp(plan: SyncCleanUpPlan) {
+    if (!api) return;
+    setCleanUp({ state: 'cleaning', plan });
+    const answer = await api.syncCleanUp().catch(() => ({ error: 'ImageFlow could not complete the request.' }));
+    if ('error' in answer) { setCleanUp({ state: 'failed', text: answer.error }); return; }
+    // Not confirmed in the question the app asked: the plan stays shown.
+    const done = answer.value;
+    if ('cancelled' in done) { setCleanUp({ state: 'found', plan }); return; }
+    setCleanUp({ state: 'done', text: done.objects ? 'Freed ' + formatStorage(done.bytes) + '.' : 'Nothing was deleted: the books use everything they store by now.' });
+    // The figures shown are out of date now.
+    if (usage && usage !== 'counting' && !('error' in usage)) void countStorage();
+  }
 
   // The first-configuration sheet (ADR 0012, section 3): once a backend is saved where sync was off, the recent books
   // with what their originals take up, to choose which sync. Nothing is uploaded before; books left out are opted out.
@@ -197,10 +210,6 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
       <div className="settings-control">
         <p className="settings-note">{icloud?.available === false ? icloud.message
           : 'Books sync through your private iCloud database, with the Apple ID this Mac is signed in to. Their originals count toward your iCloud storage.'}</p>
-        {usesICloud && usage && <p className="settings-note sync-usage" role="status">{usage === 'counting' ? 'Counting what ImageFlow stores in iCloud…'
-          : 'error' in usage ? 'What ImageFlow stores in iCloud cannot be counted now: ' + usage.error
-          : usage.books ? 'ImageFlow uses ' + formatStorage(usage.bytes) + ' of your iCloud storage for ' + usage.books + (usage.books === 1 ? ' book.' : ' books.')
-          : 'No books are stored in iCloud yet.'}</p>}
         {settings?.sync?.kind !== 'icloud' && <div className="settings-update-actions">
           <button className="primary" disabled={disabled || !icloud?.available} onClick={() => void useICloud()}>Use iCloud</button>
         </div>}
@@ -267,6 +276,33 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
           <button className="primary" disabled={setup.saving} onClick={() => void chooseBooks()}>Sync Chosen Books</button>
         </div>
         {setup.error && <p role="alert" className="error-text">{setup.error}</p>}
+      </div>
+    </>}
+    {current && <>
+      <span className="settings-label">Storage:</span>
+      <div className="settings-control sync-storage">
+        {usage && <p className="settings-note sync-usage" role="status">{usage === 'counting' ? 'Counting what ImageFlow stores…'
+          : 'error' in usage ? 'What ImageFlow stores cannot be counted now: ' + usage.error
+          : storageSummary(usage, settings?.sync?.kind === 'icloud')}</p>}
+        {usage && usage !== 'counting' && !('error' in usage) && usage.books.length > 0 && <ul className="sync-storage-books" aria-label="Storage by book">
+          {usage.books.map((book) => <li key={book.bookId}>
+            <span className="sync-storage-title">{book.deleted ? 'Deleted book (what is left of it)' : book.title || 'Untitled'}</span>
+            <span className="settings-note">{formatStorage(book.bytes)}{book.originals ? ' · originals ' + formatStorage(book.originals) + ', the rest ' + formatStorage(book.bytes - book.originals) : ''}</span>
+          </li>)}
+        </ul>}
+        {cleanUp && cleanUp.state !== 'found' && cleanUp.state !== 'cleaning' && <p role={cleanUp.state === 'failed' ? 'alert' : 'status'}
+          className={cleanUp.state === 'failed' ? 'error-text' : 'settings-note sync-clean-up-result'}>{cleanUp.state === 'looking' ? 'Looking for what no book uses…' : cleanUp.text}</p>}
+        {cleanUp && (cleanUp.state === 'found' || cleanUp.state === 'cleaning') && <p className="settings-note sync-clean-up-plan" role="status">{cleanUpText(cleanUp.plan)}</p>}
+        <div className="settings-update-actions">
+          {cleanUp && (cleanUp.state === 'found' || cleanUp.state === 'cleaning') && cleanUp.plan.objects > 0 ? <>
+            <button className="primary" disabled={cleanUp.state === 'cleaning'} onClick={() => void runCleanUp(cleanUp.plan)}>{cleanUp.state === 'cleaning' ? 'Cleaning Up…' : 'Clean Up'}</button>
+            <button disabled={cleanUp.state === 'cleaning'} onClick={() => setCleanUp(undefined)}>Cancel</button>
+          </> : <>
+            <button disabled={!api || usage === 'counting'} onClick={() => void countStorage()}>{usage && usage !== 'counting' && !('error' in usage) ? 'Count Again' : 'Show Storage'}</button>
+            <button disabled={!api || cleanUp?.state === 'looking'} onClick={() => void findCleanUp()}>Clean Up…</button>
+          </>}
+        </div>
+        <p className="settings-note">Clean Up deletes originals, previews and covers that no book has used for a week, and what is left of books deleted from sync. It asks before it deletes anything. Every book’s text, files and history stay.</p>
       </div>
     </>}
     <span className="settings-label">Downloads:</span>

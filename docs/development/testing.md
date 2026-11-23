@@ -15,7 +15,7 @@ Packaged checks cover document registration, Finder open events, proof and print
 
 ## Sync through an S3-compatible bucket
 
-The S3 store (`desktop/sync-store-s3.ts`) is tested against an in-process fake server (`tests/s3-fake.ts`) that checks every request's SigV4 signature and payload SHA-256 and injects failures; `npm run test:unit` runs the store conformance suite and the sync engine scenarios against it.
+The S3 store (`desktop/sync-store-s3.ts`) is tested against an in-process fake server (`tests/s3-fake.ts`) that checks every request's SigV4 signature and payload SHA-256 and injects failures; `npm run test:unit` runs the store conformance suite against it, and the core set of the sync engine scenarios (`core` and `coreEach` in `tests/sync.test.ts`, about 30 tests) against the memory store. The rest of that file (`test`, `each`) runs only in the full run: add new sync tests there unless they guard a user's data or are the one test of a feature. `npm run test:unit:full` runs all of them, also against the folder store, the fake S3 server and the fake CloudKit, which takes several minutes; `npm run test:desktop`, and so the nightly run, includes it.
 
 The same tests run against a real bucket when these variables name one, which is how the spike of #281 is run against R2, B2, MinIO or S3. Use a bucket (or a prefix) for tests only and a key limited to it; each run writes below `<prefix>run-<uuid>/` and deletes what it wrote at the end.
 
@@ -28,12 +28,12 @@ export IMAGEFLOW_S3_TEST_SECRET_ACCESS_KEY=…
 export IMAGEFLOW_S3_TEST_PREFIX=imageflow-test/          # optional
 export IMAGEFLOW_S3_TEST_ADDRESSING=path                 # optional: path or virtual
 export IMAGEFLOW_S3_TEST_REPORT=s3-spike-r2.json         # optional: the spike's answers as JSON
-npm run test:unit
+npm run test:unit:full
 ```
 
 `tests/sync-s3-real.test.ts` answers the spike's questions (conditional writes, checksum verification, addressing, listing right after a put, a large single PUT) as test diagnostics and in the report file. Never commit the variables or the report's endpoint if it names an account.
 
-In the app, Settings → Sync offers an S3-compatible bucket; iCloud only in a build signed with the provisioning profile, and a folder only with `IMAGEFLOW_SYNC_FOLDER=1` (see [setup](setup.md)). Development builds can keep the bucket's access key in memory instead of the keychain with `IMAGEFLOW_SYNC_CREDENTIALS=memory`. The sync smokes (`smoke-sync`, `smoke-sync-auto`, `smoke-sync-settings`, `smoke-library`) set the folder backend up in a profile's `settings.json`. `smoke-sync` turns *Sync automatically* off, so every sync in it is one it asks for; `smoke-sync-auto` covers automatic sync with a short idle wait (`IMAGEFLOW_SYNC_IDLE_MS`) and automatic syncs slowed down (`IMAGEFLOW_SYNC_TEST_SLOW_MS`), so an edit meets one.
+In the app, Settings → Sync offers an S3-compatible bucket; iCloud only in a build signed with the provisioning profile, and a folder only with `IMAGEFLOW_SYNC_FOLDER=1` (see [setup](setup.md)). Development builds can keep the bucket's access key in memory instead of the keychain with `IMAGEFLOW_SYNC_CREDENTIALS=memory`. The sync smokes (`smoke-sync`, `smoke-sync-auto`, `smoke-sync-settings`, `smoke-library`) set the folder backend up in a profile's `settings.json`. `smoke-sync-settings` also counts the storage and runs Clean Up over the fake S3 server. Clean Up's grace period is tested by passing a later `now` to `planCleanUp` (`desktop/sync-sweep.ts`) instead of ageing objects, so the sweep tests run against every store (`each` in `tests/sync.test.ts`). `smoke-sync` turns *Sync automatically* off, so every sync in it is one it asks for; `smoke-sync-auto` covers automatic sync with a short idle wait (`IMAGEFLOW_SYNC_IDLE_MS`) and automatic syncs slowed down (`IMAGEFLOW_SYNC_TEST_SLOW_MS`), so an edit meets one.
 
 Push notifications from iCloud (#284) need a signed build with the `aps-environment` entitlement: the unit tests cover the subscription over the fake CloudKit and the scheduler that a push starts, not the push itself.
 
@@ -65,11 +65,13 @@ For each edit it reports the first painted frame that shows it (*feedback*), whe
 
 GitHub Actions runs:
 
-- **check:** build, app/template/API type checks and unit tests on Linux.
-- **desktop:** `npm run test:desktop:smoke` on Apple silicon, covering launch, presentation, rendering, export, saves, updates, shutdown and compatibility books. Runs on every public-repository PR and pushes to `main`; private-repository PRs skip it.
+- **check:** build, app/template/API type checks and unit tests on Linux (`npm run test:unit`, without the sync engine reruns per store).
+- **desktop:** `npm run test:desktop:smoke` on Apple silicon, covering launch, presentation, rendering, export, saves, updates, shutdown, compatibility books and one sync smoke (`smoke-sync`). Runs on every public-repository PR and pushes to `main`; private-repository PRs skip it.
 - **Pages:** site build and internal link checks, with documentation and update feeds published together from `main`. See [Documentation site](docs-site.md).
 
-The **Full desktop suite** workflow runs the complete desktop suite nightly on `main` (02:30 UTC), so a breakage shows up the day after the merge that caused it; start it from Actions to check a branch or release candidate. Each smoke script has a time limit (`SMOKE_TIMEOUT_MINUTES`, default 6), and the run reports every failing script at the end. The release workflow runs packaged-app checks. Review UI appearance and animation manually.
+Keep these two lean: a new smoke script or a slow test suite goes into `npm run test:desktop`, not into the PR checks, unless it guards something a PR is likely to break.
+
+The **Full desktop suite** workflow runs the complete desktop suite nightly on `main` (02:30 UTC), with the full unit tests (`--full`) and every smoke script, among them `smoke-sync-auto`, `smoke-sync-settings` and `smoke-library`, so a breakage shows up the day after the merge that caused it; start it from Actions to check a branch or release candidate. Each smoke script has a time limit (`SMOKE_TIMEOUT_MINUTES`, default 6), and the run reports every failing script at the end. The release workflow runs packaged-app checks. Review UI appearance and animation manually.
 
 Use `npm run test:updates` for the focused updater and quit checks. `npm run test:upgrade:signed` exercises real signed upgrades; see [Automated signed upgrade test](../releasing.md#automated-signed-upgrade-test) for its requirements.
 

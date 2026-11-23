@@ -52,7 +52,7 @@ export const channels = {
   syncState: 'project:sync-state', syncChanged: 'project:sync-changed', syncAction: 'project:sync-action',
   chooseSyncFolder: 'app:choose-sync-folder',
   lightroom: 'lightroom:state', lightroomChanged: 'lightroom:changed', lightroomInstall: 'lightroom:install', lightroomLaunch: 'lightroom:launch',
-  syncBackend: 'sync:backend', saveSyncBackend: 'sync:save-backend', testSyncConnection: 'sync:test-connection', syncUsage: 'sync:usage', syncSetupBooks: 'sync:setup-books', chooseSyncBooks: 'sync:choose-books',
+  syncBackend: 'sync:backend', saveSyncBackend: 'sync:save-backend', testSyncConnection: 'sync:test-connection', syncUsage: 'sync:usage', syncCleanUpPlan: 'sync:clean-up-plan', syncCleanUp: 'sync:clean-up', syncSetupBooks: 'sync:setup-books', chooseSyncBooks: 'sync:choose-books',
 } as const;
 
 export type OpenAction = 'open' | 'new' | 'reload';
@@ -172,6 +172,10 @@ export type SyncBackendRequest = { backend: S3SyncBackend; credentials?: SyncCre
  * it uploads at most), whether it is trusted here (only trusted books sync; choosing an untrusted one trusts it), and
  * whether it syncs with the backend already.
  */
+/** What the books take up on the sync remote (Settings → Sync, #285): in all and per book, with the part that is originals. */
+export type SyncStorage = { bytes: number; originals: number; books: { bookId: string; title: string; bytes: number; originals: number; deleted?: true }[] };
+/** What Clean Up would free (#285): unused originals, previews and covers past the grace period, and what is left of deleted books. */
+export type SyncCleanUpPlan = { bytes: number; objects: number; books: number; deletedBooks: number; skipped: number };
 export type SyncSetupBook = { id: string; title: string; bytes: number; trusted: boolean; syncing: boolean };
 export type SyncConnectionReport = { conditionalWrites: 'enforced' | 'ignored' | 'unsupported'; checksums: 'verified' | 'not-verified'; addressing: 'path' | 'virtual' };
 export type HistoryState = { undo?: string; redo?: string };
@@ -322,7 +326,11 @@ export type DesktopApi = {
   saveSyncBackend(request: SyncBackendRequest | null): Promise<Result<SyncBackendState>>;
   testSyncConnection(request: SyncBackendRequest): Promise<Result<SyncConnectionReport>>;
   /** What the books stored through the configured backend take up there, in bytes (Settings → Sync shows it for iCloud). */
-  syncUsage(): Promise<Result<{ bytes: number; books: number }>>;
+  syncUsage(): Promise<Result<SyncStorage>>;
+  /** Finds what Clean Up would delete, and deletes nothing. */
+  syncCleanUpPlan(): Promise<Result<SyncCleanUpPlan>>;
+  /** Asks in the main process, then deletes what the last plan found after reading every book's commits again. */
+  syncCleanUp(): Promise<Result<{ bytes: number; objects: number } | { cancelled: true }>>;
   /** The recent books for the sheet shown when a backend is first set up, which asks which of them to sync. */
   syncSetupBooks(): Promise<Result<SyncSetupBook[]>>;
   /** The sheet's answer: the books to sync (`sync: true`) and those opted out for this backend. Uploads nothing by itself. */

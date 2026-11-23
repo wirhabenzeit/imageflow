@@ -11,6 +11,10 @@ import type { PutOptions, StoreEntry, StoreSource, SyncStore, TransferOptions } 
 
 /** The parts of a book's prefix (ADR 0012, section 4). */
 export type BookFolder = 'snapshots' | 'content' | 'originals' | 'proxies' | 'covers';
+/** What a remote stores (`SyncRemote.usage`): bytes in all and per book, and the part of each that is originals. */
+export type RemoteUsage = { bytes: number; originals: number; books: { bookId: string; bytes: number; originals: number; deleted?: true }[] };
+/** The keys Clean Up may delete: originals, previews and covers of a book (ADR 0012, section 4). */
+export const sweepableKey = /^books\/[^/]+\/(originals|proxies|covers)\//;
 /** A book on a remote: there, or deleted from sync (its tombstone), or marked by a newer ImageFlow in a way this one cannot read. */
 export type RemoteBook = { bookId: string; deleted?: BookTombstone; newer?: true };
 
@@ -82,10 +86,22 @@ export interface SyncRemote {
    */
   listBook(bookId: string, folder?: BookFolder, options?: { full?: boolean }): Promise<StoreEntry[]>;
   /**
-   * What the books on this remote store, in bytes, per book and in all (Settings → Sync; #292). Deleted books count
-   * only what is left of them. Over a store with a change feed it comes from the key indexes.
+   * What the books on this remote store, in bytes, per book and in all, with the part that is originals (Settings → Sync;
+   * #292, #285). Deleted books count only what is left of them. Over a store with a change feed it comes from the key
+   * indexes.
    */
-  usage(): Promise<{ bytes: number; books: { bookId: string; bytes: number }[] }>;
+  usage(): Promise<RemoteUsage>;
+  /**
+   * Deletes blobs that Clean Up found unreferenced (`desktop/sync-sweep.ts`): originals, previews and covers only, never
+   * a commit, a state blob or other content. Each key is also forgotten wherever this remote answers `hasBlob` without
+   * asking the store (the key index, the listing of a sync running), so a later push uploads it again.
+   */
+  deleteBlobs(keys: readonly string[]): Promise<void>;
+  /**
+   * Removes what is left under the prefix of a book deleted from sync (a push or upload that raced the deletion), down to
+   * its tombstone, which stays; listed in the store itself. Refuses a book without a tombstone. Returns what it removed.
+   */
+  deleteRemains(bookId: string): Promise<{ bytes: number; objects: number }>;
   /**
    * The books on this remote, from one listing of prefixes and one of the deletion markers (`deletedPrefix`); only the
    * tombstones of books deleted from sync are read. A deleted book is reported as such.
@@ -417,15 +433,48 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
       if (--session.count === 0 && this.sessions.get(bookId) === session) this.sessions.delete(bookId);
     };
   }
-  async usage() {
-    const books: { bookId: string; bytes: number }[] = [];
-    const ids = (await this.listBooks()).map(({ bookId }) => bookId);
+  async usage(): Promise<RemoteUsage> {
+    const books: RemoteUsage['books'] = [];
+    const listed = await this.listBooks();
     // A few books at a time: over a store without a feed, or without an index yet, each is a full listing.
-    for (let start = 0; start < ids.length; start += 4) {
-      books.push(...await Promise.all(ids.slice(start, start + 4).map(async (bookId) =>
-        ({ bookId, bytes: (await this.listBook(bookId)).reduce((sum, { size }) => sum + size, 0) }))));
+    for (let start = 0; start < listed.length; start += 4) {
+      books.push(...await Promise.all(listed.slice(start, start + 4).map(async ({ bookId, deleted }) => {
+        const entries = await this.listBook(bookId);
+        const originals = bookPrefix(bookId) + 'originals/';
+        return { bookId, bytes: entries.reduce((sum, { size }) => sum + size, 0),
+          originals: entries.reduce((sum, { key, size }) => sum + (key.startsWith(originals) ? size : 0), 0), ...(deleted ? { deleted: true as const } : {}) };
+      })));
     }
-    return { bytes: books.reduce((sum, book) => sum + book.bytes, 0), books };
+    return { bytes: books.reduce((sum, book) => sum + book.bytes, 0), originals: books.reduce((sum, book) => sum + book.originals, 0), books };
+  }
+  async deleteRemains(bookId: string) {
+    if (!await this.bookTombstone(bookId, { fresh: true })) throw new Error('Only what is left of a book deleted from sync is removed whole.');
+    const remains = (await this.store.list(bookPrefix(bookId))).filter(({ key }) => key !== tombstoneKey(bookId));
+    if (remains.length) await this.store.delete(remains.map(({ key }) => key));
+    this.indexes.delete((this.identity ?? '') + '/' + bookId);
+    if (this.identity) await this.options.keyIndex?.write(this.identity, bookId, undefined).catch(() => {});
+    return { bytes: remains.reduce((sum, { size }) => sum + size, 0), objects: remains.length };
+  }
+  async deleteBlobs(keys: readonly string[]) {
+    for (const key of keys) if (!sweepableKey.test(requireBlobKey(key))) throw new Error('Clean Up deletes only originals, previews and covers: ' + key);
+    if (!keys.length) return;
+    await this.store.delete(keys);
+    const byBook = new Map<string, string[]>();
+    for (const key of keys) byBook.set(key.split('/')[1], [...byBook.get(key.split('/')[1]) ?? [], key]);
+    for (const [bookId, gone] of byBook) {
+      // The listing of a sync running, and the key index this remote keeps in memory and on disk.
+      void this.sessions.get(bookId)?.listing?.then((listed) => { for (const key of gone) listed.delete(key); }, () => {});
+      const remoteId = this.identity;
+      const slot = (remoteId ?? '') + '/' + bookId;
+      const index = this.indexes.get(slot);
+      if (index) for (const key of gone) index.entries.delete(key);
+      if (!remoteId || !this.options.keyIndex) continue;
+      const kept = index ? { token: index.token, entries: Object.fromEntries([...index.entries.values()].map(({ key, size, lastModified }) => [key, { size, lastModified: lastModified.getTime() }])) }
+        : await this.options.keyIndex.read(remoteId, bookId).catch(() => undefined);
+      if (!kept?.token) continue;
+      for (const key of gone) delete kept.entries[key];
+      await this.options.keyIndex.write(remoteId, bookId, { token: kept.token, entries: kept.entries }).catch((error) => console.warn('ImageFlow could not keep the keys it read', error));
+    }
   }
   async listBooks() {
     const [prefixes, markers] = await Promise.all([this.store.listPrefixes(booksPrefix), this.store.list(deletedPrefix)]);
