@@ -64,4 +64,4 @@ ImageFlow reloads photos, Markdown and template files after changes on disk. **O
 
 ## Sync between Macs
 
-Sync is being rebuilt around one sync service per Mac instead of a folder per book, and is not available in this version. Books that synced before keep their copies on each Mac and their sync folder as they were.
+Books sync between your Macs through an S3-compatible bucket or iCloud, set up once per Mac in **Settings → Sync**. See [Syncing books between Macs](sync.md).
