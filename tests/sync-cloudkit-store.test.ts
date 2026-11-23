@@ -16,6 +16,7 @@ import { registerSyncSettings } from '../desktop/sync-settings';
 import { credentialScope, MemoryCredentialStore } from '../desktop/sync-credentials';
 import { channels } from '../src/desktop';
 import type { SyncBackendState } from '../src/desktop';
+import { formatStorage } from '../src/SyncSettings';
 import { StoreRemote } from '../desktop/sync-remote';
 import { MemoryKeyIndexCache } from '../desktop/sync-key-index';
 import { commitHeaderVersion, contentBlobKey } from '../src/sync-snapshot';
@@ -288,4 +289,45 @@ test('Settings → Sync offers iCloud only in an entitled build, and saves it on
   assert.deepEqual(changed, [{ kind: 'icloud' }]);
   assert.equal(await credentials.read(credentialScope(bucket)), undefined);
   assert.match((await save({ backend: { kind: 'icloud', extra: true } })).error ?? '', /Invalid sync setting/);
+});
+
+test('usage: what each book stores, from the key indexes, and in all', async () => {
+  const { native, store } = make();
+  const remote = new StoreRemote(store, { keyIndex: new MemoryKeyIndexCache() });
+  await remote.remoteId();
+  assert.deepEqual(await remote.usage(), { bytes: 0, books: [] });
+  await remote.putBlob(contentBlobKey(book, 'c'.repeat(64)), bytes('x'.repeat(1000)));
+  await remote.putBlob(contentBlobKey(other, 'c'.repeat(64)), bytes('y'.repeat(300_000)));
+  const usage = await remote.usage();
+  assert.equal(usage.bytes, 301_000);
+  assert.deepEqual(usage.books.map(({ bookId, bytes: size }) => [bookId, size]).sort(), [[book, 1000], [other, 300_000]].sort());
+  // Counted again from the indexes: one change-feed request per book, no listing.
+  native.calls.length = 0;
+  assert.equal((await remote.usage()).bytes, 301_000);
+  assert.equal(native.calls.filter((call) => call === 'changes').length, 1 + 2, 'the index zone for the books, then one feed request per book');
+  // A deleted book counts only its tombstone.
+  await remote.deleteBook(other);
+  assert.ok((await remote.usage()).bytes < 1200);
+});
+
+test('Settings → Sync counts the storage the books take up, in the units Finder uses', async (t) => {
+  assert.equal(formatStorage(0), '0 bytes');
+  assert.equal(formatStorage(999), '999 bytes');
+  assert.equal(formatStorage(1500), '2 KB');
+  assert.equal(formatStorage(2_345_678), '2.3 MB');
+  assert.equal(formatStorage(4_870_000_000), '4.9 GB');
+  assert.equal(formatStorage(12_000_000_000_000), '12 TB');
+  const folder = await mkdtemp(join(tmpdir(), 'if-icloud-usage-'));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  const flag = process.env.IMAGEFLOW_SYNC;
+  process.env.IMAGEFLOW_SYNC = '1';
+  t.after(() => { if (flag === undefined) delete process.env.IMAGEFLOW_SYNC; else process.env.IMAGEFLOW_SYNC = flag; });
+  const handlers = new Map<string, (event: unknown) => Promise<{ value?: unknown; error?: string }>>();
+  const ipcMain = { handle: (channel: string, handler: never) => { handlers.set(channel, handler); } } as unknown as IpcMain;
+  const settings = new SettingsStore(join(folder, 'settings.json'));
+  registerSyncSettings({ ipcMain, owner: () => true, settings, credentials: () => new MemoryCredentialStore(), changed: () => {},
+    usage: async () => ({ bytes: 4_870_000_000, books: [{}, {}] }) });
+  assert.equal((await handlers.get(channels.syncUsage)!({})).error, 'Sync is off on this Mac.');
+  await settings.update({ sync: { kind: 'icloud' } });
+  assert.deepEqual((await handlers.get(channels.syncUsage)!({})).value, { bytes: 4_870_000_000, books: 2 });
 });

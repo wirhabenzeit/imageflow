@@ -59,10 +59,12 @@ function parseRequest(request: unknown): { backend: S3SyncBackend; credentials?:
  * main process once, when it is entered, and is kept by `credentials` alone: never in `settings.json`, never in an
  * answer, an error or the log.
  */
-export function registerSyncSettings({ ipcMain, owner, settings, credentials, cloudKit, changed }: {
+export function registerSyncSettings({ ipcMain, owner, settings, credentials, cloudKit, usage, changed }: {
   ipcMain: IpcMain;
   /** What the CloudKit addon says about this build and account; undefined where there is no addon (#292). */
   cloudKit?: () => Promise<CloudKitStatus | undefined>;
+  /** What the books take up on the configured remote (`SyncRemote.usage`). */
+  usage?: () => Promise<{ bytes: number; books: unknown[] }>;
   owner: (event: IpcMainInvokeEvent) => unknown;
   settings: SettingsStore;
   credentials: () => CredentialStore;
@@ -119,6 +121,12 @@ export function registerSyncSettings({ ipcMain, owner, settings, credentials, cl
     // Told also when only the key changed: the books look at the bucket again with it.
     changed(value);
     return state();
+  }));
+
+  ipcMain.handle(channels.syncUsage, (event) => guard(event, async () => {
+    if (!usage || !settings.value.sync) throw new Error('Sync is off on this Mac.');
+    const { bytes, books } = await usage();
+    return { bytes, books: books.length };
   }));
 
   ipcMain.handle(channels.testSyncConnection, (event, request: unknown) => guard(event, async (): Promise<SyncConnectionReport> => {

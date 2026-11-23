@@ -95,6 +95,8 @@ export class SyncService {
 
   /** Whether a backend is configured. */
   get configured() { return !!this.backend(); }
+  /** The kind of the configured backend. */
+  get kind() { return this.setting()?.kind; }
   /** The name of the configured backend, for the sync status and dialogs. */
   get name() { return this.backend()?.backend.name; }
 

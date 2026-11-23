@@ -397,8 +397,13 @@ export class DocumentSession {
   private downloading?: { done: number; total: number };
   /** The photos whose originals the last sync has and this Mac does not yet: their problem says so (`marked`). */
   private notDownloaded = new Set<string>();
+  /** What the last sync left for later because the remote is full; every published view carries it until a sync ends without. */
+  private notUploaded?: SyncView['notUploaded'];
   private publishSync(view: SyncView | undefined) {
-    if (view) { const { downloading: _, ...rest } = view; view = this.downloading ? { ...rest, downloading: this.downloading } : rest; }
+    if (view) {
+      const { downloading: _, notUploaded: __, ...rest } = view;
+      view = { ...rest, ...(this.downloading ? { downloading: this.downloading } : {}), ...(this.notUploaded ? { notUploaded: this.notUploaded } : {}) };
+    }
     this.syncView = view;
     if (!this.closing && !this.window.isDestroyed()) this.window.webContents.send(channels.syncChanged, view ?? null);
     this.syncChanged?.();
@@ -480,6 +485,8 @@ export class DocumentSession {
       const result = await this.sync(connection.remote, { remoteId: connection.remoteId });
       if ('error' in result) throw new Error(result.error);
       message = describeOutcome(result.value);
+      const left = result.value.notUploaded;
+      this.notUploaded = left && { ...left, ...(this.syncService.kind === 'icloud' ? { manage: true as const } : {}) };
       return result.value;
     } finally {
       this.syncing = false;

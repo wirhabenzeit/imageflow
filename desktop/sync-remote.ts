@@ -46,6 +46,11 @@ export interface SyncRemote {
    * strength of a listing (Clean Up).
    */
   listBook(bookId: string, folder?: BookFolder, options?: { full?: boolean }): Promise<StoreEntry[]>;
+  /**
+   * What the books on this remote store, in bytes, per book and in all (Settings → Sync; #292). Deleted books count
+   * only what is left of them. Over a store with a change feed it comes from the key indexes.
+   */
+  usage(): Promise<{ bytes: number; books: { bookId: string; bytes: number }[] }>;
   /** The books on this remote, from one listing of prefixes. A deleted book is reported as such. */
   listBooks(): Promise<RemoteBook[]>;
   /** The remote's identity, a UUID written at first use. Two Macs that initialize an empty remote at once agree on it. */
@@ -246,6 +251,16 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     // The feed leaves the tombstone out (it outlives the book's objects); a listing of the whole book has it.
     const tombstone = folder ? undefined : await this.store.head(tombstoneKey(bookId));
     return tombstone ? [...entries, { key: tombstoneKey(bookId), ...tombstone }].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)) : entries;
+  }
+  async usage() {
+    const books: { bookId: string; bytes: number }[] = [];
+    const ids = (await this.listBooks()).map(({ bookId }) => bookId);
+    // A few books at a time: over a store without a feed, or without an index yet, each is a full listing.
+    for (let start = 0; start < ids.length; start += 4) {
+      books.push(...await Promise.all(ids.slice(start, start + 4).map(async (bookId) =>
+        ({ bookId, bytes: (await this.listBook(bookId)).reduce((sum, { size }) => sum + size, 0) }))));
+    }
+    return { bytes: books.reduce((sum, book) => sum + book.bytes, 0), books };
   }
   async listBooks() {
     const ids = (await this.store.listPrefixes(booksPrefix)).map(bookIdOfPrefix).filter((id) => id !== undefined);

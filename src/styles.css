@@ -761,6 +761,9 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .appearance-options input:checked + span { background: var(--segment-selected); box-shadow: 0 1px 3px #0000001a; font-weight: 500; }
 .appearance-options input:focus-visible + span { outline: 3px solid var(--focus-ring); outline-offset: 1px; }
 .appearance-options label:hover input:not(:checked) + span { background: var(--segment-hover); }
+/* Sync's backends (#292: iCloud, S3-compatible bucket, Folder) keep each name on one line. */
+.sync-settings .appearance-options label { flex: 0 0 auto; }
+.sync-settings .appearance-options span { white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .settings-disclosure > summary::before { transition: none; } }
 
 /* Template-arranged controls (`controls`): titled groups and descriptions, in the sidebar, popovers and dialogs. */
@@ -922,6 +925,12 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .studio .sync-status:hover:not(:disabled) { background: var(--selection-surface); }
 .studio .sync-status:disabled { opacity: 1; }
 .sync-status .status-spinner { display: inline-block; }
+/* iCloud storage full (#292): what waits for room, and where to make some. */
+.status-bar .sync-full { gap: 6px; color: var(--error-text); }
+.status-bar .sync-full > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.studio .sync-manage { height: 18px; min-height: 0; margin: 0; padding: 0 6px; border: 0; background: transparent; box-shadow: none;
+  color: var(--info-text); font-size: 11px; font-weight: 400; white-space: nowrap; }
+.studio .sync-manage:hover { background: var(--selection-surface); }
 .sync-status.sync-ahead, .sync-status.sync-behind { color: var(--info-text); }
 .sync-status.sync-diverged, .sync-status.sync-abandoned, .sync-status.sync-newer, .sync-status.sync-unavailable { color: var(--error-text); }
 .sync-pending { font-weight: 700; }

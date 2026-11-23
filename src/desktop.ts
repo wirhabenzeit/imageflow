@@ -51,7 +51,7 @@ export const channels = {
   syncState: 'project:sync-state', syncChanged: 'project:sync-changed', syncAction: 'project:sync-action',
   syncOffered: 'app:sync-offered', chooseSyncFolder: 'app:choose-sync-folder',
   lightroom: 'lightroom:state', lightroomChanged: 'lightroom:changed', lightroomInstall: 'lightroom:install', lightroomLaunch: 'lightroom:launch',
-  syncBackend: 'sync:backend', saveSyncBackend: 'sync:save-backend', testSyncConnection: 'sync:test-connection',
+  syncBackend: 'sync:backend', saveSyncBackend: 'sync:save-backend', testSyncConnection: 'sync:test-connection', syncUsage: 'sync:usage',
 } as const;
 
 export type OpenAction = 'open' | 'new' | 'reload';
@@ -82,9 +82,14 @@ export type SyncStatus = {
  */
 export type SyncView = { folder: string; status?: SyncStatus; syncing?: boolean; message?: string; downloading?: { done: number; total: number };
   /** Originals a running sync has uploaded, of those it uploads. */
-  uploading?: { done: number; total: number } };
+  uploading?: { done: number; total: number };
+  /**
+   * Owned originals the last sync left for later because the remote is full (iCloud storage full), with the store's
+   * words; `manage` when the remote is iCloud, whose storage System Settings manages (`manage-storage`).
+   */
+  notUploaded?: { count: number; message: string; manage?: true } };
 /** `start` makes the book sync on this Mac (asking first when it last synced somewhere else), `stop` stops that. */
-export type SyncAction = 'sync' | 'download' | 'cancel-download' | 'start' | 'stop';
+export type SyncAction = 'sync' | 'download' | 'cancel-download' | 'start' | 'stop' | 'manage-storage';
 // The main canvas shows spreads in one vertical column, or a row-by-row grid with this many columns.
 export type CanvasLayout = { mode: 'vertical' | 'grid'; columns: number };
 export const gridColumns = [1, 2, 3, 4] as const;
@@ -257,6 +262,8 @@ export type DesktopApi = {
   /** Saves the backend with credentials when given (otherwise those stored for it); null removes both. */
   saveSyncBackend(request: SyncBackendRequest | null): Promise<Result<SyncBackendState>>;
   testSyncConnection(request: SyncBackendRequest): Promise<Result<SyncConnectionReport>>;
+  /** What the books stored through the configured backend take up there, in bytes (Settings → Sync shows it for iCloud). */
+  syncUsage(): Promise<Result<{ bytes: number; books: number }>>;
   // The window's panel and canvas layout state, so the View menu can show it.
   setBookMenuState(state: BookMenuState): Promise<void>;
   openProject(action: OpenAction): Promise<Result<ProjectSummary | null>>;
