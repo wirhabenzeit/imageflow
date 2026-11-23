@@ -22,6 +22,8 @@ The built-in sample books share their photographs. The files live once in `sampl
 
 Set `IMAGEFLOW_TEMPLATES` to use another template library folder.
 
+Set `IMAGEFLOW_SYNC=1` to offer sync, which stays behind this development flag until the library ships ([ADR 0012](../decisions/0012-sync-backend-and-library.md)): **Settings → General → Sync** chooses the folder this Mac syncs every book through, **File → Sync** starts and stops syncing a book, and **File → Open Synced Book…** makes a book from one on that folder. Without the flag no book syncs, whatever the settings hold.
+
 ## Build the app
 
 ```sh

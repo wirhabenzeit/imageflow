@@ -64,11 +64,4 @@ ImageFlow reloads photos, Markdown and template files after changes on disk. **O
 
 ## Sync between Macs
 
-A book can sync through a folder your Macs share, such as one in iCloud Drive or Dropbox, a Syncthing folder or a network drive. Don't put the book itself in that folder: each Mac keeps its own copy of the book, and the shared folder holds ImageFlow's sync records, which never change once they are written.
-
-- **File → Sync → Sync with Folder…** links the open book to a folder and syncs it. Choose the same folder on every Mac.
-- **File → Open from Sync Folder…** makes a new book on this Mac from a book another Mac synced. It is not trusted yet, so it asks before its template reaches any website.
-- **File → Sync → Sync Now**, or a click on the sync status in the status bar, sends this Mac's changes and takes the other Mac's. The status shows whether the book is in sync, has changes to sync or fetch, changed on two Macs, or is waiting for the folder to catch up.
-- When a book changed on both Macs, sync keeps this Mac's version as a separate copy beside the book ("Conflict" and the date in its name) and continues with the version in the folder. If the folder has several versions, you choose one to continue with.
-- Photos copied into the book on another Mac arrive as previews first. Their originals download in the background after **File → Open from Sync Folder…** and after each sync, with progress and Cancel in the status bar; the book stays usable meanwhile, and Book check says "Original not downloaded yet" until they arrive. To keep only previews on this Mac, turn off **Settings → General → Keep originals of synced books on this Mac**; **File → Sync → Download Originals** then fetches them when you need them, for example to print. Linked photos stay where each Mac keeps them; use **Locate Folder…** on each Mac.
-- If a sync stops partway through, for example because the disk is full, the book stays openable and the status says why. The next sync continues with the folder's version, and keeps this Mac's version as a copy only if you edited the book since.
+Sync is being rebuilt around one sync service per Mac instead of a folder per book, and is not available in this version. Books that synced before keep their copies on each Mac and their sync folder as they were.

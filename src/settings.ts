@@ -6,6 +6,8 @@ export type SettingsPane = 'general' | 'sources' | 'agents';
 // allowed agents to use open books, so the connection starts again with the app; only the Agents pane changes it.
 // `keepOriginals`: synced books download their owned originals to this Mac in the background after opening and after
 // each sync (#251). On unless set to false, which keeps only previews here until Download Originals.
+// `sync`: the backend books sync through on this Mac (ADR 0012), one at a time. Each kind is one member of the union.
+export type SyncBackend = { kind: 'folder'; path: string };
 export type AppSettings = { appearance: Appearance; automaticUpdates: boolean; updateChannel: UpdateChannel; newBookSize?: { width: number; height: number }; agentAccess?: boolean;
-  keepOriginals?: boolean };
+  keepOriginals?: boolean; sync?: SyncBackend };
 export const defaultSettings: AppSettings = { appearance: 'system', automaticUpdates: true, updateChannel: 'stable' };

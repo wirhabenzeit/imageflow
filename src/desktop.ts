@@ -49,14 +49,15 @@ export const channels = {
   history: 'project:history', mcp: 'mcp:settings', mcpChanged: 'mcp:changed', mcpInstall: 'mcp:install',
   agentLease: 'project:agent-lease', agentLeaseReply: 'project:agent-lease-reply', agentRelease: 'project:agent-release',
   syncState: 'project:sync-state', syncChanged: 'project:sync-changed', syncAction: 'project:sync-action',
+  syncOffered: 'app:sync-offered', chooseSyncFolder: 'app:choose-sync-folder',
   lightroom: 'lightroom:state', lightroomChanged: 'lightroom:changed', lightroomInstall: 'lightroom:install', lightroomLaunch: 'lightroom:launch',
 } as const;
 
 export type OpenAction = 'open' | 'new' | 'reload';
 /**
  * A book's sync status (#251): `ahead` has changes to send, `behind` changes to take, `diverged` changes on both sides
- * (or several versions on the remote), `remote-syncing` a sync folder that has not caught up, `abandoned` a pull that
- * was given up (`detail` says why), `newer` records a newer ImageFlow wrote, `unavailable` a folder that cannot be read.
+ * (or several versions on the remote), `remote-syncing` a remote that has not caught up, `abandoned` a pull that was
+ * given up (`detail` says why), `newer` records a newer ImageFlow wrote, `unavailable` a remote that cannot be read.
  */
 export type SyncStatus = {
   state: 'in-sync' | 'ahead' | 'behind' | 'diverged' | 'remote-syncing' | 'abandoned' | 'newer' | 'unavailable';
@@ -70,11 +71,13 @@ export type SyncStatus = {
   pendingOriginals: number;
 };
 /**
- * What the editor shows for sync: nothing for a book that does not sync, otherwise its folder and status. `downloading`
- * counts the originals a download in the background has fetched; Cancel stops it (`cancel-download`).
+ * What the editor shows for sync: nothing for a book that does not sync, otherwise the name of the backend this Mac
+ * syncs through (`folder`, ADR 0012) and the book's status. `downloading` counts the originals a download in the
+ * background has fetched; Cancel stops it (`cancel-download`).
  */
 export type SyncView = { folder: string; status?: SyncStatus; syncing?: boolean; message?: string; downloading?: { done: number; total: number } };
-export type SyncAction = 'sync' | 'download' | 'cancel-download' | 'link' | 'unlink';
+/** `start` makes the book sync on this Mac (asking first when it last synced somewhere else), `stop` stops that. */
+export type SyncAction = 'sync' | 'download' | 'cancel-download' | 'start' | 'stop';
 // The main canvas shows spreads in one vertical column, or a row-by-row grid with this many columns.
 export type CanvasLayout = { mode: 'vertical' | 'grid'; columns: number };
 export const gridColumns = [1, 2, 3, 4] as const;
@@ -217,6 +220,10 @@ export type DesktopApi = {
   trustTemplate(id: string, allow: boolean): Promise<Result<boolean>>;
   documentAction(action: 'reveal' | 'template' | 'text', id?: string): Promise<Result<void>>;
   getSettings(): Promise<Result<AppSettings>>;
+  // Whether this build offers sync: only with the development flag until the library ships (ADR 0012).
+  syncOffered(): Promise<boolean>;
+  // Asks for the folder this Mac syncs through and sets it as the sync backend; null when the user cancels.
+  chooseSyncFolder(): Promise<Result<AppSettings | null>>;
   updateSettings(patch: Partial<AppSettings>): Promise<Result<AppSettings>>;
   onSettingsChanged(listener: (settings: AppSettings) => void): () => void;
   showSettings(pane: SettingsPane): Promise<void>;

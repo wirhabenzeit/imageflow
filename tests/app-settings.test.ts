@@ -91,3 +91,17 @@ test('a stored setting for the removed faster book updates is dropped, not a rea
   assert.equal('fasterBookUpdates' in store.value, false);
   await assert.rejects(store.update({ fasterBookUpdates: false }), /Invalid app settings/);
 });
+
+test('a sync backend this version cannot read leaves sync off and keeps the other settings', async (t) => {
+  const folder = await mkdtemp(join(tmpdir(), 'if-settings-'));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  const file = join(folder, 'settings.json');
+  await writeFile(file, JSON.stringify({ appearance: 'dark', automaticUpdates: false, updateChannel: 'beta', sync: { kind: 'later', where: 'x' } }));
+  const warn = t.mock.method(console, 'warn', () => {});
+  const store = new SettingsStore(file); await store.load();
+  assert.equal(warn.mock.callCount(), 1);
+  assert.deepEqual(store.value, { appearance: 'dark', automaticUpdates: false, updateChannel: 'beta' });
+  await writeFile(file, JSON.stringify({ appearance: 'dark', automaticUpdates: false, updateChannel: 'beta', sync: { kind: 'folder', path: '/Volumes/Sync' } }));
+  const readable = new SettingsStore(file); await readable.load();
+  assert.deepEqual(readable.value.sync, { kind: 'folder', path: '/Volumes/Sync' });
+});

@@ -26,8 +26,11 @@ const syncedSchema = z.object({ commitId: z.uuid(), bookId: z.uuid().optional(),
   localDigests: z.record(z.string(), sha256).optional(), localKeys: z.record(z.string(), sha256).optional() }).strict();
 const syncStateSchema = z.object({
   version: z.literal(1),
-  // The sync folder this book syncs through on this Mac (#251). Per Mac: another Mac may keep it elsewhere.
-  folder: z.string().min(1).max(4096).optional(),
+  // Where a book syncs is no longer its own (ADR 0012): the Mac has one backend (`AppSettings.sync`). A record keeps
+  // only the identity of the remote it last synced with, which `lastSynced` belongs to, and whether it syncs on this
+  // Mac: `enabled: false` after Stop Syncing or declining to start again on another remote.
+  remoteId: z.uuid().optional(),
+  enabled: z.boolean().optional(),
   lastSynced: syncedSchema.optional(),
   // A pull that started touching the book. `staleOriginals` are owned originals here that the snapshot replaced and
   // that go (by path, with their stale digest), so the photo shows its new proxy until its new original is downloaded.
@@ -52,6 +55,33 @@ const syncStateSchema = z.object({
   networkReview: z.literal(true).optional(),
 }).strict();
 export type SyncState = z.infer<typeof syncStateSchema>;
+/**
+ * A record as written before ADR 0012 named the folder a book synced through (#251). It is read without it: the book
+ * then does not sync until it starts again on the configured remote, and a `lastSynced` it kept counts as synced
+ * somewhere else (`bookSync`).
+ */
+const storedSyncStateSchema = z.preprocess((value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !('folder' in value)) return value;
+  const { folder: _, ...rest } = value as Record<string, unknown>;
+  return rest;
+}, syncStateSchema);
+
+/**
+ * How a book stands with the remote this Mac syncs through (ADR 0012): it syncs there (`syncing`); it was stopped on
+ * this Mac (`stopped`); it last synced with another remote, or with a sync folder before ADR 0012, and asks before it
+ * starts a new history here (`elsewhere`); or it never synced here (`off`).
+ */
+export type BookSync = 'syncing' | 'stopped' | 'elsewhere' | 'off';
+export function bookSync(state: SyncState, remoteId: string): BookSync {
+  if (state.enabled === false) return 'stopped';
+  if (state.remoteId === remoteId) return 'syncing';
+  return syncedElsewhere(state, remoteId) ? 'elsewhere' : 'off';
+}
+/**
+ * Whether the record holds a sync with another remote than `remoteId`, so starting there is a new history: what it
+ * last synced, or a pull it gave up there (which forgot `lastSynced`, and may have left the book half-done).
+ */
+export const syncedElsewhere = (state: SyncState, remoteId: string) => (!!state.lastSynced || !!state.pull || !!state.abandoned) && state.remoteId !== remoteId;
 export type PullMarker = NonNullable<SyncState['pull']>;
 
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -81,7 +111,7 @@ export async function readSyncState(folder: string): Promise<SyncState> {
   let text: string;
   try { text = await readFile(join(path, 'sync.json'), 'utf8'); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1 }; throw error; }
-  const parsed = syncStateSchema.safeParse(JSON.parse(text));
+  const parsed = storedSyncStateSchema.safeParse(JSON.parse(text));
   if (!parsed.success) throw new Error('This book’s sync record is invalid. Preserve ' + join(path, 'sync.json') + ' and remove it to sync again from scratch.');
   return parsed.data;
 }
@@ -112,6 +142,67 @@ export async function updateSyncState(folder: string, change: (state: SyncState)
   });
   syncStateWrites.set(key, task);
   try { await task; } finally { if (syncStateWrites.get(key) === task) syncStateWrites.delete(key); }
+}
+
+/** A book that last synced with another remote starts on this one only as a new history, which the user is asked about. */
+export class SyncElsewhereError extends Error {
+  readonly code = 'SYNC_ELSEWHERE';
+  constructor() {
+    super('This book last synced somewhere else. Start syncing it here as a new history first.');
+    this.name = 'SyncElsewhereError';
+  }
+}
+
+/**
+ * The last sync of a book could not be finished, so it may be only partly updated. On the remote it last synced with,
+ * the next sync pulls again and keeps this Mac's version as a copy if it was edited since (`keepBoth`); a new history
+ * on another remote would start from it, so it does not start until that sync was finished.
+ */
+export class SyncHalfPulledError extends Error {
+  readonly code = 'SYNC_HALF_PULLED';
+  constructor(detail: string) {
+    super('The last sync of this book could not be finished (' + detail.replace(/\.$/, '') + '), so it may be only partly updated. ' +
+      'Switch back to the sync it last used and sync it there first, or duplicate the book (File → Duplicate…) and sync the duplicate.');
+    this.name = 'SyncHalfPulledError';
+  }
+}
+
+/**
+ * Makes a book sync on this Mac with the remote `remoteId`, again after Stop Syncing with the history it had. A book
+ * that last synced with another remote (or a sync folder before ADR 0012) starts there only with `newHistory`, and
+ * throws `SyncElsewhereError` otherwise. A new history forgets everything the record knows of the other remote:
+ * `lastSynced`, and the trace of a pull given up there (`abandoned`), which says nothing about this remote. It never
+ * starts from a book a pull may have left half-done: an interrupted pull is finished first, and one that cannot be
+ * finished (it is given up, `finishPull`, as at every other place) or that was given up before throws
+ * `SyncHalfPulledError` and starts nothing. Finishing a pull needs the writer lock.
+ */
+export async function startSyncing(folder: string, remoteId: string, { newHistory = false }: { newHistory?: boolean } = {}) {
+  const before = await readSyncState(folder);
+  if (syncedElsewhere(before, remoteId)) {
+    if (!newHistory) throw new SyncElsewhereError();
+    if (before.pull) {
+      try { await finishPull(folder, before.pull); }
+      catch (error) { throw new SyncHalfPulledError(error instanceof Error ? error.message : String(error)); }
+    }
+    const { abandoned } = await readSyncState(folder);
+    if (abandoned) throw new SyncHalfPulledError(abandoned.error);
+  }
+  await updateSyncState(folder, (state) => {
+    if (state.remoteId === remoteId && state.enabled === true) return state;
+    if (!syncedElsewhere(state, remoteId)) return { ...state, remoteId, enabled: true };
+    if (!newHistory) throw new SyncElsewhereError();
+    if (state.pull || state.abandoned) throw new SyncHalfPulledError(state.abandoned?.error ?? 'a sync started meanwhile');
+    const { lastSynced: _, ...rest } = state;
+    return { ...rest, remoteId, enabled: true };
+  });
+}
+
+/**
+ * Stops syncing a book on this Mac: no traffic with the remote for it until Start Syncing, neither syncs nor
+ * downloads of originals. What it last synced stays, so starting again continues its history.
+ */
+export async function stopSyncing(folder: string) {
+  await updateSyncState(folder, (state) => (state.enabled === false ? state : { ...state, enabled: false }));
 }
 
 /** Reads a staged blob and checks it still has its digest. */

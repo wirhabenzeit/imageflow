@@ -13,7 +13,7 @@ import type { ContextMenuItem, ContextMenuResult } from '../src/desktop';
 import type { RegisteredCommand } from '../src/commands';
 import { bookName } from '../src/book-name';
 import { collectSources, CopyCancelled, relocateSource, relinkFolder, saveDocumentCopy, removeSources, renameSource } from './source-actions';
-import { originalPath, within } from './source-store';
+import { originalPath } from './source-store';
 // The file a source is: Show in Finder, Edit in Default App, Quick Look and dragging out need one, so a photo that is
 // not a file has none of them (ADR 0011).
 async function sourceOriginal(folder: string, entry: SourceEntry) {
@@ -32,7 +32,7 @@ import type { BaseWindow, IpcMainInvokeEvent, MenuItemConstructorOptions } from 
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, isAbsolute, parse } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
@@ -48,7 +48,8 @@ import { PreviewError } from '../src/preview';
 import { chooseSyncTip, DocumentSession } from './document-session';
 import { cloneFromRemote } from './sync-engine';
 import { remoteBooks } from './sync-remote';
-import { folderRemote } from './sync-store-folder';
+import { SyncElsewhereError } from './sync-pull';
+import { insideBook, SyncService } from './sync-service';
 import { configureMacHeader, setToolbarDragRegions } from './mac-header';
 import type { RenderSessions } from './document-session';
 import { AssetFacts } from './asset-facts';
@@ -124,6 +125,11 @@ let connectionSettingsQueue = Promise.resolve();
 let lightroom: LightroomBridge | undefined;
 let cache: string;
 let settings: SettingsStore;
+// Sync stays behind a development flag until the library ships (ADR 0012, #283): IMAGEFLOW_SYNC=1 offers the sync
+// backend in Settings, File → Sync and Open Synced Book. Without it, no book syncs, whatever the settings hold.
+const syncOffered = process.env.IMAGEFLOW_SYNC === '1';
+// The one backend every book syncs through on this Mac (`AppSettings.sync`).
+const syncService = new SyncService(() => (syncOffered ? settings?.value.sync : undefined));
 let recents: RecentDocuments;
 let library: TemplateLibrary;
 let trust: TemplateTrust;
@@ -561,6 +567,9 @@ async function openDocument(path: string): Promise<DocumentSession | undefined> 
       document.networkTrust = bookNetworkTrust;
       document.keepOriginals = () => settings.value.keepOriginals !== false;
       document.syncChanged = () => updateMenus();
+      document.syncService = syncService;
+      const asking = document;
+      asking.syncElsewhere = async () => { if (await offerSyncHere(asking)) void asking.syncNow().catch((error) => report(asking.window, error)); };
       document.dependencyCache = dependencyCache();
       document.authoringTypes = join(__dirname, 'authoring-types');
       document.authoringSkills = join(__dirname, 'skills');
@@ -1068,7 +1077,7 @@ async function revertOpened(document: DocumentSession) {
   const result = await document.run(async () => document.notify({ value: document.activate(await document.projectSession.revertOpened()) }));
   if ('error' in result) throw new Error(result.error);
 }
-/** Coming back to a book that syncs looks at its sync folder again, at most every few seconds (#251). */
+/** Coming back to a book that syncs looks at the remote again, at most every few seconds (#251). */
 const syncLooked = new WeakMap<DocumentSession, number>();
 function refreshSyncOnFocus(document: DocumentSession) {
   if (!document.syncView || Date.now() - (syncLooked.get(document) ?? 0) < 5000) return;
@@ -1076,59 +1085,58 @@ function refreshSyncOnFocus(document: DocumentSession) {
   void document.refreshSync().catch((error) => console.warn('ImageFlow could not read the sync status', error));
 }
 
-/** Syncs the focused book with its sync folder (#251), or asks for a folder first. */
-async function syncDocument(document: DocumentSession) {
-  if (!await document.syncFolder()) { await linkSyncFolder(document); return; }
-  await document.syncNow();
-}
-
-/** Lets the book sync through a folder the user chooses, such as one in iCloud Drive or Dropbox, then syncs. */
-async function linkSyncFolder(document: DocumentSession) {
-  const current = await document.syncFolder();
-  const choice = await dialog.showOpenDialog(document.window, { title: 'Sync with Folder', buttonLabel: 'Sync', properties: ['openDirectory', 'createDirectory'],
-    message: 'Choose a folder that your Macs share, for example in iCloud Drive or Dropbox. Every Mac syncing this book chooses the same folder.',
-    ...(current ? { defaultPath: current } : {}) });
-  const folder = choice.filePaths[0];
-  if (choice.canceled || !folder || document.closing) return;
-  if (within(document.book.folder, folder) || folder === document.book.folder) throw new Error('Choose a folder outside the book.');
-  // A folder without this book either has never seen it, or has not finished downloading what another Mac synced; a
-  // first sync now would start a second history there, which shows later as changed on two Macs.
-  if (await document.startsHistory(folder)) {
-    const { response } = await dialog.showMessageBox(document.window, { type: 'question', buttons: ['Start Syncing', 'Cancel'], defaultId: 0, cancelId: 1,
-      message: 'Start syncing “' + bookName(document.book.folder) + '” in “' + basename(folder) + '”?',
-      detail: 'This folder has no copy of this book yet. If another Mac already syncs it to this folder, cancel and wait until the folder has finished downloading here.' });
-    if (response !== 0) return;
+/**
+ * Syncs the focused book through the configured remote (ADR 0012): Sync Now for a book that syncs here, and with
+ * `start` (Start Syncing) one that does not. Without a backend, Settings opens where it is set up. A book that last
+ * synced somewhere else is asked about first.
+ */
+async function syncDocument(document: DocumentSession, start: boolean) {
+  if (!syncService.configured) { showSettings('general'); return; }
+  try { await document.syncNow({ start }); }
+  catch (error) {
+    if (!(error instanceof SyncElsewhereError)) throw error;
+    if (await offerSyncHere(document)) await document.syncNow();
   }
-  await document.linkSync(folder);
-  await document.syncNow();
-}
-
-async function unlinkSyncFolder(document: DocumentSession) {
-  const folder = await document.syncFolder();
-  if (!folder) return;
-  const { response } = await dialog.showMessageBox(document.window, { type: 'question', buttons: ['Stop Syncing', 'Cancel'], defaultId: 0, cancelId: 1,
-    message: 'Stop syncing this book on this Mac?', detail: 'The book and the sync folder “' + basename(folder) + '” stay as they are. Other Macs keep syncing.' });
-  if (response === 0) await document.unlinkSync();
 }
 
 /**
- * Open from Sync Folder (#251): lists the books another Mac synced to a folder, by the titles in their commit headers,
- * and makes a new local book from the one chosen. It starts untrusted (ADR 0006).
+ * A book that last synced with another remote (another backend, or a sync folder before ADR 0012) does not sync by
+ * itself: this asks whether it starts here as a new history and saves the answer, rejecting when it cannot. Declining
+ * stops syncing it on this Mac, so it is not asked again at every open; Start Syncing asks again. True when the book
+ * now syncs here, for the caller to sync it.
  */
-async function openFromSyncFolder(owner: BrowserWindow | undefined) {
+async function offerSyncHere(document: DocumentSession) {
+  if (document.closing || document.window.isDestroyed()) return false;
+  const { response } = await dialog.showMessageBox(document.window, { type: 'question', buttons: ['Start Syncing Here', 'Don’t Sync'], defaultId: 0, cancelId: 1,
+    message: 'This book last synced somewhere else.',
+    detail: 'Start syncing “' + bookName(document.book.folder) + '” with “' + (syncService.name ?? 'this Mac’s sync') + '”, as a new history? What it synced before stays where it is. ' +
+      'If you don’t, it does not sync on this Mac until you choose File → Sync → Start Syncing.' });
+  if (document.closing) return false;
+  if (response !== 0) { await document.stopSyncing(); return false; }
+  await document.startSyncing({ newHistory: true });
+  return true;
+}
+
+async function stopSyncingDocument(document: DocumentSession) {
+  const { response } = await dialog.showMessageBox(document.window, { type: 'question', buttons: ['Stop Syncing', 'Cancel'], defaultId: 0, cancelId: 1,
+    message: 'Stop syncing this book on this Mac?', detail: 'The book and its copy in “' + (syncService.name ?? 'sync') + '” stay as they are. Other Macs keep syncing.' });
+  if (response === 0) await document.stopSyncing();
+}
+
+/**
+ * Open Synced Book (#251): lists the books on the configured remote, by the titles in their commit headers, and makes
+ * a new local book from the one chosen. It starts untrusted (ADR 0006). The library (#283) replaces it.
+ */
+async function openFromSync(owner: BrowserWindow | undefined) {
   const parent = owner && !owner.isDestroyed() ? owner : undefined;
   const ask = <T extends Electron.MessageBoxOptions>(options: T) => parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options);
-  const options = { title: 'Open from Sync Folder', buttonLabel: 'Choose', properties: ['openDirectory' as const],
-    message: 'Choose the folder another Mac syncs its books to, for example in iCloud Drive or Dropbox.' };
-  const choice = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
-  const folder = choice.filePaths[0];
-  if (choice.canceled || !folder) return;
-  const remote = folderRemote(folder);
+  if (!syncService.configured) { showSettings('general'); return; }
+  const { remote, remoteId, name } = await syncService.connect();
   // A book deleted from sync is not offered.
   const books = (await remoteBooks(remote)).filter((book) => !book.deleted);
   if (!books.length) {
-    await ask({ type: 'info', message: 'There are no ImageFlow books in this folder yet.',
-      detail: 'Sync a book to it on another Mac (File → Sync → Sync with Folder…), wait until the folder has finished syncing here, then try again.' });
+    await ask({ type: 'info', message: 'There are no ImageFlow books in “' + name + '” yet.',
+      detail: 'Sync a book on another Mac (File → Sync → Sync Now), then try again.' });
     return;
   }
   let book = books[0];
@@ -1146,22 +1154,30 @@ async function openFromSyncFolder(owner: BrowserWindow | undefined) {
   const tipId = book.tips.length === 1 ? book.tips[0].commitId : parent ? await chooseSyncTip(parent, book.tips) : book.tips.at(-1)!.commitId;
   const tip = book.tips.find(({ commitId }) => commitId === tipId);
   if (!tip) return;
-  const saveOptions = { title: 'Save Book from Sync Folder', buttonLabel: 'Save',
+  const saveOptions = { title: 'Save Synced Book', buttonLabel: 'Save',
     defaultPath: join(app.getPath('documents'), (book.title || 'Untitled').replace(/[/\\:]/g, '-') + '.imageflow'), filters: [{ name: 'ImageFlow Book', extensions: ['imageflow'] }] };
   const save = parent ? await dialog.showSaveDialog(parent, saveOptions) : await dialog.showSaveDialog(saveOptions);
   if (save.canceled || !save.filePath) return;
-  const path = await cloneFromRemote({ remote, tip, destination: documentPath(save.filePath), syncFolder: folder });
+  const path = await cloneFromRemote({ remote, tip, destination: documentPath(save.filePath), remoteId });
   const document = await openDocument(path);
   if (document && settings.value.keepOriginals !== false) void document.downloadSyncedOriginals().catch((error) => report(document.window, error));
 }
 
 async function syncCommand(document: DocumentSession, action: SyncAction) {
-  if (action === 'sync') await syncDocument(document);
+  if (!syncOffered) throw new Error('Sync is not available.');
+  if (action === 'sync' || action === 'start') await syncDocument(document, action === 'start');
   else if (action === 'download') await document.downloadSyncedOriginals();
   else if (action === 'cancel-download') document.cancelDownload();
-  else if (action === 'link') await linkSyncFolder(document);
-  else if (action === 'unlink') await unlinkSyncFolder(document);
+  else if (action === 'stop') await stopSyncingDocument(document);
   else throw new Error('Unknown sync action.');
+}
+
+/** The backend changed in Settings: every open book looks at where it syncs now, and the menus follow. */
+function syncBackendChanged() {
+  for (const document of documents.values()) {
+    if (!document.closing) void document.refreshSync().catch((error) => console.warn('ImageFlow could not read the sync status', error));
+  }
+  updateMenus();
 }
 
 function installMenu() {
@@ -1204,17 +1220,20 @@ function installMenu() {
       { label: 'Revert To', submenu: [registered('revert-opened'), registered('reload')] },
       { type: 'separator' },
       registered('export'), registered('export-proof'), { type: 'separator' },
-      { id: 'open-sync-folder', label: 'Open from Sync Folder…', click: (_item, owner) => {
+      ...syncOffered ? [{ id: 'open-sync-folder', label: 'Open Synced Book…', click: (_item: Electron.MenuItem, owner?: BaseWindow) => {
         const window = owner ? BrowserWindow.fromId(owner.id) ?? undefined : undefined;
-        void openFromSyncFolder(window).catch((error) => report(window ?? startWindow, error));
-      } },
-      { label: 'Sync', submenu: ([['sync-now', 'Sync Now', 'sync'], ['sync-download', 'Download Originals', 'download'], ['sync-link', 'Sync with Folder…', 'link'],
-        ['sync-unlink', 'Stop Syncing This Book…', 'unlink']] as const).flatMap(([id, label, action]) => [
-        ...id === 'sync-link' ? [{ type: 'separator' as const }] : [],
-        { id, label, enabled: false, click: (_item: Electron.MenuItem, owner?: BaseWindow) => {
-          const document = focusedDocument(owner);
-          if (document && !document.closing) void syncCommand(document, action).catch((error) => report(document.window, error));
-        } }]) },
+        void openFromSync(window).catch((error) => report(window ?? startWindow, error));
+      } }, { label: 'Sync', submenu: [
+        ...([['sync-now', 'Sync Now', 'sync'], ['sync-download', 'Download Originals', 'download'], ['sync-start', 'Start Syncing', 'start'],
+          ['sync-stop', 'Stop Syncing on This Mac…', 'stop']] as const).flatMap(([id, label, action]) => [
+          ...id === 'sync-start' ? [{ type: 'separator' as const }] : [],
+          { id, label, enabled: false, click: (_item: Electron.MenuItem, owner?: BaseWindow) => {
+            const document = focusedDocument(owner);
+            if (document && !document.closing) void syncCommand(document, action).catch((error) => report(document.window, error));
+          } }]),
+        { type: 'separator' as const },
+        { id: 'sync-setup', label: 'Set Up Sync…', click: () => showSettings('general') },
+      ] }] : [],
       { type: 'separator' }, registered('reveal-book'),
     ] },
     { label: 'Edit', submenu: [
@@ -1287,9 +1306,12 @@ function updateMenus() {
   const rebuild = menu?.getMenuItemById('rebuild-dependencies');
   if (rebuild) rebuild.enabled = state.document && state.writable;
   const sync = document && !document.closing ? document.syncView : undefined;
-  const syncEnabled: Record<string, boolean> = { 'sync-now': state.document && state.writable && !sync?.syncing,
-    'sync-download': !!sync && !sync.syncing && !sync.downloading && (sync.status?.pendingOriginals ?? 0) > 0, 'sync-link': state.document && state.writable && !sync?.syncing,
-    'sync-unlink': !!sync && !sync.syncing };
+  const standing = document && !document.closing ? document.bookSync : 'unconfigured';
+  const syncs = standing === 'syncing' || standing === 'unavailable';
+  const syncEnabled: Record<string, boolean> = { 'sync-now': state.document && state.writable && syncs && !sync?.syncing,
+    'sync-download': !!sync && !sync.syncing && !sync.downloading && (sync.status?.pendingOriginals ?? 0) > 0,
+    'sync-start': state.document && state.writable && (standing === 'off' || standing === 'stopped' || standing === 'elsewhere'),
+    'sync-stop': syncs && !sync?.syncing, 'sync-setup': !syncService.configured, 'open-sync-folder': syncService.configured };
   for (const [id, enabled] of Object.entries(syncEnabled)) { const item = menu?.getMenuItemById(id); if (item) item.enabled = enabled; }
   const zoomAlias = menu?.getMenuItemById('zoom-in-equals');
   if (zoomAlias) zoomAlias.enabled = commandState('zoom-in', state).enabled;
@@ -2042,7 +2064,9 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.syncAction, async (event, action: unknown): Promise<Result<void>> => {
     const document = editorOwner(event);
     if (!document || quitting) return { error: 'Request is only available to an open book.' };
-    if (action !== 'sync' && action !== 'download' && action !== 'cancel-download' && action !== 'link' && action !== 'unlink') return { error: 'Unknown sync action.' };
+    // Without the development flag no sync action does anything, not even writing a book's sync record.
+    if (!syncOffered) return { error: 'Sync is not available.' };
+    if (action !== 'sync' && action !== 'download' && action !== 'cancel-download' && action !== 'start' && action !== 'stop') return { error: 'Unknown sync action.' };
     try { await syncCommand(document, action); return { value: undefined }; }
     catch (error) { return { error: errorMessage(error) }; }
   });
@@ -2081,12 +2105,37 @@ void app.whenReady().then(async () => {
       if (patch && typeof patch === 'object' && 'updateChannel' in patch && patch.updateChannel !== settings.value.updateChannel &&
           ['checking', 'downloading', 'ready'].includes(updates.state.status)) throw new Error('Finish the current update before changing channels.');
       if (patch && typeof patch === 'object' && 'agentAccess' in patch) throw new Error('Change agent access in Settings → Agents.');
+      // A window may turn sync off; a folder to sync through is chosen in a dialog of the app's own (`chooseSyncFolder`).
+      if (patch && typeof patch === 'object' && 'sync' in patch && (patch.sync !== undefined || !syncOffered)) throw new Error('Choose the sync folder in Settings.');
       const previousChannel = settings.value.updateChannel;
+      const previousSync = JSON.stringify(settings.value.sync);
       const value = await settings.update(patch);
+      if (JSON.stringify(value.sync) !== previousSync) syncBackendChanged();
       nativeTheme.themeSource = value.appearance;
       updates.setAutomatic(value.automaticUpdates);
       if (value.updateChannel !== previousChannel && value.automaticUpdates) updates.check();
       for (const owner of appWindows()) if (!owner.isDestroyed()) owner.webContents.send(channels.settingsChanged, value);
+      return { value };
+    } catch (error) { return { error: errorMessage(error) }; }
+  });
+  ipcMain.handle(channels.syncOffered, () => syncOffered);
+  ipcMain.handle(channels.chooseSyncFolder, async (event) => {
+    if (!appOwner(event) || !syncOffered) return { error: 'Request is only available to an app window.' };
+    try {
+      const owner = BrowserWindow.fromWebContents(event.sender);
+      const current = settings.value.sync?.kind === 'folder' ? settings.value.sync.path : undefined;
+      const options: Electron.OpenDialogOptions = { title: 'Sync Folder', buttonLabel: 'Choose', properties: ['openDirectory', 'createDirectory'],
+        message: 'Choose the folder this Mac syncs its books through. For development and tests: a folder iCloud Drive or Dropbox manages is not supported.',
+        ...(current ? { defaultPath: current } : {}) };
+      const choice = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
+      const path = choice.filePaths[0];
+      if (choice.canceled || !path) return { value: null };
+      // A book's own files are no place for the sync of every book (and a sync folder inside one is refused per book).
+      if (insideBook(await realpath(path).catch(() => path)) || insideBook(path)) throw new Error('Choose a folder outside every book.');
+      const previousSync = JSON.stringify(settings.value.sync);
+      const value = await settings.update({ sync: { kind: 'folder', path } });
+      if (JSON.stringify(value.sync) !== previousSync) syncBackendChanged();
+      for (const window of appWindows()) if (!window.isDestroyed()) window.webContents.send(channels.settingsChanged, value);
       return { value };
     } catch (error) { return { error: errorMessage(error) }; }
   });

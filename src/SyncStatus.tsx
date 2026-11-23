@@ -4,17 +4,17 @@ import { TaskStatus } from './TaskStatus';
 
 const labels: Record<Status['state'], string> = {
   'in-sync': 'In sync', 'ahead': 'Changes to sync', 'behind': 'Changes to fetch', 'diverged': 'Changed on two Macs',
-  'remote-syncing': 'Sync folder catching up', 'abandoned': 'Sync stopped', 'newer': 'Update to sync', 'unavailable': 'Sync folder unavailable',
+  'remote-syncing': 'Remote catching up', 'abandoned': 'Sync stopped', 'newer': 'Update to sync', 'unavailable': 'Sync unavailable',
 };
 const explanations: Record<Status['state'], string> = {
-  'in-sync': 'This book matches the sync folder.',
-  'ahead': 'This Mac has changes the sync folder does not have yet.',
+  'in-sync': 'This book matches its synced version.',
+  'ahead': 'This Mac has changes the remote does not have yet.',
   'behind': 'Another Mac synced changes this book does not have yet.',
   'diverged': 'The book changed here and on another Mac. Sync keeps this Mac’s version as a separate copy and continues with the other.',
-  'remote-syncing': 'The sync folder has not finished receiving what another Mac synced. Sync again once it has caught up.',
-  'abandoned': 'The last sync could not be finished, so the book may be partly updated. Sync again to continue with the version in the sync folder.',
+  'remote-syncing': 'The remote does not have everything another Mac synced yet. Sync again once it has caught up.',
+  'abandoned': 'The last sync could not be finished, so the book may be partly updated. Sync again to continue with the version on the remote.',
   'newer': 'A newer version of ImageFlow synced this book.',
-  'unavailable': 'The sync folder cannot be read.',
+  'unavailable': 'The remote cannot be read.',
 };
 
 /** The book's sync status in the status bar (#251): hidden for a book that does not sync; a click syncs. */
