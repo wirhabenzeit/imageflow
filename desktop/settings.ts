@@ -45,8 +45,12 @@ export class SettingsStore {
     try {
       // The former development-only app default does not override a book's own future-import policy. Faster book
       // updates (beta.12 to beta.15) was removed: rendering each edit in new frames measured as fast.
-      const { importMode: _legacy, fasterBookUpdates: _removed, ...saved } = JSON.parse(await readFile(this.file, 'utf8'));
+      const { importMode: _legacy, fasterBookUpdates: _removed, sync, ...saved } = JSON.parse(await readFile(this.file, 'utf8'));
       this.value = applyPatch(this.value, saved);
+      // A sync backend this version cannot read (a kind a newer version added) leaves sync off here; it does not cost
+      // the other settings their values.
+      try { this.value = applyPatch(this.value, { sync }); }
+      catch (error) { console.warn('ImageFlow could not read its sync setting; sync is off.', error); }
     }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') console.warn('ImageFlow could not read its settings; using defaults.', error);
