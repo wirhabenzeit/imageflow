@@ -43,7 +43,7 @@ export const commitHeaderSchema = z.object({
   title: z.string().max(400),
   stateDigest: sha256,
   // The book's 320 px JPEG cover, `books/<bookId>/covers/<coverDigest>.jpg`, so a book that is only on the remote has a
-  // thumbnail. Reserved here; no push writes one yet.
+  // thumbnail in the library (#283). A push without a cover of its own carries its parent's forward.
   coverDigest: sha256.optional(),
 }).strict();
 export type CommitHeader = z.infer<typeof commitHeaderSchema>;
@@ -110,8 +110,11 @@ export const stateBlobSchema = z.object({
   assetsMeta: assetsMetaSchema,
   // SHA-256 of each owned referenced text and file and of every template file, by its path in the book.
   content: z.record(contentPath, sha256),
-  // Owned originals (photos/ entries that are not linked), by source ID: `books/<bookId>/originals/<digest><ext>`.
-  originals: z.record(z.string(), z.object({ digest: sha256, ext: extension }).strict()),
+  // Owned originals (photos/ entries that are not linked), by source ID: `books/<bookId>/originals/<digest><ext>`. A
+  // commit names its originals before they upload (ADR 0012), so each entry may say when a commit first named this
+  // version and from which Mac (`namedAt`, `by`; carried forward unchanged): an original that never arrives can then be
+  // reported as never uploaded from that Mac, instead of as still uploading for ever (#283).
+  originals: z.record(z.string(), z.object({ digest: sha256, ext: extension, namedAt: z.iso.datetime().optional(), by: z.string().max(100).optional() }).strict()),
   // Screen proxies by the original's digest: `books/<bookId>/proxies/<originalDigest>-preview-v1<ext>`, with the proxy's own SHA-256.
   proxies: z.record(sha256, z.object({ sha256, ext: z.enum(['.jpg', '.png']) }).strict()),
 }).strict();
@@ -129,6 +132,19 @@ export const bookPrefix = (bookId: string) => booksPrefix + requireId(bookId, 'b
 export const snapshotsPrefix = (bookId: string) => bookPrefix(bookId) + 'snapshots/';
 export const commitKey = (bookId: string, commitId: string) => snapshotsPrefix(bookId) + requireId(commitId, 'commit') + '.json';
 export const tombstoneKey = (bookId: string) => bookPrefix(bookId) + 'deleted.json';
+/**
+ * Beside each tombstone, a marker at the remote's root (`deleted/<bookId>.json`, the same record), so the books deleted
+ * from sync are found with one listing of `deleted/` instead of a read per book (#283): a bucket cannot list the
+ * `deleted.json` keys under every book without listing every object, and the iCloud store keeps both in its `index`
+ * zone. The tombstone under the book's prefix stays the record a sync reads; the marker only says where to look.
+ */
+export const deletedPrefix = 'deleted/';
+export const deletedMarkerKey = (bookId: string) => deletedPrefix + requireId(bookId, 'book') + '.json';
+/** The book a key from a listing of `deletedPrefix` marks as deleted, or undefined for anything else found there. */
+export const bookIdOfDeletedMarker = (key: string) => {
+  const id = key.startsWith(deletedPrefix) && key.endsWith('.json') ? key.slice(deletedPrefix.length, -'.json'.length) : '';
+  return uuidPattern.test(id) ? id : undefined;
+};
 /** The book a prefix from a listing of `booksPrefix` belongs to, or undefined for anything else found there. */
 export const bookIdOfPrefix = (prefix: string) => {
   const id = prefix.startsWith(booksPrefix) && prefix.endsWith('/') ? prefix.slice(booksPrefix.length, -1) : '';

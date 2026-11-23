@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { canonicalJson } from '../src/canonical-json';
-import { blobKeyPattern, bookIdOfPrefix, bookPrefix, booksPrefix, bookTombstoneSchema, commitHeaderSchema, commitKey, deriveTips, NewerSyncFormatError, readBookTombstone,
-  readCommitHeader, readRemoteIdentity, remoteIdentityKey, remoteIdentitySchema, snapshotsPrefix, tombstoneKey } from '../src/sync-snapshot';
+import { blobKeyPattern, bookIdOfDeletedMarker, bookIdOfPrefix, bookPrefix, booksPrefix, bookTombstoneSchema, commitHeaderSchema, commitKey, deletedMarkerKey, deletedPrefix, deriveTips,
+  NewerSyncFormatError, readBookTombstone, readCommitHeader, readRemoteIdentity, remoteIdentityKey, remoteIdentitySchema, snapshotsPrefix, tombstoneKey } from '../src/sync-snapshot';
 import type { BookTombstone, CommitHeader } from '../src/sync-snapshot';
 import { entryTag } from './sync-header-cache';
 import type { CachedHeader, CommitHeaderCache } from './sync-header-cache';
@@ -13,6 +13,18 @@ import type { PutOptions, StoreEntry, StoreSource, SyncStore, TransferOptions } 
 export type BookFolder = 'snapshots' | 'content' | 'originals' | 'proxies' | 'covers';
 /** A book on a remote: there, or deleted from sync (its tombstone), or marked by a newer ImageFlow in a way this one cannot read. */
 export type RemoteBook = { bookId: string; deleted?: BookTombstone; newer?: true };
+
+/**
+ * A book that was deleted from sync (its tombstone, ADR 0012, section 4): nothing is pushed for it, and a Mac that still
+ * has it asks whether to keep it here only or sync it again as a new book.
+ */
+export class BookDeletedError extends Error {
+  readonly code = 'SYNC_DELETED';
+  constructor(readonly tombstone?: BookTombstone) {
+    super('This book was deleted from sync on another Mac, so it was not synced. Keep it on this Mac only, or sync it again as a new book.');
+    this.name = 'BookDeletedError';
+  }
+}
 
 /**
  * The storage books sync through (ADR 0010, Milestone 1; ADR 0012): immutable commit headers and immutable
@@ -51,7 +63,10 @@ export interface SyncRemote {
    * only what is left of them. Over a store with a change feed it comes from the key indexes.
    */
   usage(): Promise<{ bytes: number; books: { bookId: string; bytes: number }[] }>;
-  /** The books on this remote, from one listing of prefixes. A deleted book is reported as such. */
+  /**
+   * The books on this remote, from one listing of prefixes and one of the deletion markers (`deletedPrefix`); only the
+   * tombstones of books deleted from sync are read. A deleted book is reported as such.
+   */
   listBooks(): Promise<RemoteBook[]>;
   /**
    * Starts a sync of a book; the function it returns ends it. Over a store without a change feed, the first listing the
@@ -64,7 +79,11 @@ export interface SyncRemote {
   remoteId(): Promise<string>;
   /** The tombstone of a book deleted from sync, or undefined. Throws `NewerSyncFormatError` for one a newer version wrote. */
   bookTombstone(bookId: string): Promise<BookTombstone | undefined>;
-  /** Deletes a book from the remote for every Mac: writes its tombstone, then removes everything else under its prefix. */
+  /**
+   * Deletes a book from the remote for every Mac: writes its tombstone and its marker, then removes everything else
+   * under its prefix. From the start, this remote refuses to store anything more for the book (`BookDeletedError`), so
+   * an upload that was under way does not bring it back.
+   */
   deleteBook(bookId: string, now?: Date): Promise<BookTombstone>;
 }
 
@@ -122,6 +141,12 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     /** Runs before each commit is stored and refuses it by throwing: the iCloud remote checks that the account is still its own. */
     beforeCommit?: () => Promise<void> } = {}) {}
   private identity?: string;
+  /** Books this remote deleted: it stores nothing more for them, so nothing under way puts their prefix (an iCloud zone) back. */
+  private readonly deleted = new Set<string>();
+  private refuseDeleted(key: string) {
+    const bookId = key.split('/')[1];
+    if (key.startsWith(booksPrefix) && this.deleted.has(bookId)) throw new BookDeletedError();
+  }
   /** The key indexes read or kept up to date while this remote is used, by remote identity and book. */
   private readonly indexes = new Map<string, { token?: string; entries: Map<string, StoreEntry> }>();
   private readonly indexing = new Map<string, Promise<StoreEntry[]>>();
@@ -205,6 +230,7 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
 
   async putCommit(header: CommitHeader) {
     const parsed = commitHeaderSchema.parse(header);
+    this.refuseDeleted(commitKey(parsed.bookId, parsed.commitId));
     await this.options.beforeCommit?.();
     const bytes = encode(parsed);
     const { existed } = await this.store.putIfAbsent(commitKey(parsed.bookId, parsed.commitId), bytes);
@@ -260,6 +286,7 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     return !!await this.store.head(key);
   }
   async putBlob(key: string, source: StoreSource, options?: PutOptions) {
+    this.refuseDeleted(requireBlobKey(key));
     let size = 0;
     await this.store.putIfAbsent(requireBlobKey(key), source, { ...options, onProgress: (done, total) => { size = total ?? done; options?.onProgress?.(done, total); } });
     this.noteStored(key, size);
@@ -271,6 +298,7 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     if (blobName(requireBlobKey(from)) !== blobName(requireBlobKey(to))) throw new Error('A sync blob is only copied to its own key in another book: ' + from + ' to ' + to);
     // Blobs are immutable: one that is there already is left alone, and is what the copy would have been.
     if (await this.hasBlob(to)) return true;
+    this.refuseDeleted(to);
     return await this.store.copy?.(from, to) ?? false;
   }
 
@@ -311,8 +339,12 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     return { bytes: books.reduce((sum, book) => sum + book.bytes, 0), books };
   }
   async listBooks() {
-    const ids = (await this.store.listPrefixes(booksPrefix)).map(bookIdOfPrefix).filter((id) => id !== undefined);
+    const [prefixes, markers] = await Promise.all([this.store.listPrefixes(booksPrefix), this.store.list(deletedPrefix)]);
+    const ids = prefixes.map(bookIdOfPrefix).filter((id) => id !== undefined);
+    // Only books with a marker can be deleted: their tombstones are read, and no other book costs a request.
+    const marked = new Set(markers.map(({ key }) => bookIdOfDeletedMarker(key)).filter((id) => id !== undefined));
     return Promise.all(ids.map(async (bookId): Promise<RemoteBook> => {
+      if (!marked.has(bookId)) return { bookId };
       try {
         const deleted = await this.bookTombstone(bookId);
         return deleted ? { bookId, deleted } : { bookId };
@@ -341,10 +373,13 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
   }
   async deleteBook(bookId: string, now = new Date()) {
     const key = tombstoneKey(bookId);
+    this.deleted.add(bookId);
     // The tombstone goes first, so a deletion that is interrupted still reads as one; an earlier tombstone is kept.
     await this.store.putIfAbsent(key, encode(bookTombstoneSchema.parse({ version: 1, bookId, deletedAt: now.toISOString() })));
     const tombstone = await this.bookTombstone(bookId);
     if (!tombstone) throw new Error('The book could not be marked as deleted on the remote.');
+    // Then its marker, which the library lists (a deletion that stops before it is finished by deleting again).
+    await this.store.putIfAbsent(deletedMarkerKey(bookId), encode(tombstone));
     await this.store.delete((await this.store.list(bookPrefix(bookId))).map((entry) => entry.key).filter((other) => other !== key));
     this.indexes.delete((this.identity ?? '') + '/' + bookId);
     if (this.identity) await this.options.keyIndex?.write(this.identity, bookId, undefined).catch(() => {});

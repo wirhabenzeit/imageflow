@@ -14,6 +14,7 @@ import { watchLinkedFiles } from './providers/files';
 import { app, dialog, shell } from 'electron';
 import type { BrowserWindow } from 'electron';
 import { randomUUID } from 'node:crypto';
+import { hostname } from 'node:os';
 import { watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { mkdtemp, readdir, rm, stat, mkdir, rename, rmdir } from 'node:fs/promises';
@@ -56,6 +57,7 @@ import type { SyncRemote } from './sync-remote';
 import { bookSync, readSyncState, startSyncing, SyncElsewhereError, syncedElsewhere, takeAbandonedAtOpen } from './sync-pull';
 import type { SyncService, SyncStanding } from './sync-service';
 import { FirstSync } from './sync-start';
+import { networkNotice } from './sync-library';
 import type { CommitHeader } from '../src/sync-snapshot';
 import type { SyncView } from '../src/desktop';
 import { acquireProjectLock, CommittedProjectSaveError } from './persistence';
@@ -72,6 +74,8 @@ import { previewPictures } from './preview-picture-cache';
 export type RenderSessions = Map<string, { book: OpenProject; mode: RenderProject['mode']; network?: () => readonly string[];
   photos?: 'preview'; pictures?: ReturnType<typeof previewPictures.view>; pictureScope?: string }>;
 const viewPath = /^\/render\/([a-f0-9-]{36})(?:\/(.*))?$/;
+/** This Mac's name as other Macs see it in "never uploaded from …": its network name without `.local`. */
+function macName() { return hostname().replace(/\.local$/i, '').slice(0, 100) || undefined; }
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'ImageFlow could not complete the request.'; }
 async function fingerprint(path: string) {
   try {
@@ -173,6 +177,11 @@ export class DocumentSession {
   private askingNetwork?: Promise<string[]>;
   /** The declared sites the library trusts for a template with this hash (ADR 0006); set by the app. */
   networkTrust?: (hash: string, declared?: readonly string[]) => Promise<string[]>;
+  /**
+   * The book was just downloaded from the library (#283): it arrives trusted, so its template reaches the sites it
+   * declares without a question, and the first time it does, a notice names them once. Set by the app.
+   */
+  announceSites = false;
 
   /** Lets the frames reach the origins already allowed for this book's template, or trusted for it, before it renders. */
   async prepareNetwork() {
@@ -351,7 +360,7 @@ export class DocumentSession {
         (await readSyncState(this.book.folder).catch(() => undefined))?.lastSynced?.commitId ?? ''].join(':');
       const before = await mark();
       try {
-        const outcome = await syncBook({ remote, book: this.book, fetchOriginals: options.fetchOriginals, chooseTip: (tips) => this.chooseTip(tips) });
+        const outcome = await syncBook({ remote, book: this.book, fetchOriginals: options.fetchOriginals, chooseTip: (tips) => this.chooseTip(tips), cover: this.cover, device: macName() });
         if (outcome.changed) this.notify({ value: this.activate(await loadProject(this.book.folder, this.cache), true) });
         return outcome;
       } catch (error) {
@@ -374,6 +383,8 @@ export class DocumentSession {
   syncView?: SyncView;
   /** Called when `syncView` changes, so the app updates its menus. */
   syncChanged?: () => void;
+  /** The book's cached cover (a JPEG the app made for the recent books), for a push to record (#283); set by the app. */
+  cover?: () => Promise<Uint8Array | undefined>;
   /** The per-Mac "keep originals" preference, read at each sync. */
   keepOriginals?: () => boolean;
   private syncing = false;
@@ -407,6 +418,8 @@ export class DocumentSession {
    */
   private notDownloaded = new Set<string>();
   private stillUploading = new Set<string>();
+  /** Of the originals not here, those a commit named a week or more ago that never arrived, with the Mac that named them. */
+  private neverUploaded = new Map<string, string | undefined>();
   /** A sync that failed because the remote is full (its commit or a preview did not fit); cleared by the next sync. */
   private storageFull?: SyncView['storageFull'];
   private publishSync(view: SyncView | undefined) {
@@ -510,10 +523,13 @@ export class DocumentSession {
     if (this.syncing) { this.publishSync({ ...this.syncView, folder: name, syncing: true, message: notice }); return; }
     const remote = standing.connection?.remote;
     const status = remote ? await describeSync(this.book.folder, remote) : unavailableStatus(standing.error ?? 'The remote cannot be read.', standing.access);
-    const away = remote && status.pendingOriginals ? await originalsNotHere(this.book.folder, remote).catch(() => ({ ids: [], notUploaded: [] })) : { ids: [], notUploaded: [] };
-    if (away.ids.join() !== [...this.notDownloaded].join() || away.notUploaded.join() !== [...this.stillUploading].join()) {
+    const none = { ids: [] as string[], notUploaded: [] as string[], neverUploaded: undefined };
+    const away: Awaited<ReturnType<typeof originalsNotHere>> = remote && (status.pendingOriginals || status.neverUploaded) ? await originalsNotHere(this.book.folder, remote).catch(() => none) : none;
+    const lost = new Map((away.neverUploaded ?? []).map(({ id, by }) => [id, by]));
+    if (away.ids.join() !== [...this.notDownloaded].join() || away.notUploaded.join() !== [...this.stillUploading].join() || JSON.stringify([...lost]) !== JSON.stringify([...this.neverUploaded])) {
       this.notDownloaded = new Set(away.ids);
       this.stillUploading = new Set(away.notUploaded);
+      this.neverUploaded = lost;
       // The book check and the asset statuses say so at once: the book renders again with the new statuses. While
       // the book is busy, the save or load that follows renders them anyway.
       if (!this.closing && !this.busy) this.notify({ value: this.activate(this.book) });
@@ -579,6 +595,27 @@ export class DocumentSession {
     const result = await this.run(() => service.start(this.book.folder, options));
     if ('error' in result) throw new Error(result.error);
     await this.refreshSync();
+  }
+  /** Waits until a sync of the book that is running has ended (Delete from Sync waits for it before it deletes). */
+  async settleSync() { await this.syncTask?.catch(() => {}); }
+  /**
+   * Sync Again on a book deleted from sync on another Mac (#283): through the session, which holds the writer lock, the
+   * book gets a new lineage and a fresh history (`SyncService.syncAgain`), the editor takes the new project.json, and
+   * the book syncs as a new book. An untrusted book throws `UntrustedBookError` unless `trust`.
+   */
+  async syncAgain(options: { trust?: boolean } = {}) {
+    const service = this.syncService;
+    if (!service) throw new Error('Sync is not available.');
+    await this.settleSync();
+    const result = await this.run(async () => {
+      this.stopWatch();
+      try {
+        await service.syncAgain(this.book.folder, options);
+        this.notify({ value: this.activate(await loadProject(this.book.folder, this.cache), true) });
+      } finally { this.watchProject(this.book); }
+    });
+    if ('error' in result) throw new Error(result.error);
+    return this.syncNow();
   }
   /**
    * Templates → Stop Trusting This Book's Template…: withdraws the trust, and an untrusted book stops syncing on this
@@ -858,12 +895,15 @@ export class DocumentSession {
    * mark lives in the session, not in what a load reads, so a reload or a check snapshot keeps the warning.
    */
   private marked(book: OpenProject): OpenProject {
-    if ((!this.reshaped.size && !this.notDownloaded.size) || !book.sources) return book;
+    if ((!this.reshaped.size && !this.notDownloaded.size && !this.neverUploaded.size) || !book.sources) return book;
     return { ...book, sources: Object.fromEntries(Object.entries(book.sources).map(([key, status]) => {
       if (status.kind !== 'photo') return [key, status];
       let marked = this.reshaped.has(status.id) ? { ...status, reshaped: true } : status;
       // An original another Mac synced and this one has not downloaded yet is not missing: it is on its way.
-      if (status.state === 'missing' && this.stillUploading.has(status.id)) marked = { ...marked, problem: 'Original still uploading from another Mac' };
+      if (status.state === 'missing' && this.neverUploaded.has(status.id)) {
+        const by = this.neverUploaded.get(status.id);
+        marked = { ...marked, problem: 'Original never uploaded' + (by ? ' from “' + by + '”' : ' from the Mac that added it') };
+      } else if (status.state === 'missing' && this.stillUploading.has(status.id)) marked = { ...marked, problem: 'Original still uploading from another Mac' };
       else if (status.state === 'missing' && this.notDownloaded.has(status.id)) marked = { ...marked, problem: 'Original not downloaded yet' +
         (this.downloading ? ' (downloading)' : ' (File → Sync → Download Originals)') };
       return [key, marked];
@@ -1140,10 +1180,11 @@ export class DocumentSession {
       // boundary (ADR 0012).
       if (await bookTrusted(book.folder)) {
         const added = origins.filter((origin) => !known.includes(origin));
+        const notice = networkNotice(added, { known: known.length > 0, downloaded: this.announceSites });
         if (added.length) {
           await approveNetwork(book.folder, added, hash);
-          if (known.length && !this.window.isDestroyed()) this.window.webContents.send(channels.appNotice,
-            'This book’s template now also loads maps or data from ' + added.join(', ') + '.');
+          this.announceSites = false;
+          if (notice && !this.window.isDestroyed()) this.window.webContents.send(channels.appNotice, notice);
         }
         return origins;
       }

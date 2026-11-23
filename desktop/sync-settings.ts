@@ -12,24 +12,38 @@ import type { Result, SyncBackendState, SyncConnectionReport, SyncCredentialsInp
 import type { AppSettings, S3SyncBackend, SyncBackend } from '../src/settings';
 
 /**
- * The development flag of sync (ADR 0012; #280–#283 ship behind it until the library does), the same as #280's:
- * Settings → Sync and its requests exist only when ImageFlow starts with `IMAGEFLOW_SYNC=1`, in a development or a
- * packaged build (`IMAGEFLOW_SYNC=1 /Applications/ImageFlow.app/Contents/MacOS/ImageFlow`).
+ * Sync through an S3-compatible bucket ships (#283). iCloud keeps a flag of its own until the checks #292 still owes are
+ * done: Settings → Sync lists it, and a setting that names it syncs, only when ImageFlow starts with
+ * `IMAGEFLOW_SYNC_ICLOUD=1` (`IMAGEFLOW_SYNC_ICLOUD=1 /Applications/ImageFlow.app/Contents/MacOS/ImageFlow`).
  */
-export const syncFlag = () => process.env.IMAGEFLOW_SYNC === '1';
+export const icloudSyncFlag = () => process.env.IMAGEFLOW_SYNC_ICLOUD === '1';
+/**
+ * The folder backend is for tests and development (ADR 0012): Settings → Sync offers it, and its request answers, only
+ * when ImageFlow starts with `IMAGEFLOW_SYNC_FOLDER=1`. A settings file that names a folder is used as it is.
+ */
+export const folderSyncFlag = () => process.env.IMAGEFLOW_SYNC_FOLDER === '1';
+/**
+ * The backend this Mac syncs through, as this build may use it: one that names iCloud without its flag leaves sync off,
+ * neither failing nor syncing; the setting stays for a build that has it.
+ */
+export function usableBackend(backend: SyncBackend | undefined, icloud = icloudSyncFlag()) {
+  return backend?.kind === 'icloud' && !icloud ? undefined : backend;
+}
 
 /**
- * Why a settings patch from a window may not carry `sync`, or undefined. A backend is set only through Settings → Sync
- * (`saveSyncBackend`), which checks it with its credentials and forgets those of the backend it replaces; the generic
- * patch may only turn sync off (`null` or `undefined`), and only with the flag. Settings read from disk are not patches
- * from a window and keep their backend.
+ * Why a settings patch from a window may not carry `sync`, `syncBooksUnchosen` or `booksFolder`, or undefined. A backend
+ * is set only through Settings → Sync (`saveSyncBackend`), which checks it with its credentials and forgets those of the
+ * backend it replaces; the generic patch may only turn sync off (`null` or `undefined`). The folder downloads go to is
+ * chosen in the app's own dialog (`chooseBooksFolder`). Settings read from disk are not patches from a window and keep
+ * their values.
  */
-export function syncPatchError(patch: unknown, enabled = syncFlag()) {
+export function syncPatchError(patch: unknown) {
   // Whether books wait to be chosen for a backend is the main process's to say (`syncBooksUnchosen`), never a window's.
   if (patch && typeof patch === 'object' && 'syncBooksUnchosen' in patch) return 'Choose the books to sync in Settings → Sync.';
+  if (patch && typeof patch === 'object' && 'booksFolder' in patch) return 'Choose the folder for downloaded books in Settings → Sync.';
   if (!patch || typeof patch !== 'object' || !('sync' in patch)) return undefined;
   const value = (patch as { sync?: unknown }).sync;
-  return enabled && (value === null || value === undefined) ? undefined : 'Choose the sync backend in Settings → Sync.';
+  return value === null || value === undefined ? undefined : 'Choose the sync backend in Settings → Sync.';
 }
 
 /**
@@ -88,10 +102,15 @@ export function registerSyncSettings({ ipcMain, owner, settings, credentials, cl
   const state = async (): Promise<SyncBackendState> => {
     const backend = settings.value.sync;
     const stored = backend?.kind === 's3' ? credentialHint(await credentials().read(credentialScope(backend)).catch(() => undefined)) : undefined;
-    return { available: true, ...(stored ? { credentials: stored } : {}), ...(settings.value.syncBooksUnchosen ? { booksUnchosen: true as const } : {}), ...await icloud() };
+    // A setting that names iCloud in a build without it leaves sync off, and the pane says so.
+    const unusable = !!backend && !usableBackend(backend);
+    return { available: true, ...(stored ? { credentials: stored } : {}), ...(settings.value.syncBooksUnchosen && !unusable ? { booksUnchosen: true as const } : {}),
+      ...(unusable ? { unusable: 'iCloud sync is not available in this version of ImageFlow, so sync is off on this Mac.' } : {}),
+      ...(folderSyncFlag() ? { folder: true as const } : {}), ...await icloud() };
   };
-  // iCloud is offered only by a build entitled to it; whether the account can use it now is asked each time.
+  // iCloud is offered only with its flag, by a build entitled to it; whether the account can use it now is asked each time.
   const icloud = async (): Promise<Pick<SyncBackendState, 'icloud'>> => {
+    if (!icloudSyncFlag()) return {};
     const status = await cloudKit?.().catch(() => undefined);
     if (!status?.entitled) return {};
     const availability = cloudKitAvailability(status);
@@ -99,14 +118,10 @@ export function registerSyncSettings({ ipcMain, owner, settings, credentials, cl
   };
   const guard = async <T>(event: IpcMainInvokeEvent, run: () => Promise<T>): Promise<Result<T>> => {
     if (!owner(event)) return { error: 'Request is only available to Settings.' };
-    if (!syncFlag()) return { error: 'Sync backends are not available in this version.' };
     try { return { value: await run() }; } catch (error) { return { error: message(error) }; }
   };
 
-  ipcMain.handle(channels.syncBackend, (event): Promise<Result<SyncBackendState>> => {
-    if (owner(event) && !syncFlag()) return Promise.resolve({ value: { available: false } });
-    return guard(event, state);
-  });
+  ipcMain.handle(channels.syncBackend, (event): Promise<Result<SyncBackendState>> => guard(event, state));
 
   ipcMain.handle(channels.saveSyncBackend, (event, request: unknown) => guard(event, async () => {
     const previous = settings.value.sync;
@@ -138,7 +153,7 @@ export function registerSyncSettings({ ipcMain, owner, settings, credentials, cl
   }));
 
   ipcMain.handle(channels.syncUsage, (event) => guard(event, async () => {
-    if (!usage || !settings.value.sync) throw new Error('Sync is off on this Mac.');
+    if (!usage || !usableBackend(settings.value.sync)) throw new Error('Sync is off on this Mac.');
     const { bytes, books } = await usage();
     return { bytes, books: books.length };
   }));

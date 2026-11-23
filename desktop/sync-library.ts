@@ -1,0 +1,69 @@
+import sharp from 'sharp';
+import { coverBlobKey, NewerSyncFormatError } from '../src/sync-snapshot';
+import type { LibraryBook, LibraryRemote } from '../src/desktop';
+import { isCoverJpeg } from './sync-engine';
+import { remoteTips } from './sync-remote';
+import type { SyncRemote } from './sync-remote';
+
+/**
+ * What the Start window, as the library (ADR 0012, section 5; #283), reads from the remote, apart from Electron so it
+ * can be tested. The list itself is one listing of the books and one of the deletion markers (`SyncRemote.listBooks`),
+ * so a library of many books costs two requests before anything else; what a row shows of a book only on the remote
+ * (its latest title and its cover) is read per book as the row comes into view (`libraryBook`), and kept for the session.
+ *
+ * Everything here comes from the remote and is treated as untrusted input: titles are bounded strings, counts are
+ * counted here, and a cover reaches the window only as a JPEG this process decoded and encoded again.
+ */
+
+/** The books on the remote, from one listing of books and one of deletion markers. */
+export async function libraryListing(remote: SyncRemote, remoteId: string, name: string): Promise<LibraryRemote> {
+  const books = await remote.listBooks();
+  return { remoteId, name, books: books.map(({ bookId, deleted, newer }) => ({ bookId, ...(deleted ? { deleted: true as const } : {}), ...(newer ? { newer: true as const } : {}) })) };
+}
+
+/** The largest cover the library decodes; anything beyond a 320 px JPEG is no cover ImageFlow made. */
+const maximumCoverPixels = 2000;
+
+/**
+ * A cover from the remote as the window may show it: a JPEG of a cover's size that decodes, made again here at no more
+ * than 320 pixels, as a data URL. Undefined for anything else.
+ */
+export async function coverDataUrl(bytes: Uint8Array | undefined) {
+  if (!bytes || !isCoverJpeg(bytes)) return undefined;
+  try {
+    const metadata = await sharp(bytes, { limitInputPixels: maximumCoverPixels * maximumCoverPixels }).metadata();
+    if (metadata.format !== 'jpeg' || !metadata.width || !metadata.height || metadata.width > maximumCoverPixels || metadata.height > maximumCoverPixels || (metadata.pages ?? 1) > 1) return undefined;
+    const encoded = await sharp(bytes, { failOn: 'error', limitInputPixels: maximumCoverPixels * maximumCoverPixels })
+      .rotate().resize({ width: 320, height: 320, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 82 }).toBuffer();
+    return 'data:image/jpeg;base64,' + encoded.toString('base64');
+  } catch { return undefined; }
+}
+
+/**
+ * What a library row shows of a book on the remote: the title and time of its latest version, how many versions it has
+ * (several when Macs changed it at once; Download asks which), and its cover. A book a newer ImageFlow synced says so
+ * and nothing else. Over iCloud the first read of a book lists its zone once, and the key index keeps it from then on.
+ */
+export async function libraryBook(remote: SyncRemote, bookId: string): Promise<LibraryBook> {
+  let tips;
+  try { tips = await remoteTips(remote, bookId); }
+  catch (error) {
+    if (error instanceof NewerSyncFormatError) return { bookId, title: '', versions: 0, newer: true };
+    throw error;
+  }
+  const latest = [...tips].sort((a, b) => a.createdAt.localeCompare(b.createdAt)).at(-1);
+  if (!latest) return { bookId, title: '', versions: 0 };
+  const cover = latest.coverDigest ? await coverDataUrl(await remote.getBlob(coverBlobKey(bookId, latest.coverDigest)).catch(() => undefined)) : undefined;
+  return { bookId, title: latest.title.slice(0, 400), updatedAt: latest.createdAt, versions: tips.length, ...(cover ? { cover } : {}) };
+}
+
+/**
+ * The notice a trusted book gives when its template reaches sites it was not allowed to before (ADR 0012, section 2):
+ * after a pulled or edited template adds one to sites already allowed, or the first time a book downloaded from the
+ * library reaches the sites its template declares. Undefined when there is nothing to say (a book made here).
+ */
+export function networkNotice(added: readonly string[], { known, downloaded }: { known: boolean; downloaded: boolean }) {
+  if (!added.length) return undefined;
+  if (downloaded && !known) return 'This book’s template loads maps or data from ' + added.join(', ') + '. It was downloaded from your sync, which ImageFlow trusts as your own.';
+  return known ? 'This book’s template now also loads maps or data from ' + added.join(', ') + '.' : undefined;
+}

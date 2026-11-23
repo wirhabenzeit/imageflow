@@ -5,6 +5,7 @@ import { TaskStatus } from './TaskStatus';
 const labels: Record<Status['state'], string> = {
   'in-sync': 'In sync', 'ahead': 'Changes to sync', 'behind': 'Changes to fetch', 'diverged': 'Changed on two Macs',
   'remote-syncing': 'Remote catching up', 'abandoned': 'Sync stopped', 'newer': 'Update to sync', 'unavailable': 'Sync unavailable',
+  'removed': 'Removed from sync',
 };
 const explanations: Record<Status['state'], string> = {
   'in-sync': 'This book matches its synced version.',
@@ -15,6 +16,7 @@ const explanations: Record<Status['state'], string> = {
   'abandoned': 'The last sync could not be finished, so the book may be partly updated. Sync again to continue with the version on the remote.',
   'newer': 'A newer version of ImageFlow synced this book.',
   'unavailable': 'The remote cannot be read.',
+  'removed': 'This book was deleted from sync on another Mac. Keep it on this Mac only, or sync it again as a new book.',
 };
 
 /** The book's sync status in the status bar (#251): hidden for a book that does not sync; a click syncs. */
@@ -40,7 +42,7 @@ export function SyncStatus({ api, notice }: { api?: DesktopApi; notice: (message
   const label = view.syncing ? 'Syncing…' : signIn ? 'Sign-in needed' : settings ? 'Check sync settings' : status ? labels[status.state] : 'Sync';
   const pending = status?.pendingOriginals ? ' ' + status.pendingOriginals + (status.pendingOriginals === 1 ? ' original is' : ' originals are') + ' only a preview on this Mac.' : '';
   // Named by a commit but not on the remote yet: still uploading from another Mac, which is no sync error.
-  const elsewhere = status?.notUploaded ? status.notUploaded + (status.notUploaded === 1 ? ' original is' : ' originals are') + ' still uploading from another Mac.' : '';
+  const elsewhere = status?.neverUploaded ?? (status?.notUploaded ? status.notUploaded + (status.notUploaded === 1 ? ' original is' : ' originals are') + ' still uploading from another Mac.' : '');
   // This Mac's originals going up after the commit: the book has synced, its originals have not all arrived yet.
   const left = view.uploading ? view.uploading.total - view.uploading.done : 0;
   const uploadingHere = left > 0 ? left + (left === 1 ? ' original is' : ' originals are') + ' still uploading from this Mac.' : '';

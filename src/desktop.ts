@@ -35,6 +35,7 @@ export const channels = {
   showAssets: 'document:show-assets', showTemplates: 'library:show', templatePreview: 'library:preview',
   current: 'document:current', appError: 'app:error', appNotice: 'app:notice',
   recents: 'app:recents', recentsChanged: 'app:recents-changed', recentAction: 'app:recent-action',
+  libraryRemote: 'library:remote', libraryBook: 'library:book', libraryAction: 'library:action', chooseBooksFolder: 'sync:choose-books-folder',
   sourceCommand: 'document:source-command', templateAction: 'library:action', sourceAction: 'document:source-action', saveCopy: 'document:save-copy',
   chooseStarter: 'app:choose-starter', documentAction: 'document:action',
   open: 'project:open', save: 'project:save', import: 'project:import', network: 'project:editor-network',
@@ -49,7 +50,7 @@ export const channels = {
   history: 'project:history', mcp: 'mcp:settings', mcpChanged: 'mcp:changed', mcpInstall: 'mcp:install',
   agentLease: 'project:agent-lease', agentLeaseReply: 'project:agent-lease-reply', agentRelease: 'project:agent-release',
   syncState: 'project:sync-state', syncChanged: 'project:sync-changed', syncAction: 'project:sync-action',
-  syncOffered: 'app:sync-offered', chooseSyncFolder: 'app:choose-sync-folder',
+  chooseSyncFolder: 'app:choose-sync-folder',
   lightroom: 'lightroom:state', lightroomChanged: 'lightroom:changed', lightroomInstall: 'lightroom:install', lightroomLaunch: 'lightroom:launch',
   syncBackend: 'sync:backend', saveSyncBackend: 'sync:save-backend', testSyncConnection: 'sync:test-connection', syncUsage: 'sync:usage', syncSetupBooks: 'sync:setup-books', chooseSyncBooks: 'sync:choose-books',
 } as const;
@@ -58,10 +59,11 @@ export type OpenAction = 'open' | 'new' | 'reload';
 /**
  * A book's sync status (#251): `ahead` has changes to send, `behind` changes to take, `diverged` changes on both sides
  * (or several versions on the remote), `remote-syncing` a remote that has not caught up, `abandoned` a pull that was
- * given up (`detail` says why), `newer` records a newer ImageFlow wrote, `unavailable` a remote that cannot be read.
+ * given up (`detail` says why), `newer` records a newer ImageFlow wrote, `unavailable` a remote that cannot be read,
+ * `removed` a book deleted from sync on another Mac (its tombstone), which pushes nothing until it is synced again.
  */
 export type SyncStatus = {
-  state: 'in-sync' | 'ahead' | 'behind' | 'diverged' | 'remote-syncing' | 'abandoned' | 'newer' | 'unavailable';
+  state: 'in-sync' | 'ahead' | 'behind' | 'diverged' | 'remote-syncing' | 'abandoned' | 'newer' | 'unavailable' | 'removed';
   detail?: string; tips?: number;
   /**
    * What the remote held when it was last read, against this Mac's last sync: its tip is that commit (`same`), a later
@@ -72,6 +74,10 @@ export type SyncStatus = {
   pendingOriginals: number;
   /** Of those, the ones another Mac has not uploaded yet: they are still uploading there, which is no sync error. */
   notUploaded?: number;
+  /**
+   * Originals a commit named a week or more ago that never arrived, in words: which Mac never uploaded them (#283).
+   */
+  neverUploaded?: string;
   /** With `unavailable`: the remote refused this Mac's credentials, which Settings → Sync fixes. */
   signIn?: true;
   /** With `unavailable`: the settings name no bucket there (missing, another region or endpoint); Settings → Sync fixes it. */
@@ -145,15 +151,19 @@ export type ProjectSummary = ProjectFiles & {
 export type ImportCounts = { photos: number; texts: number; files: number; skipped: number; failed: number; existing?: number };
 export type Result<T> = { value: T } | { error: string; code?: 'BOOK_BUSY' };
 /**
- * Settings → Sync (#281), behind the development flag (`available`). The renderer sends an access key to the main
+ * Settings → Sync (#281; `available` is always true since #283). The renderer sends an access key to the main
  * process when it is entered and never gets it back: only whether one is stored, and the last characters of its ID.
  */
 /**
- * `icloud` is there only in a build entitled to iCloud (#292): whether this Mac can use it now, and why not (signed
+ * `icloud` is there only in a build entitled to iCloud (#292), started with its flag (`IMAGEFLOW_SYNC_ICLOUD=1`): whether this Mac can use it now, and why not (signed
  * out, iCloud off for ImageFlow, restricted) when it cannot.
  */
 /** `booksUnchosen`: the sheet that asks which recent books sync waits for an answer (`AppSettings.syncBooksUnchosen`). */
-export type SyncBackendState = { available: boolean; credentials?: { stored: true; accessKeyEnd: string }; icloud?: { available: boolean; message?: string }; booksUnchosen?: true };
+export type SyncBackendState = { available: boolean; credentials?: { stored: true; accessKeyEnd: string }; icloud?: { available: boolean; message?: string }; booksUnchosen?: true;
+  /** Why the configured backend is not used by this build (iCloud without its flag), which leaves sync off. */
+  unusable?: string;
+  /** Whether the folder backend is offered (development and tests, `IMAGEFLOW_SYNC_FOLDER=1`). */
+  folder?: true };
 export type SyncCredentialsInput = { accessKeyId: string; secretAccessKey: string };
 export type SyncBackendRequest = { backend: S3SyncBackend; credentials?: SyncCredentialsInput } | { backend: ICloudSyncBackend };
 /** What Test Connection found: see `ConnectionReport` in desktop/sync-store-s3.ts. */
@@ -195,7 +205,30 @@ export type ImportRequest = {
   kind?: 'photo' | 'markdown' | 'file'; mode?: ImportMode; paths?: string[]; folder?: boolean; accept?: string[]; target?: { spread: string; box: string; page?: PageSide };
 };
 
-export type RecentDocument = { id: string; path: string; title: string; openedAt: string; available: boolean; cover?: string };
+/**
+ * A book on this Mac as the Start window lists it (#283): `bookId` is its lineage, which books on the remote are matched
+ * by; `syncs` says that it syncs on this Mac, so it stays listed beyond the 20 most recent.
+ */
+export type RecentDocument = { id: string; path: string; title: string; openedAt: string; available: boolean; cover?: string; bookId?: string; syncs?: true;
+  /** This Mac's sync record of the book, read without the remote: which remote it syncs with, and whether it was stopped here. */
+  sync?: { remoteId?: string; enabled?: boolean } };
+/**
+ * The books on the configured remote (#283), from one listing: each by its lineage, deleted from sync (`deleted`, its
+ * tombstone) or marked by a newer ImageFlow (`newer`). `name` is what the app calls the backend ("iCloud", the bucket).
+ */
+export type LibraryRemote = { remoteId: string; name: string; books: { bookId: string; deleted?: true; newer?: true }[] };
+/**
+ * What the library shows of a book on the remote, loaded when its row comes into view and kept for the session: the
+ * title and time of its latest version, how many versions (tips) it has, and its cover as a JPEG data URL the main
+ * process made. `newer` for a book a newer ImageFlow synced.
+ */
+export type LibraryBook = { bookId: string; title: string; updatedAt?: string; versions: number; cover?: string; newer?: true };
+/**
+ * What the Start window asks of a book (#283): Download a book only on the remote, Delete from Sync (asked in the main
+ * process first), Update for one a newer ImageFlow synced, and for a book on this Mac (`id`, its recent entry) Start
+ * Syncing, Stop Syncing on This Mac, and for one deleted from sync elsewhere Keep Here Only or Sync Again.
+ */
+export type LibraryAction = { action: 'download' | 'delete' | 'update'; bookId: string } | { action: 'start' | 'stop' | 'keep-here' | 'sync-again' | 'delete'; id: string };
 
 export type SourceAction = { action: 'retry' | 'launch' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump' | 'import' | 'rename'; spread?: string; key?: string; keys?: string[]; accept?: string[]; paths?: string[]; name?: string };
 
@@ -250,6 +283,13 @@ export type DesktopApi = {
   recentDocuments(): Promise<Result<RecentDocument[]>>;
   onRecentsChanged(listener: () => void): () => void;
   recentDocument(id: string, action: 'open' | 'locate' | 'remove' | 'reveal'): Promise<Result<null>>;
+  /** The books on the configured remote, for the Start window: kept for the session; `refresh` reads the remote again. */
+  libraryRemote(refresh?: boolean): Promise<Result<LibraryRemote | null>>;
+  /** A book on the remote as its library row shows it, loaded as the row comes into view. */
+  libraryBook(bookId: string): Promise<Result<LibraryBook>>;
+  libraryAction(request: LibraryAction): Promise<Result<null>>;
+  /** Settings → Sync: asks, in the app's own dialog, for the folder Download puts books in; null when cancelled. */
+  chooseBooksFolder(): Promise<Result<AppSettings | null>>;
   // The New Book picker's choice; nothing cancels.
   chooseStarter(choice?: NewBookChoice): Promise<Result<boolean>>;
   // The template library, and changes to it from any window.
@@ -265,9 +305,8 @@ export type DesktopApi = {
   trustTemplate(id: string, allow: boolean): Promise<Result<boolean>>;
   documentAction(action: 'reveal' | 'template' | 'text', id?: string): Promise<Result<void>>;
   getSettings(): Promise<Result<AppSettings>>;
-  // Whether this build offers sync: only with the development flag until the library ships (ADR 0012).
-  syncOffered(): Promise<boolean>;
-  // Asks for the folder this Mac syncs through and sets it as the sync backend; null when the user cancels.
+  // Asks for the folder this Mac syncs through and sets it as the sync backend; null when the user cancels. For development
+  // and tests only (`IMAGEFLOW_SYNC_FOLDER=1`).
   chooseSyncFolder(): Promise<Result<AppSettings | null>>;
   updateSettings(patch: Partial<AppSettings>): Promise<Result<AppSettings>>;
   onSettingsChanged(listener: (settings: AppSettings) => void): () => void;

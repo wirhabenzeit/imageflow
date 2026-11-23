@@ -50,13 +50,38 @@ export async function createDocument(destination: string, starter: string | ((st
 }
 
 const maximumCoverLength = 300_000;
+/** Recent books that do not sync; books that sync on this Mac stay tracked beyond it (up to `maximumTracked`). */
+export const maximumRecents = 20;
+const maximumTracked = 500;
 const recentEntrySchema = z.object({
   id: z.string().uuid(), path: z.string(), identity: z.string(), title: z.string(), openedAt: z.string(),
   cover: z.string().max(maximumCoverLength).optional(),
+  // The book's lineage (`project.json` `bookId`), which the library matches books on the remote by (#283).
+  bookId: z.string().uuid().optional(),
+  // The book syncs on this Mac: it stays tracked beyond the cap, so the library never lists it as only on the remote.
+  syncs: z.literal(true).optional(),
 });
 type Entry = z.infer<typeof recentEntrySchema>;
 
-/** Recents and small derived cover images belong to the app, never to the document. */
+/** The lineage a book's project.json names, or undefined. Small and best effort: a book that cannot be read has none. */
+async function lineageOf(folder: string) {
+  try {
+    const { bookId } = JSON.parse(await readFile(join(folder, 'project.json'), 'utf8')) as { bookId?: unknown };
+    return typeof bookId === 'string' && z.string().uuid().safeParse(bookId).success ? bookId : undefined;
+  } catch { return undefined; }
+}
+
+/** The 20 most recent books, and every book that syncs here besides (#283), most recent first. */
+function capped(entries: Entry[]) {
+  let recent = 0;
+  return entries.filter((entry) => entry.syncs || recent++ < maximumRecents).slice(0, maximumTracked);
+}
+
+/**
+ * Recents and small derived cover images belong to the app, never to the document. The list is also what the library
+ * knows of the books on this Mac (#283): each entry records the book's lineage (`bookId`), and a book that syncs here
+ * stays tracked beyond the 20 most recent, so it is never listed as a book only on the remote.
+ */
 export class RecentDocuments {
   private entries: Entry[] = [];
   private writes = Promise.resolve();
@@ -64,14 +89,14 @@ export class RecentDocuments {
   async load() {
     try {
       const values = z.array(z.unknown()).parse(JSON.parse(await readFile(this.file, 'utf8')));
-      this.entries = values.flatMap((value) => {
+      this.entries = capped(values.flatMap((value) => {
         // Covers are disposable; a malformed cover must not discard the document or other recents.
         if (value && typeof value === 'object' && 'cover' in value && (typeof value.cover !== 'string' || value.cover.length > maximumCoverLength)) {
           value = { ...value, cover: undefined };
         }
         const parsed = recentEntrySchema.safeParse(value);
         return parsed.success ? [parsed.data] : [];
-      }).slice(0, 20);
+      }));
     }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') console.warn('ImageFlow could not read recent books.', error);
@@ -89,17 +114,43 @@ export class RecentDocuments {
   }
   async remember(path: string, title: string, replacing?: string) {
     const { folder, identity } = await documentIdentity(path);
+    const bookId = await lineageOf(folder);
     await this.update(() => {
       const previous = this.entries.find((entry) => entry.id === replacing || entry.identity === identity || entry.path === folder);
-      const entry: Entry = { ...previous, id: previous?.id ?? randomUUID(), path: folder, identity, title, openedAt: new Date().toISOString() };
-      this.entries = [entry, ...this.entries.filter((item) => item.id !== entry.id && item.identity !== identity && item.path !== folder)].slice(0, 20);
+      const entry: Entry = { ...previous, id: previous?.id ?? randomUUID(), path: folder, identity, title, openedAt: new Date().toISOString(), ...(bookId ? { bookId } : {}) };
+      this.entries = capped([entry, ...this.entries.filter((item) => item.id !== entry.id && item.identity !== identity && item.path !== folder)]);
     });
   }
-  async refresh(path: string, title: string, cover?: string) {
+  /** The open book changed: its title, its cover when one was made, and its lineage (Sync Again gives it a new one). */
+  async refresh(path: string, title: string, cover?: string, bookId?: string) {
     await this.update(() => {
       const entry = this.entries.find((entry) => entry.path === path);
-      if (entry) { entry.title = title; if (cover && cover.length <= maximumCoverLength) entry.cover = cover; }
+      if (entry) {
+        entry.title = title;
+        if (cover && cover.length <= maximumCoverLength) entry.cover = cover;
+        if (bookId) entry.bookId = bookId;
+      }
     });
+  }
+  /**
+   * Records whether the book at `path` syncs on this Mac: one that does stays tracked beyond the cap, and one that no
+   * longer does counts toward it again. Writes only when it changed, and says whether it did.
+   */
+  async track(path: string, syncs: boolean) {
+    const entry = this.entries.find((entry) => entry.path === path);
+    if (!entry || !!entry.syncs === syncs) return false;
+    await this.update(() => {
+      const current = this.entries.find((item) => item.path === path);
+      if (!current) return;
+      if (syncs) current.syncs = true; else delete current.syncs;
+      this.entries = capped(this.entries);
+    });
+    return true;
+  }
+  /** The cached cover of the book at `path`, as a JPEG data URL; undefined when none was made yet. */
+  async coverOf(path: string) {
+    await this.writes;
+    return this.entries.find((entry) => entry.path === path)?.cover;
   }
   remove(id: string) { return this.update(() => { this.entries = this.entries.filter((entry) => entry.id !== id); }); }
   async get(id: string) {
@@ -108,16 +159,29 @@ export class RecentDocuments {
     if (!entry) throw new Error('This recent book is no longer listed.');
     return { ...entry };
   }
+  /**
+   * Every tracked book, with whether it can be opened. An entry from before lineages were recorded gets its `bookId`
+   * from the book's project.json while it can be read, and keeps it.
+   */
   async list(): Promise<RecentDocument[]> {
     await this.writes;
-    return Promise.all(this.entries.map(async (entry) => {
+    const listed = await Promise.all(this.entries.map(async (entry) => {
       try {
         if (!isDocument(entry.path)) return { ...entry, available: false };
         const current = await documentIdentity(entry.path);
         const manifest = await stat(join(current.folder, 'project.json'));
-        return { ...entry, available: manifest.isFile() };
+        if (!manifest.isFile()) return { ...entry, available: false };
+        const bookId = entry.bookId ?? await lineageOf(current.folder);
+        return { ...entry, ...(bookId ? { bookId } : {}), available: true };
       } catch { return { ...entry, available: false }; }
     }));
+    const found = listed.filter((entry, index) => entry.bookId && !this.entries[index].bookId);
+    if (found.length) {
+      await this.update(() => {
+        for (const { id, bookId } of found) { const entry = this.entries.find((item) => item.id === id); if (entry && !entry.bookId) entry.bookId = bookId; }
+      }).catch((error) => console.warn('ImageFlow could not update recent books', error));
+    }
+    return listed;
   }
   settled() { return this.writes; }
 }

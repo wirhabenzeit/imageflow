@@ -1,10 +1,10 @@
-import { lstat, realpath } from 'node:fs/promises';
-import { basename, isAbsolute, relative, sep } from 'node:path';
+import { lstat, readFile, realpath } from 'node:fs/promises';
+import { basename, isAbsolute, join, relative, sep } from 'node:path';
 import type { SyncBackend } from '../src/settings';
 import { cloudKitOpener, s3Opener } from './sync-backend';
 import type { SyncRemoteDependencies } from './sync-backend';
 import { bookTrusted, distrustBook, trustBook } from './source-access';
-import { syncBook, uploadOriginals } from './sync-engine';
+import { newBookHistory, syncBook, uploadOriginals } from './sync-engine';
 import type { SyncOptions, UploadOutcome } from './sync-engine';
 import { bookSync, readSyncState, startSyncing, stopSyncing, syncedElsewhere, updateSyncState } from './sync-pull';
 import type { BookSync } from './sync-pull';
@@ -260,6 +260,37 @@ export class SyncService {
     return Promise.all(folders.map(async (folder) => bookSync(await readSyncState(folder), remoteId)));
   }
 
+  /**
+   * Delete from Sync (ADR 0012, sections 3 and 4), after the user confirmed it: the book goes from the remote for every
+   * Mac, and every copy on this Mac stays where it is. First the background uploads of the book stop (any upload whose
+   * book is `bookId`, also of a copy not named in `folders`), and the copies in `folders` stop syncing here
+   * (`enabled: false`) so that nothing starts again; `settle` then waits for a sync of the book that is running; then
+   * the remote writes the tombstone and removes everything else. Throws when the remote cannot be read.
+   */
+  async deleteBook(bookId: string, { folders = [], settle }: { folders?: readonly string[]; settle?: () => Promise<void> } = {}) {
+    const { remote, remoteId } = await this.connect();
+    const running = await Promise.all([...this.uploads.keys()].map(async (folder) => ((await syncedLineage(folder)) === bookId ? folder : undefined)));
+    await Promise.all([...new Set([...folders, ...running.filter((folder): folder is string => !!folder)])].map((folder) => this.cancelUpload(folder)));
+    for (const folder of folders) {
+      await updateSyncState(folder, (state) => (state.enabled === false || state.remoteId !== remoteId ? state : { ...state, enabled: false }));
+    }
+    await settle?.();
+    const tombstone = await remote.deleteBook(bookId);
+    for (const folder of folders) this.settled.delete(folder);
+    return tombstone;
+  }
+
+  /**
+   * Sync Again on a book that was deleted from sync on another Mac (#283): a new lineage and a fresh history on the
+   * configured remote (`newBookHistory`), which the next sync pushes. Needs the writer lock (the open book's session, or
+   * one taken for a closed book). Only a trusted book, as for Start Syncing.
+   */
+  async syncAgain(folder: string, options: { trust?: boolean } = {}) {
+    const { remoteId } = await this.connect(folder);
+    await this.optIn(folder, options);
+    return newBookHistory(folder, remoteId);
+  }
+
   /** Stops syncing a book on this Mac, and its upload of originals; the remote is left as it is. */
   async stop(folder: string) {
     await this.cancelUpload(folder);
@@ -363,3 +394,13 @@ export class SyncService {
 }
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+/** The book a folder's sync record last synced, or else its project.json's lineage; undefined when neither can be read. */
+async function syncedLineage(folder: string) {
+  const synced = (await readSyncState(folder).catch(() => undefined))?.lastSynced?.bookId;
+  if (synced) return synced;
+  try {
+    const { bookId } = JSON.parse(await readFile(join(folder, 'project.json'), 'utf8')) as { bookId?: unknown };
+    return typeof bookId === 'string' ? bookId : undefined;
+  } catch { return undefined; }
+}
