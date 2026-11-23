@@ -51,6 +51,24 @@ export interface SyncStore {
    * Optional: a store without a server-side copy leaves it out, and a caller then uploads instead.
    */
   copy?(from: string, to: string): Promise<boolean>;
+  /**
+   * What changed under a book's prefix since `token`, from a change feed the store keeps (CloudKit's zone change
+   * tokens), so a Mac need not list a book in full at every sync. Without a token, every object: a full listing.
+   * Covers the book's objects except its tombstone (`deleted.json`), which a caller reads on its own.
+   *
+   * Optional: a store without a feed leaves it out, and callers list. Undefined when the store holds nothing for the
+   * book. Rejects with `ChangeTokenExpiredError` when the token is no longer accepted; the caller then starts over
+   * without one.
+   */
+  changes?(bookId: string, token?: string): Promise<StoreChanges | undefined>;
+}
+
+/** Objects added or replaced (`changed`) and keys removed (`deleted`) since a token, and the token to ask with next. */
+export type StoreChanges = { changed: StoreEntry[]; deleted: string[]; token: string };
+
+/** A change token the store no longer accepts: the caller lists the book in full once, without one. */
+export class ChangeTokenExpiredError extends Error {
+  constructor(message = 'The sync store no longer accepts this change token.') { super(message); this.name = 'ChangeTokenExpiredError'; }
 }
 
 /**

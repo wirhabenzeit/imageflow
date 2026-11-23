@@ -62,7 +62,7 @@ export async function verifyMacSigning(app, identity) {
   const natives = await nativeFiles(join(app, 'Contents/Resources/app.asar.unpacked/node_modules/@img'));
   assert.ok(natives.some((path) => path.endsWith('.node')), 'sharp must be unpacked and signed.');
   assert.ok(natives.some((path) => path.endsWith('.dylib')), 'libvips must be unpacked and signed.');
-  for (const path of [join(app, 'Contents/Resources/esbuild'), join(app, 'Contents/Resources/app.asar.unpacked/native/mac-header.node'), ...natives]) {
+  for (const path of [join(app, 'Contents/Resources/esbuild'), join(app, 'Contents/Resources/app.asar.unpacked/native/mac-header.node'), join(app, 'Contents/Resources/app.asar.unpacked/native/cloudkit.node'), ...natives]) {
     await run('codesign', ['--verify', '--strict', path]);
     assert.equal(/^TeamIdentifier=(.+)$/m.exec(await details(path))?.[1], team, 'Native binary must share the app Team ID: ' + path);
   }

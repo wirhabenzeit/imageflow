@@ -30,6 +30,8 @@ import { credentialScope, MemoryCredentialStore } from '../desktop/sync-credenti
 import { unavailableStatus } from '../desktop/sync-engine';
 import { S3Store } from '../desktop/sync-store-s3';
 import { StoreAccessError } from '../desktop/sync-store';
+import { FakeCloudKit } from './cloudkit-fake';
+import { CloudKitStore } from '../desktop/sync-store-cloudkit';
 import { readCommitHeaderV1 } from './sync-v1-reader';
 import { bookTrusted } from '../desktop/source-access';
 import { readSyncState, SyncElsewhereError, SyncHalfPulledError, takeAbandonedAtOpen, updateSyncState } from '../desktop/sync-pull';
@@ -77,15 +79,17 @@ async function world(t: { after: (fn: () => Promise<void>) => void }) {
 }
 
 // The engine tests (`each`) run against every store behind the same `StoreRemote`: the memory store here, and the
-// folder and S3 stores in processes of their own (tests/sync-folder-store.test.ts, tests/sync-s3-store.test.ts), so
-// the runs go side by side. Every other test (`test`) runs once, here.
+// folder, S3 and iCloud (over a fake CloudKit) stores in processes of their own (tests/sync-folder-store.test.ts,
+// tests/sync-s3-store.test.ts, tests/sync-cloudkit-engine.test.ts), so the runs go side by side. Every other test
+// (`test`) runs once, here.
 type Remote = StoreRemote;
-const store = (['folder', 's3'] as const).find((name) => name === process.env.IMAGEFLOW_SYNC_TEST_STORE) ?? 'memory';
+const store = (['folder', 's3', 'cloudkit'] as const).find((name) => name === process.env.IMAGEFLOW_SYNC_TEST_STORE) ?? 'memory';
 const test: typeof runTest = store === 'memory' ? runTest : ((() => {}) as unknown as typeof runTest);
 const each = (name: string, run: (t: TestContext) => Promise<void>) => runTest(name + ' (' + store + ' store)', run);
 async function newRemote(root: string, name = 'Remote'): Promise<Remote> {
   if (store === 'memory') return memoryRemote();
   if (store === 's3') return s3Remote();
+  if (store === 'cloudkit') return new StoreRemote(new CloudKitStore(new FakeCloudKit(), { backoff: () => 0 }));
   await mkdir(join(root, name), { recursive: true });
   return folderRemote(join(root, name));
 }
@@ -1535,8 +1539,9 @@ each('every blob of a book lives under its prefix, and two books never share one
   assert.deepEqual((await remote.listBooks()).map((book) => book.bookId).sort(), [...ids].sort());
   // A blob is copied inside the remote, as a duplicated book's first push will do, and only between blob keys.
   const copy = crypto.randomUUID();
-  assert.equal(await remote.copyBlob(originalBlobKey(ids[0], digest, '.jpg'), originalBlobKey(copy, digest, '.jpg')), true);
-  assert.equal(sha(await stored(remote, originalBlobKey(copy, digest, '.jpg'))), digest);
+  // A store without a server-side copy (iCloud) answers false, and the caller uploads instead.
+  assert.equal(await remote.copyBlob(originalBlobKey(ids[0], digest, '.jpg'), originalBlobKey(copy, digest, '.jpg')), !!remote.store.copy);
+  if (remote.store.copy) assert.equal(sha(await stored(remote, originalBlobKey(copy, digest, '.jpg'))), digest);
   assert.equal(await remote.copyBlob(originalBlobKey(ids[0], 'f'.repeat(64), '.jpg'), originalBlobKey(copy, 'f'.repeat(64), '.jpg')), false);
   await assert.rejects(remote.copyBlob(originalBlobKey(ids[0], digest, '.jpg'), 'remote.json'), /Not a sync blob key/);
   assert.match(coverBlobKey(copy, digest), blobKeyPattern);
@@ -1714,8 +1719,8 @@ each('a blob is copied only to its own key in another book, and never over a blo
   // Also when the source is not there, and a blob copied onto itself stays.
   assert.equal(await remote.copyBlob(originalBlobKey(other, digest, '.jpg'), originalBlobKey(to, digest, '.jpg')), true);
   assert.equal(await remote.copyBlob(originalBlobKey(from, digest, '.jpg'), originalBlobKey(from, digest, '.jpg')), true);
-  assert.equal(await remote.copyBlob(originalBlobKey(from, digest, '.jpg'), originalBlobKey(other, digest, '.jpg')), true);
-  assert.deepEqual(await stored(remote, originalBlobKey(other, digest, '.jpg')), bytes);
+  assert.equal(await remote.copyBlob(originalBlobKey(from, digest, '.jpg'), originalBlobKey(other, digest, '.jpg')), !!remote.store.copy);
+  if (remote.store.copy) assert.deepEqual(await stored(remote, originalBlobKey(other, digest, '.jpg')), bytes);
 });
 
 each('a sync record names the book its commit belongs to, and originals are found there whatever project.json says later', async (t) => {
