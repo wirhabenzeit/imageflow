@@ -46,10 +46,10 @@ import { photoFile } from './photos';
 import { captureBookPreview, checkBookRender } from './preview';
 import { PreviewError } from '../src/preview';
 import { chooseSyncTip, DocumentSession } from './document-session';
-import { cloneFromRemote, downloadName, ownedOriginalsSize } from './sync-engine';
+import { cloneFromRemote, downloadName, originalsAway, ownedOriginalsSize } from './sync-engine';
 import { BookDeletedError, remoteTips } from './sync-remote';
 import { readSyncState, SyncElsewhereError } from './sync-pull';
-import { libraryBook, libraryListing } from './sync-library';
+import { deleteFromSyncQuestion, libraryBook, libraryListing } from './sync-library';
 import { insideBook, pendingUploadsText, SyncService, UntrustedBookError } from './sync-service';
 import { syncExcludedBook as excludedFrom } from './sync-start';
 import { chooseBooksPatch } from './sync-settings';
@@ -1162,7 +1162,7 @@ async function askRemoved(document: DocumentSession) {
 async function syncAgainDocument(document: DocumentSession) {
   try { await document.syncAgain(); }
   catch (error) {
-    if (!(error instanceof UntrustedBookError) && (error as { code?: string }).code !== 'SYNC_UNTRUSTED' && !/not trusted/.test(errorMessage(error))) throw error;
+    if (!(error instanceof UntrustedBookError)) throw error;
     if (await offerTrust(document)) await document.syncAgain({ trust: true });
   }
 }
@@ -1301,11 +1301,13 @@ async function libraryAction(owner: BrowserWindow, request: LibraryAction) {
   if (request.action === 'delete') {
     if (!bookId) throw new Error('This book has not synced yet, so it is not in sync.');
     const title = entry?.title || (entry && bookName(entry.path)) || await libraryTitle(bookId);
-    const { response } = await dialog.showMessageBox(owner, { type: 'warning', buttons: ['Delete from Sync', 'Cancel'], defaultId: 1, cancelId: 1,
-      message: 'Delete “' + title + '” from sync?',
-      detail: 'It is removed from “' + (syncService.name ?? 'sync') + '”, and every Mac stops syncing it. The copies on your Macs stay where they are.' });
-    if (response !== 0) return;
     const local = (await recents.list()).filter((book) => book.available && book.bookId === bookId).map(({ path }) => path);
+    // What goes with it: for a copy here, its originals that are not on this Mac (counted from its own files).
+    const counts = await Promise.all(local.map((folder) => originalsAway(folder).catch(() => undefined)));
+    const away = !counts.length || counts.some((count) => count === undefined) ? undefined : Math.min(...counts.map(Number));
+    const { response } = await dialog.showMessageBox(owner, { type: 'warning',
+      ...deleteFromSyncQuestion({ title, backend: syncService.name ?? 'sync', here: local.length > 0, away }) });
+    if (response !== 0) return;
     const open = [...documents.values()].filter((document) => !document.closing && document.book.project.bookId === bookId);
     const folders = [...new Set([...local, ...open.map((document) => document.book.folder)])];
     await syncService.deleteBook(bookId, { folders, settle: async () => { await Promise.all(open.map((document) => document.settleSync())); } });

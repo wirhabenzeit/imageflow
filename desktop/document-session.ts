@@ -53,7 +53,6 @@ import { AssetFacts } from './asset-facts';
 import { StoreFullError } from './sync-store';
 import { describeLocalChange, describeSync, originalsNotHere, placeOriginals, stageOriginals, syncBook, unavailableStatus } from './sync-engine';
 import type { SyncOptions, SyncOutcome } from './sync-engine';
-import { BookDeletedError } from './sync-remote';
 import type { SyncRemote } from './sync-remote';
 import { bookSync, readSyncState, startSyncing, SyncElsewhereError, syncedElsewhere, takeAbandonedAtOpen } from './sync-pull';
 import type { SyncService, SyncStanding } from './sync-service';
@@ -75,6 +74,11 @@ import { previewPictures } from './preview-picture-cache';
 export type RenderSessions = Map<string, { book: OpenProject; mode: RenderProject['mode']; network?: () => readonly string[];
   photos?: 'preview'; pictures?: ReturnType<typeof previewPictures.view>; pictureScope?: string }>;
 const viewPath = /^\/render\/([a-f0-9-]{36})(?:\/(.*))?$/;
+/** The book is held by another operation (a save, a reload, a sync); `run` reports it as `BOOK_BUSY`. */
+export class BookBusyError extends Error {
+  readonly code = 'BOOK_BUSY';
+  constructor() { super('ImageFlow is finishing another operation in this book.'); this.name = 'BookBusyError'; }
+}
 /** This Mac's name as other Macs see it in "never uploaded from …": its network name without `.local`. */
 function macName() { return hostname().replace(/\.local$/i, '').slice(0, 100) || undefined; }
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'ImageFlow could not complete the request.'; }
@@ -291,14 +295,23 @@ export class DocumentSession {
     }
   }
   async run<T>(task: () => Promise<T>): Promise<Result<T>> {
-    if (this.closing) return { error: 'This book is closing.' };
-    if (this.busy) return { error: 'ImageFlow is finishing another operation in this book.', code: 'BOOK_BUSY' };
-    this.busy = true;
-    try { return { value: await task() }; }
+    try { return { value: await this.hold(task) }; }
     catch (error) {
+      if (error instanceof BookBusyError) return { error: error.message, code: 'BOOK_BUSY' };
       if (error instanceof CommittedProjectSaveError) this.notify({ error: error.message });
       return { error: errorMessage(error) };
-    } finally { this.busy = false; }
+    }
+  }
+  /**
+   * Runs `task` holding the book, as `run` does, but rejects with the task's own error (`BookBusyError` while the book
+   * is busy), so callers in the main process can tell errors apart by their class instead of their text.
+   */
+  async hold<T>(task: () => Promise<T>): Promise<T> {
+    if (this.closing) throw new Error('This book is closing.');
+    if (this.busy) throw new BookBusyError();
+    this.busy = true;
+    try { return await task(); }
+    finally { this.busy = false; }
   }
   async relocate(folder: string) {
     if (this.unlockProject && !await this.unlockProject.tryRelocate(folder)) throw new Error('Could not verify the moved book’s writer lock.');
@@ -352,7 +365,7 @@ export class DocumentSession {
   async sync(remote: SyncRemote, options: Pick<SyncOptions, 'fetchOriginals'> & { remoteId?: string;
     /** Told when the sync fails because the remote is full (its commit or a preview did not fit). */
     full?: (error: StoreFullError) => void } = {}) {
-    return this.run(async () => {
+    return this.hold(async () => {
       // Syncing turns on only once the sync holds the book: one that finds it busy changes nothing.
       if (options.remoteId) await startSyncing(this.book.folder, options.remoteId);
       this.stopWatch();
@@ -574,11 +587,10 @@ export class DocumentSession {
       // Originals come after the sync, in the background (`downloadSyncedOriginals`), so the book stays usable.
       const manage = this.syncService.kind === 'icloud' ? { manage: true as const } : {};
       const result = await this.sync(connection.remote, { remoteId: connection.remoteId, full: (error) => { this.storageFull = { message: error.message, ...manage }; } });
-      // A tombstone stays a `BookDeletedError` across `run`, so the app asks what becomes of the book.
-      if ('error' in result) throw result.error === new BookDeletedError().message ? new BookDeletedError() : new Error(result.error);
-      message = describeOutcome(result.value);
+      // Errors keep their class (`hold`): a tombstone is a `BookDeletedError`, and the app asks what becomes of the book.
+      message = describeOutcome(result);
       synced = true;
-      return result.value;
+      return result;
     } finally {
       this.syncing = false;
       await this.refreshSync({ message }).catch((error) => console.warn('ImageFlow could not read the sync status', error));
@@ -614,14 +626,14 @@ export class DocumentSession {
     if (!service) throw new Error('Sync is not available.');
     await this.settleSync();
     await this.whenIdle();
-    const result = await this.run(async () => {
+    // Rejects with the service's own error, so an untrusted book is an `UntrustedBookError` the app asks about.
+    await this.hold(async () => {
       this.stopWatch();
       try {
         await service.syncAgain(this.book.folder, options);
         this.notify({ value: this.activate(await loadProject(this.book.folder, this.cache), true) });
       } finally { this.watchProject(this.book); }
     });
-    if ('error' in result) throw new Error(result.error);
     return this.syncNow();
   }
   /**

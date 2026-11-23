@@ -298,6 +298,7 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
     return fact ? [[id, fact]] : [];
   }));
   const originals: StateBlob['originals'] = {};
+  const named: NonNullable<StateBlob['named']> = {};
   for (const [id, photo] of Object.entries(state.photos)) {
     // Only photos whose source reaches the book sync as originals (ADR 0012, Sync by reach).
     const owned = syncedOriginalPath(photo);
@@ -305,13 +306,12 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
     const here = context.here[id];
     // Named, not uploaded: the original follows the commit (`uploadOriginals`), and until it has arrived another Mac
     // shows the photo's preview and says that it is still uploading.
-    if (here?.path !== undefined && here.digest === assets[id]?.digest) {
-      const ext = extname(owned).toLowerCase();
-      // The version the last snapshot named keeps when and where it was first named.
-      const named = base?.originals[id];
-      originals[id] = named?.digest === here.digest && named.ext === ext ? named
-        : { digest: here.digest, ext, namedAt: (context.options.now?.() ?? new Date()).toISOString(), ...(context.options.device ? { by: context.options.device.slice(0, 100) } : {}) };
-    } else if (base?.originals[id]) originals[id] = base.originals[id];
+    if (here?.path !== undefined && here.digest === assets[id]?.digest) originals[id] = { digest: here.digest, ext: extname(owned).toLowerCase() };
+    else if (base?.originals[id]) originals[id] = base.originals[id];
+    // The version the last snapshot named keeps when and where it was first named; a new one is named here, now.
+    const earlier = base?.named?.[id];
+    if (originals[id]) named[id] = earlier?.digest === originals[id].digest ? earlier
+      : { digest: originals[id].digest, at: (context.options.now?.() ?? new Date()).toISOString(), ...(context.options.device ? { by: context.options.device.slice(0, 100) } : {}) };
   }
   const proxies: StateBlob['proxies'] = {};
   const local = await proxyStore();
@@ -338,7 +338,7 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
   }
   const portable = portableManifests(state.project, state.photos);
   const blob: StateBlob = { version: 1, project: portable.project, photos: portable.photos, assetsMeta: { version: 1, assets },
-    content: state.contentDigests, originals, proxies };
+    content: state.contentDigests, originals, ...(Object.keys(named).length ? { named } : {}), proxies };
   const bytes = encodeStateBlob(blob);
   const stateDigest = sha(bytes);
   if (!await remote.hasBlob(contentBlobKey(bookId, stateDigest))) await remote.putBlob(contentBlobKey(bookId, stateDigest), bytes, { sha256: stateDigest });
@@ -612,12 +612,6 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
   context.stale = changed;
   const state = await readSyncState(root);
   if (state.pull) throw new Error('The interrupted sync could not be finished.');
-  // A book deleted from sync is never pushed back, nor pulled (ADR 0012, section 4): the Mac that still has it asks.
-  const lineage = (JSON.parse(await readFile(join(root, 'project.json'), 'utf8')) as { bookId?: unknown }).bookId;
-  if (typeof lineage === 'string') {
-    const tombstone = await options.remote.bookTombstone(lineage);
-    if (tombstone) throw new BookDeletedError(tombstone);
-  }
   const facts = await refreshFacts(context);
   const local = await captureBookState(root);
   const bookId = local.project.bookId;
@@ -626,6 +620,10 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
   // push would ask about, and the originals. It ends with the sync (`syncBook`).
   context.endSync = await options.remote.prepareSync?.(bookId);
   const commits = await remoteCommits(options.remote, bookId);
+  // A book deleted from sync is never pushed back, nor pulled (ADR 0012, section 4): the Mac that still has it asks.
+  // Asked after the commits were listed, so that listing answers it without a request of its own.
+  const tombstone = await options.remote.bookTombstone(bookId);
+  if (tombstone) throw new BookDeletedError(tombstone);
   const tips = deriveTips(commits);
   const synced = state.lastSynced;
   const factsChanged = !!synced && factsAhead(hereDigests(context), synced, hereKeys(context));
@@ -858,8 +856,11 @@ export async function originalsNotHere(folder: string, remote: SyncRemote, now =
   const missing = all.filter(({ replaces }) => !replaces);
   // Named long ago and still not on the remote: the Mac that had it never uploaded it (it is gone, or never synced
   // again). Also for a kept older version, whose photo then stays on its old file.
-  const neverUploaded = all.filter(({ uploaded, original }) => !uploaded && original.namedAt && now.getTime() - Date.parse(original.namedAt) > neverUploadedAfter)
-    .map(({ id, original }) => ({ id, namedAt: original.namedAt!, ...(original.by ? { by: original.by } : {}) }));
+  const namedOf = (id: string, digest: string) => (blob.named?.[id]?.digest === digest ? blob.named[id] : undefined);
+  const neverUploaded = all.flatMap(({ id, uploaded, original }) => {
+    const named = namedOf(id, original.digest);
+    return !uploaded && named && now.getTime() - Date.parse(named.at) > neverUploadedAfter ? [{ id, namedAt: named.at, ...(named.by ? { by: named.by } : {}) }] : [];
+  });
   return { ids: missing.map(({ id }) => id), notUploaded: missing.filter(({ uploaded }) => !uploaded).map(({ id }) => id), ...(neverUploaded.length ? { neverUploaded } : {}) };
 }
 
@@ -922,6 +923,25 @@ export async function ownedOriginalsSize(folder: string) {
     if (info?.isFile()) bytes += info.size;
   }
   return bytes;
+}
+
+/**
+ * How many of a book's owned originals are not on this Mac, from its own files alone: owned photos whose file photos/
+ * lacks, and those a pull kept at an older version (their new version is elsewhere). For the question Delete from Sync
+ * asks; reads photos.json, the sync record and the files' presence, nothing else.
+ */
+export async function originalsAway(folder: string) {
+  const root = await realpath(folder);
+  const photos = photoIndexSchema.parse(JSON.parse(await readFile(join(root, 'photos.json'), 'utf8')));
+  const kept = await keptOriginals(root);
+  let away = 0;
+  for (const [id, photo] of Object.entries(photos)) {
+    const path = syncedOriginalPath(photo);
+    if (!path?.startsWith('photos/')) continue;
+    const info = await lstat(await bookPath(root, path, { checking: true })).catch(() => undefined);
+    if (!info?.isFile() || kept.has(id)) away++;
+  }
+  return away;
 }
 
 /** An owned original the last synced snapshot names, that is here, and that the remote lacks: still to upload. */
@@ -1006,6 +1026,7 @@ export async function uploadOriginals({ folder, connect, signal, progress }: { f
   // A book deleted from sync uploads nothing: on iCloud an upload would make its zone again.
   const synced = (await readSyncState(root)).lastSynced;
   const lineage = synced && await syncedBookId(root, synced);
+  // Right after a sync this is answered from its listing; on its own (a book reopened) the remote is asked.
   if (lineage && await connection.remote.bookTombstone(lineage)) return { ...outcome, stopped: 'deleted' };
   // Looked at again while the upload runs (at most every 30 s), so a deletion on another Mac stops it soon.
   let looked = Date.now();
@@ -1020,7 +1041,7 @@ export async function uploadOriginals({ folder, connect, signal, progress }: { f
     if (connection.remoteId !== expected || await syncsWith() !== expected) return { ...outcome, left, stopped: 'elsewhere' };
     if (lineage && Date.now() - looked > 30_000) {
       looked = Date.now();
-      if (await connection.remote.bookTombstone(lineage)) return { ...outcome, left, stopped: 'deleted' };
+      if (await connection.remote.bookTombstone(lineage, { fresh: true })) return { ...outcome, left, stopped: 'deleted' };
     }
     if (await fileDigest(path).catch(() => undefined) !== digest) { outcome.changed++; continue; }
     try { await connection.remote.putBlob(key, { file: path }, { sha256: digest, signal }); }
@@ -1143,9 +1164,13 @@ export async function newBookHistory(folder: string, remoteId: string) {
  * pushed by the next sync, but does not count as ahead here), and so is anything a sync would find still arriving.
  */
 export async function describeSync(folder: string, remote: SyncRemote): Promise<SyncStatus> {
+  let end: (() => void) | undefined;
   try {
     const root = await realpath(folder);
     const state = await readSyncState(root);
+    // Over a bucket one listing of the book answers its commits, its originals and its tombstone, as in a sync.
+    const lineage = (JSON.parse(await readFile(join(root, 'project.json'), 'utf8')) as { bookId?: unknown }).bookId;
+    if (typeof lineage === 'string') end = await remote.prepareSync?.(lineage);
     const away = await originalsNotHere(root, remote).catch(() => ({ ids: [], notUploaded: [] as string[], neverUploaded: undefined }));
     const base = { pendingOriginals: away.ids.length, ...(away.notUploaded.length ? { notUploaded: away.notUploaded.length } : {}),
       ...(away.neverUploaded?.length ? { neverUploaded: neverUploadedText(away.neverUploaded) } : {}) };
@@ -1154,9 +1179,9 @@ export async function describeSync(folder: string, remote: SyncRemote): Promise<
     const local = await captureBookState(root);
     const bookId = local.project.bookId;
     if (!bookId) return { ...base, state: 'ahead' };
+    const commits = await remoteCommits(remote, bookId);
     // Deleted from sync on another Mac: the book asks to be kept here only or synced again, and pushes nothing.
     if (await remote.bookTombstone(bookId)) return { state: 'removed', pendingOriginals: 0 };
-    const commits = await remoteCommits(remote, bookId);
     const tips = deriveTips(commits);
     const decision = decideSync({ pullInProgress: !!state.pull, tips, commits, lastSynced: state.lastSynced, localRevision: local.revision, factsChanged: false });
     const states: Record<SyncDecision['action'], SyncStatus['state']> = { 'resume': 'behind', 'remote-behind': 'remote-syncing', 'initial-push': 'ahead',
@@ -1170,7 +1195,7 @@ export async function describeSync(folder: string, remote: SyncRemote): Promise<
     if (error instanceof NewerSyncFormatError) return { state: 'newer', detail: error.message, pendingOriginals: 0 };
     if (error instanceof StoreAccessError) return unavailableStatus(error.message, error.reason);
     return { state: 'unavailable', detail: error instanceof Error ? error.message : String(error), pendingOriginals: 0 };
-  }
+  } finally { end?.(); }
 }
 
 /**

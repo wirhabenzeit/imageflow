@@ -77,10 +77,16 @@ export interface SyncRemote {
   prepareSync?(bookId: string): Promise<() => void>;
   /** The remote's identity, a UUID written at first use. Two Macs that initialize an empty remote at once agree on it. */
   remoteId(): Promise<string>;
-  /** The tombstone of a book deleted from sync, or undefined. Throws `NewerSyncFormatError` for one a newer version wrote. */
-  bookTombstone(bookId: string): Promise<BookTombstone | undefined>;
   /**
-   * Deletes a book from the remote for every Mac: writes its tombstone and its marker, then removes everything else
+   * The tombstone of a book deleted from sync, or undefined. Throws `NewerSyncFormatError` for one a newer version wrote.
+   * Asked right after the book's commits were listed (a sync, a status), it is answered from that listing where it
+   * says: the one listing of a sync over a bucket, which holds `deleted.json` when there is one, or the key index the
+   * change feed just brought up to date, which has commits only while the book is not deleted (deleting it removes its
+   * commits first). Otherwise, and with `fresh`, the store is asked.
+   */
+  bookTombstone(bookId: string, options?: { fresh?: boolean }): Promise<BookTombstone | undefined>;
+  /**
+   * Deletes a book from the remote for every Mac: writes its marker and then its tombstone, then removes everything else
    * under its prefix. From the start, this remote refuses to store anything more for the book (`BookDeletedError`), so
    * an upload that was under way does not bring it back.
    */
@@ -150,6 +156,10 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
   /** The key indexes read or kept up to date while this remote is used, by remote identity and book. */
   private readonly indexes = new Map<string, { token?: string; entries: Map<string, StoreEntry> }>();
   private readonly indexing = new Map<string, Promise<StoreEntry[]>>();
+  /** When the key index of each book was last brought up to date from the change feed. */
+  private readonly refreshed = new Map<string, number>();
+  /** Books this remote asked about and found without a tombstone, while nothing changed in them since (see `bookTombstone`). */
+  private readonly confirmed = new Set<string>();
 
   /**
    * Every key of a book but its tombstone. Over a store with a change feed (#292): the key index, brought up to date
@@ -179,11 +189,16 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
         if (remoteId) await this.options.keyIndex?.write(remoteId, bookId, undefined).catch(() => {});
         return [];
       }
+      // Changes this Mac did not make itself (another Mac's push or deletion; its own writes are in the index already)
+      // make the tombstone be asked again (`bookTombstone`).
+      const known = index?.entries;
+      if (!index?.token || result.deleted.some((key) => known?.has(key)) || result.changed.some((entry) => !known?.has(entry.key))) this.confirmed.delete(slot);
       // Without a token the answer is everything: it replaces the index.
       const entries = index?.token ? new Map(index.entries) : new Map<string, StoreEntry>();
       for (const key of result.deleted) entries.delete(key);
       for (const entry of result.changed) entries.set(entry.key, entry);
       this.indexes.set(slot, { token: result.token, entries });
+      this.refreshed.set(slot, Date.now());
       if (remoteId) {
         await this.options.keyIndex?.write(remoteId, bookId, { token: result.token, entries: Object.fromEntries([...entries.values()].map(({ key, size, lastModified }) => [key, { size, lastModified: lastModified.getTime() }])) })
           .catch((error) => console.warn('ImageFlow could not keep the keys it read', error));
@@ -346,7 +361,7 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     return Promise.all(ids.map(async (bookId): Promise<RemoteBook> => {
       if (!marked.has(bookId)) return { bookId };
       try {
-        const deleted = await this.bookTombstone(bookId);
+        const deleted = await this.bookTombstone(bookId, { fresh: true });
         return deleted ? { bookId, deleted } : { bookId };
       } catch (error) {
         if (!(error instanceof NewerSyncFormatError)) throw error;
@@ -367,19 +382,48 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     return this.identity = adopted;
   }
 
-  async bookTombstone(bookId: string) {
+  async bookTombstone(bookId: string, { fresh = false }: { fresh?: boolean } = {}) {
+    if (!fresh && !await this.mayHaveTombstone(bookId)) return undefined;
     const tombstone = readBookTombstone(await this.json(tombstoneKey(bookId)));
-    return tombstone?.bookId === bookId ? tombstone : undefined;
+    const found = tombstone?.bookId === bookId ? tombstone : undefined;
+    if (!found && this.store.changes) this.confirmed.add((this.identity ?? '') + '/' + bookId);
+    return found;
+  }
+  /**
+   * False when a listing just taken says the book has no tombstone, so no request is needed (see `bookTombstone`):
+   * - over a store without a feed, the listing of the sync running, which holds `deleted.json` when there is one;
+   * - over a store with a feed (iCloud, whose tombstones live apart from the book), a key index brought up to date in
+   *   the last few seconds that holds commits, of a book this remote found without a tombstone before while nothing
+   *   in it changed since. Deleting a book removes its commits before it writes the tombstone, so a deletion always
+   *   shows in the feed.
+   * True when the store has to be asked.
+   */
+  private async mayHaveTombstone(bookId: string) {
+    const session = this.sessions.get(bookId)?.listing;
+    if (session) {
+      const listed = await session.catch(() => undefined);
+      return !listed || listed.has(tombstoneKey(bookId));
+    }
+    if (!this.store.changes) return true;
+    const slot = (this.identity ?? '') + '/' + bookId;
+    const index = this.indexes.get(slot);
+    const recent = Date.now() - (this.refreshed.get(slot) ?? 0) < 5000;
+    return !index || !recent || !this.confirmed.has(slot) || ![...index.entries.keys()].some((key) => key.startsWith(snapshotsPrefix(bookId)));
   }
   async deleteBook(bookId: string, now = new Date()) {
     const key = tombstoneKey(bookId);
     this.deleted.add(bookId);
-    // The tombstone goes first, so a deletion that is interrupted still reads as one; an earlier tombstone is kept.
-    await this.store.putIfAbsent(key, encode(bookTombstoneSchema.parse({ version: 1, bookId, deletedAt: now.toISOString() })));
-    const tombstone = await this.bookTombstone(bookId);
+    const record = encode(bookTombstoneSchema.parse({ version: 1, bookId, deletedAt: now.toISOString() }));
+    // The marker goes first: a marker without a tombstone reads as a book that is not deleted, and a tombstone then
+    // always has its marker, so a deletion that stops between the two is never half visible. Deleting again finishes it.
+    await this.store.putIfAbsent(deletedMarkerKey(bookId), record);
+    // Then its commits, so the book stops reading as one with a history (and the change feed shows the deletion),
+    // then the tombstone, so a deletion interrupted after it still reads as one; an earlier tombstone is kept.
+    const commits = (await this.store.list(snapshotsPrefix(bookId))).map((entry) => entry.key);
+    if (!await this.store.head(key)) await this.store.delete(commits);
+    await this.store.putIfAbsent(key, record);
+    const tombstone = await this.bookTombstone(bookId, { fresh: true });
     if (!tombstone) throw new Error('The book could not be marked as deleted on the remote.');
-    // Then its marker, which the library lists (a deletion that stops before it is finished by deleting again).
-    await this.store.putIfAbsent(deletedMarkerKey(bookId), encode(tombstone));
     await this.store.delete((await this.store.list(bookPrefix(bookId))).map((entry) => entry.key).filter((other) => other !== key));
     this.indexes.delete((this.identity ?? '') + '/' + bookId);
     if (this.identity) await this.options.keyIndex?.write(this.identity, bookId, undefined).catch(() => {});

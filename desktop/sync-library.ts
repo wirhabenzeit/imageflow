@@ -67,3 +67,17 @@ export function networkNotice(added: readonly string[], { known, downloaded }: {
   if (downloaded && !known) return 'This book’s template loads maps or data from ' + added.join(', ') + '. It was downloaded from your sync, which ImageFlow trusts as your own.';
   return known ? 'This book’s template now also loads maps or data from ' + added.join(', ') + '.' : undefined;
 }
+
+/**
+ * What Delete from Sync asks (#283), by case. The book goes from the remote for every Mac, and every Mac stops syncing it.
+ * A book only on the remote (`here` false) may be on no Mac at all: then it is deleted for good. A copy on this Mac stays,
+ * but originals that are not on this Mac (`away`, or unknown) go with the remote unless another Mac has them.
+ */
+export function deleteFromSyncQuestion({ title, backend, here, away }: { title: string; backend: string; here: boolean; away?: number }) {
+  const removed = 'It is removed from “' + backend + '”, and every Mac stops syncing it.';
+  const detail = !here ? removed + ' It is not on this Mac: unless another Mac still has a copy, the book is deleted for good.'
+    : removed + ' The copy on this Mac stays where it is. ' + (away === undefined ? 'Originals that are not on this Mac are removed with it, unless another Mac has them.'
+      : away === 0 ? 'This Mac has all its originals.'
+      : (away === 1 ? '1 original of this book is' : away + ' originals of this book are') + ' not on this Mac: ' + (away === 1 ? 'it is' : 'they are') + ' removed with it, unless another Mac has ' + (away === 1 ? 'it.' : 'them.'));
+  return { message: 'Delete “' + title + '” from sync?', detail, buttons: ['Delete from Sync', 'Cancel'], defaultId: 1, cancelId: 1 };
+}

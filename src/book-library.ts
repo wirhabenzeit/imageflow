@@ -5,7 +5,8 @@ import type { LibraryRemote, RecentDocument } from './desktop';
  * list, matched by lineage (`bookId`). Pure, so the merge is tested without a window.
  *
  * - A book on this Mac that syncs with the configured remote shows its sync state: `synced`, or `removed` when another
- *   Mac deleted it from sync (its tombstone), or `newer` when a newer ImageFlow marked it.
+ *   Mac deleted it from sync (its tombstone), or `newer` when a newer ImageFlow marked it. One the remote does not have
+ *   (its first sync has not happened, or did not finish) is `unsynced`, "Not synced yet".
  * - One that does not sync here (stopped, never started, or last synced with another remote) is `not-syncing`.
  * - While the remote is being read, a book that syncs here by its record is `checking`; when it cannot be read,
  *   `unavailable`. The books on this Mac are listed first, before the remote has answered.
@@ -15,7 +16,7 @@ import type { LibraryRemote, RecentDocument } from './desktop';
  *   leaves the book listed as only on the remote. A recent book that cannot be found (`available: false`) still counts
  *   as on this Mac, so the remote copy is offered on its row (`onRemote`) instead of as a second row.
  */
-export type LocalLibraryState = 'synced' | 'not-syncing' | 'removed' | 'newer' | 'checking' | 'unavailable' | 'missing';
+export type LocalLibraryState = 'synced' | 'unsynced' | 'not-syncing' | 'removed' | 'newer' | 'checking' | 'unavailable' | 'missing';
 export type LibraryRow =
   | { kind: 'local'; book: RecentDocument; state: LocalLibraryState; onRemote: boolean }
   | { kind: 'remote'; bookId: string; state: 'remote' | 'newer' };
@@ -34,7 +35,7 @@ export function libraryRows(local: readonly RecentDocument[], remote?: LibraryRe
     if (!listing) return 'unavailable';
     if (!syncsHere(book, listing.remoteId)) return 'not-syncing';
     const there = book.bookId ? byId.get(book.bookId) : undefined;
-    return there?.deleted ? 'removed' : there?.newer ? 'newer' : 'synced';
+    return !there ? 'unsynced' : there.deleted ? 'removed' : there.newer ? 'newer' : 'synced';
   };
   const rows = local.map((book): LibraryRow => {
     const there = book.bookId ? byId.get(book.bookId) : undefined;
@@ -50,6 +51,6 @@ export function libraryRows(local: readonly RecentDocument[], remote?: LibraryRe
 
 /** What a row's state says under its title. */
 export const libraryStateLabels: Record<LocalLibraryState | 'remote', string> = {
-  synced: 'Synced', 'not-syncing': 'Not syncing', removed: 'Removed from sync', newer: 'Needs an update', checking: 'Synced',
+  synced: 'Synced', unsynced: 'Not synced yet', 'not-syncing': 'Not syncing', removed: 'Removed from sync', newer: 'Needs an update', checking: 'Synced',
   unavailable: 'Sync unavailable', missing: 'Not found', remote: 'Not on this Mac',
 };

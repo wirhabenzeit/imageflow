@@ -110,11 +110,13 @@ export const stateBlobSchema = z.object({
   assetsMeta: assetsMetaSchema,
   // SHA-256 of each owned referenced text and file and of every template file, by its path in the book.
   content: z.record(contentPath, sha256),
-  // Owned originals (photos/ entries that are not linked), by source ID: `books/<bookId>/originals/<digest><ext>`. A
-  // commit names its originals before they upload (ADR 0012), so each entry may say when a commit first named this
-  // version and from which Mac (`namedAt`, `by`; carried forward unchanged): an original that never arrives can then be
-  // reported as never uploaded from that Mac, instead of as still uploading for ever (#283).
-  originals: z.record(z.string(), z.object({ digest: sha256, ext: extension, namedAt: z.iso.datetime().optional(), by: z.string().max(100).optional() }).strict()),
+  // Owned originals (photos/ entries that are not linked), by source ID: `books/<bookId>/originals/<digest><ext>`.
+  originals: z.record(z.string(), z.object({ digest: sha256, ext: extension }).strict()),
+  // When a commit first named each owned original's version and from which Mac (#283), carried forward while the version
+  // stays: a commit names its originals before they upload (ADR 0012), so one that never arrives can be reported as never
+  // uploaded from that Mac. A field of its own, so a build that does not know it reads the blob as one a newer version
+  // wrote (`NewerSyncFormatError`, "Update ImageFlow") rather than as damaged.
+  named: z.record(z.string(), z.object({ digest: sha256, at: z.iso.datetime(), by: z.string().max(100).optional() }).strict()).optional(),
   // Screen proxies by the original's digest: `books/<bookId>/proxies/<originalDigest>-preview-v1<ext>`, with the proxy's own SHA-256.
   proxies: z.record(sha256, z.object({ sha256, ext: z.enum(['.jpg', '.png']) }).strict()),
 }).strict();

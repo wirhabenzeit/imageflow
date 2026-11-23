@@ -88,14 +88,14 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
       run: (id) => void library({ action: id as 'download' | 'delete' | 'update', bookId: row.bookId }) };
     }
     const { book, state } = row;
-    const syncing = configured && (state === 'synced' || state === 'checking' || state === 'unavailable' || state === 'newer');
+    const syncing = configured && (state === 'synced' || state === 'unsynced' || state === 'checking' || state === 'unavailable' || state === 'newer');
     const items: PopupItem[] = [{ id: 'open', label: 'Open', enabled: book.available }, { id: 'reveal', label: 'Show in Finder', enabled: book.available }];
     if (configured && book.available) {
       items.push({ type: 'separator' });
       if (state === 'not-syncing') items.push({ id: 'start', label: 'Start Syncing' });
       if (state === 'removed') items.push({ id: 'keep-here', label: 'Keep Here Only' }, { id: 'sync-again', label: 'Sync Again' });
       if (syncing) items.push({ id: 'stop', label: 'Stop Syncing on This Mac…' });
-      if (syncing && book.bookId) items.push({ id: 'delete', label: 'Delete from Sync…' });
+      if (syncing && book.bookId && state !== 'unsynced') items.push({ id: 'delete', label: 'Delete from Sync…' });
     }
     if (!book.available && row.onRemote) items.push({ type: 'separator' }, { id: 'download', label: 'Download' });
     items.push({ type: 'separator' }, ...(!book.available ? [{ id: 'locate', label: 'Locate…' }] : []),
@@ -121,7 +121,7 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
     const { book, state } = row;
     const name = bookName(book.path);
     const syncState = configured && book.available && state !== 'not-syncing' ? libraryStateLabels[state] : configured && book.available && listing ? libraryStateLabels['not-syncing'] : undefined;
-    const removable = !configured || !(state === 'synced' || state === 'checking' || state === 'unavailable' || state === 'newer' || state === 'removed');
+    const removable = !configured || !(state === 'synced' || state === 'unsynced' || state === 'checking' || state === 'unavailable' || state === 'newer' || state === 'removed');
     return <li key={book.id} className={book.available ? 'library-local library-' + state : 'missing'} data-state={state} data-book={book.bookId} {...menuHandlers(row)}>
       <button className="recent-open" disabled={!!busy} onClick={() => void act(book.available ? 'open' : 'locate', book.id)}>
         <span className="recent-cover">{book.cover ? <img src={book.cover} alt="" /> : <img className="recent-cover-icon" src={bookIcon} alt="" />}</span>

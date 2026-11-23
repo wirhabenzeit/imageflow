@@ -318,7 +318,9 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
       if (older && status.state === 'available' && (status.digest ?? stored?.digest ?? older.kept) === older.kept) {
         const fact = facts.get(source.id);
         const photo = fact?.digest === older.current ? await proxyPhoto(book, source.id, fact, keptOriginalProblem) : undefined;
-        sources[source.key] = { ...status, state: 'missing', problem: keptOriginalProblem, ...(photo ? { cached: true } : {}) };
+        // Nothing to locate: the file is here, at its older version. Replace stays, and what the user chooses then is this
+        // Mac's own change; Remove, Copy into Book and Locate Folder leave the kept file where it is.
+        sources[source.key] = { ...status, state: 'missing', problem: keptOriginalProblem, repairs: [], ...(photo ? { cached: true } : {}) };
         problems.push('photo ' + source.id + ' · ' + keptOriginalProblem);
         if (photo) photos.set(source.id, photo);
         else if (fact) unavailablePhotos[source.id] = fact;

@@ -5,11 +5,11 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
-import { libraryRows } from '../src/book-library';
+import { libraryRows, libraryStateLabels } from '../src/book-library';
 import { channels } from '../src/desktop';
 import type { LibraryRemote, RecentDocument } from '../src/desktop';
 import { maximumRecents, RecentDocuments } from '../desktop/documents';
-import { coverDataUrl, libraryBook, libraryListing, networkNotice } from '../desktop/sync-library';
+import { coverDataUrl, deleteFromSyncQuestion, libraryBook, libraryListing, networkNotice } from '../desktop/sync-library';
 import { memoryRemote, remoteTips, StoreRemote } from '../desktop/sync-remote';
 import { CloudKitStore } from '../desktop/sync-store-cloudkit';
 import { MemoryKeyIndexCache } from '../desktop/sync-key-index';
@@ -217,4 +217,23 @@ test('listing a library over a bucket takes two listings, whatever the number of
 test('every IPC channel has a name of its own, so no handler is registered twice', () => {
   const names = Object.values(channels);
   assert.deepEqual(names.filter((name, index) => names.indexOf(name) !== index), []);
+});
+
+test('Delete from Sync says what goes: a book only on the remote is deleted for good unless another Mac has it, and a copy here names its originals that are not here', () => {
+  const remoteOnly = deleteFromSyncQuestion({ title: 'Trip', backend: 'books', here: false });
+  assert.equal(remoteOnly.message, 'Delete “Trip” from sync?');
+  assert.match(remoteOnly.detail, /It is not on this Mac: unless another Mac still has a copy, the book is deleted for good\.$/);
+  assert.deepEqual([remoteOnly.buttons, remoteOnly.defaultId, remoteOnly.cancelId], [['Delete from Sync', 'Cancel'], 1, 1], 'Cancel is the default');
+  assert.match(deleteFromSyncQuestion({ title: 'Trip', backend: 'books', here: true, away: 0 }).detail, /The copy on this Mac stays where it is\. This Mac has all its originals\.$/);
+  assert.match(deleteFromSyncQuestion({ title: 'Trip', backend: 'books', here: true, away: 1 }).detail, /1 original of this book is not on this Mac: it is removed with it, unless another Mac has it\.$/);
+  assert.match(deleteFromSyncQuestion({ title: 'Trip', backend: 'books', here: true, away: 12 }).detail, /12 originals of this book are not on this Mac: they are removed with it, unless another Mac has them\.$/);
+  assert.match(deleteFromSyncQuestion({ title: 'Trip', backend: 'books', here: true }).detail, /Originals that are not on this Mac are removed with it, unless another Mac has them\.$/);
+  for (const here of [true, false]) assert.match(deleteFromSyncQuestion({ title: 'Trip', backend: 'books', here }).detail, /^It is removed from “books”, and every Mac stops syncing it\./);
+});
+
+test('a book that syncs here by its record but that the remote does not have reads as not synced yet', () => {
+  const first = syncing();
+  const unnamed = syncing({ bookId: undefined });
+  assert.deepEqual(states(libraryRows([first, unnamed], listing([]))), [first.id + ':unsynced', unnamed.id + ':unsynced']);
+  assert.equal(libraryStateLabels.unsynced, 'Not synced yet');
 });
