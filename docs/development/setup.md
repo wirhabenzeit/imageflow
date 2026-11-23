@@ -29,6 +29,8 @@ Sync ships ([ADR 0012](../decisions/0012-sync-backend-and-library.md)): **Settin
 
 `IMAGEFLOW_SYNC_CREDENTIALS=memory` keeps a bucket's key in memory instead of the keychain in a development build.
 
+`IMAGEFLOW_SYNC_IDLE_MS=<ms>` shortens how long a development build waits after a save before a book pushes by itself (30 s otherwise; a packaged app ignores it).
+
 ## Build the app
 
 ```sh

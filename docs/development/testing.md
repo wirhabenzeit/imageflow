@@ -33,7 +33,9 @@ npm run test:unit
 
 `tests/sync-s3-real.test.ts` answers the spike's questions (conditional writes, checksum verification, addressing, listing right after a put, a large single PUT) as test diagnostics and in the report file. Never commit the variables or the report's endpoint if it names an account.
 
-In the app, Settings → Sync offers an S3-compatible bucket; iCloud only with `IMAGEFLOW_SYNC_ICLOUD=1` and a folder only with `IMAGEFLOW_SYNC_FOLDER=1` (see [setup](setup.md)). Development builds can keep the bucket's access key in memory instead of the keychain with `IMAGEFLOW_SYNC_CREDENTIALS=memory`. The sync smokes (`smoke-sync`, `smoke-sync-settings`, `smoke-library`) set the folder backend up in a profile's `settings.json`.
+In the app, Settings → Sync offers an S3-compatible bucket; iCloud only with `IMAGEFLOW_SYNC_ICLOUD=1` and a folder only with `IMAGEFLOW_SYNC_FOLDER=1` (see [setup](setup.md)). Development builds can keep the bucket's access key in memory instead of the keychain with `IMAGEFLOW_SYNC_CREDENTIALS=memory`. The sync smokes (`smoke-sync`, `smoke-sync-auto`, `smoke-sync-settings`, `smoke-library`) set the folder backend up in a profile's `settings.json`. `smoke-sync` turns *Sync automatically* off, so every sync in it is one it asks for; `smoke-sync-auto` covers automatic sync with a short idle wait (`IMAGEFLOW_SYNC_IDLE_MS`).
+
+Push notifications from iCloud (#284) need a signed build with the `aps-environment` entitlement: the unit tests cover the subscription over the fake CloudKit and the scheduler that a push starts, not the push itself.
 
 ## Flaky tests
 

@@ -83,6 +83,9 @@ export class AuthoringQueue {
     this.resolveIdle();
   }
 
+  /** Whether no agent call runs or waits. */
+  get idle() { return !this.active && !this.pending.length; }
+
   whenIdle(): Promise<void> {
     if (!this.active && !this.pending.length) return Promise.resolve();
     return new Promise((resolve) => { this.idleWaiters.add(resolve); });

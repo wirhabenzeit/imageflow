@@ -144,4 +144,10 @@ export class FakeCloudKit implements CloudKitNative {
 
   cancel(id: number) { this.cancelled.add(id); return true; }
   onAccountChange(listener: () => void) { this.accountListeners.splice(0, Infinity, listener); }
+  /** The database subscriptions saved, by ID (#284). */
+  readonly subscriptions = new Set<string>();
+  async saveSubscription(id: string) {
+    await this.begin('saveSubscription');
+    this.subscriptions.add(id);
+  }
 }

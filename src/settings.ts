@@ -17,6 +17,9 @@ export type SyncBackend = FolderSyncBackend | S3SyncBackend | ICloudSyncBackend;
 // allowed agents to use open books, so the connection starts again with the app; only the Agents pane changes it.
 // `keepOriginals`: synced books download their owned originals to this Mac in the background after opening and after
 // each sync (#251). On unless set to false, which keeps only previews here until Download Originals.
+// `syncAutomatically`: books that sync on this Mac pull and push by themselves (#284): pull on open, focus and an iCloud
+// push, push after a save once the book is idle and when it closes. On unless set to false, which leaves File → Sync →
+// Sync Now. An ordinary preference a window may change: it never makes a book sync that does not.
 // `sync`: the backend books sync through on this Mac (ADR 0012), one at a time. Each kind is one member of the union.
 // `syncBooksUnchosen`: the backend was set up (or changed) and the sheet that asks which recent books sync has not been
 // answered yet (#282): no book starts syncing by itself until it is. Only the Sync settings requests and the sheet's
@@ -24,5 +27,5 @@ export type SyncBackend = FolderSyncBackend | S3SyncBackend | ICloudSyncBackend;
 // `booksFolder`: where Download puts books from the library (#283), `~/Documents/ImageFlow` unless set. Only the app's
 // own folder dialog sets it (Settings → Sync), never the generic settings patch.
 export type AppSettings = { appearance: Appearance; automaticUpdates: boolean; updateChannel: UpdateChannel; newBookSize?: { width: number; height: number }; agentAccess?: boolean;
-  keepOriginals?: boolean; sync?: SyncBackend; syncBooksUnchosen?: true; booksFolder?: string };
+  keepOriginals?: boolean; syncAutomatically?: boolean; sync?: SyncBackend; syncBooksUnchosen?: true; booksFolder?: string };
 export const defaultSettings: AppSettings = { appearance: 'system', automaticUpdates: true, updateChannel: 'stable' };

@@ -37,7 +37,18 @@ When you first set up sync, ImageFlow lists your recent books with what their or
 - the sample book, template previews and books opened read-only;
 - books you do not trust. A book you did not make on this Mac syncs only once you trust it: **File → Sync → Start Syncing** asks once. **Templates → Stop Trusting This Book's Template…** also stops syncing it on this Mac.
 
-**File → Sync → Sync Now** syncs the open book, and the status bar shows how it stands. A book changed on two Macs at once keeps both versions: the other Mac's continues, and this Mac's is saved beside it as a copy.
+### Syncing by itself
+
+A book that syncs keeps itself current, with **Sync automatically** on in **Settings → Sync** (it is on unless you turn it off):
+
+- When the book opens, and when its window comes to the front, it takes what your other Macs synced. With iCloud, a change from another Mac also reaches a book that is open in the background.
+- After you edit, it sends your changes once you have stopped for about 30 seconds, and when you close the book. Closing waits a few seconds at most: what did not go up by then goes up the next time the book syncs. Originals follow in the background.
+- It takes changes only when nothing is being edited: while you type in a field, while a text is open in its own editor, while an inline editor is open, while the book exports or an agent changes it, the changes wait and arrive once you are done.
+- It never decides for you. A book changed on two Macs at once shows **Changed on two Macs** and waits for you.
+- When the other Macs cannot be reached (offline, iCloud unavailable), the status bar says so and the book tries again later, sooner once the network changes. No dialog interrupts you.
+- When your iCloud storage is full, the book itself goes on syncing while it fits; its originals wait until **Sync Now**, or until you open the book again.
+
+**File → Sync → Sync Now** syncs the open book at once, and the status bar shows how it stands. With **Sync automatically** off, books sync only then. Sync Now on a book changed on two Macs at once keeps both versions: the other Mac's continues, and this Mac's is saved beside it as a copy.
 
 ## What syncs
 
