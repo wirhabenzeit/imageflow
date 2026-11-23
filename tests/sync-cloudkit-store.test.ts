@@ -315,7 +315,7 @@ test('usage: what each book stores, from the key indexes, and in all', async () 
   const { native, store } = make();
   const remote = new StoreRemote(store, { keyIndex: new MemoryKeyIndexCache() });
   await remote.remoteId();
-  assert.deepEqual(await remote.usage(), { bytes: 0, books: [] });
+  assert.deepEqual(await remote.usage(), { bytes: 0, originals: 0, books: [] });
   await remote.putBlob(contentBlobKey(book, 'c'.repeat(64)), bytes('x'.repeat(1000)));
   await remote.putBlob(contentBlobKey(other, 'c'.repeat(64)), bytes('y'.repeat(300_000)));
   const usage = await remote.usage();
@@ -346,8 +346,8 @@ test('Settings → Sync counts the storage the books take up, in the units Finde
   const ipcMain = { handle: (channel: string, handler: never) => { handlers.set(channel, handler); } } as unknown as IpcMain;
   const settings = new SettingsStore(join(folder, 'settings.json'));
   registerSyncSettings({ ipcMain, owner: () => true, settings, credentials: () => new MemoryCredentialStore(), changed: () => {},
-    usage: async () => ({ bytes: 4_870_000_000, books: [{}, {}] }) });
+    usage: async () => ({ bytes: 4_870_000_000, originals: 4_800_000_000, books: [] }) });
   assert.equal((await handlers.get(channels.syncUsage)!({})).error, 'Sync is off on this Mac.');
   await settings.update({ sync: { kind: 'icloud' } });
-  assert.deepEqual((await handlers.get(channels.syncUsage)!({})).value, { bytes: 4_870_000_000, books: 2 });
+  assert.deepEqual((await handlers.get(channels.syncUsage)!({})).value, { bytes: 4_870_000_000, originals: 4_800_000_000, books: [] });
 });

@@ -1,6 +1,6 @@
 # 0012: One sync backend per Mac, sync by source reach, and a book library
 
-Status: proposed, 2026-11-23 (revised after review; amended after the CloudKit spike, #286, the same day). Builds on [0010](0010-sync-revisions-and-cloud-assets.md) (snapshots, `SyncRemote`, the folder transport) and [0011](0011-lightroom-classic.md) (source providers). Supersedes 0010's choice of a synced folder as the first transport, its per-book sync folder, and its untrusted-remote rule for a user's own backend (with the matching wording of [0006](0006-template-capabilities.md) about templates that arrive over sync); the snapshot model, the engine and the fast-forward-or-keep-both policy stay as they are.
+Status: accepted, 2026-11-23, with the implementation (#278–#285; see [What the implementation settled](#what-the-implementation-settled)). Proposed the same day, revised after review and amended after the CloudKit spike (#286). Builds on [0010](0010-sync-revisions-and-cloud-assets.md) (snapshots, `SyncRemote`, the folder transport) and [0011](0011-lightroom-classic.md) (source providers). Supersedes 0010's choice of a synced folder as the first transport, its per-book sync folder, and its untrusted-remote rule for a user's own backend (with the matching wording of [0006](0006-template-capabilities.md) about templates that arrive over sync); the snapshot model, the engine and the fast-forward-or-keep-both policy stay as they are.
 
 ## Problem
 
@@ -161,6 +161,16 @@ deleted/<bookId>.json
 - iCloud sync uses the user's iCloud storage (5 GB on the free plan), works only on Apple platforms, and CloudKit keeps its own cache copy of uploaded and downloaded originals until the system purges it.
 - Signing gains restricted entitlements and an embedded Developer ID provisioning profile. Without the profile the app is killed at launch, so the release checks verify it; a Mac with the profile installed hides its absence.
 - `SyncRemote`, the engine and the snapshot format survive. The work is the object store and its S3 and CloudKit implementations, per-book keys, the remote identity and tombstone, moving the setting, and the library.
+
+## What the implementation settled
+
+Where this section and the text above differ, this section holds.
+
+- **Sync is automatic** (#284): an automatic sync only fast-forwards or pushes; a divergence, with one tip or several, waits for **Sync Now**. iCloud pushes come from a `CKDatabaseSubscription`, which names the database, not a zone, so every open book looks.
+- **Storage figures** (#285) are one path for every backend: `SyncRemote.usage()` per book, with the part that is originals, titled from each book's newest tip (`storageReport`, `desktop/sync-sweep.ts`). Settings → Sync counts only when asked, also over iCloud, where the figures come from the key indexes.
+- **Clean Up** (#285) runs over every book on the remote at once, after showing what it would free. It lists each book in the store itself (`listBook(…, { full: true })`), never from a key index, and deletes through `SyncRemote.deleteBlobs`, which accepts only `originals/`, `proxies/` and `covers/` keys and removes them from the key index and from the listing of a sync running on this Mac, so a later push uploads a swept blob again instead of trusting either. A book whose tips cannot be read (none yet, a snapshot missing, damaged or from a newer version) is left alone. What is left of a deleted book goes through `SyncRemote.deleteRemains`, which refuses a book without a tombstone; on iCloud nothing is left, since deleting a book deletes its zone.
+- **Duplicate and Save a Copy** (#285) note the source in the copy's sync record (`copiedFrom`: the source's `bookId`, its remote, and the originals by photo, from the source's sync record and photos.json, so it works offline and on a Mac with previews only). The copy's first push names those originals for photos without a file here, and its background upload copies each inside the store (`copyBlob`) before it would upload. Where the store cannot copy (iCloud), it uploads the file here, or, on a Mac with previews only, downloads the original from the source book and uploads it again. The Duplicate question says so when the backend is iCloud. The hint is used only while the copy syncs with the remote it names.
+- **Not done:** whether macOS purges CloudKit's asset cache (`~/Library/Caches/CloudKit/<bundle ID>`) is still unchecked on a signed build, so Settings → Sync does not show its size.
 
 ## Implementation order
 

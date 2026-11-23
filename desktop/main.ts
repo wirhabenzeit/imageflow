@@ -55,6 +55,8 @@ import { insideBook, pendingUploadsText, SyncService, UntrustedBookError } from 
 import { cloudKitPush } from './sync-auto';
 import { syncExcludedBook as excludedFrom } from './sync-start';
 import { chooseBooksPatch } from './sync-settings';
+import { cleanUp, planCleanUp, storageReport } from './sync-sweep';
+import type { CleanUpPlan } from './sync-sweep';
 import { configureMacHeader, setToolbarDragRegions } from './mac-header';
 import type { RenderSessions } from './document-session';
 import { AssetFacts } from './asset-facts';
@@ -142,6 +144,8 @@ let settings: SettingsStore;
 let cloudKitNative: CloudKitNative | undefined | null = null;
 const cloudKit = () => (cloudKitNative === null ? (cloudKitNative = loadCloudKitNative()) : cloudKitNative);
 // A setting that names iCloud in a build started without its flag leaves sync off (`usableBackend`).
+/** What Settings → Sync last showed that Clean Up would free (#285), which Clean Up then deletes. */
+let cleanUpPlan: CleanUpPlan | undefined;
 const syncService = new SyncService(() => usableBackend(settings?.value.sync), { credentials: () => syncCredentials(), cacheFolder: () => app.getPath('userData'), cloudKit,
   booksUnchosen: () => !!settings?.value.syncBooksUnchosen,
   // CloudKit's account-change event (also sent without a change) reads the status of the open books again; it never
@@ -2393,9 +2397,13 @@ void app.whenReady().then(async () => {
   });
   ipcMain.handle(channels.saveCopy, (event, includeAssets?: boolean) => fromEditor(event, async (document) => {
     if (includeAssets === undefined) {
+      const linked = sourceEntries(document.book).some((entry) => sourceReach(entry) !== 'book') ? 'Unchecked: linked files keep their full paths, and photos from other sources stay linked to them.' : undefined;
+      // iCloud cannot copy inside the store (#285): a copy of a synced book uploads its originals again when it syncs.
+      const icloud = syncService.kind === 'icloud' && !!(await readSyncState(document.book.folder).catch(() => undefined))?.lastSynced
+        ? 'The copy syncs as a new book. iCloud cannot copy its originals, so they are uploaded again and count toward your iCloud storage a second time.' : undefined;
       const answer = await dialog.showMessageBox(document.window, { type: 'question', message: 'Duplicate this book?',
         buttons: ['Duplicate', 'Cancel'], defaultId: 0, cancelId: 1, checkboxLabel: 'Include all files', checkboxChecked: true,
-        detail: sourceEntries(document.book).some((entry) => sourceReach(entry) !== 'book') ? 'Unchecked: linked files keep their full paths, and photos from other sources stay linked to them.' : undefined });
+        detail: [linked, icloud].filter(Boolean).join('\n\n') || undefined });
       if (answer.response !== 0) return null;
       includeAssets = answer.checkboxChecked;
     }
@@ -2423,7 +2431,23 @@ void app.whenReady().then(async () => {
   // the key changed (a corrected key clears "Sign-in needed" without a restart).
   registerSyncSettings({ ipcMain, owner: settingsOwner, settings, credentials: syncCredentials, cloudKit: async () => cloudKit()?.status(),
     booksToChoose: async () => (await booksToChoose()).length,
-    usage: async () => (await syncService.connect()).remote.usage(),
+    usage: async () => storageReport((await syncService.connect()).remote),
+    cleanUp: {
+      // The plan shown is the one Clean Up deletes from (after reading the tips again), for the remote it was made on.
+      plan: async () => {
+        const { remote, remoteId } = await syncService.connect();
+        const plan = { ...await planCleanUp(remote), remoteId };
+        cleanUpPlan = plan;
+        return { bytes: plan.bytes, objects: plan.objects, books: plan.books.filter(({ deleted }) => !deleted).length, deletedBooks: plan.books.filter(({ deleted }) => deleted).length, skipped: plan.skipped };
+      },
+      run: async () => {
+        const { remote, remoteId } = await syncService.connect();
+        const plan = cleanUpPlan;
+        cleanUpPlan = undefined;
+        if (!plan || plan.remoteId !== remoteId) throw new Error('Look for what Clean Up would free again: the remote changed since.');
+        return cleanUp(remote, plan);
+      },
+    },
     changed: (value) => { syncBackendChanged(); for (const owner of appWindows()) if (!owner.isDestroyed()) owner.webContents.send(channels.settingsChanged, value); } });
   ipcMain.handle(channels.settings, (event) => appOwner(event) ? { value: settings.value } : { error: 'Request is only available to an app window.' });
   ipcMain.handle(channels.updateSettings, async (event, patch: unknown) => {

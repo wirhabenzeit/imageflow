@@ -21,6 +21,7 @@ import type { SaveCheckpoint } from './persistence';
 import { captureProjectInputs } from './revisions';
 import { digestBytes, originalPath, SourceStore, within } from './source-store';
 import { approveSource, approvedExtensions, transferSourceAccess, transferBookTrust } from './source-access';
+import { recordCopySource } from './sync-pull';
 
 const filesOf = (book: OpenProject): ProjectFiles => structuredClone({ project: book.project, photoIndex: book.photoIndex });
 function reference(files: ProjectFiles, source: SourceEntry, path: string, linked: boolean) {
@@ -330,6 +331,8 @@ export async function saveDocumentCopy(source: OpenProject, destination: string,
   if (!includeAssets) await transferSourceAccess(book.folder, result, sourceEntries(book));
   // A copy of the user's own book is theirs too (ADR 0006).
   await transferBookTrust(book.folder, result);
+  // A copy with a new lineage copies its originals inside the sync store at its first sync instead of uploading them (#285).
+  if (!keepLineage) await recordCopySource(book.folder, result);
   return result;
 }
 
