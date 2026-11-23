@@ -39,7 +39,7 @@ import { bookTrusted, distrustBook, trustBook } from '../desktop/source-access';
 import { readSyncState, SyncElsewhereError, SyncHalfPulledError, takeAbandonedAtOpen, updateSyncState } from '../desktop/sync-pull';
 import { insideBook, pendingUploadsText, SyncService, UntrustedBookError } from '../desktop/sync-service';
 import { FirstSync, syncExcludedBook } from '../desktop/sync-start';
-import { AutoSync, autoSyncTiming } from '../desktop/sync-auto';
+import { AutomaticRuns, AutoSync, autoSyncTiming, SyncInterruptedError } from '../desktop/sync-auto';
 import { SettingsStore } from '../desktop/settings';
 import { chooseBooksPatch, syncPatchError } from '../desktop/sync-settings';
 import type { FolderSyncBackend, S3SyncBackend, SyncBackend } from '../src/settings';
@@ -3436,4 +3436,84 @@ test('what an automatic look costs over a bucket: a status read is one listing o
   fake.requests.length = 0;
   assert.equal((await on(a, (book) => syncBook({ remote, book, fastForwardOnly: true }))).action, 'in-sync');
   assert.ok(fake.requests.length <= 3, described(fake.requests));
+});
+
+test('the pull gate is read again as a fast-forward is applied: an editor opened while the sync read the remote defers it, with nothing lost', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  await edit(a, caption('shore', 'Opened an editor meanwhile'));
+  await sync(a, remote);
+  const before = await manifests(b);
+  let asked = 0;
+  const deferred = await sync(b, remote, { fastForwardOnly: true, beforeApply: () => { asked++; return false; } });
+  assert.deepEqual([deferred.action, deferred.changed, asked], ['deferred', false, 1]);
+  assert.deepEqual(await manifests(b), before, 'the book is as it was');
+  assert.equal((await readSyncState(b.folder)).pull, undefined, 'and no pull is marked');
+  assert.equal((await describeSync(b.folder, remote)).state, 'behind');
+  const applied = await sync(b, remote, { fastForwardOnly: true, beforeApply: () => true });
+  assert.equal(applied.action, 'fast-forward');
+  assert.equal((await manifests(b)).photos.shore.caption, 'Opened an editor meanwhile');
+});
+
+test('an edit during an automatic push stops it and is kept; one during a pull being applied waits for it', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  await copyBook(a, b);
+  await sync(b, remote);
+  const runs = new AutomaticRuns();
+  // A push that takes a while at the remote, as the edit comes in: stopped before its commit.
+  const slowAt = (method: string) => {
+    let started!: () => void;
+    const reached = new Promise<void>((resolve) => { started = resolve; });
+    const slowed = new Proxy(remote, { get: (target, name, receiver) => (name !== method ? Reflect.get(target, name, receiver)
+      : async (...args: unknown[]) => { started(); await new Promise((resolve) => setTimeout(resolve, 300));
+        return (Reflect.get(target, name, receiver) as (...values: unknown[]) => unknown).apply(target, args); }) });
+    return { slowed, reached };
+  };
+  let holding = true;
+  const automaticPush = (via: SyncRemote) => {
+    const begun = runs.begin();
+    holding = true;
+    return commitOnly(b, via, { pushOnly: true, signal: begun.run.job.signal, beforeApply: () => begun.mayApply(() => false) })
+      .finally(() => { holding = false; begun.end(); });
+  };
+  await edit(b, caption('shore', 'First edit'));
+  const atBlob = slowAt('putBlob');
+  const pushing = automaticPush(atBlob.slowed);
+  await atBlob.reached;
+  assert.equal(await runs.yieldTo(() => holding), true);
+  await assert.rejects(pushing, SyncInterruptedError);
+  const tipBefore = (await tips(remote, a))[0].commitId;
+  // The edit goes ahead and is kept; the next push sends both.
+  await edit(b, caption('segla', 'Second edit, during the push'));
+  assert.equal((await manifests(b)).photos.segla.caption, 'Second edit, during the push');
+  // An edit that comes while the commit is being sent waits for it: the commit is recorded, and nothing forks.
+  const atCommit = slowAt('putCommit');
+  const committing = automaticPush(atCommit.slowed);
+  await atCommit.reached;
+  assert.equal(await runs.yieldTo(() => holding), true);
+  assert.equal((await committing).action, 'push');
+  await edit(b, caption('segla', 'Third edit, during the commit'));
+  assert.equal((await sync(b, remote, { pushOnly: true })).action, 'push');
+  const after = await tips(remote, a);
+  assert.equal(after.length, 1, 'no fork of this Mac’s own making');
+  assert.notEqual(after[0].commitId, tipBefore);
+  await sync(a, remote, { fastForwardOnly: true });
+  assert.deepEqual([(await manifests(a)).photos.shore.caption, (await manifests(a)).photos.segla.caption], ['First edit', 'Third edit, during the commit']);
+  // A pull that began to be applied finishes; the edit waits and then finds the pulled book.
+  await edit(a, caption('shore', 'Pulled while editing'));
+  await sync(a, remote);
+  const pull = runs.begin();
+  holding = true;
+  let applying!: () => void;
+  const applyingNow = new Promise<void>((resolve) => { applying = resolve; });
+  const pulling = commitOnly(b, remote, { fastForwardOnly: true, signal: pull.run.job.signal,
+    beforeApply: () => { const may = pull.mayApply(() => false); applying(); return may; } }).finally(() => { holding = false; pull.end(); });
+  await applyingNow;
+  assert.equal(await runs.yieldTo(() => holding), true);
+  assert.equal((await pulling).action, 'fast-forward');
+  assert.equal(pull.run.job.signal.aborted, false);
+  assert.equal((await manifests(b)).photos.shore.caption, 'Pulled while editing');
 });

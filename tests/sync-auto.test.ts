@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { AutoSync, autoSyncTiming, cloudKitPush } from '../desktop/sync-auto';
+import { AutomaticRuns, AutoSync, autoSyncTiming, cloudKitPush, SyncInterruptedError, whenUnblocked } from '../desktop/sync-auto';
 import type { AutoFailure, AutoLook, AutoSyncHost, AutoSyncTiming } from '../desktop/sync-auto';
 
 // The scheduler of automatic sync (#284) with a host that records what it is asked, and times in milliseconds.
@@ -42,6 +42,7 @@ class Host implements AutoSyncHost {
     const kind = (error as { kind?: AutoFailure }).kind;
     return kind ?? 'retry';
   }
+  async refresh() { this.calls.push('refresh'); }
   async upload() {
     this.calls.push('upload');
     const next = this.uploads.shift();
@@ -65,7 +66,7 @@ test('a focus that finds nothing to do reads the status once and does not sync; 
   host.isAllowed = false;
   auto.focused();
   await auto.settled();
-  assert.deepEqual(host.calls, ['look', 'look', 'sync']);
+  assert.deepEqual(host.calls, ['look', 'look', 'sync', 'refresh'], 'only the status');
 });
 
 test('a pull waits while the book is being edited, without a request, and runs once nothing blocks it; a push goes ahead without changing the book', async (t) => {
@@ -127,19 +128,19 @@ test('failures back off from 30 s up to 15 min; every trigger waits, and a netwo
   auto.focused();
   await auto.settled();
   assert.equal(auto.state.failures, 1);
-  // A focus during the backoff waits for it: nothing is sent to a remote that cannot be reached.
+  // A focus during the backoff reads only the status, and the look waits for the backoff.
   auto.focused();
   await auto.settled();
-  assert.deepEqual(host.calls, ['look']);
+  assert.deepEqual(host.calls, ['look', 'refresh']);
   await wait(60);
   await auto.settled();
-  assert.deepEqual(host.calls, ['look', 'look'], 'tried again once the backoff ended');
+  assert.deepEqual(host.calls, ['look', 'refresh', 'look'], 'tried again once the backoff ended');
   assert.equal(auto.state.failures, 2);
   // The network changed: what waits runs now.
   host.looks.push('pull');
   auto.networkChanged();
   await auto.settled();
-  assert.deepEqual(host.calls, ['look', 'look', 'look', 'sync']);
+  assert.deepEqual(host.calls, ['look', 'refresh', 'look', 'look', 'sync']);
   assert.equal(auto.state.failures, 0);
   // Sync Now ends a backoff too.
   host.looks.push(failing());
@@ -184,7 +185,7 @@ test('a book deleted from sync stops the scheduler until Sync Now, and is no rep
   auto.focused(); auto.saved(); auto.notified();
   await wait(60);
   await auto.settled();
-  assert.deepEqual(host.calls, ['look', 'sync'], 'nothing more is asked or pushed');
+  assert.deepEqual(host.calls, ['look', 'sync', 'refresh'], 'nothing more is pushed; the focus reads the status');
   // A status that says so stops it as well.
   auto.reset();
   host.looks.push('stop');
@@ -265,4 +266,100 @@ test('Sync automatically is an ordinary preference a window may change, beside t
   assert.match(syncPatchError({ syncAutomatically: true, sync: { kind: 'icloud' } })!, /Settings → Sync/);
   assert.match(syncPatchError({ syncAutomatically: true, syncBooksUnchosen: true })!, /Settings → Sync/);
   assert.match(syncPatchError({ syncAutomatically: true, booksFolder: '/tmp' })!, /Settings → Sync/);
+});
+
+test('a focus always ends with a current status: also for a book that does not sync by itself, a stopped scheduler and during a backoff', async (t) => {
+  const host = new Host();
+  const auto = new AutoSync(host, timing);
+  t.after(() => auto.close());
+  host.isAllowed = false;
+  auto.focused();
+  await auto.settled();
+  assert.deepEqual(host.calls, ['refresh'], 'the status alone, no look and no sync');
+  host.isAllowed = true;
+  host.looks.push(failing());
+  auto.focused();
+  await auto.settled();
+  host.calls.length = 0;
+  auto.focused();
+  await auto.settled();
+  assert.deepEqual(host.calls, ['refresh'], 'during the backoff');
+  auto.reset();
+  await auto.settled();
+  host.calls.length = 0;
+  host.looks.push('stop');
+  auto.focused();
+  await auto.settled();
+  auto.focused();
+  await auto.settled();
+  assert.deepEqual(host.calls, ['look', 'refresh'], 'and once it stopped');
+});
+
+test('an edit that interrupts an automatic sync is no failure: no backoff and no retry, the save starts the idle wait again', async (t) => {
+  const host = new Host();
+  const auto = new AutoSync(host, timing);
+  t.after(() => auto.close());
+  host.results.push(failing('interrupted'));
+  auto.saved();
+  await wait(50);
+  await auto.settled();
+  await wait(60);
+  assert.deepEqual(host.calls, ['sync']);
+  assert.deepEqual([auto.state.failures, auto.state.wanted], [0, undefined]);
+});
+
+test('an edit stops an automatic sync that has not begun to apply a pull, and waits for one that has', async () => {
+  const runs = new AutomaticRuns();
+  // Nothing runs: the edit goes ahead at once.
+  assert.equal(await runs.yieldTo(() => true), false);
+  // A push holds the book: the edit stops it and waits until it let go.
+  let held = true;
+  const push = runs.begin();
+  const edit = runs.yieldTo(() => held);
+  assert.ok(push.run.job.signal.reason instanceof SyncInterruptedError);
+  assert.equal(push.mayApply(() => false), false, 'a stopped sync applies nothing');
+  let edited = false;
+  void edit.then(() => { edited = true; });
+  await wait(5);
+  assert.equal(edited, false, 'the edit waits while the sync still holds the book');
+  held = false;
+  push.end();
+  assert.equal(await edit, true);
+  // A pull that began to be applied is not stopped: it finishes, and the edit waits for it.
+  held = true;
+  const pull = runs.begin();
+  assert.equal(pull.mayApply(() => false), true);
+  const waiting = runs.yieldTo(() => held);
+  assert.equal(pull.run.job.signal.aborted, false);
+  held = false;
+  pull.end();
+  assert.equal(await waiting, true);
+  // An editor opened while the sync read the remote: it does not apply the pull.
+  const late = runs.begin();
+  assert.equal(late.mayApply(() => true), false);
+  late.end();
+  // Stopped with the scheduler's signal (the book closes).
+  const closing = new AbortController();
+  const closed = runs.begin(closing.signal);
+  closing.abort(new Error('The book closed.'));
+  assert.equal(closed.run.job.signal.aborted, true);
+  closed.end();
+  assert.equal(runs.current, undefined);
+});
+
+test('originals an automatic sync downloaded are placed only once nothing blocks a pull, and not at all when the book closes', async () => {
+  let blocked: string | undefined = 'A text of the book is open in its editor.';
+  let checks = 0;
+  const placing = whenUnblocked(() => { checks++; return blocked; }, () => false, 5);
+  let placed: boolean | undefined;
+  void placing.then((value) => { placed = value; });
+  await wait(30);
+  assert.equal(placed, undefined, 'they stay staged while the editor is open');
+  assert.ok(checks > 2, 'checked again and again, locally');
+  blocked = undefined;
+  assert.equal(await placing, true);
+  let closing = false;
+  const closed = whenUnblocked(() => 'An inline editor is open.', () => closing, 5);
+  closing = true;
+  assert.equal(await closed, false, 'a closing book places nothing');
 });

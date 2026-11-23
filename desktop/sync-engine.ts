@@ -87,11 +87,19 @@ export type SyncOptions = {
    */
   pushOnly?: boolean;
   /**
-   * Stops the sync (the bounded push when a book closes): every request to the remote that runs or would start rejects
-   * with the signal's reason at once, and the sync rejects at its next request. What a stopped push stored is harmless:
-   * blobs are content-addressed, and a commit stored without being recorded here is adopted by the next sync.
+   * Stops the sync (the bounded push when a book closes, an edit during an automatic sync): every request to the remote
+   * that runs or would start rejects with the signal's reason at once, and the sync rejects at its next request or
+   * local step. What a stopped push stored is harmless: blobs are content-addressed. A commit request that was sent is
+   * the exception: it is waited for and recorded (`abortableRemote`), so a stopped push never leaves a commit of this
+   * Mac that it does not know, which an edit after it would fork from.
    */
   signal?: AbortSignal;
+  /**
+   * Asked immediately before an automatic sync changes the book (#284): before a staged fast-forward is applied, before
+   * an interrupted pull is finished, and before older originals a pull kept are replaced. False leaves the book as it
+   * is (`deferred`): an editor opened while the sync read the remote. Everything is staged by then; nothing is lost.
+   */
+  beforeApply?: () => boolean | Promise<boolean>;
 };
 export type SyncOutcome = {
   /** `deferred`: with `pushOnly`, the sync needed to change the book and did nothing. */
@@ -160,6 +168,7 @@ async function refreshFacts(context: Context) {
   // provider such as Lightroom Classic answers over a bridge.
   const provided = await observePhotos(root, sources.filter((source) => !isFileLocator(source.locator)), store, facts);
   for (const source of sources) {
+    context.options.signal?.throwIfAborted();
     const reported = provided.get(source.id)?.observed;
     // A file its provider reports where it reported none before is read like any file, below.
     if (reported && !(reported.state === 'available' && reported.file !== undefined)) {
@@ -311,10 +320,13 @@ async function uploadProxy(remote: SyncRemote, bookId: string, digest: string, b
 async function push(context: Context, parents: string[], base: StateBlob | undefined, facts: Record<string, AssetFact>, synced: SyncedCommit | undefined,
   parentCover?: string) {
   const { root, remote } = context;
+  const { signal } = context.options;
+  signal?.throwIfAborted();
   const state = await captureBookState(root);
   const bookId = state.project.bookId;
   if (!bookId) throw new Error('This book has no lineage ID yet. Make an edit, then sync.');
   for (const [path, digest] of Object.entries(state.contentDigests)) {
+    signal?.throwIfAborted();
     const key = contentBlobKey(bookId, digest);
     if (await remote.hasBlob(key)) continue;
     const bytes = await readFile(state.files[path]);
@@ -354,6 +366,7 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
   for (const [id, fact] of Object.entries(assets)) {
     const digest = fact.digest;
     if (proxies[digest]) continue;
+    signal?.throwIfAborted();
     // Unchanged photos keep the proxy the last snapshot recorded: nothing is read, decoded or downloaded again.
     if (base?.proxies[digest]) { proxies[digest] = base.proxies[digest]; continue; }
     const here = context.here[id];
@@ -372,6 +385,7 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
     const stored = await local?.path(digest);
     if (stored) proxies[digest] = await uploadProxy(remote, bookId, digest, await readFile(stored), extname(stored) === '.png' ? '.png' : '.jpg');
   }
+  signal?.throwIfAborted();
   const portable = portableManifests(state.project, state.photos);
   const blob: StateBlob = { version: 1, project: portable.project, photos: portable.photos, assetsMeta: { version: 1, assets },
     content: state.contentDigests, originals, ...(Object.keys(named).length ? { named } : {}), proxies };
@@ -381,6 +395,7 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
   const coverDigest = await uploadCover(context, bookId, parentCover);
   const header = commitHeaderSchema.parse({ version: commitHeaderVersion, commitId: randomUUID(), bookId, parents, bookStateRevision: state.revision,
     createdAt: (context.options.now?.() ?? new Date()).toISOString(), title: state.project.title.slice(0, 400), stateDigest, ...(coverDigest ? { coverDigest } : {}) });
+  signal?.throwIfAborted();
   await remote.putCommit(header);
   await recordSynced(root, { commitId: header.commitId, bookId, bookStateRevision: header.bookStateRevision, stateDigest, photoDigests: digestsOf(assets),
     // What this Mac has: originals at the snapshot's digest, and older versions a pull kept until their new ones arrive.
@@ -440,9 +455,13 @@ async function recordSynced(root: string, synced: SyncedCommit) {
  */
 async function pull(context: Context, tip: CommitHeader) {
   const { blob, marker } = await stagePull(context, tip);
+  // The last moment an automatic sync may leave the book as it is: from here on the pull is applied, which is local.
+  context.options.signal?.throwIfAborted();
+  if (!await mayApply(context)) return undefined;
   await applyPull(context, marker);
   return blob;
 }
+const mayApply = async (context: Context) => !context.options.beforeApply || await context.options.beforeApply();
 
 /** Marks and projects a staged pull, then looks at the originals here again: stale ones went, downloaded ones came. */
 async function applyPull(context: Context, marker: PullMarker) {
@@ -623,7 +642,7 @@ export async function syncBook(options: SyncOptions): Promise<SyncOutcome> {
     // keeps originals: the book had the file. Never fails the sync, which has succeeded by then.
     // Looked for only when the sync record says one was kept (a digest here other than the snapshot's), so a book that
     // never kept one reads nothing more.
-    const replaced = (decided.action === 'diverged' && !decided.pulled) || !await keepsOlderOriginal(root) ? [] : await fetchOriginals(root, options.remote, undefined, { keptOnly: true })
+    const replaced = (decided.action === 'diverged' && !decided.pulled) || !await keepsOlderOriginal(root) || !await mayApply(context) ? [] : await fetchOriginals(root, options.remote, undefined, { keptOnly: true })
       .then(({ downloaded }) => downloaded, (error) => { console.warn('ImageFlow could not replace an original that changed on another Mac', error); return [] as string[]; });
     const outcome = replaced.length ? { ...decided, changed: true } : decided;
     // The sync has succeeded; originals kept on this Mac come after it and never fail it.
@@ -646,6 +665,7 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
   // An interrupted pull is finished first; it was decided on before anything else changed.
   const interrupted = (await readSyncState(root)).pull;
   const deferred: SyncOutcome = { action: 'deferred', pushed: [], changed: false };
+  if (interrupted && !options.pushOnly && !await mayApply(context)) return deferred;
   if (options.pushOnly && (interrupted || !(JSON.parse(await readFile(join(root, 'project.json'), 'utf8')) as { bookId?: unknown }).bookId)) return deferred;
   // One that cannot be finished is given up (`abandonPull`), and the decision below keeps both versions.
   if (interrupted) await finishPull(root, interrupted).catch((error) => console.warn('ImageFlow gave up an interrupted sync', error));
@@ -720,6 +740,7 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
     }
     case 'fast-forward': {
       const blob = await pull(context, decision.tip);
+      if (!blob) return { ...deferred, changed };
       const now = (await readSyncState(root)).lastSynced!;
       // The merge kept the facts of originals that changed here; they go back, never stale ones.
       if (factsAhead(hereDigests(context), now, hereKeys(context)) || await unnamedOriginals(context, blob)) {

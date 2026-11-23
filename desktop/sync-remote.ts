@@ -130,8 +130,9 @@ export interface SyncRemote {
  * The remote as a sync bounded by `signal` sees it (the push when a book closes, #284): once the signal is aborted, every
  * call rejects with its reason at once, also one that is running, so the sync stops at its next request instead of
  * waiting for a remote that is slow or out of reach. A transfer is given the signal as well, which stops it cleanly. A
- * request already sent may still complete; what it stores is harmless (see `SyncOptions.signal`). A `prepareSync` that
- * completes after the abort is ended at once.
+ * request already sent may still complete; what it stores is harmless (content-addressed blobs). The one exception is
+ * `putCommit`: once sent it is waited for (until the store gives up), so the sync records its commit. A `prepareSync`
+ * that completes after the abort is ended at once.
  */
 export function abortableRemote(remote: SyncRemote, signal?: AbortSignal): SyncRemote {
   if (!signal) return remote;
@@ -153,6 +154,9 @@ export function abortableRemote(remote: SyncRemote, signal?: AbortSignal): SyncR
         // Uploads and downloads stop with the signal themselves.
         if (name === 'putBlob' || name === 'downloadBlob') args[2] = { ...(args[2] as object | undefined), signal };
         const result = (value as (...values: unknown[]) => unknown).apply(target, args);
+        // A commit that was sent is waited for, and the sync records it: one left to land unrecorded while the user
+        // edits on would come back as a second tip next to this Mac's next push, a fork of its own making.
+        if (name === 'putCommit') return result;
         return result instanceof Promise ? race(name, result) : result;
       };
     },

@@ -55,7 +55,7 @@ import { describeLocalChange, describeSync, originalsNotHere, placeOriginals, st
 import type { SyncOptions, SyncOutcome } from './sync-engine';
 import { BookDeletedError } from './sync-remote';
 import type { SyncRemote } from './sync-remote';
-import { AutoSync, autoSyncTiming } from './sync-auto';
+import { AutomaticRuns, AutoSync, autoSyncTiming, SyncInterruptedError, whenUnblocked } from './sync-auto';
 import type { AutoFailure, AutoLook, AutoSyncTiming } from './sync-auto';
 import { bookSync, readSyncState, startSyncing, SyncElsewhereError, syncedElsewhere, takeAbandonedAtOpen } from './sync-pull';
 import { UntrustedBookError } from './sync-service';
@@ -79,6 +79,11 @@ import { previewPictures } from './preview-picture-cache';
 export type RenderSessions = Map<string, { book: OpenProject; mode: RenderProject['mode']; network?: () => readonly string[];
   photos?: 'preview'; pictures?: ReturnType<typeof previewPictures.view>; pictureScope?: string }>;
 const viewPath = /^\/render\/([a-f0-9-]{36})(?:\/(.*))?$/;
+/** A request named a revision of the book that is no longer the current one (`currentBook`). */
+export class StaleBookError extends Error {
+  constructor(message = 'The project changed. Try again using the current project.') { super(message); this.name = 'StaleBookError'; }
+}
+
 /** The book is held by another operation (a save, a reload, a sync); `run` reports it as `BOOK_BUSY`. */
 export class BookBusyError extends Error {
   readonly code = 'BOOK_BUSY';
@@ -145,6 +150,7 @@ export type SyncRequest = { start?: boolean; auto?: boolean; trust?: boolean; au
 /** How a failed automatic sync is taken (`AutoSync`): what may not sync by itself stops, a full remote waits, a busy book tries again soon. */
 export function automaticFailure(error: unknown): AutoFailure {
   if (error instanceof BookDeletedError || error instanceof NewerSyncFormatError || error instanceof SyncElsewhereError || error instanceof UntrustedBookError) return 'stop';
+  if (error instanceof SyncInterruptedError) return 'interrupted';
   if (error instanceof StoreFullError) return 'full';
   if (error instanceof BookBusyError) return 'later';
   return 'retry';
@@ -316,13 +322,33 @@ export class DocumentSession {
     }
   }
   async run<T>(task: () => Promise<T>): Promise<Result<T>> {
-    try { return { value: await this.hold(task) }; }
+    try { return { value: await this.holdAfterAutomatic(task) }; }
     catch (error) {
       if (error instanceof BookBusyError) return { error: error.message, code: 'BOOK_BUSY' };
       if (error instanceof CommittedProjectSaveError) this.notify({ error: error.message });
       return { error: errorMessage(error) };
     }
   }
+  /**
+   * An edit never fails because of a sync nobody asked for (#284). A request from the editor (`run`: a save, Undo,
+   * Redo, an import) that finds the book held by an automatic sync waits for it, and stops it first unless it is already
+   * applying a pull: an automatic push is aborted (`SyncInterruptedError`), and the save starts its idle wait again. A
+   * pull being applied finishes; the request then finds a newer revision of the book, which it never overwrites: a
+   * request made against the revision before is refused with a message that says why.
+   */
+  private async holdAfterAutomatic<T>(task: () => Promise<T>): Promise<T> {
+    const revision = this.active?.id;
+    const waited = !this.closing && await this.automaticRuns.yieldTo(() => this.busy);
+    try { return await this.hold(task); }
+    catch (error) {
+      if (waited && error instanceof StaleBookError && this.active?.id !== revision) {
+        throw new StaleBookError('The book took changes from another Mac just now, so this edit was not made. Make it again.');
+      }
+      throw error;
+    }
+  }
+  /** The automatic sync that runs, which an edit stops or waits for. */
+  private readonly automaticRuns = new AutomaticRuns();
   /**
    * Runs `task` holding the book, as `run` does, but rejects with the task's own error (`BookBusyError` while the book
    * is busy), so callers in the main process can tell errors apart by their class instead of their text.
@@ -395,6 +421,13 @@ export class DocumentSession {
         (await readSyncState(this.book.folder).catch(() => undefined))?.lastSynced?.commitId ?? ''].join(':');
       const before = await mark();
       try {
+        // Tests of automatic sync stand in for a slow remote (`IMAGEFLOW_SYNC_TEST_SLOW_MS`, development builds only).
+        const slow = DocumentSession.automaticSyncDelay;
+        const { signal } = options;
+        if (signal && slow) await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, slow);
+          signal.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
+        });
         const outcome = await syncBook({ remote, book: this.book, fetchOriginals: options.fetchOriginals, chooseTip: (tips) => this.chooseTip(tips), cover: this.cover, device: macName(),
           fastForwardOnly: options.fastForwardOnly, pushOnly: options.pushOnly, signal: options.signal });
         if (outcome.changed) this.notify({ value: this.activate(await loadProject(this.book.folder, this.cache), true) });
@@ -493,6 +526,8 @@ export class DocumentSession {
    */
   /** When automatic sync acts; development builds may shorten the idle wait for tests (`IMAGEFLOW_SYNC_IDLE_MS`). */
   static autoSyncTiming: AutoSyncTiming = autoSyncTiming;
+  /** Development builds only: how long an automatic sync waits, holding the book, before it starts (a slow remote). */
+  static automaticSyncDelay = 0;
   readonly autoSync = new AutoSync({
     allowed: () => this.autoAllowed(),
     blocked: () => this.pullBlocked(),
@@ -504,6 +539,7 @@ export class DocumentSession {
       return outcome?.action === 'deferred' ? 'deferred' : undefined;
     },
     failure: automaticFailure,
+    refresh: () => this.refreshSync(),
     upload: async () => {
       const service = this.syncService;
       if (!service || this.closing) return;
@@ -511,6 +547,7 @@ export class DocumentSession {
       if (this.syncView && !this.closing) this.publishSync(this.syncView);
     },
   }, DocumentSession.autoSyncTiming);
+  private readonly autoSyncTiming = DocumentSession.autoSyncTiming;
   /** Whether automatic sync is on: the preference, with a backend configured. */
   private automatic() { return !!this.syncService?.configured && this.syncAutomatically?.() !== false; }
   /**
@@ -531,9 +568,9 @@ export class DocumentSession {
    * Why a pull may not change the book now (#284), or undefined: it reloads the book and resets Undo and Redo, so it
    * waits for edits in flight or unsaved, an export, a copy, a check, an agent, and an open text or element editor.
    */
-  pullBlocked(): string | undefined {
+  pullBlocked({ holding = false }: { holding?: boolean } = {}): string | undefined {
     const menu = this.menuState;
-    if (this.busy || this.exportJob || this.copyJob || this.checkJobs.size || this.agentLeases.size || !this.queue.idle) return 'The book is busy.';
+    if ((this.busy && !holding) || this.exportJob || this.copyJob || this.checkJobs.size || this.agentLeases.size || !this.queue.idle) return 'The book is busy.';
     if (menu && (menu.busy || menu.saving || menu.textEditing || menu.activeEditor)) return 'The book is being edited.';
     if (this.textEditorsOpen?.()) return 'A text of the book is open in its editor.';
     return undefined;
@@ -718,8 +755,14 @@ export class DocumentSession {
     try {
       // Originals come after the sync, in the background (`downloadSyncedOriginals`), so the book stays usable.
       const manage = this.syncService.kind === 'icloud' ? { manage: true as const } : {};
-      const result = await this.sync(connection.remote, { remoteId: connection.remoteId, full: (error) => { this.storageFull = { message: error.message, ...manage }; },
-        ...(automatic ? { fastForwardOnly: true, pushOnly: automatic.pushOnly, signal: automatic.signal } : {}) });
+      const begun = automatic ? this.automaticRuns.begin(automatic.signal) : undefined;
+      let result: SyncOutcome;
+      try {
+        result = await this.sync(connection.remote, { remoteId: connection.remoteId, full: (error) => { this.storageFull = { message: error.message, ...manage }; },
+          ...(automatic && begun ? { fastForwardOnly: true, pushOnly: automatic.pushOnly, signal: begun.run.job.signal,
+            // The gate is read again as the pull is applied: an editor may have opened while the sync read the remote.
+            beforeApply: () => begun.mayApply(() => this.closing || !!this.pullBlocked({ holding: true })) } : {}) });
+      } finally { begun?.end(); }
       // Errors keep their class (`hold`): a tombstone is a `BookDeletedError`, and the app asks what becomes of the book.
       // An automatic sync says only what changed the book; the status bar shows the rest.
       message = !automatic || result.changed ? describeOutcome(result) : undefined;
@@ -736,7 +779,7 @@ export class DocumentSession {
       // (or the book's next open): an automatic sync does not try the same original again at every idle.
       if (synced) this.uploadOriginals(!automatic);
       // Placing downloaded originals reloads the book, which an automatic sync does only when nothing blocks a pull.
-      if ((!automatic || (!automatic.pushOnly && !this.pullBlocked())) && this.keepOriginals?.() && this.syncView?.status && this.syncView.status.pendingOriginals > (this.syncView.status.notUploaded ?? 0)) void this.downloadSyncedOriginals().catch((error) => { if (!automatic && !this.window.isDestroyed()) this.window.webContents.send(channels.appNotice, 'Originals are still to be downloaded: ' + errorMessage(error)); });
+      if ((!automatic || !automatic.pushOnly) && this.keepOriginals?.() && this.syncView?.status && this.syncView.status.pendingOriginals > (this.syncView.status.notUploaded ?? 0)) void this.downloadSyncedOriginals({ automatic: !!automatic }).catch((error) => { if (!automatic && !this.window.isDestroyed()) this.window.webContents.send(channels.appNotice, 'Originals are still to be downloaded: ' + errorMessage(error)); });
     }
   }
   /**
@@ -824,7 +867,7 @@ export class DocumentSession {
    * one short step at the end, when the book reloads to show them. A second request while one runs waits for nothing.
    * Cancel keeps the originals downloaded by then.
    */
-  async downloadSyncedOriginals() {
+  async downloadSyncedOriginals({ automatic = false }: { automatic?: boolean } = {}) {
     if (this.downloadJob) return [];
     const remote = await this.syncedRemote();
     const job = new AbortController();
@@ -839,15 +882,24 @@ export class DocumentSession {
     try {
       const staged = await stageOriginals({ remote, folder: this.book.folder, signal: job.signal, notUploaded: (count) => { away = count; },
         progress: (done, all) => { total = all; if (all) show({ done, total: all }); } });
+      // After an automatic sync, placing them (which reloads the book and resets Undo) waits like a pull until nothing
+      // blocks one (#284); the staged files stay meanwhile.
+      if (automatic && staged.length) await whenUnblocked(() => this.pullBlocked(), () => this.closing, this.autoSyncTiming.gate);
+      if (staged.length && this.closing) {
+        await Promise.all(staged.map(({ staging }) => rm(staging, { force: true })));
+        return [];
+      }
       if (staged.length) {
-        const result = await this.run(async () => {
+        const place = async () => {
           this.stopWatch();
           try {
             const ids = await placeOriginals(this.book.folder, staged);
             if (ids.length) this.notify({ value: this.activate(await loadProject(this.book.folder, this.cache), true) });
             return ids;
           } finally { this.watchProject(this.book); }
-        });
+        };
+        // Placing never stops an automatic sync (as an edit does): it waited for the book to be free.
+        const result: Result<string[]> = automatic ? await this.hold(place).then((value) => ({ value }), (error: unknown) => ({ error: errorMessage(error) })) : await this.run(place);
         if ('error' in result) { await Promise.all(staged.map(({ staging }) => rm(staging, { force: true }))); throw new Error(result.error); }
         placed = result.value;
       }
@@ -1000,7 +1052,15 @@ export class DocumentSession {
     })();
     return this.closeTask;
   }
-  /** How long the push of a closing book may take (#284); the originals it names upload afterwards, in the background. */
+  /**
+   * How long sync work may delay closing a book (#284); the originals the push names upload afterwards, in the
+   * background. The bound stops every request to the remote at once, and the push checks it between its local steps
+   * (each photo's fact, each content file, each preview). A commit request that was sent is waited for until the store
+   * gives up, so the commit is recorded (`abortableRemote`). What it cannot stop is one local step under way: reading the
+   * book's files to know its state, hashing an original whose digest is not known yet (a photo just imported) or
+   * reading and decoding one preview. Those take milliseconds for a book's own files and up to seconds for a large
+   * original the book has not hashed yet.
+   */
   static closePushMs = 5000;
   /**
    * The push when the book closes (#284), with the writer lock held: state and previews of what changed since the last
@@ -1287,7 +1347,7 @@ export class DocumentSession {
 
 
   currentBook(id: string) {
-    if (!this.active || this.active.id !== id) throw new Error('The project changed. Try again using the current project.');
+    if (!this.active || this.active.id !== id) throw new StaleBookError();
     return this.active.book;
   }
 

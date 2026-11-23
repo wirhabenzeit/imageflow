@@ -1,7 +1,9 @@
 // Automatic sync (#284), end to end in the app with the folder backend (`IMAGEFLOW_SYNC_FOLDER=1`) and a short idle wait
 // (`IMAGEFLOW_SYNC_IDLE_MS`, honoured only by a development build): an edit on one copy goes up by itself once the book is
 // idle, and the other copy takes it when its window comes to the front, without a click; a pull waits while a Markdown
-// editor of the book is open and runs once it closed; and a book pushes what changed when it closes. The two "Macs" are
+// editor of the book is open and runs once it closed; an edit during an automatic push (slowed down here with
+// `IMAGEFLOW_SYNC_TEST_SLOW_MS`) is kept without an error and goes up afterwards; and a book pushes what changed when it
+// closes. The two "Macs" are
 // two windows of one app with one backend: the book and its download from the Start window.
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readdir, readFile, realpath, writeFile } from 'node:fs/promises';
@@ -23,7 +25,7 @@ await mkdir(join(work, 'profile'));
 // The backend is set up already, and no book waits to be chosen: books that sync here sync by themselves.
 await writeFile(join(work, 'profile', 'settings.json'), JSON.stringify({ booksFolder: join(work, 'Laptop'), sync: { kind: 'folder', path: folder } }));
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
-  env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1', IMAGEFLOW_SYNC_FOLDER: '1', IMAGEFLOW_SYNC_IDLE_MS: '1500' } });
+  env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1', IMAGEFLOW_SYNC_FOLDER: '1', IMAGEFLOW_SYNC_IDLE_MS: '1500', IMAGEFLOW_SYNC_TEST_SLOW_MS: '1500' } });
 const stderr = [];
 app.process().stderr.on('data', (bytes) => stderr.push(String(bytes)));
 const until = async (check, label, timeout = 30000) => {
@@ -120,6 +122,24 @@ try {
   assert.equal(await caption(laptop, 'shore'), 'Edited on the desktop', 'no pull while the Markdown editor is open');
   await app.browserWindow(markdown).then((window) => window.evaluate((window) => window.close()));
   await until(async () => await caption(laptop, 'shore') === 'While the laptop edits text', 'the pull ran once the editor closed');
+
+  // An edit while the desktop pushes by itself (each automatic sync waits 1.5 s at its start here, as a slow remote
+  // would): the edit is neither refused nor lost. It stops the push, and the push follows once the book is idle again.
+  const pushedEarlier = (await tips(bookId))[0].commitId;
+  const saveOnce = (text) => desktop.evaluate(async (text) => {
+    const { value } = await window.imageflow.currentProject();
+    value.photoIndex.segla.caption = text;
+    return window.imageflow.saveProject(value.id, { project: value.project, photoIndex: value.photoIndex });
+  }, text);
+  assert.ok((await saveOnce('Before the push')).value);
+  await waitForPage(desktop, () => document.querySelector('.sync-status')?.getAttribute('data-state') === 'syncing', undefined, { timeout: 15000 });
+  const during = await saveOnce('During the push');
+  assert.ok(during.value, 'the edit during the automatic push: ' + JSON.stringify(during.error));
+  assert.equal(await caption(desktop, 'segla'), 'During the push', 'the edit is kept');
+  assert.equal((await tips(bookId))[0].commitId, pushedEarlier, 'the push it interrupted sent nothing');
+  await until(async () => (await tips(bookId))[0]?.commitId !== pushedEarlier && await desktop.evaluate(() => document.querySelector('.sync-status')?.getAttribute('data-state') === 'in-sync'),
+    'the edit went up once the book was idle again');
+  await until(async () => { await focus(laptop); return await caption(laptop, 'segla') === 'During the push'; }, 'the laptop has the edit');
 
   // Closing pushes: the laptop edits and closes at once, before its idle wait; the desktop then takes the edit.
   const laptopTips = (await tips(bookId)).map(({ commitId }) => commitId);

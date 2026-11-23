@@ -1907,6 +1907,8 @@ void app.whenReady().then(async () => {
   // Tests of automatic sync wait less for a book to be idle; a packaged app always waits 30 s.
   const idle = Number(process.env.IMAGEFLOW_SYNC_IDLE_MS);
   if (!app.isPackaged && Number.isFinite(idle) && idle > 0) DocumentSession.autoSyncTiming = { ...DocumentSession.autoSyncTiming, idle };
+  const slow = Number(process.env.IMAGEFLOW_SYNC_TEST_SLOW_MS);
+  if (!app.isPackaged && Number.isFinite(slow) && slow > 0) DocumentSession.automaticSyncDelay = slow;
   powerMonitor.on('resume', () => { for (const document of documents.values()) { document.projectSession.inputs.invalidate(); document.autoSync.networkChanged(); } });
   watchNetwork();
   if (process.platform === 'darwin') pushNotifications.on('received-apns-notification', (_event, userInfo) => {

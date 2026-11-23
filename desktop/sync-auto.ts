@@ -23,9 +23,10 @@
 export type AutoLook = 'pull' | 'push' | 'none' | 'stop';
 /**
  * How the host reads a failed automatic sync: `stop` (the book was deleted from sync, or a newer ImageFlow synced it),
- * `full` (the remote is full: no backoff), `later` (the book was busy for a moment: again after `gate`), `retry` (back off).
+ * `full` (the remote is full: no backoff), `later` (the book was busy for a moment: again after `gate`), `interrupted`
+ * (the user edited the book: nothing, the save starts the idle wait again), `retry` (back off).
  */
-export type AutoFailure = 'stop' | 'full' | 'later' | 'retry';
+export type AutoFailure = 'stop' | 'full' | 'later' | 'retry' | 'interrupted';
 
 export type AutoSyncHost = {
   /**
@@ -47,6 +48,11 @@ export type AutoSyncHost = {
    */
   sync(options: { pushOnly: boolean; signal: AbortSignal }): Promise<'deferred' | 'stop' | void>;
   failure(error: unknown): AutoFailure;
+  /**
+   * Reads the sync status only, for a focus that does not look by itself now (the book does not sync by itself, the
+   * scheduler stopped or waits for a backoff): a focus always ends with a current status.
+   */
+  refresh?(): Promise<void>;
   /** Uploads the book's pending originals again; rejects when the upload failed. */
   upload?(): Promise<void>;
 };
@@ -80,8 +86,15 @@ export class AutoSync {
 
   /** The book opened: its first sync by itself, then a look at the remote. */
   opened() { this.want('open'); }
-  /** The book's window came to the front (the caller throttles it). */
-  focused() { this.want('look'); }
+  /**
+   * The book's window came to the front (the caller throttles it). It looks at the remote; when it cannot now (stopped,
+   * waiting for a backoff, or the book does not sync by itself, see `attempt`) it still reads the status.
+   */
+  focused() {
+    if (this.stopped === 'closed') return;
+    if (this.stopped || this.until > this.now()) void this.host.refresh?.().catch(() => {});
+    this.want('look');
+  }
   /** The remote said something changed (an iCloud push); several at once count as one. */
   notified() {
     if (this.stopped || this.notifyTimer) return;
@@ -182,7 +195,12 @@ export class AutoSync {
     this.job = job;
     try {
       if (intent === 'open') await this.host.start();
-      if (this.stopped || !await this.host.allowed()) return;
+      if (this.stopped) return;
+      if (!await this.host.allowed()) {
+        // A focus still ends with a current status, as before automatic sync.
+        if (intent === 'look') await this.host.refresh?.();
+        return;
+      }
       let pull = intent === 'pull';
       if (intent === 'push') {
         if (!await this.host.edited()) return;
@@ -204,8 +222,9 @@ export class AutoSync {
       if (job.signal.aborted || this.stopped) return;
       const kind = this.host.failure(error);
       if (kind === 'stop') { this.stop(); return; }
-      // A full remote is shown by the status; trying again every few seconds would not make room.
-      if (kind === 'full') return;
+      // A full remote is shown by the status; trying again every few seconds would not make room. An edit that
+      // interrupted the sync pushes after its own idle wait.
+      if (kind === 'full' || kind === 'interrupted') return;
       if (kind === 'later') {
         setTimeout(() => this.want(intent === 'open' ? 'look' : intent), this.timing.gate);
         return;
@@ -235,4 +254,72 @@ export class AutoSync {
 export function cloudKitPush(userInfo: unknown) {
   const ck = userInfo && typeof userInfo === 'object' ? (userInfo as { ck?: unknown }).ck : undefined;
   return !!ck && typeof ck === 'object';
+}
+
+/**
+ * An automatic sync stopped because the user edited the book (#284): no failure, and the push that follows the edit
+ * starts its idle wait again.
+ */
+export class SyncInterruptedError extends Error {
+  constructor() { super('An edit interrupted the automatic sync.'); this.name = 'SyncInterruptedError'; }
+}
+
+/** One automatic sync of a book, as an edit sees it (`AutomaticRuns`). */
+export type AutomaticRun = {
+  /** Stops the sync at its next request, and keeps it from applying a pull. */
+  readonly job: AbortController;
+  /** Whether it has begun to apply a pull, which then finishes. */
+  applying: boolean;
+  /** Resolves once the sync let go of the book. */
+  readonly done: Promise<void>;
+};
+
+/**
+ * Edits come first (#284): an edit never fails because of a sync nobody asked for. The automatic sync of a book runs
+ * as an `AutomaticRun`; an edit that finds the book held by it (`yieldTo`) stops it, unless it is already applying a
+ * pull, and waits until it let go of the book. The sync asks `mayApply` immediately before it changes the book, which
+ * says no once an edit stopped it or a pull would disturb the user (`blocked`).
+ */
+export class AutomaticRuns {
+  current?: AutomaticRun;
+  /** Starts a run, stopped also by `signal` (the scheduler's, when the book closes). `end` must be called once it let go of the book. */
+  begin(signal?: AbortSignal) {
+    let end = () => {};
+    const run: AutomaticRun = { job: new AbortController(), applying: false, done: new Promise<void>((resolve) => { end = resolve; }) };
+    if (signal?.aborted) run.job.abort(signal.reason);
+    signal?.addEventListener('abort', () => run.job.abort(signal.reason), { once: true });
+    this.current = run;
+    const mayApply = (blocked: () => boolean) => {
+      if (run.job.signal.aborted || blocked()) return false;
+      run.applying = true;
+      return true;
+    };
+    return { run, mayApply, end: () => { if (this.current === run) this.current = undefined; end(); } };
+  }
+  /**
+   * For an edit: stops the automatic sync unless it is applying a pull, and waits while it holds the book (`held`).
+   * Resolves whether it waited for one.
+   */
+  async yieldTo(held: () => boolean) {
+    let waited = false;
+    for (let run = this.current; run; run = this.current) {
+      if (!run.applying) run.job.abort(new SyncInterruptedError());
+      // Before it holds the book (it reads the remote's identity), a stopped sync gives way at once.
+      if (!held()) break;
+      waited = true;
+      await run.done;
+      if (this.current === run) break;
+    }
+    return waited;
+  }
+}
+
+/**
+ * Waits, checking locally every `gate` ms and sending no request, until nothing blocks a change of the book
+ * (`blocked`), or until `stop` says to give up. Resolves true when the book may change, false when it stopped: originals
+ * an automatic sync downloaded are placed only then (#284), and stay staged meanwhile.
+ */
+export async function whenUnblocked(blocked: () => unknown, stop: () => boolean, gate = autoSyncTiming.gate) {
+  while (!stop() && blocked()) await new Promise((resolve) => setTimeout(resolve, gate));
+  return !stop();
 }

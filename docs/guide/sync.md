@@ -44,6 +44,7 @@ A book that syncs keeps itself current, with **Sync automatically** on in **Sett
 - When the book opens, and when its window comes to the front, it takes what your other Macs synced. With iCloud, a change from another Mac also reaches a book that is open in the background.
 - After you edit, it sends your changes once you have stopped for about 30 seconds, and when you close the book. Closing waits a few seconds at most: what did not go up by then goes up the next time the book syncs. Originals follow in the background.
 - It takes changes only when nothing is being edited: while you type in a field, while a text is open in its own editor, while an inline editor is open, while the book exports or an agent changes it, the changes wait and arrive once you are done.
+- Editing always comes first: an edit you make while the book syncs by itself is never refused. Sending stops and starts again once you pause. Only when the book is just then taking changes from another Mac does your edit wait a moment, and if it was made on the version before those changes, ImageFlow says so and you make it again.
 - It never decides for you. A book changed on two Macs at once shows **Changed on two Macs** and waits for you.
 - When the other Macs cannot be reached (offline, iCloud unavailable), the status bar says so and the book tries again later, sooner once the network changes. No dialog interrupts you.
 - When your iCloud storage is full, the book itself goes on syncing while it fits; its originals wait until **Sync Now**, or until you open the book again.
