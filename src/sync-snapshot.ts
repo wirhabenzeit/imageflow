@@ -7,23 +7,33 @@ import { adoptedEntry, fileNameOf, sharedEntry, unlocatedPath } from './source-l
 import type { LocatorFields } from './source-locator';
 
 /**
- * Immutable sync snapshots (ADR 0010, Milestone 1). A sync remote keeps two kinds of immutable record per book:
+ * Immutable sync snapshots (ADR 0010, Milestone 1). A sync remote keeps two kinds of immutable record per book, all
+ * under the book's own prefix (ADR 0012, section 4):
  *
  * - a **commit header** (`books/<bookId>/snapshots/<commitId>.json`): a few hundred bytes naming its parents, the
  *   portable book-state revision and the digest of its state blob, so deriving the tips never parses whole books;
- * - a **state blob** (`blobs/content/<stateDigest>`): the full small book state, with machine-local linked paths
- *   reduced to their file names, the derived `assets-meta.json`, and digest maps of the content, owned originals and
- *   screen proxies it refers to, which are blobs of their own.
+ * - a **state blob** (`books/<bookId>/content/<stateDigest>`): the full small book state, with machine-local linked
+ *   paths reduced to their file names, the derived `assets-meta.json`, and digest maps of the content, owned originals
+ *   and screen proxies it refers to, which are blobs of their own under the same prefix.
+ *
+ * Beside them a remote holds its identity (`remote.json`) and, for a book deleted from sync, a tombstone
+ * (`books/<bookId>/deleted.json`).
  *
  * Pure and host-agnostic: no Node, Electron or filesystem APIs, so a web companion reads the same records.
  */
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
 const uuid = z.uuid();
+const uuidSource = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
+const uuidPattern = new RegExp('^' + uuidSource + '$');
+const requireId = (id: string, what: string) => { if (typeof id !== 'string' || !uuidPattern.test(id)) throw new Error('Not a sync ' + what + ' ID: ' + id); return id; };
 // `.jpg`, `.png`, `.webp`…: lower case, with the dot, as `extname` gives it.
 const extension = z.string().regex(/^\.[a-z0-9]{1,10}$/);
 
+// Version 2 came with the per-book layout (ADR 0012): a build that reads version 1 refuses it (`NewerSyncFormatError`)
+// instead of looking for the book's blobs where they no longer are.
+export const commitHeaderVersion = 2;
 export const commitHeaderSchema = z.object({
-  version: z.literal(1),
+  version: z.literal(commitHeaderVersion),
   commitId: uuid,
   bookId: uuid,
   // `[]` for the first commit, `[previous]` for an ordinary push, every superseded tip when a fork is closed.
@@ -32,6 +42,9 @@ export const commitHeaderSchema = z.object({
   createdAt: z.iso.datetime(),
   title: z.string().max(400),
   stateDigest: sha256,
+  // The book's 320 px JPEG cover, `books/<bookId>/covers/<coverDigest>.jpg`, so a book that is only on the remote has a
+  // thumbnail. Reserved here; no push writes one yet.
+  coverDigest: sha256.optional(),
 }).strict();
 export type CommitHeader = z.infer<typeof commitHeaderSchema>;
 
@@ -46,20 +59,44 @@ export class NewerSyncFormatError extends Error {
     this.name = 'NewerSyncFormatError';
   }
 }
-const newer = (value: unknown, schema: z.ZodObject) => {
+const newer = (value: unknown, schema: z.ZodObject, current = 1) => {
   if (!value || typeof value !== 'object') return false;
   const version = (value as { version?: unknown }).version;
-  if (typeof version === 'number' && version > 1) return true;
+  if (typeof version === 'number' && version > current) return true;
   // Every field this version needs, and more: written by a newer version.
-  return version === 1 && schema.loose().safeParse(value).success;
+  return version === current && schema.loose().safeParse(value).success;
 };
 /** A commit header as a remote stored it: the header, or undefined for one that is incomplete or not a header. */
 export function readCommitHeader(value: unknown): CommitHeader | undefined {
   const parsed = commitHeaderSchema.safeParse(value);
   if (parsed.success) return parsed.data;
-  if (newer(value, commitHeaderSchema)) throw new NewerSyncFormatError();
+  if (newer(value, commitHeaderSchema, commitHeaderVersion)) throw new NewerSyncFormatError();
   return undefined;
 }
+
+/**
+ * A remote's identity (`remote.json` at its root, ADR 0012): a UUID written at first use, which a book's sync record
+ * names, so a book that meets another remote is asked about instead of forking silently.
+ */
+export const remoteIdentitySchema = z.object({ version: z.literal(1), remoteId: uuid }).strict();
+export type RemoteIdentity = z.infer<typeof remoteIdentitySchema>;
+/**
+ * The tombstone of a book deleted from sync (`books/<bookId>/deleted.json`): the one object left under its prefix, so a
+ * Mac that still has the book asks instead of pushing it back.
+ */
+export const bookTombstoneSchema = z.object({ version: z.literal(1), bookId: uuid, deletedAt: z.iso.datetime() }).strict();
+export type BookTombstone = z.infer<typeof bookTombstoneSchema>;
+
+const reader = <T>(schema: z.ZodObject & z.ZodType<T>) => (value: unknown): T | undefined => {
+  const parsed = schema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  if (newer(value, schema)) throw new NewerSyncFormatError();
+  return undefined;
+};
+/** `remote.json` as stored: the identity, or undefined for one that is missing or incomplete. Throws for a newer one. */
+export const readRemoteIdentity = reader<RemoteIdentity>(remoteIdentitySchema);
+/** `deleted.json` as stored: the tombstone, or undefined for one that is missing or incomplete. Throws for a newer one. */
+export const readBookTombstone = reader<BookTombstone>(bookTombstoneSchema);
 
 // Paths of the content map: the book's own texts and files that project.json references, and every template file.
 const contentPath = z.string().max(1024).refine((path) => /^(?:texts|files|template)\/./.test(path) &&
@@ -73,20 +110,38 @@ export const stateBlobSchema = z.object({
   assetsMeta: assetsMetaSchema,
   // SHA-256 of each owned referenced text and file and of every template file, by its path in the book.
   content: z.record(contentPath, sha256),
-  // Owned originals (photos/ entries that are not linked), by source ID: `blobs/originals/<digest><ext>`.
+  // Owned originals (photos/ entries that are not linked), by source ID: `books/<bookId>/originals/<digest><ext>`.
   originals: z.record(z.string(), z.object({ digest: sha256, ext: extension }).strict()),
-  // Screen proxies by the original's digest: `blobs/proxies/<originalDigest>-preview-v1<ext>`, with the proxy's own SHA-256.
+  // Screen proxies by the original's digest: `books/<bookId>/proxies/<originalDigest>-preview-v1<ext>`, with the proxy's own SHA-256.
   proxies: z.record(sha256, z.object({ sha256, ext: z.enum(['.jpg', '.png']) }).strict()),
 }).strict();
 export type StateBlob = z.infer<typeof stateBlobSchema>;
 /** Whether a complete state blob that this version cannot read was written by a newer version. */
 export const newerStateBlob = (value: unknown) => newer(value, stateBlobSchema);
 
-/** Keys of the immutable blobs a remote stores. */
-export const contentBlobKey = (digest: string) => 'blobs/content/' + sha256.parse(digest);
-export const originalBlobKey = (digest: string, ext: string) => 'blobs/originals/' + sha256.parse(digest) + extension.parse(ext);
-export const proxyBlobKey = (originalDigest: string, ext: string) => 'blobs/proxies/' + sha256.parse(originalDigest) + '-preview-v1' + z.enum(['.jpg', '.png']).parse(ext);
-export const blobKeyPattern = /^blobs\/(?:content\/[a-f0-9]{64}|originals\/[a-f0-9]{64}\.[a-z0-9]{1,10}|proxies\/[a-f0-9]{64}-preview-v1\.(?:jpg|png))$/;
+/**
+ * The keys of a remote (ADR 0012, section 4). Everything a book needs lives under its own prefix, so deleting a book
+ * deletes one prefix, its size is one listing, and credentials or a share link can be scoped to it.
+ */
+export const remoteIdentityKey = 'remote.json';
+export const booksPrefix = 'books/';
+export const bookPrefix = (bookId: string) => booksPrefix + requireId(bookId, 'book') + '/';
+export const snapshotsPrefix = (bookId: string) => bookPrefix(bookId) + 'snapshots/';
+export const commitKey = (bookId: string, commitId: string) => snapshotsPrefix(bookId) + requireId(commitId, 'commit') + '.json';
+export const tombstoneKey = (bookId: string) => bookPrefix(bookId) + 'deleted.json';
+/** The book a prefix from a listing of `booksPrefix` belongs to, or undefined for anything else found there. */
+export const bookIdOfPrefix = (prefix: string) => {
+  const id = prefix.startsWith(booksPrefix) && prefix.endsWith('/') ? prefix.slice(booksPrefix.length, -1) : '';
+  return uuidPattern.test(id) ? id : undefined;
+};
+/** Keys of the immutable blobs a book stores. */
+export const contentBlobKey = (bookId: string, digest: string) => bookPrefix(bookId) + 'content/' + sha256.parse(digest);
+export const originalBlobKey = (bookId: string, digest: string, ext: string) => bookPrefix(bookId) + 'originals/' + sha256.parse(digest) + extension.parse(ext);
+export const proxyBlobKey = (bookId: string, originalDigest: string, ext: string) =>
+  bookPrefix(bookId) + 'proxies/' + sha256.parse(originalDigest) + '-preview-v1' + z.enum(['.jpg', '.png']).parse(ext);
+export const coverBlobKey = (bookId: string, digest: string) => bookPrefix(bookId) + 'covers/' + sha256.parse(digest) + '.jpg';
+export const blobKeyPattern = new RegExp('^books/' + uuidSource +
+  '/(?:content/[a-f0-9]{64}|originals/[a-f0-9]{64}\\.[a-z0-9]{1,10}|proxies/[a-f0-9]{64}-preview-v1\\.(?:jpg|png)|covers/[a-f0-9]{64}\\.jpg)$');
 
 /** The bytes of a state blob as stored and hashed. */
 export const encodeStateBlob = (blob: StateBlob) => new TextEncoder().encode(canonicalJson(stateBlobSchema.parse(blob)));

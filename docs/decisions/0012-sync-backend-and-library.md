@@ -8,7 +8,7 @@ Sync and source providers were built separately and do not yet read as one desig
 
 - **Sync is configured per book.** Each book records, per Mac, the folder it syncs through (`desktop/sync-pull.ts`, **File → Sync → Sync with Folder…**). Every book on every Mac has to be pointed at the same folder by hand, and nothing lists what is synced.
 - **What syncs is decided by a special case.** The engine uploads an original when the photo's provider is `package`. ADR 0011 describes the general rule (its "reach" table) but the provider contract does not carry it, and an online provider has no place in it yet.
-- **A synced folder cannot say that a sync finished.** The folder transport (`desktop/sync-remote-folder.ts`) holds only immutable files, so it is safe, but:
+- **A synced folder cannot say that a sync finished.** The folder transport (`desktop/sync-store-folder.ts`) holds only immutable files, so it is safe, but:
   - a successful sync means "written to a local folder". Whether iCloud Drive or Dropbox has uploaded it is unknown, so closing the lid leaves the other Mac without the changes while this one says *Synced*;
   - files evicted to placeholders look present and stall when read, and a listing can be incomplete. `RemoteSyncingError` and the *remote still syncing* status exist only for this;
   - there is no conditional write, so `putCommit` falls back to looking and renaming where hard links are not available.

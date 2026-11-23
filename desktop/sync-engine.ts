@@ -8,7 +8,7 @@ import { parseDocument, photoIndexSchema, projectSchema, withBookFormat } from '
 import type { PhotoIndex } from '../src/project';
 import { sourceEntries } from '../src/source-locations';
 import { packagePath } from '../src/source-locator';
-import { changedOriginals, commitHeaderSchema, contentBlobKey, decideSync, deriveTips, encodeStateBlob, factsAhead, newerStateBlob, NewerSyncFormatError, originalBlobKey, portableManifests,
+import { changedOriginals, commitHeaderSchema, commitHeaderVersion, contentBlobKey, decideSync, deriveTips, encodeStateBlob, factsAhead, newerStateBlob, NewerSyncFormatError, originalBlobKey, portableManifests,
   projectManifests, proxyBlobKey, stateBlobSchema, stateMatchesHeader } from '../src/sync-snapshot';
 import type { CommitHeader, StateBlob, SyncDecision, SyncedCommit } from '../src/sync-snapshot';
 import type { SyncStatus } from '../src/desktop';
@@ -120,12 +120,12 @@ const photoFacts = (facts: Record<string, AssetFact>, photos: PhotoIndex) => Obj
 const digestsOf = (facts: Record<string, AssetFact>) => Object.fromEntries(Object.entries(facts).map(([id, fact]) => [id, fact.digest]));
 
 /** A state blob from the remote, checked against its digest, its schema and, with a header, its revision. */
-async function fetchState(remote: SyncRemote, stateDigest: string, header?: CommitHeader): Promise<StateBlob> {
-  return (await fetchStateBytes(remote, stateDigest, header)).blob;
+async function fetchState(remote: SyncRemote, bookId: string, stateDigest: string, header?: CommitHeader): Promise<StateBlob> {
+  return (await fetchStateBytes(remote, bookId, stateDigest, header)).blob;
 }
 /** The same, with the bytes as stored, which a pull stages: re-encoding would drop fields a newer version added. */
-async function fetchStateBytes(remote: SyncRemote, stateDigest: string, header?: CommitHeader) {
-  const bytes = await remote.getBlob(contentBlobKey(stateDigest));
+async function fetchStateBytes(remote: SyncRemote, bookId: string, stateDigest: string, header?: CommitHeader) {
+  const bytes = await remote.getBlob(contentBlobKey(bookId, stateDigest));
   if (!bytes) throw new RemoteSyncingError('a snapshot of this book has not arrived yet.');
   if (sha(bytes) !== stateDigest) throw new RemoteSyncingError('a snapshot of this book is incomplete.');
   let value: unknown;
@@ -156,10 +156,10 @@ async function missingProxies(blob: StateBlob, photos: PhotoIndex, here: Record<
 }
 
 /** Downloads proxies and checks each against its own SHA-256 before any is stored. */
-async function fetchProxies(remote: SyncRemote, wanted: Awaited<ReturnType<typeof missingProxies>>) {
+async function fetchProxies(remote: SyncRemote, bookId: string, wanted: Awaited<ReturnType<typeof missingProxies>>) {
   const fetched: { digest: string; bytes: Uint8Array }[] = [];
   for (const [digest, entry] of wanted) {
-    const bytes = await remote.getBlob(proxyBlobKey(digest, entry.ext));
+    const bytes = await remote.getBlob(proxyBlobKey(bookId, digest, entry.ext));
     if (!bytes || sha(bytes) !== entry.sha256) throw new RemoteSyncingError('a photo preview has not fully arrived yet.');
     fetched.push({ digest, bytes });
   }
@@ -174,9 +174,9 @@ async function storeProxies(fetched: { digest: string; bytes: Uint8Array }[]) {
 }
 
 /** Fetches the proxies that were evicted from the proxy store, or never arrived, for photos without an original here. */
-async function refetchProxies(context: Context, blob: StateBlob) {
+async function refetchProxies(context: Context, bookId: string, blob: StateBlob) {
   const photos = photoIndexSchema.parse(JSON.parse(await readFile(join(context.root, 'photos.json'), 'utf8')));
-  await storeProxies(await fetchProxies(context.remote, await missingProxies(blob, photos, hereDigests(context))));
+  await storeProxies(await fetchProxies(context.remote, bookId, await missingProxies(blob, photos, hereDigests(context))));
 }
 
 /** The open book as on disk now, for renditions of originals: reloaded after a pull or an import changed it. */
@@ -198,8 +198,8 @@ async function decodes(bytes: Uint8Array, ext: '.jpg' | '.png') {
 }
 
 /** A proxy's bytes on the remote: ours when it has none, theirs (with their digest) when another Mac stored one first. */
-async function uploadProxy(remote: SyncRemote, digest: string, bytes: Uint8Array, ext: '.jpg' | '.png') {
-  const key = proxyBlobKey(digest, ext);
+async function uploadProxy(remote: SyncRemote, bookId: string, digest: string, bytes: Uint8Array, ext: '.jpg' | '.png') {
+  const key = proxyBlobKey(bookId, digest, ext);
   if (await remote.hasBlob(key)) {
     const existing = await remote.getBlob(key);
     // A proxy another Mac is still writing (a synced folder delivers files piecemeal) must not enter a snapshot.
@@ -221,11 +221,11 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
   const bookId = state.project.bookId;
   if (!bookId) throw new Error('This book has no lineage ID yet. Make an edit, then sync.');
   for (const [path, digest] of Object.entries(state.contentDigests)) {
-    const key = contentBlobKey(digest);
+    const key = contentBlobKey(bookId, digest);
     if (await remote.hasBlob(key)) continue;
     const bytes = await readFile(state.files[path]);
     if (sha(bytes) !== digest) throw new Error('The book changed during sync. Sync again.');
-    await remote.putBlob(key, bytes);
+    await remote.putBlob(key, bytes, { sha256: digest });
   }
   // A photo's fact from here goes up only when its original changed here since the last sync (or the snapshot lacks
   // one); an original merely left at an older digest never pushes that digest back over another Mac's re-export.
@@ -243,10 +243,10 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
     const here = context.here[id];
     if (here && here.digest === assets[id]?.digest) {
       const entry = { digest: here.digest, ext: extname(owned).toLowerCase() };
-      const key = originalBlobKey(entry.digest, entry.ext);
+      const key = originalBlobKey(bookId, entry.digest, entry.ext);
       if (!await remote.hasBlob(key)) {
         if (await fileDigest(here.path) !== here.digest) throw new Error('A photo changed during sync. Sync again.');
-        await remote.putBlob(key, { file: here.path });
+        await remote.putBlob(key, { file: here.path }, { sha256: here.digest });
       }
       originals[id] = entry;
     } else if (base?.originals[id]) originals[id] = base.originals[id];
@@ -267,20 +267,20 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
         const bytes = await readFile(path);
         const ext = extname(path).toLowerCase() === '.png' ? '.png' : '.jpg';
         await local?.put(digest, bytes).catch((error) => console.warn('ImageFlow could not keep a sync proxy', error));
-        proxies[digest] = await uploadProxy(remote, digest, bytes, ext);
+        proxies[digest] = await uploadProxy(remote, bookId, digest, bytes, ext);
         continue;
       }
     }
     const stored = await local?.path(digest);
-    if (stored) proxies[digest] = await uploadProxy(remote, digest, await readFile(stored), extname(stored) === '.png' ? '.png' : '.jpg');
+    if (stored) proxies[digest] = await uploadProxy(remote, bookId, digest, await readFile(stored), extname(stored) === '.png' ? '.png' : '.jpg');
   }
   const portable = portableManifests(state.project, state.photos);
   const blob: StateBlob = { version: 1, project: portable.project, photos: portable.photos, assetsMeta: { version: 1, assets },
     content: state.contentDigests, originals, proxies };
   const bytes = encodeStateBlob(blob);
   const stateDigest = sha(bytes);
-  if (!await remote.hasBlob(contentBlobKey(stateDigest))) await remote.putBlob(contentBlobKey(stateDigest), bytes);
-  const header = commitHeaderSchema.parse({ version: 1, commitId: randomUUID(), bookId, parents, bookStateRevision: state.revision,
+  if (!await remote.hasBlob(contentBlobKey(bookId, stateDigest))) await remote.putBlob(contentBlobKey(bookId, stateDigest), bytes, { sha256: stateDigest });
+  const header = commitHeaderSchema.parse({ version: commitHeaderVersion, commitId: randomUUID(), bookId, parents, bookStateRevision: state.revision,
     createdAt: (context.options.now?.() ?? new Date()).toISOString(), title: state.project.title.slice(0, 400), stateDigest });
   await remote.putCommit(header);
   await recordSynced(root, { commitId: header.commitId, bookStateRevision: header.bookStateRevision, stateDigest, photoDigests: digestsOf(assets),
@@ -344,12 +344,12 @@ async function copyBeside(root: string, path: string, source: string, digest: st
  */
 async function stagePull(context: Context, tip: CommitHeader) {
   const { root, remote } = context;
-  const { blob, bytes } = await fetchStateBytes(remote, tip.stateDigest, tip);
+  const { blob, bytes } = await fetchStateBytes(remote, tip.bookId, tip.stateDigest, tip);
   const staging = await stagingFolder(root, true);
   await writeFile(join(staging, tip.stateDigest), bytes);
   for (const digest of new Set(Object.values(blob.content))) {
     const path = join(staging, digest);
-    if (!await remote.downloadBlob(contentBlobKey(digest), path) || await fileDigest(path) !== digest) {
+    if (!await remote.downloadBlob(contentBlobKey(tip.bookId, digest), path) || await fileDigest(path) !== digest) {
       throw new RemoteSyncingError('a file of this book has not fully arrived yet.');
     }
   }
@@ -363,7 +363,7 @@ async function stagePull(context: Context, tip: CommitHeader) {
   // Photos whose original changed here since the last sync keep their local fact; every other original here that
   // differs from the snapshot is stale.
   const keepLocal = new Set([...changedOriginals(here, synced)].filter((id) => projected[id]));
-  const proxies = await fetchProxies(remote, await missingProxies(blob, projected, here, keepLocal));
+  const proxies = await fetchProxies(remote, tip.bookId, await missingProxies(blob, projected, here, keepLocal));
   const staleOriginals: PullMarker['staleOriginals'] = {};
   const localDigests: PullMarker['localDigests'] = {};
   for (const [id, photo] of Object.entries(projected)) {
@@ -503,22 +503,22 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
       return { action: 'initial-push', pushed: [header.commitId], changed };
     }
     case 'push': {
-      const base = await fetchState(options.remote, synced!.stateDigest);
+      const base = await fetchState(options.remote, bookId, synced!.stateDigest);
       const { header } = await push(context, [decision.tip.commitId], base, facts, synced);
       return { action: 'push', pushed: [header.commitId], changed };
     }
     case 'in-sync': {
-      const blob = await fetchState(options.remote, decision.tip.stateDigest).catch(() => undefined);
-      if (blob) await refetchProxies(context, blob);
+      const blob = await fetchState(options.remote, bookId, decision.tip.stateDigest).catch(() => undefined);
+      if (blob) await refetchProxies(context, bookId, blob);
       return { action: 'in-sync', pushed: [], changed };
     }
     case 'adopt': {
-      const blob = await fetchState(options.remote, decision.tip.stateDigest, decision.tip);
+      const blob = await fetchState(options.remote, bookId, decision.tip.stateDigest, decision.tip);
       const photoDigests = digestsOf(photoFacts(blob.assetsMeta.assets, local.photos));
       // Without a record of its own, every original here that differs from the snapshot counts as newer.
       const adopted = { commitId: decision.tip.commitId, bookStateRevision: decision.tip.bookStateRevision, stateDigest: decision.tip.stateDigest, photoDigests };
       await recordSynced(root, { ...adopted, localDigests: Object.fromEntries(Object.entries(hereDigests(context)).filter(([id, digest]) => photoDigests[id] === digest)) });
-      await refetchProxies(context, blob);
+      await refetchProxies(context, bookId, blob);
       // Facts this Mac knows better than the snapshot go back with a commit of the same book state.
       if (factsAhead(hereDigests(context), adopted)) {
         const { header } = await push(context, [decision.tip.commitId], blob, facts, adopted);
@@ -571,6 +571,13 @@ async function missingOriginals(root: string, blob: StateBlob, ids?: readonly st
   return missing;
 }
 
+/** The lineage ID a synced book's blobs are stored under: the one in its project.json. */
+async function syncedBookId(root: string) {
+  const { bookId } = JSON.parse(await readFile(join(root, 'project.json'), 'utf8')) as { bookId?: unknown };
+  if (typeof bookId !== 'string') throw new Error('This book has no lineage ID yet. Make an edit, then sync.');
+  return bookId;
+}
+
 /** An original downloaded into the book's root and checked, waiting to go to its place in photos/. */
 export type StagedOriginal = { id: string; path: string; staging: string };
 
@@ -585,14 +592,15 @@ export async function stageOriginals({ remote, folder, signal, progress }: { rem
   const root = await realpath(folder);
   const synced = (await readSyncState(root)).lastSynced;
   if (!synced) return [];
-  const missing = await missingOriginals(root, await fetchState(remote, synced.stateDigest));
+  const bookId = await syncedBookId(root);
+  const missing = await missingOriginals(root, await fetchState(remote, bookId, synced.stateDigest));
   const staged: StagedOriginal[] = [];
   progress?.(0, missing.length);
   try {
     for (const { id, path, original } of missing) {
       if (signal?.aborted) break;
       const staging = join(root, '.imageflow-write-' + randomUUID() + '.tmp');
-      if (!await remote.downloadBlob(originalBlobKey(original.digest, original.ext), staging) || await fileDigest(staging) !== original.digest) {
+      if (!await remote.downloadBlob(originalBlobKey(bookId, original.digest, original.ext), staging) || await fileDigest(staging) !== original.digest) {
         await rm(staging, { force: true });
         throw new RemoteSyncingError('an original photo has not fully arrived yet.');
       }
@@ -630,21 +638,22 @@ export async function pendingOriginals(folder: string, remote: SyncRemote) {
   const root = await realpath(folder);
   const synced = (await readSyncState(root)).lastSynced;
   if (!synced) return [];
-  const blob = await fetchState(remote, synced.stateDigest).catch(() => undefined);
+  const blob = await syncedBookId(root).then((bookId) => fetchState(remote, bookId, synced.stateDigest)).catch(() => undefined);
   return blob ? (await missingOriginals(root, blob)).map(({ id }) => id) : [];
 }
 
 async function fetchOriginals(root: string, remote: SyncRemote, ids?: readonly string[]) {
   const synced = (await readSyncState(root)).lastSynced;
   if (!synced) return [];
-  const blob = await fetchState(remote, synced.stateDigest);
+  const bookId = await syncedBookId(root);
+  const blob = await fetchState(remote, bookId, synced.stateDigest);
   const downloaded: string[] = [];
   for (const { id, path, original } of await missingOriginals(root, blob, ids)) {
     const target = await bookPath(root, path);
     // Staged beside its target, so a transport on the same volume can clone it, and removed whatever happens.
     const staging = join(dirname(target), '.imageflow-write-' + randomUUID() + '.tmp');
     try {
-      if (!await remote.downloadBlob(originalBlobKey(original.digest, original.ext), staging) || await fileDigest(staging) !== original.digest) {
+      if (!await remote.downloadBlob(originalBlobKey(bookId, original.digest, original.ext), staging) || await fileDigest(staging) !== original.digest) {
         throw new RemoteSyncingError('an original photo has not fully arrived yet.');
       }
       await rename(staging, target);
@@ -665,7 +674,7 @@ async function fetchOriginals(root: string, remote: SyncRemote, ids?: readonly s
  */
 export async function cloneFromRemote({ remote, tip, destination, syncFolder }: { remote: SyncRemote; tip: CommitHeader; destination: string; syncFolder?: string }) {
   const folder = join(await realpath(dirname(destination)), basename(documentPath(destination)));
-  const { blob } = await fetchStateBytes(remote, tip.stateDigest, tip);
+  const { blob } = await fetchStateBytes(remote, tip.bookId, tip.stateDigest, tip);
   const staging = join(dirname(folder), '.imageflow-create-' + randomUUID());
   let reserved = false;
   let facts: Record<string, AssetFact> = {};
@@ -674,7 +683,7 @@ export async function cloneFromRemote({ remote, tip, destination, syncFolder }: 
     await mkdir(join(staging, 'photos'));
     for (const [path, digest] of Object.entries(blob.content)) {
       const target = await bookPath(staging, path);
-      if (!await remote.downloadBlob(contentBlobKey(digest), target) || await fileDigest(target) !== digest) {
+      if (!await remote.downloadBlob(contentBlobKey(tip.bookId, digest), target) || await fileDigest(target) !== digest) {
         throw new RemoteSyncingError('a file of this book has not fully arrived yet.');
       }
     }
@@ -685,7 +694,7 @@ export async function cloneFromRemote({ remote, tip, destination, syncFolder }: 
     await writeFile(join(staging, 'photos.json'), JSON.stringify(photos, null, 2) + '\n', { flag: 'wx' });
     facts = photoFacts(blob.assetsMeta.assets, photos);
     await AssetFacts.adoptSynced(staging, facts);
-    await storeProxies(await fetchProxies(remote, await missingProxies(blob, photos, {})));
+    await storeProxies(await fetchProxies(remote, tip.bookId, await missingProxies(blob, photos, {})));
     if (await captureBookState(staging).then(({ revision }) => revision) !== tip.bookStateRevision) {
       throw new Error('The book on the remote does not match its commit. Nothing was created.');
     }

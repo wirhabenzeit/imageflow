@@ -1,33 +1,51 @@
-import { constants } from 'node:fs';
-import { copyFile, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { dirname, join } from 'node:path';
-import { blobKeyPattern, commitHeaderSchema, deriveTips, NewerSyncFormatError, readCommitHeader } from '../src/sync-snapshot';
-import type { CommitHeader } from '../src/sync-snapshot';
+import { canonicalJson } from '../src/canonical-json';
+import { blobKeyPattern, bookIdOfPrefix, bookPrefix, booksPrefix, bookTombstoneSchema, commitHeaderSchema, commitKey, deriveTips, NewerSyncFormatError, readBookTombstone,
+  readCommitHeader, readRemoteIdentity, remoteIdentityKey, remoteIdentitySchema, snapshotsPrefix, tombstoneKey } from '../src/sync-snapshot';
+import type { BookTombstone, CommitHeader } from '../src/sync-snapshot';
+import { MemoryStore } from './sync-store';
+import type { PutOptions, StoreEntry, StoreSource, SyncStore, TransferOptions } from './sync-store';
+
+/** The parts of a book's prefix (ADR 0012, section 4). */
+export type BookFolder = 'snapshots' | 'content' | 'originals' | 'proxies' | 'covers';
+/** A book on a remote: there, or deleted from sync (its tombstone), or marked by a newer ImageFlow in a way this one cannot read. */
+export type RemoteBook = { bookId: string; deleted?: BookTombstone; newer?: true };
 
 /**
- * The storage a book syncs through (ADR 0010, Milestone 1): immutable commit headers and immutable content-addressed
- * blobs, nothing mutable. Heads are derived from the headers (`remoteTips`), so two Macs pushing at once produce two
- * tips instead of a torn head file. Transports implement this (a synced folder in #251, object storage later); the
- * sync engine never trusts what they return and verifies every digest itself.
+ * The storage books sync through (ADR 0010, Milestone 1; ADR 0012): immutable commit headers and immutable
+ * content-addressed blobs, each book under its own prefix, plus the remote's identity and the tombstones of deleted
+ * books. Heads are derived from the headers (`remoteTips`), so two Macs pushing at once produce two tips instead of a
+ * torn head file. `StoreRemote` implements it over any object store; the sync engine never trusts what it returns and
+ * verifies every digest itself.
  */
 export interface SyncRemote {
   /** Stores a commit header. Headers are immutable: storing one whose ID exists is an error unless it is identical. */
   putCommit(header: CommitHeader): Promise<void>;
   /** A commit header as stored (parsed JSON), or undefined. The engine validates it (`readCommitHeader`). */
   getCommit(bookId: string, commitId: string): Promise<unknown>;
-  /** Every commit header of a book as stored (parsed JSON). Files that are not whole JSON yet are left out; anything
-   * else is returned, so the engine can tell a header a newer version wrote from one still arriving. */
+  /** Every commit header of a book as stored (parsed JSON). Objects that are not whole JSON are left out; anything
+   * else is returned, so the engine can tell a header a newer version wrote from one that is damaged. */
   listCommits(bookId: string): Promise<unknown[]>;
   hasBlob(key: string): Promise<boolean>;
   /** Stores a blob under a key of `blobKeyPattern`, from bytes or a local file. An existing blob is kept. */
-  putBlob(key: string, source: Uint8Array | { file: string }): Promise<void>;
+  putBlob(key: string, source: StoreSource, options?: PutOptions): Promise<void>;
   /** A whole blob, or undefined when the remote does not have it (yet). For small blobs. */
   getBlob(key: string): Promise<Uint8Array | undefined>;
   /** Writes a blob to a new local file at `destination`; false when the remote does not have it (yet). For large blobs. */
-  downloadBlob(key: string, destination: string): Promise<boolean>;
-  /** The IDs of the books with commits on this remote, for Open from Sync Folder. */
-  listBooks(): Promise<string[]>;
+  downloadBlob(key: string, destination: string, options?: TransferOptions): Promise<boolean>;
+  /** Copies a blob to another key inside the remote (a duplicated book's originals), without uploading it again;
+   * false when the remote does not have it. */
+  copyBlob(from: string, to: string): Promise<boolean>;
+  /** What a book stores, with sizes and times of last change: everything under its prefix, or one part of it. */
+  listBook(bookId: string, folder?: BookFolder): Promise<StoreEntry[]>;
+  /** The books on this remote, from one listing of prefixes. A deleted book is reported as such. */
+  listBooks(): Promise<RemoteBook[]>;
+  /** The remote's identity, a UUID written at first use. Two Macs that initialize an empty remote at once agree on it. */
+  remoteId(): Promise<string>;
+  /** The tombstone of a book deleted from sync, or undefined. Throws `NewerSyncFormatError` for one a newer version wrote. */
+  bookTombstone(bookId: string): Promise<BookTombstone | undefined>;
+  /** Deletes a book from the remote for every Mac: writes its tombstone, then removes everything else under its prefix. */
+  deleteBook(bookId: string, now?: Date): Promise<BookTombstone>;
 }
 
 /** A book's commits on a remote. Throws `NewerSyncFormatError` for one a newer version wrote. */
@@ -35,24 +53,26 @@ export async function remoteCommits(remote: SyncRemote, bookId: string) {
   return (await remote.listCommits(bookId)).map(readCommitHeader).filter((header) => header !== undefined && header.bookId === bookId) as CommitHeader[];
 }
 
+export type RemoteBookListing = { bookId: string; tips: CommitHeader[]; title: string; updatedAt: string; newer?: true; deleted?: BookTombstone };
+
 /**
  * The books on a remote with their tips, newest tip first, skipping books whose commits have not arrived yet. A book a
- * newer ImageFlow synced is listed with `newer` and no tips (last), so it never hides the others.
+ * newer ImageFlow synced is listed with `newer` and no tips, and a book deleted from sync with `deleted` and no tips
+ * (after the others), so neither hides the others.
  */
 export async function remoteBooks(remote: SyncRemote) {
-  const books: { bookId: string; tips: CommitHeader[]; title: string; updatedAt: string; newer?: true }[] = [];
-  for (const bookId of await remote.listBooks()) {
-    let tips: CommitHeader[];
-    try { tips = await remoteTips(remote, bookId); }
-    catch (error) {
-      if (!(error instanceof NewerSyncFormatError)) throw error;
-      books.push({ bookId, tips: [], title: '', updatedAt: '', newer: true });
-      continue;
-    }
+  const books: RemoteBookListing[] = [];
+  for (const { bookId, deleted, newer } of await remote.listBooks()) {
+    if (deleted) { books.push({ bookId, tips: [], title: '', updatedAt: deleted.deletedAt, deleted }); continue; }
+    let tips: CommitHeader[] | undefined;
+    try { tips = newer ? undefined : await remoteTips(remote, bookId); }
+    catch (error) { if (!(error instanceof NewerSyncFormatError)) throw error; }
+    if (!tips) { books.push({ bookId, tips: [], title: '', updatedAt: '', newer: true }); continue; }
     const latest = tips.at(-1);
     if (latest) books.push({ bookId, tips, title: latest.title, updatedAt: latest.createdAt });
   }
-  return books.sort((a, b) => Number(!!a.newer) - Number(!!b.newer) || b.updatedAt.localeCompare(a.updatedAt) || a.title.localeCompare(b.title));
+  const rank = (book: RemoteBookListing) => (book.deleted ? 2 : book.newer ? 1 : 0);
+  return books.sort((a, b) => rank(a) - rank(b) || b.updatedAt.localeCompare(a.updatedAt) || a.title.localeCompare(b.title));
 }
 
 /** The tips of a book on a remote: commits that no other commit names as a parent. */
@@ -62,55 +82,94 @@ export async function remoteTips(remote: SyncRemote, bookId: string) {
 
 export function requireBlobKey(key: string) {
   if (!blobKeyPattern.test(key)) throw new Error('Not a sync blob key: ' + key);
+  return key;
 }
 
-/** A remote held in memory: tests, and the reference for what a transport has to do. */
-export class MemoryRemote implements SyncRemote {
-  // Values as stored; tests put other ones here to stand for what another version wrote.
-  readonly commits = new Map<string, unknown>();
-  readonly blobs = new Map<string, Uint8Array>();
+const encode = (value: unknown) => new TextEncoder().encode(canonicalJson(value) + '\n');
+
+/**
+ * `SyncRemote` over an object store (ADR 0012, section 2): the one implementation, with the layout of section 4. A
+ * transport implements only `SyncStore`.
+ */
+export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRemote {
+  constructor(readonly store: Store) {}
+
+  /** A small JSON object as stored, or undefined for one that is missing or not whole JSON. */
+  private async json(key: string): Promise<unknown> {
+    const bytes = await this.store.get(key);
+    if (!bytes) return undefined;
+    try { return JSON.parse(new TextDecoder().decode(bytes)); } catch { return undefined; }
+  }
+
   async putCommit(header: CommitHeader) {
     const parsed = commitHeaderSchema.parse(header);
-    const key = parsed.bookId + '/' + parsed.commitId;
-    const existing = this.commits.get(key);
-    if (existing && JSON.stringify(existing) !== JSON.stringify(parsed)) throw new Error('A different commit with this ID exists.');
-    this.commits.set(key, structuredClone(parsed));
+    const { existed } = await this.store.putIfAbsent(commitKey(parsed.bookId, parsed.commitId), encode(parsed));
+    if (!existed) return;
+    const existing = await this.getCommit(parsed.bookId, parsed.commitId);
+    if (existing === undefined || canonicalJson(existing) !== canonicalJson(parsed)) throw new Error('A different commit with this ID exists.');
   }
   async getCommit(bookId: string, commitId: string) {
-    const header = this.commits.get(bookId + '/' + commitId);
-    return header && structuredClone(header);
-  }
-  async listBooks() {
-    return [...new Set([...this.commits.keys()].map((key) => key.split('/')[0]))];
+    return this.json(commitKey(bookId, commitId));
   }
   async listCommits(bookId: string) {
-    return [...this.commits.entries()].filter(([key]) => key.startsWith(bookId + '/')).map(([, header]) => structuredClone(header));
+    const headers: unknown[] = [];
+    // Anything a sync service put beside the headers (its conflict copy `<id> (1).json` holds an immutable header too)
+    // is read like one; the engine decides what it is.
+    for (const { key } of await this.store.list(snapshotsPrefix(bookId))) {
+      const value = key.endsWith('.json') ? await this.json(key) : undefined;
+      if (value !== undefined) headers.push(value);
+    }
+    return headers;
   }
-  async hasBlob(key: string) { requireBlobKey(key); return this.blobs.has(key); }
-  async putBlob(key: string, source: Uint8Array | { file: string }) {
-    requireBlobKey(key);
-    if (this.blobs.has(key)) return;
-    this.blobs.set(key, source instanceof Uint8Array ? new Uint8Array(source) : new Uint8Array(await readFile(source.file)));
+
+  async hasBlob(key: string) { return !!await this.store.head(requireBlobKey(key)); }
+  async putBlob(key: string, source: StoreSource, options?: PutOptions) { await this.store.putIfAbsent(requireBlobKey(key), source, options); }
+  async getBlob(key: string) { return this.store.get(requireBlobKey(key)); }
+  async downloadBlob(key: string, destination: string, options?: TransferOptions) { return this.store.download(requireBlobKey(key), destination, options); }
+  async copyBlob(from: string, to: string) { return this.store.copy(requireBlobKey(from), requireBlobKey(to)); }
+
+  async listBook(bookId: string, folder?: BookFolder) {
+    return this.store.list(bookPrefix(bookId) + (folder ? folder + '/' : ''));
   }
-  async getBlob(key: string) {
-    requireBlobKey(key);
-    const bytes = this.blobs.get(key);
-    return bytes && new Uint8Array(bytes);
+  async listBooks() {
+    const ids = (await this.store.listPrefixes(booksPrefix)).map(bookIdOfPrefix).filter((id) => id !== undefined);
+    return Promise.all(ids.map(async (bookId): Promise<RemoteBook> => {
+      try {
+        const deleted = await this.bookTombstone(bookId);
+        return deleted ? { bookId, deleted } : { bookId };
+      } catch (error) {
+        if (!(error instanceof NewerSyncFormatError)) throw error;
+        return { bookId, newer: true };
+      }
+    }));
   }
-  async downloadBlob(key: string, destination: string) {
-    const bytes = await this.getBlob(key);
-    if (!bytes) return false;
-    await writeAtomically(destination, bytes);
-    return true;
+
+  async remoteId() {
+    const read = async () => readRemoteIdentity(await this.json(remoteIdentityKey))?.remoteId;
+    const found = await read();
+    if (found) return found;
+    // Always read back and adopt what is there: whichever Mac wrote first wins, also where the store cannot say
+    // reliably whether the object existed.
+    await this.store.putIfAbsent(remoteIdentityKey, encode(remoteIdentitySchema.parse({ version: 1, remoteId: randomUUID() })));
+    const adopted = await read();
+    if (!adopted) throw new Error('The identity of the sync remote (' + remoteIdentityKey + ') cannot be read.');
+    return adopted;
+  }
+
+  async bookTombstone(bookId: string) {
+    const tombstone = readBookTombstone(await this.json(tombstoneKey(bookId)));
+    return tombstone?.bookId === bookId ? tombstone : undefined;
+  }
+  async deleteBook(bookId: string, now = new Date()) {
+    const key = tombstoneKey(bookId);
+    // The tombstone goes first, so a deletion that is interrupted still reads as one; an earlier tombstone is kept.
+    await this.store.putIfAbsent(key, encode(bookTombstoneSchema.parse({ version: 1, bookId, deletedAt: now.toISOString() })));
+    const tombstone = await this.bookTombstone(bookId);
+    if (!tombstone) throw new Error('The book could not be marked as deleted on the remote.');
+    await this.store.delete((await this.store.list(bookPrefix(bookId))).map((entry) => entry.key).filter((other) => other !== key));
+    return tombstone;
   }
 }
 
-/** Writes a new file by a rename from a staging file beside it. */
-export async function writeAtomically(destination: string, source: Uint8Array | { file: string }) {
-  const staging = join(dirname(destination), '.sync-' + randomUUID() + '.tmp');
-  try {
-    if (source instanceof Uint8Array) await writeFile(staging, source, { flag: 'wx', mode: 0o644 });
-    else await copyFile(source.file, staging, constants.COPYFILE_FICLONE | constants.COPYFILE_EXCL);
-    await rename(staging, destination);
-  } finally { await rm(staging, { force: true }); }
-}
+/** A remote held in memory, for tests. */
+export const memoryRemote = () => new StoreRemote(new MemoryStore());

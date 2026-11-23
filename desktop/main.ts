@@ -48,7 +48,7 @@ import { PreviewError } from '../src/preview';
 import { chooseSyncTip, DocumentSession } from './document-session';
 import { cloneFromRemote } from './sync-engine';
 import { remoteBooks } from './sync-remote';
-import { FolderRemote } from './sync-remote-folder';
+import { folderRemote } from './sync-store-folder';
 import { configureMacHeader, setToolbarDragRegions } from './mac-header';
 import type { RenderSessions } from './document-session';
 import { AssetFacts } from './asset-facts';
@@ -1123,8 +1123,9 @@ async function openFromSyncFolder(owner: BrowserWindow | undefined) {
   const choice = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
   const folder = choice.filePaths[0];
   if (choice.canceled || !folder) return;
-  const remote = new FolderRemote(folder);
-  const books = await remoteBooks(remote);
+  const remote = folderRemote(folder);
+  // A book deleted from sync is not offered.
+  const books = (await remoteBooks(remote)).filter((book) => !book.deleted);
   if (!books.length) {
     await ask({ type: 'info', message: 'There are no ImageFlow books in this folder yet.',
       detail: 'Sync a book to it on another Mac (File → Sync → Sync with Folder…), wait until the folder has finished syncing here, then try again.' });
