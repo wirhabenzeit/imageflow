@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { libraryRows, libraryStateLabels } from '../src/book-library';
+import { syncPlace, syncRows, syncRowState, syncSwitch } from '../src/sync-rows';
 import { channels } from '../src/desktop';
 import type { LibraryRemote, RecentDocument } from '../src/desktop';
 import { maximumRecents, RecentDocuments } from '../desktop/documents';
@@ -52,6 +53,46 @@ test('the books on this Mac are listed before the remote answers, and still when
   assert.deepEqual(states(libraryRows([synced, local], undefined)), [synced.id + ':checking', local.id + ':not-syncing']);
   assert.deepEqual(states(libraryRows([synced, local], { error: 'offline' })), [synced.id + ':unavailable', local.id + ':not-syncing']);
   assert.deepEqual(states(libraryRows([synced, local], null)), [synced.id + ':checking', local.id + ':not-syncing'], 'without a backend the window shows no sync state');
+});
+
+test('the Sync window lists books here and on the remote together, switched on only where this Mac’s record says they sync', () => {
+  const synced = syncing(), stopped = syncing({ sync: { remoteId, enabled: false } }), never = book(), elsewhere = book({ sync: { remoteId: randomUUID(), enabled: true } });
+  const made = book({ sync: { starts: true } }), sample = book({ syncExcluded: true }), gone = book({ available: false }), away = syncing({ available: false });
+  const removed = syncing();
+  const remoteOnly = randomUUID();
+  const rows = syncRows(libraryRows([synced, stopped, never, elsewhere, made, sample, gone, away, removed], listing([{ bookId: synced.bookId! }, { bookId: stopped.bookId! },
+    { bookId: away.bookId! }, { bookId: removed.bookId!, deleted: true }, { bookId: remoteOnly }])));
+  assert.deepEqual(rows.map((row) => [row.kind === 'local' ? row.book.id : row.bookId, syncSwitch(row)]), [[synced.id, true], [stopped.id, false], [never.id, false], [elsewhere.id, false],
+    [made.id, true], [removed.id, false], [remoteOnly, undefined], [away.id, undefined]], 'the sample book and a book that is nowhere are left out');
+  const [syncedRow, , neverRow, , madeRow, removedRow, remoteRow, awayRow] = rows;
+  assert.deepEqual(rows.map((row) => syncPlace(row, 'iCloud', false)).slice(-2), ['Only in iCloud', 'Not found on this Mac']);
+  assert.equal(syncPlace(remoteRow, 'iCloud', true), 'Downloading to this Mac');
+  // Their states, in a few words.
+  assert.equal(syncRowState(neverRow).text, 'Not syncing');
+  assert.equal(syncRowState(madeRow).text, 'Not synced yet');
+  assert.equal(syncRowState(removedRow).text, 'Removed on another Mac');
+  for (const row of [remoteRow, awayRow]) assert.equal(syncRowState(row).action, 'download');
+  assert.equal(syncRowState(remoteRow, { details: { bookId: remoteOnly, title: '', versions: 0, newer: true } }).action, 'update');
+  assert.equal(syncRowState(awayRow, { details: { bookId: remoteOnly, title: '', versions: 0, newer: true } }).action, 'update');
+  assert.equal(syncRowState(remoteRow, { details: { error: 'offline' } }).text, 'Cannot be read now');
+  assert.deepEqual(syncRowState(remoteRow, { download: { bookId: remoteOnly, done: 124, total: 200 } }), { text: '124 of 200', bar: { done: 124, total: 200 } });
+  assert.equal(syncRowState(remoteRow, { download: { bookId: remoteOnly, waiting: true } }).text, 'Waiting…');
+  // A closed book is as its status says once it was read; an open or busy one as its view does.
+  assert.equal(syncRowState(syncedRow).text, 'Looking…');
+  assert.equal(syncRowState(syncedRow, { status: { state: 'in-sync', pendingOriginals: 0 } }).text, 'Up to date');
+  const view = (fields: object) => syncRowState(syncedRow, { view: { folder: 'iCloud', ...fields }, status: { state: 'in-sync', pendingOriginals: 0 } });
+  assert.deepEqual(view({ syncing: true, sending: { done: 3, total: 20 } }), { bar: { done: 3, total: 20 }, text: 'Uploading 3 of 20' });
+  assert.equal(view({ syncing: true }).text, 'Syncing…');
+  assert.equal(view({ uploading: { done: 1, total: 9 } }).text, 'Uploading 1 of 9');
+  assert.equal(view({ uploadFailed: { left: 3, message: 'offline' } }).text, '3 originals not uploaded');
+  assert.deepEqual(view({ storageFull: { message: 'iCloud storage is full.', notUploaded: 2, manage: true } }), { text: 'iCloud full', tone: 'problem', detail: 'iCloud storage is full.', action: 'manage-storage' });
+  assert.equal(view({ storageFull: { message: 'The bucket is full.' } }).action, undefined);
+  assert.equal(view({ status: { state: 'diverged', pendingOriginals: 0 } }).text, 'Changed on two Macs');
+  assert.deepEqual(view({ status: { state: 'unavailable', signIn: true, detail: 'Sign-in needed: …', pendingOriginals: 0 } }), { text: 'Sign-in needed', tone: 'problem', detail: 'Sign-in needed: …', action: 'settings' });
+  assert.equal(view({ status: { state: 'newer', pendingOriginals: 0 } }).action, 'update');
+  for (const state of ['in-sync', 'ahead', 'behind', 'diverged', 'remote-syncing', 'abandoned', 'newer', 'unavailable', 'removed'] as const) {
+    assert.ok(view({ status: { state, pendingOriginals: 0 } }).text!.length <= 24, 'short words');
+  }
 });
 
 test('two copies with one lineage are both listed and keep the book off the remote-only rows; a book that cannot be found offers its remote copy on its row', () => {

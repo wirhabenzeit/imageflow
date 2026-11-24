@@ -17,7 +17,7 @@ import { SyncService } from '../desktop/sync-service';
 import { credentialScope, MemoryCredentialStore } from '../desktop/sync-credentials';
 import { channels } from '../src/desktop';
 import type { SyncBackendState } from '../src/desktop';
-import { formatStorage } from '../src/SyncSettings';
+import { formatStorage } from '../src/sync-storage-text';
 import { StoreRemote } from '../desktop/sync-remote';
 import { MemoryKeyIndexCache } from '../desktop/sync-key-index';
 import { commitHeaderVersion, contentBlobKey } from '../src/sync-snapshot';
@@ -279,7 +279,10 @@ test('Settings → Sync offers iCloud only in an entitled build, and saves it on
   const credentials = new MemoryCredentialStore();
   let status: CloudKitStatus | undefined = { entitled: false };
   const changed: unknown[] = [];
-  registerSyncSettings({ ipcMain, owner: () => true, settings, credentials: () => credentials, cloudKit: async () => status, changed: (value) => changed.push(value.sync) });
+  let setUps = 0;
+  let leave = false;
+  const asked: string[] = [];
+  registerSyncSettings({ ipcMain, owner: () => true, windowOwner: () => false, setUp: () => { setUps++; }, forgetKey: async (_, bucket) => { asked.push(bucket); return leave; }, settings, credentials: () => credentials, cloudKit: async () => status, changed: (value) => changed.push(value.sync) });
   const state = () => handlers.get(channels.syncBackend)!({});
   const save = (request: unknown) => handlers.get(channels.saveSyncBackend)!({}, request);
   assert.deepEqual((await state()).value, { available: true }, 'not offered by a build without the entitlements');
@@ -293,9 +296,21 @@ test('Settings → Sync offers iCloud only in an entitled build, and saves it on
   const bucket = { kind: 's3' as const, endpoint: 'https://s3.example.com', region: 'auto', bucket: 'books' };
   await credentials.write(credentialScope(bucket), { accessKeyId: 'AKIAEXAMPLE', secretAccessKey: 'secret' });
   await settings.update({ sync: bucket });
+  // It asks first, as Off does: the key cannot be shown again. Declined, all stays.
+  await save({ backend: { kind: 'icloud' } });
+  await save(null);
+  assert.deepEqual([settings.value.sync, asked, changed, setUps], [bucket, ['books', 'books'], [], 0]);
+  assert.ok(await credentials.read(credentialScope(bucket)));
+  leave = true;
   assert.deepEqual((await save({ backend: { kind: 'icloud' } })).value?.icloud, { available: true });
   assert.deepEqual(settings.value.sync, { kind: 'icloud' });
   assert.deepEqual(changed, [{ kind: 'icloud' }]);
+  // The one click begins a set-up, and the app opens the Sync window; saving it again does neither.
+  const setup = settings.value.syncSetup;
+  assert.ok(setup && setUps === 1);
+  await save({ backend: { kind: 'icloud' } });
+  assert.deepEqual([settings.value.syncSetup, setUps], [setup, 1]);
+  assert.match((await handlers.get(channels.syncCleanUpPlan)!({})).error ?? '', /only available to the Sync window/);
   assert.equal(await credentials.read(credentialScope(bucket)), undefined);
   assert.match((await save({ backend: { kind: 'icloud', extra: true } })).error ?? '', /Invalid sync setting/);
   // A build without the entitlements (development, ad-hoc) does not offer iCloud, and a setting that names it leaves
@@ -311,42 +326,29 @@ test('Settings → Sync offers iCloud only in an entitled build, and saves it on
   assert.equal(new SyncService(() => usableBackend(settings.value.sync), { cloudKit: () => new FakeCloudKit() }).configured, false);
 });
 
-test('usage: what each book stores, from the key indexes, and in all', async () => {
+test('usage: what each book stores, from the key indexes', async () => {
   const { native, store } = make();
   const remote = new StoreRemote(store, { keyIndex: new MemoryKeyIndexCache() });
   await remote.remoteId();
-  assert.deepEqual(await remote.usage(), { bytes: 0, originals: 0, books: [] });
+  assert.deepEqual(await remote.usage(book), { bytes: 0, originals: 0 });
   await remote.putBlob(contentBlobKey(book, 'c'.repeat(64)), bytes('x'.repeat(1000)));
   await remote.putBlob(contentBlobKey(other, 'c'.repeat(64)), bytes('y'.repeat(300_000)));
-  const usage = await remote.usage();
-  assert.equal(usage.bytes, 301_000);
-  assert.deepEqual(usage.books.map(({ bookId, bytes: size }) => [bookId, size]).sort(), [[book, 1000], [other, 300_000]].sort());
-  // Counted again from the indexes: one change-feed request per book, no listing.
+  assert.deepEqual(await remote.usage(book), { bytes: 1000, originals: 0 });
+  assert.deepEqual(await remote.usage(other), { bytes: 300_000, originals: 0 });
+  // Counted again from the index: one change-feed request, no listing.
   native.calls.length = 0;
-  assert.equal((await remote.usage()).bytes, 301_000);
-  assert.equal(native.calls.filter((call) => call === 'changes').length, 2 + 2, 'the index zone for the books and for the deletion markers, then one feed request per book');
+  assert.equal((await remote.usage(other)).bytes, 300_000);
+  assert.equal(native.calls.filter((call) => call === 'changes').length, 1, native.calls.join(', '));
   // A deleted book counts only its tombstone.
   await remote.deleteBook(other);
-  assert.ok((await remote.usage()).bytes < 1200);
+  assert.ok((await remote.usage(other)).bytes < 200);
 });
 
-test('Settings → Sync counts the storage the books take up, in the units Finder uses', async (t) => {
+test('storage reads in the units Finder uses', () => {
   assert.equal(formatStorage(0), '0 bytes');
   assert.equal(formatStorage(999), '999 bytes');
   assert.equal(formatStorage(1500), '2 KB');
   assert.equal(formatStorage(2_345_678), '2.3 MB');
   assert.equal(formatStorage(4_870_000_000), '4.9 GB');
   assert.equal(formatStorage(12_000_000_000_000), '12 TB');
-  const folder = await mkdtemp(join(tmpdir(), 'if-icloud-usage-'));
-  t.after(() => rm(folder, { recursive: true, force: true }));
-  setICloudEntitled(true);
-  t.after(() => setICloudEntitled(false));
-  const handlers = new Map<string, (event: unknown) => Promise<{ value?: unknown; error?: string }>>();
-  const ipcMain = { handle: (channel: string, handler: never) => { handlers.set(channel, handler); } } as unknown as IpcMain;
-  const settings = new SettingsStore(join(folder, 'settings.json'));
-  registerSyncSettings({ ipcMain, owner: () => true, settings, credentials: () => new MemoryCredentialStore(), changed: () => {},
-    usage: async () => ({ bytes: 4_870_000_000, originals: 4_800_000_000, books: [] }) });
-  assert.equal((await handlers.get(channels.syncUsage)!({})).error, 'Sync is off on this Mac.');
-  await settings.update({ sync: { kind: 'icloud' } });
-  assert.deepEqual((await handlers.get(channels.syncUsage)!({})).value, { bytes: 4_870_000_000, originals: 4_800_000_000, books: [] });
 });

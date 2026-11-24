@@ -246,10 +246,10 @@ async function fetchState(remote: SyncRemote, bookId: string, stateDigest: strin
 const statesRead = new Map<string, Uint8Array>();
 const statesKept = 8;
 /** The same, with the bytes as stored, which a pull stages: re-encoding would drop fields a newer version added. */
-async function fetchStateBytes(remote: SyncRemote, bookId: string, stateDigest: string, header?: CommitHeader, { cached = false }: { cached?: boolean } = {}) {
+async function fetchStateBytes(remote: SyncRemote, bookId: string, stateDigest: string, header?: CommitHeader, { cached = false, signal }: { cached?: boolean; signal?: AbortSignal } = {}) {
   const key = contentBlobKey(bookId, stateDigest);
   const kept = cached ? statesRead.get(key) : undefined;
-  const bytes = kept ?? await remote.getBlob(key);
+  const bytes = kept ?? await remote.getBlob(key, { signal });
   if (!bytes) throw new RemoteSyncingError('a snapshot of this book has not arrived yet.');
   if (!kept && sha(bytes) !== stateDigest) throw new RemoteSyncingError('a snapshot of this book is incomplete.');
   statesRead.delete(key);
@@ -282,13 +282,15 @@ async function missingProxies(blob: StateBlob, photos: PhotoIndex, here: Record<
   return [...missing];
 }
 
-/** Downloads proxies and checks each against its own SHA-256 before any is stored. */
-async function fetchProxies(remote: SyncRemote, bookId: string, wanted: Awaited<ReturnType<typeof missingProxies>>) {
+/** Downloads proxies and checks each against its own SHA-256 before any is stored; `each` is told after every one. */
+async function fetchProxies(remote: SyncRemote, bookId: string, wanted: Awaited<ReturnType<typeof missingProxies>>, { signal, each }: { signal?: AbortSignal; each?: () => void } = {}) {
   const fetched: { digest: string; bytes: Uint8Array }[] = [];
   for (const [digest, entry] of wanted) {
-    const bytes = await remote.getBlob(proxyBlobKey(bookId, digest, entry.ext));
+    signal?.throwIfAborted();
+    const bytes = await remote.getBlob(proxyBlobKey(bookId, digest, entry.ext), { signal });
     if (!bytes || sha(bytes) !== entry.sha256) throw new RemoteSyncingError('a photo preview has not fully arrived yet.');
     fetched.push({ digest, bytes });
+    each?.();
   }
   return fetched;
 }
@@ -1147,21 +1149,6 @@ async function fetchOriginals(root: string, remote: SyncRemote, ids?: readonly s
 }
 
 /**
- * What a book's owned originals take up on this Mac, in bytes: what syncing it would upload at most, for the sheet that
- * asks which books to sync when a backend is first set up. Reads only photos.json and the files' sizes.
- */
-export async function ownedOriginalsSize(folder: string) {
-  const root = await realpath(folder);
-  const photos = photoIndexSchema.parse(JSON.parse(await readFile(join(root, 'photos.json'), 'utf8')));
-  let bytes = 0;
-  for (const path of new Set(Object.values(photos).flatMap((photo) => { const path = syncedOriginalPath(photo); return path?.startsWith('photos/') ? [path] : []; }))) {
-    const info = await lstat(await bookPath(root, path, { checking: true })).catch(() => undefined);
-    if (info?.isFile()) bytes += info.size;
-  }
-  return bytes;
-}
-
-/**
  * How many of a book's owned originals are not on this Mac, from its own files alone: owned photos whose file photos/
  * lacks, and those a pull kept at an older version (their new version is elsewhere). For the question Delete from Sync
  * asks; reads photos.json, the sync record and the files' presence, nothing else.
@@ -1388,15 +1375,33 @@ export function downloadName(title: string) {
  * The book arrives trusted (ADR 0012, section 2): the configured backend lies inside the user's trust boundary, so the
  * book is one of their own. Returns the folder it made.
  */
-export async function cloneFromRemote({ remote, tip, destination, remoteId }: { remote: SyncRemote; tip: CommitHeader; destination: string; remoteId?: string }) {
+export async function cloneFromRemote({ remote, tip, destination, remoteId, progress, signal }: { remote: SyncRemote; tip: CommitHeader; destination: string; remoteId?: string;
+  /** Told how many of the book's files and previews are here, of how many; previews this Mac already has are not counted. */
+  progress?: (done: number, total: number) => void;
+  /**
+   * Cancels the download: the transfer that runs stops, the staging folder goes and no book is made. Once the book is
+   * put under its name it is there and stays; a cancel after that does nothing.
+   */
+  signal?: AbortSignal }) {
   const parent = await realpath(dirname(destination));
   const folder = join(parent, basename(documentPath(destination)));
   const taken = 'A book named “' + basename(folder) + '” already exists there. Choose another name.';
   // Refused before anything is downloaded; the name is reserved below, in case it is taken meanwhile.
   if (await lstat(folder).catch(() => undefined)) throw new Error(taken);
+  signal?.throwIfAborted();
   const tombstone = await remote.bookTombstone(tip.bookId);
   if (tombstone) throw new BookDeletedError(tombstone);
-  const { blob } = await fetchStateBytes(remote, tip.bookId, tip.stateDigest, tip);
+  const { blob } = await fetchStateBytes(remote, tip.bookId, tip.stateDigest, tip, { signal });
+  signal?.throwIfAborted();
+  // Known before the first file comes down, so the count has its total from the start.
+  const projected = projectManifests(blob, {});
+  const photos = parseDocument(photoIndexSchema, projected.photos, 'photos.json');
+  const project = withBookFormat(parseDocument(projectSchema, projected.project, 'project.json'), photos);
+  const previews = await missingProxies(blob, photos, {});
+  const total = Object.keys(blob.content).length + previews.length;
+  let done = 0;
+  const each = () => progress?.(++done, total);
+  progress?.(0, total);
   const staging = join(parent, '.imageflow-create-' + randomUUID());
   let reserved = false;
   let facts: Record<string, AssetFact> = {};
@@ -1404,22 +1409,23 @@ export async function cloneFromRemote({ remote, tip, destination, remoteId }: { 
     await mkdir(staging);
     await mkdir(join(staging, 'photos'));
     for (const [path, digest] of Object.entries(blob.content)) {
+      signal?.throwIfAborted();
       const target = await bookPath(staging, path);
-      if (!await remote.downloadBlob(contentBlobKey(tip.bookId, digest), target) || await fileDigest(target) !== digest) {
+      // The transfer itself is waited for, also when it is cancelled, so it writes nothing once the staging folder goes.
+      if (!await remote.downloadBlob(contentBlobKey(tip.bookId, digest), target, { signal }) || await fileDigest(target) !== digest) {
         throw new RemoteSyncingError('a file of this book has not fully arrived yet.');
       }
+      each();
     }
-    const projected = projectManifests(blob, {});
-    const photos = parseDocument(photoIndexSchema, projected.photos, 'photos.json');
-    const project = withBookFormat(parseDocument(projectSchema, projected.project, 'project.json'), photos);
     await writeFile(join(staging, 'project.json'), JSON.stringify(project, null, 2) + '\n', { flag: 'wx' });
     await writeFile(join(staging, 'photos.json'), JSON.stringify(photos, null, 2) + '\n', { flag: 'wx' });
     facts = photoFacts(blob.assetsMeta.assets, photos);
     await AssetFacts.adoptSynced(staging, facts);
-    await storeProxies(await fetchProxies(remote, tip.bookId, await missingProxies(blob, photos, {})));
+    await storeProxies(await fetchProxies(remote, tip.bookId, previews, { signal, each }));
     if (await captureBookState(staging).then(({ revision }) => revision) !== tip.bookStateRevision) {
       throw new Error('The book on the remote does not match its commit. Nothing was created.');
     }
+    signal?.throwIfAborted();
     // Reserve the name exclusively: never replace a book or file that is already there, even an empty package.
     try { await mkdir(folder); reserved = true; }
     catch (error) { throw (error as NodeJS.ErrnoException).code === 'EEXIST' ? new Error(taken, { cause: error }) : error; }

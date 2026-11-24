@@ -718,24 +718,33 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 
 .settings-content { padding: 22px 28px 24px; }
 .settings-form { display: grid; grid-template-columns: 120px minmax(0, 1fr); column-gap: 10px; row-gap: 20px; align-items: start; }
-.settings-label { padding-top: 5px; text-align: right; font-size: 13px; white-space: nowrap; }
-.settings-control { grid-column: 2; min-width: 0; }
+/* One rule for every pane: a label is as high as a control (26px), and so is the first line of what it names. */
+.settings-label { display: flex; align-items: center; justify-content: flex-end; min-height: 26px; font-size: 13px; white-space: nowrap; }
+.settings-control { grid-column: 2; min-width: 0; min-height: 26px; }
+.studio .settings-control > button, .studio .settings-form .settings-buttons button { min-height: 26px; }
+.settings-control .appearance-options { height: 26px; }
+.settings-control .appearance-options span { padding-block: 0; line-height: 20px; }
 select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .settings-form > .error-text { margin: -8px 0 0; font-size: 12px; }
 .settings-note { margin: 5px 0 0; font-size: 11px; line-height: 1.45; color: var(--muted); }
 .settings-form .pc-switch { min-height: 26px; font-size: 13px; }
-.sync-fields { display: grid; gap: 6px; }
-.sync-fields > .settings-note, .sync-fields > .settings-update-actions { margin-top: 0; }
 .sync-field-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
-.sync-settings .error-text { margin: 0; font-size: 12px; }
-.sync-setup-books { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 4px; max-height: 180px; overflow-y: auto; }
-.sync-setup-books label { display: flex; align-items: baseline; gap: 6px; }
-.sync-setup-books .settings-note { margin: 0; }
-.sync-setup-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sync-storage-books { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 4px; max-height: 180px; overflow-y: auto; }
-.sync-storage-books li { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
-.sync-storage-books .settings-note { margin: 0; white-space: nowrap; }
-.sync-storage-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sync-settings { min-height: 216px; grid-template-rows: auto auto auto minmax(0, 1fr); }
+.sync-through { display: flex; align-items: center; gap: 8px; }
+.sync-through .appearance-options { flex: none; }
+.sync-place { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
+.studio .sync-through > button { flex: none; min-height: 24px; padding: 2px 9px; font-size: 12px; }
+/* Two lines at the bottom are kept for an error, so the pane stays as high with one as without. */
+.sync-problem { grid-column: 1 / -1; align-self: end; min-height: 34px; margin: 0; display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 12px; line-height: 17px; text-align: center; }
+.sync-sheet { width: 420px; max-width: calc(100vw - 32px); margin: 0 auto; padding: 0; border: 1px solid var(--edge); border-top: 0; border-radius: 0 0 10px 10px; background: var(--popup-surface); color: var(--text); box-shadow: 0 8px 30px #0005; }
+.sync-sheet::backdrop { background: #0004; }
+.sync-sheet-form { display: grid; gap: 8px; padding: 16px 18px; }
+.sync-sheet h2 { margin: 0 0 2px; font-size: 13px; font-weight: 600; }
+/* Three lines for what Test Connection says; a longer answer scrolls. */
+.sync-sheet-result { height: 51px; margin: 2px 0 0; overflow-y: auto; font-size: 11px; line-height: 17px; color: var(--muted); }
+.sync-sheet-result.error-text { color: var(--error-text); }
+.sync-sheet-actions { display: flex; gap: 8px; }
+.sync-sheet-actions > button:first-child { margin-right: auto; }
 .settings-form .pc-switch + .settings-note { margin-top: 1px; padding-left: 21px; }
 .settings-status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .settings-buttons { display: inline-grid; gap: 8px; }
@@ -805,9 +814,9 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .appearance-options input:checked + span { background: var(--segment-selected); box-shadow: 0 1px 3px #0000001a; font-weight: 500; }
 .appearance-options input:focus-visible + span { outline: 3px solid var(--focus-ring); outline-offset: 1px; }
 .appearance-options label:hover input:not(:checked) + span { background: var(--segment-hover); }
-/* Sync's backends (#292: iCloud, S3-compatible bucket, Folder) keep each name on one line. */
+/* Sync's backends keep each name on one line, as wide as it is. */
 .sync-settings .appearance-options label { flex: 0 0 auto; }
-.sync-settings .appearance-options span { white-space: nowrap; }
+.sync-settings .appearance-options span { min-width: 56px; white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .settings-disclosure > summary::before { transition: none; } }
 
 /* Template-arranged controls (`controls`): titled groups and descriptions, in the sidebar, popovers and dialogs. */
@@ -863,12 +872,17 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .start-brand-flow { color: #14A687; }
 .start-actions p { color: var(--muted); margin: 0 0 28px; font-size: 14px; line-height: 1.6; }
 .start-actions > button { padding: 8px 12px; margin-bottom: 10px; font-size: 13px; }
+/* Set Up Sync… while sync is off: at the foot of the actions, quiet beside New Book and Open. */
+.studio .start-actions > button.start-sync { margin: auto 0 0; align-self: start; min-height: 0; padding: 2px 0; border: 0; background: none; box-shadow: none; color: var(--muted); font-size: 12px; }
+.studio .start-actions > button.start-sync:hover:not(:disabled) { color: var(--accent); }
 .recent-books { overflow: auto; padding: 48px 24px 20px; }
 .recent-books h2 { font-size: 14px; font-weight: 600; margin: 0 0 18px; }
 .recent-books ul { list-style: none; margin: 0; padding: 0; }
 .recent-books li { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--subtle-border); padding: 10px 0; }
 .studio .recent-open { display: flex; gap: 14px; align-items: center; width: 100%; min-width: 0; padding: 4px; text-align: left; background: none; border: 0; box-shadow: none; }
 .recent-open:hover:not(:disabled) { background: var(--subtle-hover); }
+/* A row that downloads keeps its colors: its button only waits for the download to end. */
+.studio .recent-open.recent-downloading:disabled { opacity: 1; }
 .recent-cover { flex: 0 0 60px; height: 66px; background: var(--canvas-surface); display: grid; place-items: center; border-radius: 3px; overflow: hidden; color: var(--muted); font-size: 26px; }
 .recent-cover img { width: 100%; height: 100%; object-fit: contain; }
 .recent-cover img.recent-cover-icon { width: 52px; height: 52px; }
@@ -883,6 +897,47 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .recent-books li.library-remote .recent-cover { opacity: .85; }
 .recent-books li.library-removed .recent-description > span:last-child, .recent-books li[data-state="newer"] .recent-description > span:last-child { color: var(--text); }
 .recent-actions > button:not(.recent-remove) { font-size: 12px; padding: 3px 9px; }
+/* A book's download on its row: the bar, then how much is here beside Cancel, in a fixed width so nothing moves. */
+.book-progress { display: grid; gap: 4px; width: 118px; flex: none; }
+.book-progress .task-status-bar { width: 100%; }
+.book-progress-line { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 11px; color: var(--muted); }
+.book-progress-text { font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* The Sync window (#307): one table of the books here and on the remote, and a footer with the total. */
+.studio.sync-window { display: grid; grid-template-rows: minmax(0, 1fr) auto; background: var(--panel-surface); }
+.studio.sync-window-off { display: grid; place-content: center; justify-items: center; gap: 12px; color: var(--muted); }
+.sync-window-off p { margin: 0; }
+.sync-table { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
+.sync-rows { overflow-y: auto; scrollbar-gutter: stable; }
+.sync-row { display: grid; grid-template-columns: 46px minmax(0, 1fr) 72px 176px 40px; column-gap: 12px; align-items: center; min-height: 58px; padding: 8px 16px; border-bottom: 1px solid var(--subtle-border); }
+.sync-row:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.sync-head { min-height: 0; padding: 7px 16px; overflow: hidden; scrollbar-gutter: stable; border-bottom-color: var(--edge); color: var(--muted); font-size: 11px; }
+.sync-cover { width: 46px; height: 40px; display: grid; place-items: center; overflow: hidden; border-radius: 3px; background: var(--canvas-surface); }
+.sync-cover img { width: 100%; height: 100%; object-fit: contain; }
+.sync-cover img.sync-cover-icon { width: 34px; height: 34px; }
+.sync-book { display: grid; gap: 2px; min-width: 0; }
+.sync-book strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; }
+.sync-book > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted); }
+.sync-size { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sync-row:not(.sync-head) .sync-size, .sync-state { font-size: 12px; }
+.sync-state { display: grid; justify-items: start; gap: 4px; min-width: 0; }
+.sync-state > span:not(.book-progress) { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sync-state .book-progress, .sync-state > .task-status-bar { width: 100%; }
+.sync-state-muted { color: var(--muted); }
+.sync-state-problem { color: var(--error-text); }
+.studio .sync-state > button, .studio .sync-foot button { font-size: 12px; white-space: nowrap; }
+.studio .sync-state > button { padding: 2px 9px; }
+.sync-switch-cell { justify-self: end; display: grid; }
+.studio .sync-switch { position: relative; width: 32px; height: 19px; min-height: 0; padding: 0; border: 0; border-radius: 10px; background: var(--control-border); box-shadow: none; transition: background 150ms; }
+.sync-switch::after { content: ''; position: absolute; left: 2px; top: 2px; width: 15px; height: 15px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px #00000050; transition: left 150ms; }
+.studio .sync-switch[aria-checked="true"] { background: var(--button-primary); }
+.sync-switch[aria-checked="true"]::after { left: 15px; }
+.studio .sync-switch:disabled { opacity: .5; }
+.studio .sync-switch:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 1px; }
+@media (prefers-reduced-motion: reduce) { .studio .sync-switch, .sync-switch::after { transition: none; } }
+.sync-empty { margin: 60px 20px; text-align: center; color: var(--muted); }
+.sync-foot { display: flex; align-items: center; gap: 8px; padding: 9px 16px; border-top: 1px solid var(--edge); background: var(--footer-surface); }
+.sync-summary { flex: 1; min-width: 0; display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; color: var(--muted); font-size: 12px; }
+.sync-summary.sync-state-problem { color: var(--error-text); }
 .recent-empty { text-align: center; max-width: 260px; margin: 74px auto 0; color: var(--muted); }
 .recent-empty > img { display: block; width: 96px; height: 96px; margin: 0 auto; }
 .recent-empty h3 { font-weight: 500; color: var(--text); font-size: 17px; margin: 16px 0 8px; }

@@ -21,9 +21,11 @@ export type SyncBackend = FolderSyncBackend | S3SyncBackend | ICloudSyncBackend;
 // push, push after a save once the book is idle and when it closes. On unless set to false, which leaves File → Sync →
 // Sync Now. An ordinary preference a window may change: it never makes a book sync that does not.
 // `sync`: the backend books sync through on this Mac (ADR 0012), one at a time. Each kind is one member of the union.
-// `syncBooksUnchosen`: the backend was set up (or changed) and the sheet that asks which recent books sync has not been
-// answered yet (#282): no book starts syncing by itself until it is. Only the Sync settings requests and the sheet's
-// answer set or clear it, never the generic settings patch; it goes when sync is turned off.
+// `syncSetup`: the set-up of that backend, made anew whenever another backend (or the first) is chosen (#307). No book
+// that was there before starts syncing by itself: one syncs when it was turned on (its sync record), or when it was made
+// under this set-up (`startWith` in its record). Only the Sync settings requests write it; it goes when sync is turned off.
+// `syncBooksUnchosen`: from versions before #307, which asked once which recent books sync: the question was never
+// answered. `settleSyncSetup` turns it into a set-up at launch; until then nothing syncs by itself. Nothing writes it.
 export type AppSettings = { appearance: Appearance; automaticUpdates: boolean; updateChannel: UpdateChannel; newBookSize?: { width: number; height: number }; agentAccess?: boolean;
-  keepOriginals?: boolean; syncAutomatically?: boolean; sync?: SyncBackend; syncBooksUnchosen?: true };
+  keepOriginals?: boolean; syncAutomatically?: boolean; sync?: SyncBackend; syncSetup?: string; syncBooksUnchosen?: true };
 export const defaultSettings: AppSettings = { appearance: 'system', automaticUpdates: true, updateChannel: 'stable' };

@@ -143,21 +143,19 @@ try {
   await choosePaths({ open: folder });
   const configured = await desktop.evaluate(() => window.imageflow.chooseSyncFolder());
   assert.deepEqual(configured.value?.sync, { kind: 'folder', path: folder });
-  // The first configuration asks which recent books sync, in Settings → Sync; until then no book starts by itself.
-  // The desktop's book is left out here, so Start Syncing below makes its first push.
+  // Setting sync up uploads nothing: the Sync window opens with the desktop's book switched off, and Start Syncing below
+  // makes its first push.
   assert.equal((await desktop.evaluate(() => window.imageflow.syncBackendState())).error, 'Request is only available to Settings.');
-  await desktop.evaluate(() => window.imageflow.showSettings('sync'));
-  let settingsPage;
-  for (let attempt = 0; !(settingsPage = app.windows().find((page) => page.url() === 'imageflow://editor/settings')); attempt++) {
-    assert.ok(attempt < 400, 'Settings opens');
+  let syncPage;
+  for (let attempt = 0; !(syncPage = app.windows().find((page) => page.url() === 'imageflow://editor/sync')); attempt++) {
+    assert.ok(attempt < 400, 'the Sync window opens');
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  const sheet = settingsPage.getByRole('group', { name: 'Books to sync' });
-  await sheet.waitFor({ timeout: 30000 });
-  await sheet.getByRole('checkbox', { name: /Along the coast/ }).uncheck();
-  await sheet.getByRole('button', { name: 'Sync Chosen Books' }).click();
-  await settingsPage.getByText('No book syncs until you choose File → Sync → Start Syncing in it.', { exact: true }).waitFor();
-  await settingsPage.close();
+  const bookRow = syncPage.locator('.sync-rows .sync-row');
+  await bookRow.locator('.sync-state', { hasText: 'Not syncing' }).waitFor({ timeout: 30000 });
+  assert.equal(await bookRow.getByRole('switch').getAttribute('aria-checked'), 'false');
+  assert.deepEqual((await readdir(folder)).filter((name) => !name.startsWith('.') && name !== 'remote.json'), [], 'nothing was uploaded');
+  await syncPage.close();
   for (let attempt = 0; !await menuEnabled('sync-start'); attempt++) {
     assert.ok(attempt < 400, 'a configured backend offers Start Syncing');
     await new Promise((resolve) => setTimeout(resolve, 50));

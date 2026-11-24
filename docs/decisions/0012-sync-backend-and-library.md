@@ -1,6 +1,6 @@
 # 0012: One sync backend per Mac, sync by source reach, and a book library
 
-Status: accepted, 2026-11-23, with the implementation (#278–#285; see [What the implementation settled](#what-the-implementation-settled)). Proposed the same day, revised after review and amended after the CloudKit spike (#286). Amended 2026-11-24: Download asks where a book goes, and there is no folder for downloaded books (#303). Builds on [0010](0010-sync-revisions-and-cloud-assets.md) (snapshots, `SyncRemote`, the folder transport) and [0011](0011-lightroom-classic.md) (source providers). Supersedes 0010's choice of a synced folder as the first transport, its per-book sync folder, and its untrusted-remote rule for a user's own backend (with the matching wording of [0006](0006-template-capabilities.md) about templates that arrive over sync); the snapshot model, the engine and the fast-forward-or-keep-both policy stay as they are.
+Status: accepted, 2026-11-23, with the implementation (#278–#285; see [What the implementation settled](#what-the-implementation-settled)). Proposed the same day, revised after review and amended after the CloudKit spike (#286). Amended 2026-11-24: Download asks where a book goes, and there is no folder for downloaded books (#303); which books sync, storage and Clean Up are managed in a Sync window, where each book is turned on, instead of a list asked once in Settings (#306, #307). Builds on [0010](0010-sync-revisions-and-cloud-assets.md) (snapshots, `SyncRemote`, the folder transport) and [0011](0011-lightroom-classic.md) (source providers). Supersedes 0010's choice of a synced folder as the first transport, its per-book sync folder, and its untrusted-remote rule for a user's own backend (with the matching wording of [0006](0006-template-capabilities.md) about templates that arrive over sync); the snapshot model, the engine and the fast-forward-or-keep-both policy stay as they are.
 
 ## Problem
 
@@ -19,9 +19,9 @@ Sync and source providers were built separately and do not yet read as one desig
 
 1. **Sync behaviour follows from a photo's source.** A provider declares its reach, and the reach decides what syncs. A book has no sync options.
 2. **The sync backend is a per-Mac app setting**, one at a time, and **sync is off until the user turns it on** in Settings → Sync and chooses the backend: **iCloud** (the user's private CloudKit database) or an **S3-compatible bucket** they bring. Neither is preselected, and being signed in to iCloud starts nothing. A book only records whether it syncs on this Mac.
-3. **Every trusted book syncs once a backend is configured**, unless it is opted out. A user's personal sync backend sits inside their trust boundary: only trusted books sync, and books downloaded from it arrive trusted.
+3. **The user turns on which books sync.** Books made while sync is set up sync from the start. (First: every trusted book, unless it was opted out; amended by #307.) A user's personal sync backend sits inside their trust boundary: only trusted books sync, and books downloaded from it arrive trusted.
 4. **Each book has its own prefix on the remote**, with every blob it needs under it.
-5. **The Start window is the library**: books on this Mac and books on the remote in one list, with the actions to download, stop syncing and delete. Storage is managed in Settings.
+5. **The Start window is the library**: books on this Mac and books on the remote in one list, to open and download. **The Sync window** manages what syncs: a switch per book, what each takes up, Delete from Sync and Clean Up (#307; first in the Start window and in Settings).
 6. **Folders in iCloud Drive or Dropbox are no longer offered.** The folder transport stays for tests and development. iCloud as a backend means CloudKit, not a folder in iCloud Drive.
 
 ## 1. Sync by reach
@@ -85,7 +85,7 @@ A remote carries a UUID, written at first use (`remote.json` at its root; a Mac 
 A user's configured sync backend is **inside their trust boundary** (revising ADR 0010's unauthenticated-folder rule):
 
 - **Only trusted books sync.** An untrusted book (e.g. received from someone else) never starts syncing automatically, and **Templates → Stop Trusting This Book's Template…** also stops syncing on this Mac.
-- **Explicit opt-in trusts and syncs.** Choosing **Start Syncing** on an untrusted local book (or selecting it in the first-configuration sheet) asks once to trust and sync it (`trustBook`), giving older or copied books without declared `network` origins a direct path into sync.
+- **Explicit opt-in trusts and syncs.** Choosing **Start Syncing** on an untrusted local book, or turning on its switch in the Sync window, asks once to trust and sync it (`trustBook`), giving older or copied books without declared `network` origins a direct path into sync.
 - **Downloaded books arrive trusted.** Because the configured backend holds only the user's own trusted books, `cloneFromRemote` marks the downloaded book trusted and synced template changes stay trusted without re-prompting. The download says once which sites the book's template loads from, as a notice and not a question; a pulled template change that adds a site does the same (the existing notice for trusted books).
 - **Trusted means what `bookTrusted` means today** (`desktop/source-access.ts`): made here, trusted once, or a book for which a site was allowed before. A received book whose map site the user allowed therefore counts as their own and syncs.
 - **iCloud fits this rule best:** the private database is authenticated as the user and reachable only by them.
@@ -93,10 +93,13 @@ A user's configured sync backend is **inside their trust boundary** (revising AD
 
 ## 3. Which books sync
 
-ImageFlow has no library folder, so "every book" means every trusted book this Mac opens.
+(Amended by #307. First, a trusted book started syncing when it was opened with a backend configured, and Settings asked once which of the recent books to leave out.)
 
-- **A trusted book starts syncing when it is opened with a backend configured**, and a new trusted book when it is created.
-- **Configuring a backend uploads nothing by itself.** It lists the recent books with their sizes and asks once. Owned originals can be gigabytes. Unchecking a book records `enabled: false` for that remote so opening it later does not start syncing it.
+- **Configuring a backend uploads nothing by itself.** The Sync window opens with the books on this Mac switched off, except those whose own sync record says they sync with this remote (sync was off in between), beside the books that are on the remote. Owned originals can be gigabytes; nothing of a book goes up until its switch is turned on.
+- **A book that was there before never starts by itself**, whether it was among the recent books or is found and opened later. Turning its switch on, or Start Syncing in it, records it as syncing (`remoteId`, `enabled`), and that record is what syncs it.
+- **A book made from then on syncs by default.** Setting a backend up (the first one, or another) makes a new *set-up* (`AppSettings.syncSetup`, a UUID). New Book notes it in the book's record (`startWith`), which needs no request, and the book starts at its first open while that set-up lasts; its first sync replaces the note. Another set-up does not know the note, so turning sync off and on, or changing the backend, starts no book that did not sync yet. A copy (Duplicate, Keep Both) does what the book it was made from does, with the same remote.
+- **A book turned on while it is closed syncs without being opened**: under its writer lock, pushing or fast-forwarding only (`desktop/sync-closed.ts`). Opening it stops that sync, and the open book's own goes on.
+- **Installations from before #307** are settled once, at launch, without a request (`settleSyncSetup`). Where the list was answered, books with a record go on as they are, and a recent trusted book without one was chosen and not opened since: it is noted like a new book and starts when it opens. Where the list was never answered, nothing syncs by itself until it is settled, and the recent books with a record are turned off.
 - **Never auto-synced:** the sample book, template previews, read-only opens and untrusted books (which can opt in through *Start Syncing* after trusting the book).
 - **Two ways out, kept apart:**
   - *Stop Syncing on This Mac* is local. The remote copy stays, and other Macs go on syncing.
@@ -128,17 +131,20 @@ deleted/<bookId>.json
 
 | State | Shown as | Actions |
 | --- | --- | --- |
-| On this Mac, synced | Sync status as in the editor | Open, Stop Syncing on This Mac, Delete from Sync |
-| On this Mac, not syncing | *Not syncing* | Open, Start Syncing |
-| On the remote only | Cover, title, last change | Download, Delete from Sync |
+| On this Mac, synced | Sync status as in the editor | Open |
+| On this Mac, not syncing | *Not syncing* | Open |
+| On the remote only | Cover, title, last change | Download |
 | Removed on another Mac | *Removed from sync* | Keep Here Only, Sync Again |
 | Synced by a newer ImageFlow | *Needs an update* | Update |
 
-- *Download* is `cloneFromRemote`, to where a save panel of the Start window asks for, with the book's title as the name. With several versions, which one is asked first. A name that is taken and a place inside another book are refused. It opens trusted. (Amended by #303: it first saved into a default books folder, `~/Documents/ImageFlow` unless changed in Settings, without asking, so macOS asked for access to a folder the user never chose.)
+- What syncs is managed in the Sync window, which the rows' menu opens (*Manage Synced Books…*).
+- *Download* is `cloneFromRemote`, to where a save panel of the Start window asks for, with the book's title as the name. With several versions, which one is asked first. A name that is taken and a place inside another book are refused. It opens trusted. A download shows on its row how many of the book's files and previews are here, with Cancel, which leaves nothing behind; it belongs to the app, so closing the window does not end it, and Quit asks (#305). (Amended by #303: it first saved into a default books folder, `~/Documents/ImageFlow` unless changed in Settings, without asking, so macOS asked for access to a folder the user never chose.)
 - *Update* opens Settings → General and checks for updates (or restarts if an update is already ready).
 - **Open from Sync Folder** and **Sync with Folder…** are removed; **File → Sync** offers *Set Up Sync…* when no backend is configured.
 
-**Settings → Sync.** Sync is off at first. Turning it on asks for the backend: iCloud (listed when this build can use it and the Mac is signed in) or an S3-compatible bucket, with neither preselected. Then, for a bucket, a connection test, and for either, total and per-book storage (computed on demand, not at launch), *Keep originals*, *Sync automatically* and *Clean Up*.
+**Sync window** (#307), opened from Settings → Sync, **File → Sync → Manage Synced Books…** and the Start window's rows, and by itself when a backend is set up. One table of the books on this Mac and on the remote, matched as in the Start window: cover, title and where it is; what it takes up; what sync does with it (transfers and failures, in a few words); and a switch for each book on this Mac, which is Start Syncing and Stop Syncing on This Mac. Sizes fill in as they are counted, two books at a time, since over a bucket each is a listing. The footer has the total and *Clean Up*. A row's menu has Delete from Sync and the other actions.
+
+**Settings → Sync.** Sync is off at first. The choice is Off, iCloud (listed when this build can use it) or an S3-compatible bucket, with neither backend preselected. Off and iCloud take one click; a bucket has its fields and connection test in a sheet. Beside it are *Keep originals* and *Sync automatically*. The pane keeps one height in every state (#306). While sync is off, the Start window offers *Set Up Sync…*. Which books sync, storage and Clean Up are in the Sync window.
 
 ## Deferred
 
@@ -166,7 +172,7 @@ deleted/<bookId>.json
 Where this section and the text above differ, this section holds.
 
 - **Sync is automatic** (#284): an automatic sync only fast-forwards or pushes; a divergence, with one tip or several, waits for **Sync Now**. iCloud pushes come from a `CKDatabaseSubscription`, which names the database, not a zone, so every open book looks.
-- **Storage figures** (#285) are one path for every backend: `SyncRemote.usage()` per book, with the part that is originals, titled from each book's newest tip (`storageReport`, `desktop/sync-sweep.ts`). Settings → Sync counts only when asked, also over iCloud, where the figures come from the key indexes.
+- **Storage figures** (#285) are one path for every backend: `SyncRemote.usage()` per book. The Sync window counts them in the background while it is open (#307; first only when asked, in Settings); over iCloud they come from the key indexes.
 - **Clean Up** (#285) runs over every book on the remote at once, after showing what it would free; the main process asks before it deletes, as for Delete from Sync. **The grace period counts from the removal, not the upload:** a blob is kept while a tip names it, while a commit made within the week dropped it (the parents of every commit of the last week are read as tips are), and while the store's time of last change is within the week. An original a book's tip names but lacks (a duplicate still copying it) is kept in every book. A push checks the previews it carries forward against the remote and sends a missing one again, and a sync with nothing to push sends the missing previews of its snapshot, where this Mac holds the recorded bytes, so a preview lost to the race does not stop other Macs from pulling. It lists each book in the store itself (`listBook(…, { full: true })`), never from a key index, and deletes through `SyncRemote.deleteBlobs`, which accepts only `originals/`, `proxies/` and `covers/` keys and removes them from the key index and from the listing of a sync running on this Mac, so a later push uploads a swept blob again instead of trusting either. A book whose tips cannot be read (none yet, a snapshot missing, damaged or from a newer version) is left alone. What is left of a deleted book goes through `SyncRemote.deleteRemains`, which refuses a book without a tombstone; on iCloud nothing is left, since deleting a book deletes its zone.
 - **Duplicate and Save a Copy** (#285) note the source in the copy's sync record (`copiedFrom`: the source's `bookId`, its remote, and the originals by photo, from the source's sync record and photos.json, so it works offline and on a Mac with previews only). The copy's first push names those originals for photos without a file here, and its background upload copies each inside the store (`copyBlob`) before it would upload. Where the store cannot copy (iCloud), it uploads the file here, or, on a Mac with previews only, downloads the original from the source book and uploads it again. The Duplicate question says so when the backend is iCloud. The hint is used only while the copy syncs with the remote it names, only for the originals it names (a photo added to the copy later uploads with no copy request), and it is dropped once none of them is left to copy.
 - **Not done:** whether macOS purges CloudKit's asset cache (`~/Library/Caches/CloudKit/<bundle ID>`) is still unchecked on a signed build, so Settings → Sync does not show its size.

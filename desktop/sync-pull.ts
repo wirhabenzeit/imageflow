@@ -33,6 +33,9 @@ const syncStateSchema = z.object({
   remoteId: z.uuid().optional(),
   enabled: z.boolean().optional(),
   lastSynced: syncedSchema.optional(),
+  // The set-up of sync (`AppSettings.syncSetup`) this book was made under: it starts syncing by itself while that set-up
+  // lasts (#307). Its first sync replaces it with `remoteId`; another set-up does not know it, and starts nothing.
+  startWith: z.uuid().optional(),
   // The book this one is a copy of (Duplicate, Save a Copy; #285), on the remote `remoteId`, with the originals that
   // book's last synced snapshot named, by photo: the copy's first push names them for photos without a file here, and
   // its background upload copies each inside the store from the source book instead of uploading it
@@ -88,6 +91,12 @@ export function bookSync(state: SyncState, remoteId: string): BookSync {
  * last synced, or a pull it gave up there (which forgot `lastSynced`, and may have left the book half-done).
  */
 export const syncedElsewhere = (state: SyncState, remoteId: string) => (!!state.lastSynced || !!state.pull || !!state.abandoned) && state.remoteId !== remoteId;
+/**
+ * Whether the record says the book starts by itself under the set-up of sync `setup`: it was made under it, and never
+ * synced here or anywhere else. Only a trusted book does (`SyncService.startsOnOpen`).
+ */
+export const startsWithSetup = (state: SyncState, setup: string | undefined) =>
+  !!state.startWith && state.startWith === setup && state.enabled !== false && !state.lastSynced && !state.pull && !state.abandoned;
 export type PullMarker = NonNullable<SyncState['pull']>;
 
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -148,6 +157,28 @@ export async function updateSyncState(folder: string, change: (state: SyncState)
   });
   syncStateWrites.set(key, task);
   try { await task; } finally { if (syncStateWrites.get(key) === task) syncStateWrites.delete(key); }
+}
+
+let currentSetup: () => string | undefined = () => undefined;
+/** The set-up of sync on this Mac now (`AppSettings.syncSetup`), undefined with sync off: what a new book starts with. */
+export function configureSyncSetup(setup: () => string | undefined) { currentSetup = setup; }
+/** Notes that a book was made here under the set-up of sync there is now, so it starts syncing by itself (New Book). */
+export async function startNewBook(folder: string) {
+  const setup = currentSetup();
+  if (setup) await updateSyncState(folder, (state) => ({ ...state, startWith: setup }));
+}
+/**
+ * Whether a copy of a book syncs is what the book it was made from does (#307): a copy of one that syncs here starts
+ * with the same remote, one of a book that does not is left for the user to turn on. A book moved to another volume
+ * (`moved`) is the same book, and keeps its answer either way.
+ */
+export async function carrySyncChoice(source: string, copy: string, { moved = false }: { moved?: boolean } = {}) {
+  try {
+    const { remoteId, enabled, startWith } = await readSyncState(source);
+    if (!moved && (!currentSetup() || enabled === false)) return;
+    if (!remoteId && !startWith && enabled === undefined) return;
+    await updateSyncState(copy, (state) => ({ ...state, ...(remoteId ? { remoteId } : {}), ...(enabled !== undefined ? { enabled } : {}), ...(startWith ? { startWith } : {}) }));
+  } catch (error) { console.warn('ImageFlow could not note whether a copied book syncs', error); }
 }
 
 /** Where a copy's originals are on the remote it syncs with: the hint `recordCopySource` left, while the copy syncs there. */
@@ -237,11 +268,11 @@ export async function startSyncing(folder: string, remoteId: string, { newHistor
   }
   await updateSyncState(folder, (state) => {
     if (unless?.(state)) throw new SyncStoppedError();
-    if (state.remoteId === remoteId && state.enabled === true) return state;
-    if (!syncedElsewhere(state, remoteId)) return { ...state, remoteId, enabled: true };
+    if (state.remoteId === remoteId && state.enabled === true && !state.startWith) return state;
+    if (!syncedElsewhere(state, remoteId)) { const { startWith: _, ...started } = state; return { ...started, remoteId, enabled: true }; }
     if (!newHistory) throw new SyncElsewhereError();
     if (state.pull || state.abandoned) throw new SyncHalfPulledError(state.abandoned?.error ?? 'a sync started meanwhile');
-    const { lastSynced: _, ...rest } = state;
+    const { lastSynced: _, startWith: __, ...rest } = state;
     return { ...rest, remoteId, enabled: true };
   });
 }

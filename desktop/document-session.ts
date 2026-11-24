@@ -95,7 +95,7 @@ export class BookBusyError extends Error {
   constructor() { super('ImageFlow is finishing another operation in this book.'); this.name = 'BookBusyError'; }
 }
 /** This Mac's name as other Macs see it in "never uploaded from …": its network name without `.local`. */
-function macName() { return hostname().replace(/\.local$/i, '').slice(0, 100) || undefined; }
+export function macName() { return hostname().replace(/\.local$/i, '').slice(0, 100) || undefined; }
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'ImageFlow could not complete the request.'; }
 async function fingerprint(path: string) {
   try {
@@ -544,8 +544,8 @@ export class DocumentSession {
   private automatic() { return !!this.syncService?.configured && this.syncAutomatically?.() !== false; }
   /**
    * Whether the book syncs by itself now (ADR 0012, section 3): never a read-only, excluded, untrusted or stopped book,
-   * one that syncs with another remote, one Delete from Sync is deleting, nor any while the first-configuration sheet
-   * waits for an answer. Local: reads the sync record and the trust, sends no request.
+   * one that syncs with another remote, one Delete from Sync is deleting, nor any while an earlier
+   * version’s question which books sync is still to be settled. Local: reads the sync record and the trust, sends no request.
    */
   private async autoAllowed() {
     const service = this.syncService;
@@ -834,7 +834,7 @@ export class DocumentSession {
       let result: SyncOutcome;
       try {
         result = await this.sync(connection.remote, { remoteId: connection.remoteId, ahead,
-          // Turned off meanwhile, here or by its record (Delete from Sync, the sheet that asks which books sync).
+          // Turned off meanwhile, here or by its record (Delete from Sync).
           unless: (now) => run.stopped || (now.enabled === false && state.enabled !== false), full: (error) => { this.storageFull = { message: error.message, ...manage }; },
           ...(automatic && begun ? { fastForwardOnly: true, pushOnly: automatic.pushOnly, signal: begun.run.job.signal,
             // The gate is read again as the pull is applied: an editor may have opened while the sync read the remote.

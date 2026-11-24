@@ -6,7 +6,7 @@ import type { SyncRemoteDependencies } from './sync-backend';
 import { bookTrusted, distrustBook, trustBook } from './source-access';
 import { newBookHistory, syncBook, uploadOriginals } from './sync-engine';
 import type { SyncOptions, UploadOutcome } from './sync-engine';
-import { bookSync, readSyncState, startSyncing, stopSyncing, syncedElsewhere, updateSyncState } from './sync-pull';
+import { bookSync, readSyncState, startsWithSetup, startSyncing, stopSyncing, updateSyncState } from './sync-pull';
 import type { BookSync } from './sync-pull';
 import { BookDeleteError, BookNotDeletedError, remoteCommits } from './sync-remote';
 import type { SyncRemote } from './sync-remote';
@@ -79,9 +79,11 @@ export const insideBook = (path: string) => path.split(sep).some((part) => /\.im
  * are kept (`<userData>/Sync Cache`). Functions, so the app can make them once it is ready.
  */
 export type SyncServiceDependencies = { credentials?: () => SyncRemoteDependencies['credentials']; cacheFolder?: () => string;
+  /** The set-up of sync there is now (`AppSettings.syncSetup`): a book made under it starts syncing by itself. */
+  setup?: () => string | undefined;
   /**
-   * Whether the sheet that asks which recent books sync waits for an answer (`AppSettings.syncBooksUnchosen`): until it
-   * is answered, no book starts syncing by itself.
+   * Whether an earlier version's question which books sync was never answered and is not settled yet
+   * (`AppSettings.syncBooksUnchosen`, `settleSyncSetup`): until it is, no book syncs by itself.
    */
   booksUnchosen?: () => boolean;
   /**
@@ -159,7 +161,7 @@ export class SyncService {
   get kind() { return this.setting()?.kind; }
   /** The name of the configured backend, for the sync status and dialogs. */
   get name() { return this.backend()?.backend.name; }
-  /** Whether the first-configuration sheet waits for an answer: until it is, nothing syncs by itself (#282, #284). */
+  /** Whether an earlier version's question which books sync is still to be settled: until it is, nothing syncs by itself. */
   get booksUnchosen() { return !!this.dependencies.booksUnchosen?.(); }
 
   /**
@@ -229,57 +231,23 @@ export class SyncService {
   }
 
   /**
-   * Whether a book that was just opened or created starts syncing by itself, without any setup (ADR 0012, section 3):
-   * with a backend configured, a trusted book that has no sync state for this remote, or one that was chosen to sync
-   * here and never synced yet. Never a book the caller `excluded` (the sample book, template previews, read-only opens),
-   * an untrusted one, one stopped on this Mac (`enabled: false`, also by the first-configuration sheet) or one that last
-   * synced somewhere else (asked about instead), and none while the first-configuration sheet waits for an answer.
+   * Whether a book that was just opened or created starts syncing by itself (ADR 0012, section 3): with a backend
+   * configured, a trusted book that was turned on and never synced yet, or one made under this set-up of sync
+   * (`startWith`). Never a book that was there before and was not turned on, one the caller `excluded` (the sample book,
+   * template previews, read-only opens), an untrusted one, one stopped on this Mac (`enabled: false`) or one that last
+   * synced somewhere else (asked about instead), and none while an earlier version's question is still to be settled.
    * Writes nothing; the caller syncs, which records the start. Throws when the remote cannot be read.
    */
   async startsOnOpen(folder: string, { excluded = false, readOnly = false }: { excluded?: boolean; readOnly?: boolean } = {}) {
     if (excluded || readOnly || !this.configured) return false;
-    // The sheet that asks which books sync is not answered yet: nothing starts by itself until it is.
     if (this.dependencies.booksUnchosen?.()) return false;
     if (!await bookTrusted(folder)) return false;
     const state = await readSyncState(folder);
     if (state.enabled === false) return false;
     const { remoteId } = await this.connect(folder);
     const standing = bookSync(state, remoteId);
-    return standing === 'off' || (standing === 'syncing' && !state.lastSynced && !state.pull && !state.abandoned);
-  }
-
-  /**
-   * The first-configuration sheet's answer (ADR 0012, section 3): the books chosen sync, each from its next open (or
-   * now, for one that is open), and the others are opted out for this remote, `{ enabled: false, remoteId }`, so opening
-   * them later does not start them. A chosen book that is not trusted is trusted (the sheet says so). Nothing is
-   * uploaded here. A book that last synced with another remote keeps that remote's record and is only stopped, so it
-   * still asks before it starts a new history here.
-   */
-  async chooseBooks(choices: readonly { folder: string; sync: boolean }[]) {
-    const { remoteId } = await this.connect();
-    for (const { folder, sync } of choices) {
-      if (sync) {
-        await trustBook(folder);
-        await updateSyncState(folder, (state) => {
-          if (state.enabled !== false || syncedElsewhere(state, remoteId)) return state;
-          const { enabled: _, ...rest } = state;
-          return rest;
-        });
-      } else {
-        await this.cancelUpload(folder);
-        await updateSyncState(folder, (state) => (syncedElsewhere(state, remoteId) ? (state.enabled === false ? state : { ...state, enabled: false })
-          : state.enabled === false && state.remoteId === remoteId ? state : { ...state, remoteId, enabled: false }));
-      }
-    }
-  }
-
-  /**
-   * How each of `folders` stands with the configured remote, from one connection (the first-configuration sheet lists
-   * up to 20 books; on iCloud each connection reads the account). Records are read side by side.
-   */
-  async standings(folders: readonly string[]) {
-    const { remoteId } = await this.connect();
-    return Promise.all(folders.map(async (folder) => bookSync(await readSyncState(folder), remoteId)));
+    if (standing === 'off') return startsWithSetup(state, this.dependencies.setup?.());
+    return standing === 'syncing' && !state.lastSynced && !state.pull && !state.abandoned;
   }
 
   /**

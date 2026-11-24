@@ -36,6 +36,24 @@ test('the removed folder for downloaded books is ignored, whatever it holds, and
   }
 });
 
+test('the set-up of sync is kept with its backend, validated, and goes with it', async (t) => {
+  const folder = await mkdtemp(join(tmpdir(), 'if-settings-'));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  const file = join(folder, 'settings.json');
+  const setup = '0f0e0d0c-0b0a-4908-8706-050403020100';
+  const store = new SettingsStore(file);
+  await store.update({ syncSetup: setup });
+  assert.equal(store.value.syncSetup, undefined, 'nothing without a backend');
+  await store.update({ sync: { kind: 'icloud' }, syncSetup: setup });
+  await store.update({ appearance: 'dark' });
+  const reopened = new SettingsStore(file);
+  await reopened.load();
+  assert.equal(reopened.value.syncSetup, setup);
+  await assert.rejects(reopened.update({ syncSetup: 'yes' }), /Invalid sync setting/);
+  await reopened.update({ sync: null });
+  assert.equal(reopened.value.syncSetup, undefined);
+});
+
 test('automatic update preference is validated and survives reload and unrelated changes', async (t) => {
   const folder = await mkdtemp(join(tmpdir(), 'if-settings-'));
   t.after(() => rm(folder, { recursive: true, force: true }));

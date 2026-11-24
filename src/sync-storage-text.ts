@@ -1,4 +1,4 @@
-import type { SyncCleanUpPlan, SyncStorage } from './desktop';
+import type { SyncCleanUpPlan } from './desktop';
 
 /** A size as Finder and iCloud show it: decimal units, one decimal from MB on. */
 export function formatStorage(bytes: number) {
@@ -7,14 +7,6 @@ export function formatStorage(bytes: number) {
   let value = bytes / 1000, unit = 0;
   while (value >= 1000 && unit < units.length - 1) { value /= 1000; unit++; }
   return (unit === 0 ? Math.round(value) : Math.round(value * 10) / 10) + ' ' + units[unit];
-}
-
-/** The storage figures in a sentence. */
-export function storageSummary(usage: SyncStorage, icloud: boolean) {
-  const books = usage.books.filter(({ deleted }) => !deleted).length;
-  if (!usage.books.length) return icloud ? 'No books are stored in iCloud yet.' : 'No books are stored yet.';
-  return 'ImageFlow uses ' + formatStorage(usage.bytes) + (icloud ? ' of your iCloud storage' : '') + ' for ' + books + (books === 1 ? ' book' : ' books') +
-    (usage.originals ? ', ' + formatStorage(usage.originals) + ' of it originals.' : '.');
 }
 
 /** What Clean Up would free, in words, before it deletes anything. */

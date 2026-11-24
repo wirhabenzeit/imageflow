@@ -18,6 +18,7 @@ export const markdownURL = desktopScheme + '://editor/markdown';
 export const presentationURL = desktopScheme + '://editor/presentation';
 export const assetsURL = desktopScheme + '://editor/assets';
 export const templatesURL = desktopScheme + '://editor/templates';
+export const syncURL = desktopScheme + '://editor/sync';
 export const settingsURL = desktopScheme + '://editor/settings';
 export const renderOrigin = desktopScheme + '://render';
 // The sidebar thumbnails render the whole book too. From their own origin they get their own render process, so they
@@ -35,7 +36,7 @@ export const channels = {
   showAssets: 'document:show-assets', showTemplates: 'library:show', templatePreview: 'library:preview',
   current: 'document:current', appError: 'app:error', appNotice: 'app:notice',
   recents: 'app:recents', recentsChanged: 'app:recents-changed', recentAction: 'app:recent-action',
-  libraryRemote: 'books:remote', libraryBook: 'books:book', libraryAction: 'books:action',
+  libraryRemote: 'books:remote', libraryBook: 'books:book', libraryAction: 'books:action', downloads: 'books:downloads', downloadsChanged: 'books:downloads-changed',
   sourceCommand: 'document:source-command', templateAction: 'library:action', sourceAction: 'document:source-action', saveCopy: 'document:save-copy',
   chooseStarter: 'app:choose-starter', documentAction: 'document:action',
   open: 'project:open', save: 'project:save', import: 'project:import', network: 'project:editor-network',
@@ -52,7 +53,7 @@ export const channels = {
   syncState: 'project:sync-state', syncChanged: 'project:sync-changed', syncAction: 'project:sync-action',
   chooseSyncFolder: 'app:choose-sync-folder',
   lightroom: 'lightroom:state', lightroomChanged: 'lightroom:changed', lightroomInstall: 'lightroom:install', lightroomLaunch: 'lightroom:launch',
-  syncBackend: 'sync:backend', saveSyncBackend: 'sync:save-backend', testSyncConnection: 'sync:test-connection', syncUsage: 'sync:usage', syncCleanUpPlan: 'sync:clean-up-plan', syncCleanUp: 'sync:clean-up', syncSetupBooks: 'sync:setup-books', chooseSyncBooks: 'sync:choose-books',
+  syncBackend: 'sync:backend', saveSyncBackend: 'sync:save-backend', testSyncConnection: 'sync:test-connection', showSync: 'sync:show', syncBooks: 'sync:books', syncBooksChanged: 'sync:books-changed', syncBookStatus: 'sync:book-status', syncBookSize: 'sync:book-size', manageSyncStorage: 'sync:manage-storage', syncCleanUpPlan: 'sync:clean-up-plan', syncCleanUp: 'sync:clean-up',
 } as const;
 
 export type OpenAction = 'open' | 'new' | 'reload';
@@ -160,8 +161,7 @@ export type Result<T> = { value: T } | { error: string; code?: 'BOOK_BUSY' };
  * `icloud` is there only in a build entitled to iCloud (#292): whether this Mac can use it now, and why not (signed
  * out, iCloud off for ImageFlow, restricted) when it cannot.
  */
-/** `booksUnchosen`: the sheet that asks which recent books sync waits for an answer (`AppSettings.syncBooksUnchosen`). */
-export type SyncBackendState = { available: boolean; credentials?: { stored: true; accessKeyEnd: string }; icloud?: { available: boolean; message?: string }; booksUnchosen?: true;
+export type SyncBackendState = { available: boolean; credentials?: { stored: true; accessKeyEnd: string }; icloud?: { available: boolean; message?: string };
   /** Why the configured backend is not used by this build (iCloud in a build without its entitlements), which leaves sync off. */
   unusable?: string;
   /** Whether the folder backend is offered (development and tests, `IMAGEFLOW_SYNC_FOLDER=1`). */
@@ -169,16 +169,8 @@ export type SyncBackendState = { available: boolean; credentials?: { stored: tru
 export type SyncCredentialsInput = { accessKeyId: string; secretAccessKey: string };
 export type SyncBackendRequest = { backend: S3SyncBackend; credentials?: SyncCredentialsInput } | { backend: ICloudSyncBackend };
 /** What Test Connection found: see `ConnectionReport` in desktop/sync-store-s3.ts. */
-/**
- * A recent book in the first-configuration sheet: what its owned originals take up on this Mac (`bytes`, what syncing
- * it uploads at most), whether it is trusted here (only trusted books sync; choosing an untrusted one trusts it), and
- * whether it syncs with the backend already.
- */
-/** What the books take up on the sync remote (Settings → Sync, #285): in all and per book, with the part that is originals. */
-export type SyncStorage = { bytes: number; originals: number; books: { bookId: string; title: string; bytes: number; originals: number; deleted?: true }[] };
 /** What Clean Up would free (#285): unused originals, previews and covers past the grace period, and what is left of deleted books. */
 export type SyncCleanUpPlan = { bytes: number; objects: number; books: number; deletedBooks: number; skipped: number };
-export type SyncSetupBook = { id: string; title: string; bytes: number; trusted: boolean; syncing: boolean };
 export type SyncConnectionReport = { conditionalWrites: 'enforced' | 'ignored' | 'unsupported'; checksums: 'verified' | 'not-verified'; addressing: 'path' | 'virtual' };
 export type HistoryState = { undo?: string; redo?: string };
 // How an MCP client starts ImageFlow's stdio bridge. It does not change when the connection is enabled again.
@@ -216,8 +208,13 @@ export type ImportRequest = {
  * by; `syncs` says that it syncs on this Mac, so it stays listed beyond the 20 most recent.
  */
 export type RecentDocument = { id: string; path: string; title: string; openedAt: string; available: boolean; cover?: string; bookId?: string; syncs?: true;
-  /** This Mac's sync record of the book, read without the remote: which remote it syncs with, and whether it was stopped here. */
-  sync?: { remoteId?: string; enabled?: boolean } };
+  /**
+   * This Mac's sync record of the book, read without the remote: which remote it syncs with, whether it was stopped here,
+   * and whether it starts by itself at its next open (a book made under this set-up of sync).
+   */
+  sync?: { remoteId?: string; enabled?: boolean; starts?: true };
+  /** Never syncs: the sample book and template previews, which the Sync window leaves out. */
+  syncExcluded?: true };
 /**
  * The books on the configured remote (#283), from one listing: each by its lineage, deleted from sync (`deleted`, its
  * tombstone) or marked by a newer ImageFlow (`newer`). `name` is what the app calls the backend ("iCloud", the bucket).
@@ -230,11 +227,22 @@ export type LibraryRemote = { remoteId: string; name: string; books: { bookId: s
  */
 export type LibraryBook = { bookId: string; title: string; updatedAt?: string; versions: number; cover?: string; newer?: true };
 /**
- * What the Start window asks of a book (#283): Download a book only on the remote, Delete from Sync (asked in the main
+ * A book that is being downloaded (#305): how many of its files and previews are here, of how many. Without a `total`
+ * it is still reading what there is to download; `waiting` for another book's download to end.
+ */
+export type BookDownload = { bookId: string; done?: number; total?: number; waiting?: true };
+/**
+ * What sync does with a book on this Mac now, for the Sync window (#307), by its recent entry (`id`): `view` is the open
+ * book's status as its status bar shows it, or the same of a closed book whose originals upload or whose first sync runs;
+ * `open` whether the book is open.
+ */
+export type SyncBook = { id: string; open?: true; view: SyncView | null };
+/**
+ * What the Start window and the Sync window ask of a book (#283): Download a book only on the remote (and cancel that), Delete from Sync (asked in the main
  * process first), Update for one a newer ImageFlow synced, and for a book on this Mac (`id`, its recent entry) Start
  * Syncing, Stop Syncing on This Mac, and for one deleted from sync elsewhere Keep Here Only or Sync Again.
  */
-export type LibraryAction = { action: 'download' | 'delete' | 'update'; bookId: string } | { action: 'start' | 'stop' | 'keep-here' | 'sync-again' | 'delete'; id: string };
+export type LibraryAction = { action: 'download' | 'cancel-download' | 'delete' | 'update'; bookId: string } | { action: 'start' | 'stop' | 'keep-here' | 'sync-again' | 'delete'; id: string };
 
 export type SourceAction = { action: 'retry' | 'refresh' | 'launch' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump' | 'import' | 'rename'; spread?: string; key?: string; keys?: string[]; accept?: string[]; paths?: string[]; name?: string };
 
@@ -294,6 +302,9 @@ export type DesktopApi = {
   /** A book on the remote as its library row shows it, loaded as the row comes into view. */
   libraryBook(bookId: string): Promise<Result<LibraryBook>>;
   libraryAction(request: LibraryAction): Promise<Result<null>>;
+  /** The books being downloaded now, and changes to them. */
+  downloads(): Promise<BookDownload[]>;
+  onDownloadsChanged(listener: (downloads: BookDownload[]) => void): () => void;
   // The New Book picker's choice; nothing cancels.
   chooseStarter(choice?: NewBookChoice): Promise<Result<boolean>>;
   // The template library, and changes to it from any window.
@@ -325,16 +336,21 @@ export type DesktopApi = {
   /** Saves the backend with credentials when given (otherwise those stored for it); null removes both. */
   saveSyncBackend(request: SyncBackendRequest | null): Promise<Result<SyncBackendState>>;
   testSyncConnection(request: SyncBackendRequest): Promise<Result<SyncConnectionReport>>;
-  /** What the books stored through the configured backend take up there, in bytes (Settings → Sync shows it for iCloud). */
-  syncUsage(): Promise<Result<SyncStorage>>;
+  // The Sync window (#307): the books on this Mac and on the remote, with what sync does with each.
+  showSync(): Promise<void>;
+  /** What sync does now with the books it is busy with, or that are open; no request to the remote. */
+  syncBooks(): Promise<Result<SyncBook[]>>;
+  onSyncBooksChanged(listener: () => void): () => void;
+  /** How a closed book that syncs stands with the remote, read for its row; null for one that does not sync here. */
+  syncBookStatus(id: string): Promise<Result<SyncStatus | null>>;
+  /** What a book takes up on the remote: kept until it changes, or read again with `refresh`. */
+  syncBookSize(bookId: string, refresh?: boolean): Promise<Result<{ bytes: number; originals: number }>>;
+  /** Opens System Settings where iCloud storage is managed. */
+  manageSyncStorage(): Promise<Result<void>>;
   /** Finds what Clean Up would delete, and deletes nothing. */
   syncCleanUpPlan(): Promise<Result<SyncCleanUpPlan>>;
   /** Asks in the main process, then deletes what the last plan found after reading every book's commits again. */
   syncCleanUp(): Promise<Result<{ bytes: number; objects: number } | { cancelled: true }>>;
-  /** The recent books for the sheet shown when a backend is first set up, which asks which of them to sync. */
-  syncSetupBooks(): Promise<Result<SyncSetupBook[]>>;
-  /** The sheet's answer: the books to sync (`sync: true`) and those opted out for this backend. Uploads nothing by itself. */
-  chooseSyncBooks(choices: { id: string; sync: boolean }[]): Promise<Result<void>>;
   // The window's panel and canvas layout state, so the View menu can show it.
   setBookMenuState(state: BookMenuState): Promise<void>;
   openProject(action: OpenAction): Promise<Result<ProjectSummary | null>>;

@@ -24,6 +24,9 @@ if ((window.location.hostname === 'render' || window.location.hostname === 'thum
 } else if (window.location.pathname === '/templates') {
   document.title = 'Templates';
   void import('./TemplateWindow').then(({ TemplateWindow }) => show(<TemplateWindow api={window.imageflow} />));
+} else if (window.location.pathname === '/sync') {
+  document.title = 'Synced Books';
+  void import('./SyncWindow').then(({ SyncWindow }) => show(<SyncWindow api={window.imageflow} />));
 } else if (window.location.pathname === '/settings') {
   document.title = 'Settings';
   void import('./SettingsPanel').then(({ SettingsPanel }) => show(<SettingsPanel api={window.imageflow} />));
