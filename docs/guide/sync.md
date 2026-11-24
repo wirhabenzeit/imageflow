@@ -79,7 +79,7 @@ The Start window lists the books on this Mac and, once sync is set up, the books
 
 Right-click a book (or press Shift-F10) for its actions.
 
-- **Download** saves the book in **Documents → ImageFlow** (change the folder in **Settings → Sync**), with a number added if a book of that name is there, and opens it. A book Macs changed at once asks which version to download. The book arrives trusted; the first time its template loads maps or data, ImageFlow names the sites once.
+- **Download** asks where to save the book, with its title as the name, and opens it. It never replaces a book: if the name is taken there, choose another. A book Macs changed at once asks first which version to download. The book arrives trusted; the first time its template loads maps or data, ImageFlow names the sites once.
 - **Stop Syncing on This Mac** leaves the book and its copy in your sync as they are; your other Macs keep syncing it.
 - **Delete from Sync** removes the book from your sync for every Mac, after asking. The copies on your Macs stay where they are, but only with what each Mac has: an original that no Mac downloaded (with **Keep originals** off, or still to download) is lost with the book, and a book that is on no Mac is gone for good. The question says how many originals of this Mac's copy are not on this Mac. Your other Macs show the book as **Removed from sync** and push nothing for it; there, **Keep Here Only** keeps it on that Mac without syncing, and **Sync Again** syncs it as a new book. A book synced by a newer ImageFlow can be deleted only from that version.
 - **Update** checks for a newer ImageFlow in **Settings → General**, or restarts into one that is ready.

@@ -23,7 +23,7 @@ await mkdir(join(work, 'Laptop'));
 await mkdir(folder);
 await mkdir(join(work, 'profile'));
 // The backend is set up already, and no book waits to be chosen: books that sync here sync by themselves.
-await writeFile(join(work, 'profile', 'settings.json'), JSON.stringify({ booksFolder: join(work, 'Laptop'), sync: { kind: 'folder', path: folder } }));
+await writeFile(join(work, 'profile', 'settings.json'), JSON.stringify({ sync: { kind: 'folder', path: folder } }));
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
   env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1', IMAGEFLOW_SYNC_FOLDER: '1', IMAGEFLOW_SYNC_IDLE_MS: '1500', IMAGEFLOW_SYNC_TEST_SLOW_MS: '1500' } });
 const stderr = [];
@@ -87,7 +87,8 @@ try {
   await statusIs(desktop, 'in-sync');
   const bookId = (await current(desktop)).project.bookId;
 
-  // The laptop downloads the book from the Start window.
+  // The laptop downloads the book from the Start window, which asks where.
+  await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, join(work, 'Laptop', 'Laptop Book.imageflow'));
   const start = app.windows().find((page) => page.url() === 'imageflow://editor/start');
   const before = new Set(app.windows());
   assert.deepEqual(await start.evaluate((id) => window.imageflow.libraryAction({ action: 'download', bookId: id }), bookId), { value: null });

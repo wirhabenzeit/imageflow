@@ -2938,7 +2938,7 @@ each('a push records the cached cover, uploads it once, and carries the parent�
   assert.deepEqual((await remote.listBook(first.bookId, 'covers')).map(({ key }) => key).sort(), [coverBlobKey(first.bookId, sha(red)), coverBlobKey(first.bookId, sha(blue))].sort());
 });
 
-coreEach('Download makes the book under a name made unique, never over a book or file that is there, trusted, with its originals left on the remote', async (t) => {
+coreEach('Download makes the book under the chosen name, never over a book or file that is there, trusted, with its originals left on the remote', async (t) => {
   const { a, b, remote } = await world(t);
   await sync(a, remote);
   const [tip] = await tips(remote, a);
@@ -2947,7 +2947,12 @@ coreEach('Download makes the book under a name made unique, never over a book or
   await mkdir(join(folder, 'Book.imageflow'), { recursive: true });
   await writeFile(join(folder, 'Book 2.imageflow'), 'a file, not a book');
   const remoteId = await remote.remoteId();
-  const made = await cloneFromRemote({ remote, tip, destination: join(folder, downloadName('Book')), remoteId, unique: true });
+  // A name that is taken is refused before anything is downloaded, also after the panel's own Replace question (#303).
+  for (const name of ['Book.imageflow', 'Book 2.imageflow']) {
+    await assert.rejects(cloneFromRemote({ remote, tip, destination: join(folder, name), remoteId }), { message: 'A book named “' + name + '” already exists there. Choose another name.' });
+  }
+  assert.deepEqual((await readdir(folder)).sort(), ['Book 2.imageflow', 'Book.imageflow'], 'nothing is left behind');
+  const made = await cloneFromRemote({ remote, tip, destination: join(folder, downloadName('Book 3')), remoteId });
   assert.equal(made, join(await realpath(folder), 'Book 3.imageflow'));
   assert.deepEqual(await readdir(join(folder, 'Book.imageflow')), [], 'the book that was there is untouched');
   assert.equal(await readFile(join(folder, 'Book 2.imageflow'), 'utf8'), 'a file, not a book');
@@ -2961,8 +2966,6 @@ coreEach('Download makes the book under a name made unique, never over a book or
   assert.ok((await on(mac, (book) => downloadOriginals({ remote, book }))).length > 0);
   assert.deepEqual(await pendingOriginals(made, remote), []);
   assert.equal(await originalsAway(made), 0);
-  // Without `unique` a name that is taken is refused, as before.
-  await assert.rejects(cloneFromRemote({ remote, tip, destination: join(folder, 'Book'), remoteId }), /already exists/);
   // A title becomes a name Finder takes.
   assert.equal(downloadName('  ../Trip: 2026/11 '), 'Trip- 2026-11');
   assert.equal(downloadName('...'), 'Untitled');

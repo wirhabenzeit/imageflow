@@ -28,7 +28,7 @@ function syncBackend(value: unknown): SyncBackend {
 
 function applyPatch(current: AppSettings, patch: unknown): AppSettings {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch) ||
-      Object.keys(patch).some((key) => key !== 'appearance' && key !== 'newBookSize' && key !== 'automaticUpdates' && key !== 'updateChannel' && key !== 'agentAccess' && key !== 'keepOriginals' && key !== 'syncAutomatically' && key !== 'sync' && key !== 'syncBooksUnchosen' && key !== 'booksFolder')) throw new Error('Invalid app settings.');
+      Object.keys(patch).some((key) => key !== 'appearance' && key !== 'newBookSize' && key !== 'automaticUpdates' && key !== 'updateChannel' && key !== 'agentAccess' && key !== 'keepOriginals' && key !== 'syncAutomatically' && key !== 'sync' && key !== 'syncBooksUnchosen')) throw new Error('Invalid app settings.');
   const appearance = 'appearance' in patch ? patch.appearance : current.appearance;
   if (appearance !== 'light' && appearance !== 'dark' && appearance !== 'system') throw new Error('Invalid appearance setting.');
   const newBookSize = 'newBookSize' in patch ? patch.newBookSize as { width?: unknown; height?: unknown } : current.newBookSize;
@@ -44,8 +44,6 @@ function applyPatch(current: AppSettings, patch: unknown): AppSettings {
   if (keepOriginals !== undefined && typeof keepOriginals !== 'boolean') throw new Error('Invalid keep originals setting.');
   const syncAutomatically = 'syncAutomatically' in patch ? patch.syncAutomatically : current.syncAutomatically;
   if (syncAutomatically !== undefined && typeof syncAutomatically !== 'boolean') throw new Error('Invalid automatic sync setting.');
-  const booksFolder = 'booksFolder' in patch ? patch.booksFolder : current.booksFolder;
-  if (booksFolder !== undefined && booksFolder !== null && (typeof booksFolder !== 'string' || !isAbsolute(booksFolder) || booksFolder.length > 4096)) throw new Error('Invalid books folder.');
   const sync = 'sync' in patch ? patch.sync : current.sync;
   const unchosen = 'syncBooksUnchosen' in patch ? patch.syncBooksUnchosen : current.syncBooksUnchosen;
   if (unchosen !== undefined && unchosen !== null && unchosen !== true) throw new Error('Invalid sync setting.');
@@ -53,7 +51,6 @@ function applyPatch(current: AppSettings, patch: unknown): AppSettings {
   return { appearance, automaticUpdates, updateChannel, ...(newBookSize ? { newBookSize: newBookSize as {width:number;height:number} } : {}),
     ...(agentAccess ? { agentAccess: true } : {}), ...(keepOriginals === false ? { keepOriginals: false } : {}),
     ...(syncAutomatically === false ? { syncAutomatically: false } : {}), ...(backend ? { sync: backend } : {}),
-    ...(typeof booksFolder === 'string' ? { booksFolder } : {}),
     // Books wait to be chosen only for a backend: turning sync off answers the sheet too.
     ...(backend && unchosen === true ? { syncBooksUnchosen: true as const } : {}) };
 }
@@ -66,8 +63,9 @@ export class SettingsStore {
   async load() {
     try {
       // The former development-only app default does not override a book's own future-import policy. Faster book
-      // updates (beta.12 to beta.15) was removed: rendering each edit in new frames measured as fast.
-      const { importMode: _legacy, fasterBookUpdates: _removed, sync, syncBooksUnchosen, ...saved } = JSON.parse(await readFile(this.file, 'utf8'));
+      // updates (beta.12 to beta.15) was removed: rendering each edit in new frames measured as fast. So was the folder
+      // for downloaded books (up to beta.22): Download asks where each book goes (#303).
+      const { importMode: _legacy, fasterBookUpdates: _removed, booksFolder: _asked, sync, syncBooksUnchosen, ...saved } = JSON.parse(await readFile(this.file, 'utf8'));
       this.value = applyPatch(this.value, saved);
       // A sync backend this version cannot read (a kind a newer version added) leaves sync off here; it does not cost
       // the other settings their values. Books that wait to be chosen keep waiting after a restart.

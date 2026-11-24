@@ -69,9 +69,9 @@ try {
   await settings.getByText('Sync is off: books do not sync on this Mac.', { exact: true }).waitFor();
   assert.deepEqual(await settings.getByRole('radio').evaluateAll((radios) => radios.map((radio) => [radio.value, radio.checked])), [['s3', false]]);
   assert.match((await settings.evaluate(() => window.imageflow.chooseSyncFolder())).error ?? '', /only available/);
-  // The folder for downloaded books is shown, and only the app's own dialog sets it.
-  await settings.getByText('Books you download from the Start window are saved in Documents → ImageFlow.', { exact: true }).waitFor();
-  assert.match((await settings.evaluate(() => window.imageflow.updateSettings({ booksFolder: '/tmp' }))).error ?? '', /Settings → Sync/);
+  // Download asks where each book goes (#303): there is no folder to set for it.
+  assert.equal(await settings.getByText('Downloads:', { exact: true }).count(), 0);
+  assert.match((await settings.evaluate(() => window.imageflow.updateSettings({ booksFolder: '/tmp' }))).error ?? '', /Invalid app settings/);
   await settings.getByRole('radio', { name: 'S3-compatible bucket' }).check();
   // The S3 URL as R2 shows it, with the bucket: split into Endpoint and Bucket when the field is left.
   const endpoint = settings.getByRole('textbox', { name: 'Endpoint' });

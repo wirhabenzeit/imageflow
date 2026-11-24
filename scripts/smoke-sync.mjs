@@ -1,7 +1,7 @@
 // Sync through the Mac's sync backend (#251, #280, #282, #283), end to end in the app with the folder backend (which only
 // development and tests reach, `IMAGEFLOW_SYNC_FOLDER=1`): the folder chosen in Settings, Start Syncing, a trusted
 // duplicate that starts syncing by itself when it opens and uploads its originals after the commit, Download from the
-// Start window (a trusted copy on "another Mac" that names its template's sites once), a normal sync that reloads the
+// Start window (asked where, refused over a book or inside one; a trusted copy on "another Mac" that names its template's sites once), a normal sync that reloads the
 // editor, a pulled template change in a trusted book (allowed, with a notice and no question), a sync that fails after
 // its pull and still reloads it, the tip chooser with five tips including Cancel, a changed backend, which asks once
 // before a synced book starts a new history there, and Delete from Sync, after which a sync asks and Sync Again makes a
@@ -31,11 +31,10 @@ const trustQuestion = 'Trust this book’s template?';
 const tipQuestion = 'This book was changed on two Macs.';
 const elsewhereQuestion = 'This book last synced somewhere else.';
 
-// Downloaded books go to the "laptop"'s folder, never to the real Documents folder.
 await mkdir(join(work, 'profile'));
 // Every sync here is asked for: automatic sync (#284) has a smoke of its own (smoke-sync-auto), and pulls or pushes by
 // itself would race with the steps below.
-await writeFile(join(work, 'profile', 'settings.json'), JSON.stringify({ booksFolder: join(work, 'Laptop'), syncAutomatically: false }));
+await writeFile(join(work, 'profile', 'settings.json'), JSON.stringify({ syncAutomatically: false }));
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
   env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1', IMAGEFLOW_SYNC_FOLDER: '1' } });
 const stderr = [];
@@ -105,7 +104,12 @@ try {
   const desktop = await testBook(app, desktopBook);
   await app.evaluate(({ dialog }) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [globalThis.syncPaths.open] });
-    dialog.showSaveDialog = async () => ({ canceled: false, filePath: globalThis.syncPaths.save });
+    globalThis.savePanels = [];
+    // Without a path to save to, the panel is cancelled.
+    dialog.showSaveDialog = async (...args) => {
+      globalThis.savePanels.push({ window: args.length > 1 ? args[0].id : undefined, defaultPath: args.at(-1).defaultPath });
+      return { canceled: !globalThis.syncPaths.save, filePath: globalThis.syncPaths.save ?? '' };
+    };
   });
   await ready(desktop);
   const desktopWindow = await windowId(desktop);
@@ -231,7 +235,7 @@ try {
   await created.close();
 
   // Download from the library on the "laptop": the Start window lists the books on the backend, and Download makes a
-  // trusted copy in the folder for downloaded books, which names its template's sites once instead of asking.
+  // trusted copy where its save panel says (#303), which names its template's sites once instead of asking.
   await app.evaluate(({ app: electronApp }) => {
     globalThis.syncNotices = [];
     electronApp.on('web-contents-created', (_event, contents) => {
@@ -247,8 +251,24 @@ try {
   const title = (await current(desktop)).project.title;
   assert.equal((await start.evaluate((id) => window.imageflow.libraryBook(id), bookId)).value?.title, title);
   assert.match((await desktop.evaluate((id) => window.imageflow.libraryAction({ action: 'download', bookId: id }), bookId)).error ?? '', /start window/, 'only the Start window asks');
+  const download = () => start.evaluate((id) => window.imageflow.libraryAction({ action: 'download', bookId: id }), bookId);
   const beforeLaptop = new Set(app.windows());
-  assert.deepEqual(await start.evaluate((id) => window.imageflow.libraryAction({ action: 'download', bookId: id }), bookId), { value: null });
+  // The panel is a sheet of the Start window that names the book and no folder; Cancel does nothing.
+  await app.evaluate(() => { globalThis.savePanels.length = 0; });
+  await choosePaths({});
+  assert.deepEqual(await download(), { value: null });
+  assert.deepEqual(await app.evaluate(() => globalThis.savePanels), [{ window: await windowId(start), defaultPath: title + '.imageflow' }]);
+  // Inside another book, or over a book (the panel's own Replace): refused, and nothing is written.
+  const project = await readFile(join(desktopBook, 'project.json'), 'utf8');
+  await choosePaths({ save: join(desktopBook, 'Inside') });
+  assert.match((await download()).error ?? '', /outside every book/);
+  await choosePaths({ save: desktopBook });
+  assert.match((await download()).error ?? '', /“Sync Book\.imageflow” already exists there/);
+  assert.equal(await readFile(join(desktopBook, 'project.json'), 'utf8'), project, 'the book there is not replaced');
+  assert.equal(app.windows().filter((page) => !beforeLaptop.has(page)).length, 0, 'nothing opened');
+  // A name without the extension still makes a book.
+  await choosePaths({ save: join(work, 'Laptop', 'Laptop Book') });
+  assert.deepEqual(await download(), { value: null });
   let laptop;
   for (let attempt = 0; !(laptop = app.windows().find((page) => !beforeLaptop.has(page) && page.url() === 'imageflow://editor/')); attempt++) {
     assert.ok(attempt < 400, 'Download opens the new book');
@@ -256,9 +276,8 @@ try {
   }
   await ready(laptop);
   const laptopWindow = await windowId(laptop);
-  const [downloaded] = (await readdir(join(work, 'Laptop'))).filter((name) => name.endsWith('.imageflow'));
-  assert.ok(downloaded, 'the book is in the folder for downloaded books');
-  const laptopBook = join(work, 'Laptop', downloaded);
+  assert.deepEqual(await readdir(join(work, 'Laptop')), ['Laptop Book.imageflow'], 'the book is where the panel said');
+  const laptopBook = join(work, 'Laptop', 'Laptop Book.imageflow');
   assert.equal((await current(laptop)).project.bookId, bookId);
   await statusIs(laptop, 'in-sync');
   for (let attempt = 0; !(await app.evaluate(() => globalThis.syncNotices)).some((text) => /loads maps or data from .*downloaded from your sync/.test(text)); attempt++) {
@@ -363,7 +382,18 @@ try {
   assert.match(chooser.detail, /1 older version is not shown/);
   assert.equal((await tips(bookId)).length, 5, 'Cancel leaves the fork open');
   await statusIs(desktop, 'diverged');
+  // Download asks which version first: Cancel there asks for no place, and a cancelled panel downloads nothing.
+  const startId = await windowId(start);
+  await app.evaluate(() => { globalThis.savePanels.length = 0; });
+  assert.deepEqual(await download(), { value: null });
+  assert.equal(await timesAsked(tipQuestion, startId), 1);
+  assert.equal(await app.evaluate(() => globalThis.savePanels.length), 0);
   await answer(tipQuestion, 0);
+  await choosePaths({});
+  assert.deepEqual(await download(), { value: null });
+  assert.equal(await timesAsked(tipQuestion, startId), 2);
+  assert.equal(await app.evaluate(() => globalThis.savePanels.length), 1);
+  assert.deepEqual(await readdir(join(work, 'Laptop')), ['Laptop Book.imageflow']);
   assert.deepEqual(await sync(desktop), { value: undefined });
   const [closing, ...more] = await tips(bookId);
   assert.equal(more.length, 0);
@@ -428,6 +458,6 @@ try {
   assert.notEqual(again, bookId, 'Sync Again gives the book a new lineage');
   assert.deepEqual((await readdir(join(otherFolder, 'books', bookId))).sort(), ['deleted.json'], 'the deleted book stays deleted');
   assert.equal((await readdir(join(otherFolder, 'books', again, 'snapshots'))).filter((name) => name.endsWith('.json')).length, 1);
-  console.log('The folder backend in Settings, Start Syncing, a duplicate and a New Book book that sync by themselves with originals after the commit, Download from the Start window (trusted, naming its sites once), reloads after sync and after a failed push, the five-tip chooser, a pulled template change in a trusted book, a changed backend, and Delete from Sync with Sync Again passed.');
+  console.log('The folder backend in Settings, Start Syncing, a duplicate and a New Book book that sync by themselves with originals after the commit, Download from the Start window (asked where; trusted, naming its sites once), reloads after sync and after a failed push, the five-tip chooser, a pulled template change in a trusted book, a changed backend, and Delete from Sync with Sync Again passed.');
 } catch (error) { console.error(stderr.join('\n')); throw error; }
 finally { await closeApp(app); await rm(work, { recursive: true, force: true }); }
