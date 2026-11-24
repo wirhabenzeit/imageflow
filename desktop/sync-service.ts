@@ -6,7 +6,7 @@ import type { SyncRemoteDependencies } from './sync-backend';
 import { bookTrusted, distrustBook, trustBook } from './source-access';
 import { newBookHistory, syncBook, uploadOriginals } from './sync-engine';
 import type { SyncOptions, UploadOutcome } from './sync-engine';
-import { bookSync, readSyncState, startSyncing, stopSyncing, updateSyncState } from './sync-pull';
+import { bookSync, readSyncState, startsWithSetup, startSyncing, stopSyncing, updateSyncState } from './sync-pull';
 import type { BookSync } from './sync-pull';
 import { BookDeleteError, BookNotDeletedError, remoteCommits } from './sync-remote';
 import type { SyncRemote } from './sync-remote';
@@ -246,7 +246,7 @@ export class SyncService {
     if (state.enabled === false) return false;
     const { remoteId } = await this.connect(folder);
     const standing = bookSync(state, remoteId);
-    if (standing === 'off') return !!state.startWith && state.startWith === this.dependencies.setup?.();
+    if (standing === 'off') return startsWithSetup(state, this.dependencies.setup?.());
     return standing === 'syncing' && !state.lastSynced && !state.pull && !state.abandoned;
   }
 

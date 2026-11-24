@@ -23,12 +23,14 @@ export type HeldBook = { book: OpenProject; close: () => Promise<void> };
  * and the open book's own sync goes on from there. So does its next open after a failure or a quit.
  */
 export class ClosedBookSyncs {
-  private readonly jobs = new Map<string, { job: AbortController; state: ClosedSyncState; task: Promise<void> }>();
+  private readonly jobs = new Map<string, { job: AbortController; state: ClosedSyncState; backend: string; task: Promise<void> }>();
   private readonly failures = new Map<string, NonNullable<ClosedSyncState['failed']>>();
   private readonly turn = limited(1);
   private closed = false;
   constructor(private readonly options: {
     service: SyncService;
+    /** The backend now. A sync asked for on one never goes on to another. */
+    backend: () => string;
     /** Takes the writer lock alone, which starting a book needs; rejects while another process has the book open. */
     lock: (folder: string) => Promise<() => Promise<void>>;
     /** Takes the writer lock and loads the book for a sync. */
@@ -43,13 +45,15 @@ export class ClosedBookSyncs {
 
   /** Start Syncing (`SyncService.start`, whose refusals reject), then the sync in the background. */
   async start(folder: string, options: { newHistory?: boolean; trust?: boolean } = {}) {
+    const backend = this.options.backend();
     await this.locked(folder, () => this.options.service.start(folder, options));
-    this.run(folder);
+    this.run(folder, backend);
   }
   /** Sync Again on a book deleted from sync on another Mac (`SyncService.syncAgain`), then its sync in the background. */
   async syncAgain(folder: string, options: { trust?: boolean } = {}) {
+    const backend = this.options.backend();
     await this.locked(folder, () => this.options.service.syncAgain(folder, options));
-    this.run(folder);
+    this.run(folder, backend);
   }
   private async locked(folder: string, step: () => Promise<unknown>) {
     await this.stop(folder);
@@ -61,11 +65,11 @@ export class ClosedBookSyncs {
     } finally { await release(); }
   }
 
-  private run(folder: string) {
-    if (this.closed || this.jobs.has(folder)) return;
+  private run(folder: string, backend: string) {
+    if (this.closed || this.jobs.has(folder) || backend !== this.options.backend()) return;
     this.failures.delete(folder);
     const job = new AbortController();
-    const entry = { job, state: { syncing: true } as ClosedSyncState, task: Promise.resolve() };
+    const entry = { job, state: { syncing: true } as ClosedSyncState, backend, task: Promise.resolve() };
     this.jobs.set(folder, entry);
     let waiting = true;
     const running = this.turn(() => { waiting = false; return this.sync(folder, job.signal, entry.state); });
@@ -112,6 +116,18 @@ export class ClosedBookSyncs {
     const running = this.jobs.get(folder);
     running?.job.abort(new Error('The book was opened.'));
     await running?.task;
+  }
+  /**
+   * The backend, or only its key, changed in Settings: what failed there is forgotten, and a sync that began on another
+   * backend ends, so that nothing is uploaded to the one there is now by a switch that was turned on before.
+   */
+  async backendChanged() {
+    const failed = [...this.failures.keys()];
+    this.failures.clear();
+    for (const folder of failed) this.options.changed(folder);
+    const former = [...this.jobs.values()].filter(({ backend }) => backend !== this.options.backend());
+    for (const { job } of former) job.abort(new Error('The book’s sync was changed in Settings.'));
+    await Promise.all(former.map(({ task }) => task));
   }
   /** Quit: ends every sync and starts none after it. Each goes on at the book's next open. */
   async shutdown() {

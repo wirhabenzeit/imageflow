@@ -73,6 +73,7 @@ test('the Sync window lists books here and on the remote together, switched on o
   assert.equal(syncRowState(removedRow).text, 'Removed on another Mac');
   for (const row of [remoteRow, awayRow]) assert.equal(syncRowState(row).action, 'download');
   assert.equal(syncRowState(remoteRow, { details: { bookId: remoteOnly, title: '', versions: 0, newer: true } }).action, 'update');
+  assert.equal(syncRowState(awayRow, { details: { bookId: remoteOnly, title: '', versions: 0, newer: true } }).action, 'update');
   assert.equal(syncRowState(remoteRow, { details: { error: 'offline' } }).text, 'Cannot be read now');
   assert.deepEqual(syncRowState(remoteRow, { download: { bookId: remoteOnly, done: 124, total: 200 } }), { text: '124 of 200', bar: { done: 124, total: 200 } });
   assert.equal(syncRowState(remoteRow, { download: { bookId: remoteOnly, waiting: true } }).text, 'Waiting…');

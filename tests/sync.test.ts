@@ -38,7 +38,7 @@ import { MemoryKeyIndexCache } from '../desktop/sync-key-index';
 import { MemoryHeaderCache } from '../desktop/sync-header-cache';
 import { readCommitHeaderV1 } from './sync-v1-reader';
 import { bookTrusted, distrustBook, trustBook } from '../desktop/source-access';
-import { configureSyncSetup, readSyncState, startNewBook, startSyncing, SyncElsewhereError, SyncHalfPulledError, SyncStoppedError, takeAbandonedAtOpen, updateSyncState } from '../desktop/sync-pull';
+import { configureSyncSetup, readSyncState, startNewBook, startsWithSetup, startSyncing, SyncElsewhereError, SyncHalfPulledError, SyncStoppedError, takeAbandonedAtOpen, updateSyncState } from '../desktop/sync-pull';
 import { insideBook, pendingUploadsText, SyncService, UntrustedBookError } from '../desktop/sync-service';
 import { ClosedBookSyncs } from '../desktop/sync-closed';
 import { FirstSync, settleSyncSetup, syncExcludedBook } from '../desktop/sync-start';
@@ -2336,6 +2336,11 @@ core('only a book made under this set-up, or turned on, starts by itself; one th
   setup = randomUUID();
   assert.equal(await service.startsOnOpen(b.folder), false);
   setup = first;
+  // What the windows say of it goes by the same record: one that was stopped, or synced somewhere else, does not start.
+  const made = await readSyncState(b.folder);
+  assert.equal(startsWithSetup(made, setup), true);
+  for (const state of [{ ...made, enabled: false }, { ...made, abandoned: { targetCommit: randomUUID(), error: '', at: new Date().toISOString() } }] as const) assert.equal(startsWithSetup(state, setup), false);
+  assert.equal(startsWithSetup(made, randomUUID()), false);
   // Its first sync replaces the mark, and it is not started again.
   await edit(b, caption('shore', 'First save'));
   assert.equal((await syncWith(b, service)).action, 'initial-push');
@@ -2494,8 +2499,8 @@ core('a book turned on while it is closed syncs without being opened, and lets g
   const service = new SyncService(() => backend);
   await use(a);
   const events: string[] = [];
-  let holding = 0, wait: Promise<void> | undefined;
-  const closed = new ClosedBookSyncs({ service, lock: acquireProjectLock, device: 'Desk', changed: () => { events.push(JSON.stringify(closed.state(a.folder) ?? null)); }, synced: (folder) => { events.push('synced ' + folder); },
+  let holding = 0, wait: Promise<void> | undefined, place = 'first';
+  const closed = new ClosedBookSyncs({ service, backend: () => place, lock: acquireProjectLock, device: 'Desk', changed: () => { events.push(JSON.stringify(closed.state(a.folder) ?? null)); }, synced: (folder) => { events.push('synced ' + folder); },
     hold: async (folder) => {
       const release = await acquireProjectLock(folder);
       holding++;
@@ -2530,14 +2535,39 @@ core('a book turned on while it is closed syncs without being opened, and lets g
   assert.equal(closed.state(a.folder), undefined, 'being opened is no failure');
   assert.equal((await service.standing(a.folder)).sync, 'syncing');
   assert.equal((await tips(remote, a)).length, 1, 'nothing was committed');
+  // So does another backend, before anything goes up there; a corrected key ends none.
+  await service.stop(a.folder);
+  wait = new Promise((resolve) => { release = resolve; });
+  await closed.start(a.folder);
+  for (let attempt = 0; !holding && attempt < 500; attempt++) await new Promise((resolve) => setTimeout(resolve, 5));
+  await closed.backendChanged();
+  assert.equal(closed.state(a.folder)?.syncing, true);
+  place = 'second';
+  const changed = closed.backendChanged();
+  release();
+  await changed;
+  assert.equal(holding, 0);
+  assert.equal(closed.state(a.folder), undefined, 'a changed backend is no failure');
+  assert.equal((await tips(remote, a)).length, 1, 'nothing was committed');
   wait = undefined;
   assert.equal((await syncWith(a, service)).action, 'push');
+  // A backend changed while the book was being recorded: its sync does not begin on the other one.
+  await service.stop(a.folder);
+  const late = new ClosedBookSyncs({ service, backend: () => place, lock: async (folder) => { place = 'third'; return acquireProjectLock(folder); },
+    hold: async () => { throw new Error('Nothing syncs.'); }, changed: () => {} });
+  await late.start(a.folder);
+  assert.equal(late.state(a.folder), undefined);
   // A failure is kept for the window until the book is opened or turned on again.
   await service.stop(a.folder);
-  const failing = new ClosedBookSyncs({ service, lock: acquireProjectLock, hold: async () => { throw new Error('This book cannot be read.'); }, changed: () => {} });
+  const failing = new ClosedBookSyncs({ service, backend: () => place, lock: acquireProjectLock, hold: async () => { throw new Error('This book cannot be read.'); }, changed: () => {} });
   await failing.start(a.folder);
   for (let attempt = 0; failing.state(a.folder)?.syncing && attempt < 500; attempt++) await new Promise((resolve) => setTimeout(resolve, 5));
   assert.equal(failing.state(a.folder)?.failed?.message, 'This book cannot be read.');
+  await failing.backendChanged();
+  assert.equal(failing.state(a.folder), undefined, 'a changed backend or key forgets it');
+  await service.stop(a.folder);
+  await failing.start(a.folder);
+  for (let attempt = 0; failing.state(a.folder)?.syncing && attempt < 500; attempt++) await new Promise((resolve) => setTimeout(resolve, 5));
   await failing.stop(a.folder);
   assert.equal(failing.state(a.folder), undefined);
   // After Quit nothing starts.

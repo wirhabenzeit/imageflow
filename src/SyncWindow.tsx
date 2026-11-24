@@ -15,6 +15,8 @@ type Remote = LibraryRemote | { error: string } | null | undefined;
 const failed = { error: 'ImageFlow could not complete the request.' };
 const keyOf = (row: LibraryRow) => (row.kind === 'remote' ? row.bookId : row.book.id);
 const bookIdOf = (row: LibraryRow) => (row.kind === 'remote' ? row.bookId : row.book.bookId);
+/** Whether a row offers the remote's copy of its book, which is not on this Mac or cannot be found here. */
+const offered = (row: LibraryRow) => row.kind === 'remote' || (row.state === 'missing' && row.onRemote);
 
 /**
  * The Sync window (#307): the books on this Mac and the books on the configured remote in one table, matched as in the
@@ -72,16 +74,18 @@ export function SyncWindow({ api }: { api?: DesktopApi }) {
   const downloading = (row: LibraryRow) => downloads.find(({ bookId }) => bookId === bookIdOf(row));
   const busyWith = (row: LibraryRow) => (row.kind === 'local' ? active[row.book.id] : undefined);
 
-  // What a closed book's row shows of the remote, read for each listing; the main process reads two at a time.
+  // What a closed book's row shows of the remote, read for each listing; the main process reads two at a time. A book
+  // that cannot be found here offers its copy on the remote, as one only there does.
   useEffect(() => {
     if (!api || !listing) return;
     let current = true;
     for (const row of rows) {
-      if (row.kind === 'remote') {
-        void api.libraryBook(row.bookId).catch(() => failed).then((result) => { if (current) setDetails((all) => ({ ...all,
+      const bookId = bookIdOf(row);
+      if (bookId && offered(row)) {
+        void api.libraryBook(bookId).catch(() => failed).then((result) => { if (current) setDetails((all) => ({ ...all,
           // A row that could be read before keeps what it showed when reading it again fails.
-          [row.bookId]: 'value' in result ? result.value : all[row.bookId] && 'title' in all[row.bookId] ? all[row.bookId] : { error: result.error } })); });
-      } else if (syncSwitch(row) && !active[row.book.id]?.open) {
+          [bookId]: 'value' in result ? result.value : all[bookId] && 'title' in all[bookId] ? all[bookId] : { error: result.error } })); });
+      } else if (row.kind === 'local' && syncSwitch(row) && !active[row.book.id]?.open) {
         void api.syncBookStatus(row.book.id).catch(() => failed).then((result) => { if (current && 'value' in result) setStatuses((all) => ({ ...all, [row.book.id]: result.value })); });
       }
     }
@@ -91,17 +95,22 @@ export function SyncWindow({ api }: { api?: DesktopApi }) {
   // What each book takes up: counted once the list is there, again when an upload of it ended, never waited for.
   const counted = useRef(new Set<string>());
   const uploading = useRef(new Set<string>());
-  const onRemote = listing ? rows.filter((row) => row.kind === 'remote' || row.onRemote).map(bookIdOf).filter((id): id is string => !!id) : [];
-  const size = (bookId: string) => void api?.syncBookSize(bookId, true).catch(() => failed).then((result) => setSizes((all) => ({ ...all,
-    [bookId]: 'value' in result ? result.value.bytes : all[bookId] ?? 'unknown' })));
-  useEffect(() => { counted.current.clear(); setSizes({}); setDetails({}); setStatuses({}); }, [JSON.stringify(settings?.sync)]);
-  useEffect(() => { for (const bookId of onRemote) if (!counted.current.has(bookId)) { counted.current.add(bookId); size(bookId); } }, [onRemote.join(), JSON.stringify(settings?.sync)]);
+  // Two copies of a book on this Mac are one book on the remote.
+  const onRemote = listing ? [...new Set(rows.filter((row) => row.kind === 'remote' || row.onRemote).map(bookIdOf).filter((id): id is string => !!id))] : [];
+  // Where the books sync now: what was asked of another backend is not shown when it arrives late.
+  const backend = JSON.stringify(settings?.sync ?? null);
+  const shown = useRef(backend);
+  const size = (bookId: string, refresh = false) => void api?.syncBookSize(bookId, refresh).catch(() => failed).then((result) => {
+    if (shown.current === backend) setSizes((all) => ({ ...all, [bookId]: 'value' in result ? result.value.bytes : all[bookId] ?? 'unknown' }));
+  });
+  useEffect(() => { shown.current = backend; counted.current.clear(); setSizes({}); setDetails({}); setStatuses({}); }, [backend]);
+  useEffect(() => { for (const bookId of onRemote) if (!counted.current.has(bookId)) { counted.current.add(bookId); size(bookId); } }, [onRemote.join(), backend]);
   useEffect(() => {
     for (const row of rows) {
       const bookId = bookIdOf(row), view = busyWith(row)?.view;
       if (!bookId) continue;
       if (view?.syncing || view?.uploading) uploading.current.add(bookId);
-      else if (uploading.current.delete(bookId)) size(bookId);
+      else if (uploading.current.delete(bookId)) size(bookId, true);
     }
   }, [active]);
 
@@ -168,15 +177,15 @@ export function SyncWindow({ api }: { api?: DesktopApi }) {
         {rows.map((row) => <Row key={keyOf(row)} row={row} place={syncPlace(row, name, !!downloading(row))} details={row.kind === 'remote' ? details[row.bookId] : undefined}
           size={onRemote.includes(bookIdOf(row) ?? '') ? sizes[bookIdOf(row)!] ?? 'counting' : undefined} download={downloading(row)}
           state={syncRowState(row, { download: downloading(row), view: busyWith(row)?.view, status: row.kind === 'local' ? statuses[row.book.id] : undefined,
-            details: row.kind === 'remote' ? details[row.bookId] : undefined, switching: row.kind === 'local' && switching[row.book.id] })}
+            details: offered(row) ? details[bookIdOf(row) ?? ''] : undefined, switching: row.kind === 'local' && switching[row.book.id] })}
           disabled={!settings || (row.kind === 'local' && (switching[row.book.id] || row.state === 'checking'))} turn={() => { if (row.kind === 'local') void turn(row); }}
           act={(action) => act(row, action)} cancel={() => { const bookId = bookIdOf(row); if (bookId) void library({ action: 'cancel-download', bookId }); }} menu={(point) => void menu(row, point)} />)}
         {recents && remote !== undefined && !rows.length && <p className="sync-empty">No books on this Mac or in {name}.</p>}
       </div>
     </div>
     <footer className="sync-foot">
-      <CleanUp api={api} disabled={!listing} summary={error || (remote && 'error' in remote ? remote.error : '') || summary} problem={!!error || (!!remote && 'error' in remote)}
-        cleaned={() => { counted.current.clear(); for (const bookId of onRemote) { counted.current.add(bookId); size(bookId); } }} />
+      <CleanUp key={backend} api={api} disabled={!listing} summary={error || (remote && 'error' in remote ? remote.error : '') || summary} problem={!!error || (!!remote && 'error' in remote)}
+        cleaned={() => { counted.current.clear(); for (const bookId of onRemote) { counted.current.add(bookId); size(bookId, true); } }} />
     </footer>
   </main>;
 }

@@ -51,7 +51,7 @@ import { BookDownloads } from './downloads';
 import { cloneFromRemote, describeSync, downloadName, originalsAway, unavailableStatus } from './sync-engine';
 import { BookDeletedError, BookDeleteError, BookNotDeletedError, remoteTips } from './sync-remote';
 import type { BookUsage, SyncRemote } from './sync-remote';
-import { configureSyncSetup, readSyncState, startNewBook, SyncElsewhereError } from './sync-pull';
+import { configureSyncSetup, readSyncState, startNewBook, startsWithSetup, SyncElsewhereError } from './sync-pull';
 import { ClosedBookSyncs } from './sync-closed';
 import { deleteFromSyncQuestion, libraryBook, libraryListing, limited, syncsWithRemote } from './sync-library';
 import { insideBook, pendingUploadsText, SyncService, UntrustedBookError } from './sync-service';
@@ -1334,7 +1334,7 @@ async function startClosed(owner: BrowserWindow, folder: string, again = false) 
   }
 }
 /** The first syncs of books turned on in the Sync window while they are closed. */
-const closedSyncs = new ClosedBookSyncs({ service: syncService, lock: acquireProjectLock, device: macName(),
+const closedSyncs = new ClosedBookSyncs({ service: syncService, backend: () => JSON.stringify(settings.value.sync ?? null), lock: acquireProjectLock, device: macName(),
   hold: async (folder) => {
     const release = await acquireProjectLock(folder);
     const done = async () => {
@@ -1351,7 +1351,7 @@ const closedSyncs = new ClosedBookSyncs({ service: syncService, lock: acquirePro
   cover: recentCover,
   changed: () => publishSyncBooks(),
   synced: (folder, book) => {
-    libraryCache = undefined;
+    libraryCache = librarySizes = undefined;
     void recents.refresh(folder, book.project.title, undefined, book.project.bookId).then(() => recents.track(folder, true)).catch((error) => console.warn('ImageFlow could not update recent books', error)).finally(publishRecents);
   } });
 
@@ -1410,22 +1410,24 @@ async function libraryRow(bookId: string) {
   }
   return book;
 }
-/** What books take up, for the backend they were counted on: kept until a book changes, or its row asks again. */
-let librarySizes: { key: string; sizes: Map<string, Promise<BookUsage>> } | undefined;
+/**
+ * What books take up, for the backend they were counted on: kept until a book changes here or its row asks again, and
+ * for a few minutes, since another Mac may change it too.
+ */
+let librarySizes: { key: string; sizes: Map<string, { read: Promise<BookUsage>; at: number }> } | undefined;
+const sizesKept = 5 * 60_000;
 /** What a book takes up on the remote (#307): two at a time, since over a bucket each is a listing of the whole book. */
 const sizeReads = limited(2);
 async function librarySize(bookId: string, refresh: boolean) {
   const key = JSON.stringify(usableBackend(settings.value.sync) ?? null);
   if (librarySizes?.key !== key) librarySizes = { key, sizes: new Map() };
   const { sizes } = librarySizes;
-  let size = refresh ? undefined : sizes.get(bookId);
-  if (!size) {
-    size = sizeReads(() => syncService.connect().then(({ remote }) => remote.usage(bookId)));
-    sizes.set(bookId, size);
-    const kept = size;
-    kept.catch(() => { if (sizes.get(bookId) === kept) sizes.delete(bookId); });
-  }
-  return size;
+  const kept = sizes.get(bookId);
+  if (kept && !refresh && Date.now() - kept.at < sizesKept) return kept.read;
+  const counted = { read: sizeReads(() => syncService.connect().then(({ remote }) => remote.usage(bookId))), at: Date.now() };
+  sizes.set(bookId, counted);
+  counted.read.catch(() => { if (sizes.get(bookId) === counted) sizes.delete(bookId); });
+  return counted.read;
 }
 /** How closed books stand with the remote, for their rows in the Sync window; two at a time. */
 const statusReads = limited(2);
@@ -1539,7 +1541,8 @@ async function libraryLocal(): Promise<RecentDocument[]> {
   const listed = await Promise.all(entries.map(async (entry) => {
     if (!entry.available) return entry;
     const state = await readSyncState(entry.path).catch(() => undefined);
-    const starts = !!state?.startWith && state.startWith === settings.value.syncSetup && state.enabled !== false;
+    // As the book would at its next open (`SyncService.startsOnOpen`): one whose sites were not allowed yet does not.
+    const starts = !!state && startsWithSetup(state, settings.value.syncSetup) && await bookTrusted(entry.path).catch(() => false);
     const sync = state ? { ...(state.remoteId ? { remoteId: state.remoteId } : {}), ...(state.enabled !== undefined ? { enabled: state.enabled } : {}), ...(starts ? { starts: true as const } : {}) } : undefined;
     // Books that sync with the configured remote stay tracked beyond the most recent ones (`RecentDocuments.track`);
     // while the remote cannot be read, tracking stays as it was.
@@ -1594,7 +1597,7 @@ async function libraryAction(owner: BrowserWindow, request: LibraryAction) {
     for (const document of open) document.deleting = true;
     try { await syncService.deleteBook(bookId, { folders, settle: async () => { await Promise.all(open.map((document) => document.settleSync())); } }); }
     finally { for (const document of open) document.deleting = false; }
-    libraryCache = undefined;
+    libraryCache = librarySizes = undefined;
     for (const folder of folders) await recents.track(folder, false).catch(() => {});
     for (const document of open) void document.refreshSync().catch((error) => console.warn('ImageFlow could not read the sync status', error));
     return;
@@ -1649,6 +1652,10 @@ async function syncCommand(document: DocumentSession, action: SyncAction) {
 function syncBackendChanged() {
   // The library reads the new remote.
   libraryCache = undefined;
+  librarySizes = undefined;
+  cleanUpPlan = undefined;
+  void closedSyncs.backendChanged();
+  publishSyncBooks();
   publishRecents();
   for (const document of documents.values()) {
     if (!document.closing) void document.refreshSync().catch((error) => console.warn('ImageFlow could not read the sync status', error));
@@ -2141,7 +2148,7 @@ void app.whenReady().then(async () => {
     if (!cloudKitPush(userInfo) || syncService.kind !== 'icloud') return;
     for (const document of documents.values()) document.notified();
   });
-  syncService.onUploads(() => publishSyncBooks());
+  syncService.onUploads(() => { librarySizes = undefined; publishSyncBooks(); });
   // An installation from before #307 syncs on exactly what it synced, and starts nothing else (ADR 0012, section 3).
   await settleSyncSetup(settings, (await booksThatSync()).map(({ path }) => path)).catch((error) => console.warn('ImageFlow could not settle which books sync', error));
   registerSyncPushes();

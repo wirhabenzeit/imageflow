@@ -91,6 +91,12 @@ export function bookSync(state: SyncState, remoteId: string): BookSync {
  * last synced, or a pull it gave up there (which forgot `lastSynced`, and may have left the book half-done).
  */
 export const syncedElsewhere = (state: SyncState, remoteId: string) => (!!state.lastSynced || !!state.pull || !!state.abandoned) && state.remoteId !== remoteId;
+/**
+ * Whether the record says the book starts by itself under the set-up of sync `setup`: it was made under it, and never
+ * synced here or anywhere else. Only a trusted book does (`SyncService.startsOnOpen`).
+ */
+export const startsWithSetup = (state: SyncState, setup: string | undefined) =>
+  !!state.startWith && state.startWith === setup && state.enabled !== false && !state.lastSynced && !state.pull && !state.abandoned;
 export type PullMarker = NonNullable<SyncState['pull']>;
 
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
