@@ -17,8 +17,8 @@ import type { OpenProject } from '../desktop/project';
 import { collectSources, relinkFolder, relocateSource, removeSources, saveDocumentCopy } from '../desktop/source-actions';
 import { cleanUp, cleanUpQuestion, planCleanUp, storageReport } from '../desktop/sync-sweep';
 import { captureBookStateRevision } from '../desktop/revisions';
-import { cloneFromRemote, describeLocalChange, describeSync, downloadName, downloadOriginals, newBookHistory, originalsAway, originalsNotHere, pendingOriginals, pendingUploads, placeOriginals, RemoteSyncingError, stageOriginals, stageSyncPull, syncBook, uploadOriginals } from '../desktop/sync-engine';
-import type { SyncOptions } from '../desktop/sync-engine';
+import { cloneFromRemote, describeLocalChange, describeSync, downloadName, downloadOriginals, newBookHistory, originalsAway, originalsNotHere, pendingOriginals, pendingUploads, placeOriginals, RemoteSyncingError, stageOriginals, stageSyncPull, syncBook, ensureBookId, uploadAhead, uploadOriginals } from '../desktop/sync-engine';
+import type { SyncOptions, UploadedPreviews } from '../desktop/sync-engine';
 import { memoryRemote, remoteBooks, remoteTips, StoreRemote } from '../desktop/sync-remote';
 import type { SyncRemote } from '../desktop/sync-remote';
 import { FolderStore, folderRemote } from '../desktop/sync-store-folder';
@@ -3828,4 +3828,100 @@ test('Clean Up asks before it deletes: the question names the backend and what i
   assert.equal(question.message, 'Clean up “books”?');
   assert.deepEqual([question.buttons, question.defaultId, question.cancelId], [['Clean Up', 'Cancel'], 1, 1]);
   assert.match(question.detail, /^Clean Up can free 2\.5 MB: originals, previews and covers unused for a week in 1 book\. They are deleted for every Mac\./);
+});
+
+// The first sync of a book of 1210 photos held the book for over half an hour: one upload at a time, each after asking
+// for a blob that was not there, which fails over iCloud.
+async function manyPhotos(mac: Mac, count: number) {
+  const files = await Promise.all(Array.from({ length: count }, async (_, index) => {
+    const file = join(mac.external, 'many-' + index + '.jpg');
+    await image(file, '#' + (0x101010 + index * 4099).toString(16).padStart(6, '0'));
+    return file;
+  }));
+  await on(mac, (book) => importIntoProject(book, { kind: 'photo', mode: 'copy' }, files));
+  // The lineage ID, which the app gives a book before it sends anything.
+  await on(mac, () => ensureBookId(mac.folder));
+}
+/** What a store is asked: how many puts run at once at most, and the keys it is asked for that it lacks. */
+function recordTraffic(remote: Remote, delay = 5) {
+  const traffic = { most: 0, missed: [] as string[], read: [] as string[], put: [] as string[] };
+  let running = 0;
+  const { store } = remote;
+  const put = store.putIfAbsent.bind(store);
+  const head = store.head.bind(store);
+  const get = store.get.bind(store);
+  store.putIfAbsent = async (key, source, options) => {
+    traffic.put.push(key);
+    traffic.most = Math.max(traffic.most, ++running);
+    try { await new Promise((done) => setTimeout(done, delay)); return await put(key, source, options); } finally { running--; }
+  };
+  store.head = async (key) => { const found = await head(key); if (!found && /\/(content|proxies)\//.test(key)) traffic.missed.push(key); return found; };
+  store.get = async (key) => { traffic.read.push(key); return get(key); };
+  return traffic;
+}
+
+coreEach('a push uploads a few blobs at once, and asks for none that is not there', async (t) => {
+  const { a, remote } = await world(t);
+  await manyPhotos(a, 24);
+  const traffic = recordTraffic(remote);
+  await commitOnly(a, remote);
+  assert.ok(traffic.most > 1 && traffic.most <= 8, traffic.most + ' at once');
+  // Over iCloud each such question is a failed request, which CloudKit answers with delays. (The folder and S3 stores
+  // look for an object themselves before they send one.)
+  if (store === 'memory' || store === 'cloudkit') assert.deepEqual(traffic.missed, []);
+  const state = await stateOf(remote, (await tips(remote, a))[0]);
+  for (const { digest } of Object.values(state.assetsMeta.assets)) assert.ok(state.proxies[digest], 'every photo has its preview');
+});
+
+coreEach('what goes up ahead of a sync changes nothing in the book, and the sync then sends little and reads no preview back', async (t) => {
+  const { a, remote } = await world(t);
+  await manyPhotos(a, 24);
+  await on(a, async (book) => {
+    const before = [await readFile(join(a.folder, 'project.json')), await readFile(join(a.folder, 'photos.json'))];
+    const ahead: UploadedPreviews = new Map();
+    const seen: number[] = [];
+    await uploadAhead({ remote, book, ahead, progress: (done, total) => { seen.push(done); assert.ok(total >= 24); } });
+    assert.deepEqual([await readFile(join(a.folder, 'project.json')), await readFile(join(a.folder, 'photos.json'))], before);
+    assert.equal((await readSyncState(a.folder)).lastSynced, undefined);
+    assert.equal(await commitCount(remote), 0, 'no commit');
+    assert.ok(ahead.size >= 24, ahead.size + ' previews');
+    assert.ok(seen.at(-1)! >= 24);
+    const traffic = recordTraffic(remote);
+    assert.equal((await syncBook({ remote, book, ahead })).action, 'initial-push');
+    assert.deepEqual(traffic.read.filter((key) => key.includes('/proxies/')), []);
+    assert.deepEqual(traffic.put.filter((key) => key.includes('/proxies/') && [...ahead.keys()].some((digest) => key.includes(digest))), []);
+  });
+  // A preview Clean Up removed in between is sent again.
+  const state = await stateOf(remote, (await tips(remote, a))[0]);
+  for (const [digest, { ext, sha256 }] of Object.entries(state.proxies)) {
+    assert.equal(sha(await stored(remote, proxyBlobKey(await bookId(a), digest, ext))), sha256);
+  }
+});
+
+coreEach('an upload ahead of a sync stops with its signal and goes on where it stopped', async (t) => {
+  const { a, remote } = await world(t);
+  await manyPhotos(a, 24);
+  await on(a, async (book) => {
+    const ahead: UploadedPreviews = new Map();
+    const job = new AbortController();
+    const why = new Error('Stopped.');
+    await assert.rejects(uploadAhead({ remote, book, ahead, signal: job.signal, progress: (done) => { if (done === 10) job.abort(why); } }), (error) => error === why);
+    assert.equal(await commitCount(remote), 0);
+    const kept = new Set(ahead.keys());
+    const traffic = recordTraffic(remote);
+    await uploadAhead({ remote, book, ahead });
+    for (const digest of kept) assert.ok(![...traffic.put, ...traffic.read].some((key) => key.includes(digest)), 'neither sent nor read again');
+    assert.equal((await syncBook({ remote, book, ahead })).action, 'initial-push');
+  });
+});
+
+each('nothing goes up ahead for a book deleted from sync', async (t) => {
+  const { a, remote } = await world(t);
+  await sync(a, remote);
+  const id = await bookId(a);
+  await remote.deleteBook(id);
+  await edit(a, caption('shore', 'After the deletion'));
+  const traffic = recordTraffic(remote);
+  await on(a, (book) => uploadAhead({ remote, book, ahead: new Map() }));
+  assert.deepEqual(traffic.put, []);
 });

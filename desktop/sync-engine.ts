@@ -100,7 +100,29 @@ export type SyncOptions = {
    * is (`deferred`): an editor opened while the sync read the remote. Everything is staged by then; nothing is lost.
    */
   beforeApply?: () => boolean | Promise<boolean>;
+  /** The previews `uploadAhead` stored or checked for this remote; a push neither sends nor reads them again. */
+  ahead?: UploadedPreviews;
 };
+/** Previews known to be whole on a remote, by the digest of their original, as a snapshot records them. */
+export type UploadedPreviews = Map<string, { sha256: string; ext: '.jpg' | '.png' }>;
+
+/**
+ * How many blobs go up at once. Each iCloud upload has over a second of fixed cost, so one at a time the previews of a
+ * book of 1200 photos took more than half an hour, hardly any of it spent sending.
+ */
+const uploadsAtOnce = 6;
+/** Runs `task` for every item, a few at once. After a failure no further one starts; it rejects once those running ended. */
+async function eachAtOnce<T>(items: readonly T[], task: (item: T) => Promise<void>) {
+  let next = 0;
+  let failure: { error: unknown } | undefined;
+  await Promise.all(Array.from({ length: Math.min(uploadsAtOnce, items.length) }, async () => {
+    while (!failure && next < items.length) {
+      const item = items[next++];
+      try { await task(item); } catch (error) { failure ??= { error }; }
+    }
+  }));
+  if (failure) throw failure.error;
+}
 export type SyncOutcome = {
   /** `deferred`: with `pushOnly`, the sync needed to change the book and did nothing. */
   action: 'initial-push' | 'push' | 'in-sync' | 'adopt' | 'fast-forward' | 'diverged' | 'deferred';
@@ -302,13 +324,12 @@ async function decodes(bytes: Uint8Array, ext: '.jpg' | '.png') {
 /** A proxy's bytes on the remote: ours when it has none, theirs (with their digest) when another Mac stored one first. */
 async function uploadProxy(remote: SyncRemote, bookId: string, digest: string, bytes: Uint8Array, ext: '.jpg' | '.png') {
   const key = proxyBlobKey(bookId, digest, ext);
-  if (await remote.hasBlob(key)) {
+  if (await remote.listsBlob(key) || (await remote.putBlob(key, bytes)).existed) {
     const existing = await remote.getBlob(key);
     // A proxy another Mac is still writing (a synced folder delivers files piecemeal) must not enter a snapshot.
     if (!existing || !await decodes(existing, ext)) throw new RemoteSyncingError('a photo preview has not fully arrived yet.');
     return { sha256: sha(existing), ext };
   }
-  await remote.putBlob(key, bytes);
   return { sha256: sha(bytes), ext };
 }
 
@@ -327,14 +348,14 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
   const state = await captureBookState(root);
   const bookId = state.project.bookId;
   if (!bookId) throw new Error('This book has no lineage ID yet. Make an edit, then sync.');
-  for (const [path, digest] of Object.entries(state.contentDigests)) {
+  await eachAtOnce(contentFiles(state), async ([path, digest]) => {
     signal?.throwIfAborted();
     const key = contentBlobKey(bookId, digest);
-    if (await remote.hasBlob(key)) continue;
+    if (await remote.listsBlob(key)) return;
     const bytes = await readFile(state.files[path]);
     if (sha(bytes) !== digest) throw new Error('The book changed during sync. Sync again.');
     await remote.putBlob(key, bytes, { sha256: digest });
-  }
+  });
   // A photo's fact from here goes up only when its original changed here since the last sync (or the snapshot lacks
   // one); an original merely left at an older digest never pushes that digest back over another Mac's re-export.
   const changed = changedOriginals(hereDigests(context), synced, hereKeys(context));
@@ -369,18 +390,25 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
   }
   const proxies: StateBlob['proxies'] = {};
   const local = await proxyStore();
-  for (const [id, fact] of Object.entries(assets)) {
-    const digest = fact.digest;
-    if (proxies[digest]) continue;
+  // Photos of one digest share a preview: they are tried in turn, until one gives it.
+  const byDigest = new Map<string, string[]>();
+  for (const [id, { digest }] of Object.entries(assets)) byDigest.set(digest, [...(byDigest.get(digest) ?? []), id]);
+  // Loaded at most once, whichever photo needs it first.
+  let opened: Promise<OpenProject> | undefined;
+  const openBook = () => opened ??= currentBook(context);
+  const addPreview = async (digest: string, id: string) => {
     signal?.throwIfAborted();
     // Unchanged photos keep the proxy the last snapshot recorded: nothing is read, decoded or downloaded again. It is
     // checked against what the remote has (the sync's listing over a bucket, the key index over iCloud, so no request
     // for one that is there): one Clean Up removed is sent again, as it was where this Mac has those bytes.
     const carried = base?.proxies[digest];
-    if (carried && (await remote.hasBlob(proxyBlobKey(bookId, digest, carried.ext)) || await restoreProxy(remote, bookId, digest, carried))) { proxies[digest] = carried; continue; }
+    if (carried && (await remote.hasBlob(proxyBlobKey(bookId, digest, carried.ext)) || await restoreProxy(remote, bookId, digest, carried))) { proxies[digest] = carried; return; }
+    // Sent before the sync held the book, and still listed: Clean Up may have removed it meanwhile.
+    const ahead = context.options.ahead?.get(digest);
+    if (ahead && await remote.listsBlob(proxyBlobKey(bookId, digest, ahead.ext))) { proxies[digest] = ahead; return; }
     const here = context.here[id];
     if (here?.path !== undefined && here.digest === digest) {
-      const book = await currentBook(context);
+      const book = await openBook();
       const photo = book.photos.get(id);
       if (photo && photo.original === here.path) {
         const path = await photoFile(photo, 'preview');
@@ -388,21 +416,24 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
         const ext = extname(path).toLowerCase() === '.png' ? '.png' : '.jpg';
         await local?.put(digest, bytes).catch((error) => console.warn('ImageFlow could not keep a sync proxy', error));
         proxies[digest] = await uploadProxy(remote, bookId, digest, bytes, ext);
-        continue;
+        return;
       }
     }
     const stored = await local?.path(digest);
     if (stored) proxies[digest] = await uploadProxy(remote, bookId, digest, await readFile(stored), extname(stored) === '.png' ? '.png' : '.jpg');
     // Missing on the remote and nowhere here: the entry stays, and a Mac that has the preview sends it again.
     else if (carried) proxies[digest] = carried;
-  }
+  };
+  await eachAtOnce([...byDigest], async ([digest, ids]) => {
+    for (const id of ids) { if (proxies[digest]) break; await addPreview(digest, id); }
+  });
   signal?.throwIfAborted();
   const portable = portableManifests(state.project, state.photos);
   const blob: StateBlob = { version: 1, project: portable.project, photos: portable.photos, assetsMeta: { version: 1, assets },
     content: state.contentDigests, originals, ...(Object.keys(named).length ? { named } : {}), proxies };
   const bytes = encodeStateBlob(blob);
   const stateDigest = sha(bytes);
-  if (!await remote.hasBlob(contentBlobKey(bookId, stateDigest))) await remote.putBlob(contentBlobKey(bookId, stateDigest), bytes, { sha256: stateDigest });
+  if (!await remote.listsBlob(contentBlobKey(bookId, stateDigest))) await remote.putBlob(contentBlobKey(bookId, stateDigest), bytes, { sha256: stateDigest });
   const coverDigest = await uploadCover(context, bookId, parentCover);
   const header = commitHeaderSchema.parse({ version: commitHeaderVersion, commitId: randomUUID(), bookId, parents, bookStateRevision: state.revision,
     createdAt: (context.options.now?.() ?? new Date()).toISOString(), title: state.project.title.slice(0, 400), stateDigest, ...(coverDigest ? { coverDigest } : {}) });
@@ -414,6 +445,93 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
       (assets[id]?.digest === digest || synced?.localDigests?.[id] === digest)).map(([id, { digest }]) => [id, digest])),
     localKeys: syncedKeys(context, synced, state.photos) });
   return { header, blob };
+}
+
+/** The content files of a book state, each digest once. */
+const contentFiles = ({ contentDigests }: Pick<Awaited<ReturnType<typeof captureBookState>>, 'contentDigests'>) =>
+  [...new Map(Object.entries(contentDigests).map(([path, digest]) => [digest, [path, digest] as const])).values()];
+
+/**
+ * Sends what a push will need, its content files and previews, before the sync holds the book (`DocumentSession`): a
+ * first sync of a large book takes minutes of uploads, and meanwhile the book can be edited and agents can use it. Blobs
+ * are content-addressed, so one an edit made useless is harmless (Clean Up removes it). It changes nothing in the book
+ * and nothing in its sync record, and does nothing unless the sync would push: what it cannot read or does not find
+ * as expected is left to the push, which checks everything again under the hold.
+ *
+ * `ahead` collects the previews known to be whole on the remote; the caller keeps it for this remote between tries, so
+ * a sync that was stopped does not read them back.
+ */
+export async function uploadAhead({ remote: unbounded, book, ahead, signal, progress }: { remote: SyncRemote; book: OpenProject; ahead: UploadedPreviews;
+  signal?: AbortSignal; progress?: (done: number, total: number) => void }) {
+  signal?.throwIfAborted();
+  const root = await realpath(book.folder);
+  const remote = abortableRemote(unbounded, signal);
+  const record = await readSyncState(root);
+  if (record.pull) return;
+  const state = await captureBookState(root);
+  const bookId = state.project.bookId;
+  if (!bookId) return;
+  const endSync = await remote.prepareSync?.(bookId);
+  try {
+    const commits = await remoteCommits(remote, bookId);
+    // A book deleted from sync gets nothing stored again; the sync itself says so.
+    if (await deletedFromSync(remote, bookId, commits.length)) return;
+    const decision = decideSync({ pullInProgress: false, tips: deriveTips(commits), commits, lastSynced: record.lastSynced, localRevision: state.revision, factsChanged: false });
+    if (decision.action !== 'initial-push' && decision.action !== 'push') return;
+    const facts = photoFacts((await AssetFacts.forBook(root)).all(), state.photos);
+    const base = record.lastSynced && decision.action === 'push' ? (await fetchState(remote, bookId, record.lastSynced.stateDigest, undefined, { cached: true })).proxies : {};
+    const store = await SourceStore.forBook(root, book.cache);
+    const local = await proxyStore();
+    const kept = await keptOriginals(root);
+    const jobs: (() => Promise<void>)[] = [];
+    for (const [path, digest] of contentFiles(state)) {
+      const key = contentBlobKey(bookId, digest);
+      if (await remote.listsBlob(key)) continue;
+      jobs.push(async () => {
+        const bytes = await readFile(state.files[path]).catch(() => undefined);
+        if (bytes && sha(bytes) === digest) await remote.putBlob(key, bytes, { sha256: digest });
+      });
+    }
+    const started = new Set<string>();
+    const sendPreview = async (digest: string, path: string) => {
+      const bytes = await readFile(path).catch(() => undefined);
+      if (!bytes) return;
+      const ext = extname(path).toLowerCase() === '.png' ? '.png' : '.jpg';
+      const { sha256 } = await uploadProxy(remote, bookId, digest, bytes, ext);
+      ahead.set(digest, { sha256, ext });
+    };
+    for (const source of sourceEntries({ project: book.project, photoIndex: state.photos })) {
+      if (source.kind !== 'photo' || kept.has(source.id)) continue;
+      const known = facts[source.id]?.digest;
+      if (known !== undefined && (ahead.has(known) || base[known])) continue;
+      jobs.push(async () => {
+        let digest: string | undefined = known;
+        let path = digest === undefined ? undefined : await local?.path(digest);
+        if (!path && isFileLocator(source.locator)) {
+          // The preview of a file is made only from the very snapshot its digest was read from.
+          let resolved = await store.resolve(root, source);
+          if (resolved.status.state === 'available' && !resolved.status.digest) { await store.digested(); resolved = await store.resolve(root, source); }
+          const photo = book.photos.get(source.id);
+          if (resolved.status.state !== 'available' || !photo || resolved.stored?.snapshot !== photo.original) return;
+          digest = resolved.status.digest;
+          path = digest === undefined ? undefined : await photoFile(photo, 'preview');
+          // Kept for the sync that follows, as a push keeps it.
+          if (digest && path) await local?.put(digest, path).catch((error) => console.warn('ImageFlow could not keep a sync proxy', error));
+        }
+        // Two photos of one digest share a preview.
+        if (!digest || !path || started.has(digest) || ahead.has(digest) || base[digest]) return;
+        started.add(digest);
+        await sendPreview(digest, path);
+      });
+    }
+    let done = 0;
+    if (jobs.length) progress?.(0, jobs.length);
+    await eachAtOnce(jobs, async (job) => {
+      signal?.throwIfAborted();
+      await job();
+      progress?.(++done, jobs.length);
+    });
+  } finally { endSync?.(); }
 }
 
 /**
@@ -463,7 +581,7 @@ async function uploadCover(context: Context, bookId: string, parentCover: string
   if (digest === parentCover) return parentCover;
   const key = coverBlobKey(bookId, digest);
   try {
-    if (!await context.remote.hasBlob(key)) await context.remote.putBlob(key, bytes, { sha256: digest });
+    if (!await context.remote.listsBlob(key)) await context.remote.putBlob(key, bytes, { sha256: digest });
     return digest;
   } catch (error) {
     if (error instanceof BookDeletedError) throw error;
@@ -657,7 +775,8 @@ async function keepBoth(context: Context, tips: CommitHeader[], localRevision: s
 }
 
 /** Gives a book from before lineage IDs its `bookId` (ADR 0010), the key of its commits on a remote. */
-async function ensureBookId(root: string) {
+/** Gives a book its lineage ID, with the book held; whether it had none. */
+export async function ensureBookId(root: string) {
   const before = { 'project.json': await readFile(join(root, 'project.json')), 'photos.json': await readFile(join(root, 'photos.json')) };
   const project = parseDocument(projectSchema, JSON.parse(before['project.json'].toString('utf8')), 'project.json');
   if (project.bookId) return false;

@@ -1422,7 +1422,7 @@ async function syncCommand(document: DocumentSession, action: SyncAction) {
   else if (action === 'download') await document.downloadSyncedOriginals();
   else if (action === 'cancel-download') document.cancelDownload();
   else if (action === 'stop') {
-    if (document.bookSync !== 'syncing' && document.bookSync !== 'unavailable') throw new Error('This book does not sync on this Mac.');
+    if (document.bookSync !== 'syncing' && document.bookSync !== 'unavailable' && !document.sendingAhead) throw new Error('This book does not sync on this Mac.');
     await stopSyncingDocument(document);
   }
   else if (action === 'manage-storage') await shell.openExternal(manageICloudStorage);
@@ -1570,7 +1570,7 @@ function updateMenus() {
     // Originals another Mac is still uploading cannot be downloaded yet.
     'sync-download': !!sync && !sync.syncing && !sync.downloading && (sync.status?.pendingOriginals ?? 0) > (sync.status?.notUploaded ?? 0),
     'sync-start': state.document && state.writable && (standing === 'off' || standing === 'stopped' || standing === 'elsewhere'),
-    'sync-stop': syncs && !sync?.syncing, 'sync-setup': !syncService.configured };
+    'sync-stop': (syncs && !sync?.syncing) || !!sync?.sending, 'sync-setup': !syncService.configured };
   for (const [id, enabled] of Object.entries(syncEnabled)) { const item = menu?.getMenuItemById(id); if (item) item.enabled = enabled; }
   const zoomAlias = menu?.getMenuItemById('zoom-in-equals');
   if (zoomAlias) zoomAlias.enabled = commandState('zoom-in', state).enabled;
@@ -1916,6 +1916,8 @@ void app.whenReady().then(async () => {
   if (!app.isPackaged && Number.isFinite(idle) && idle > 0) DocumentSession.autoSyncTiming = { ...DocumentSession.autoSyncTiming, idle };
   const slow = Number(process.env.IMAGEFLOW_SYNC_TEST_SLOW_MS);
   if (!app.isPackaged && Number.isFinite(slow) && slow > 0) DocumentSession.automaticSyncDelay = slow;
+  const sending = Number(process.env.IMAGEFLOW_SYNC_TEST_SENDING_MS);
+  if (!app.isPackaged && Number.isFinite(sending) && sending > 0) DocumentSession.sendingDelay = sending;
   powerMonitor.on('resume', () => { for (const document of documents.values()) { document.projectSession.inputs.invalidate(); document.autoSync.networkChanged(); } });
   watchNetwork();
   if (process.platform === 'darwin') pushNotifications.on('received-apns-notification', (_event, userInfo) => {

@@ -89,6 +89,8 @@ export type SyncStatus = {
  * background has fetched; Cancel stops it (`cancel-download`).
  */
 export type SyncView = { folder: string; status?: SyncStatus; syncing?: boolean; message?: string; downloading?: { done: number; total: number };
+  /** With `syncing`: how many of the files and previews this sync sends are on the remote. The book stays usable meanwhile. */
+  sending?: { done: number; total: number };
   /**
    * Owned originals of this book still uploading from this Mac, in the background after the commit that named them:
    * how many went up of those pending. The book itself has synced.

@@ -69,8 +69,14 @@ export interface SyncRemote {
    * else is returned, so the engine can tell a header a newer version wrote from one that is damaged. */
   listCommits(bookId: string): Promise<unknown[]>;
   hasBlob(key: string): Promise<boolean>;
-  /** Stores a blob under a key of `blobKeyPattern`, from bytes or a local file. An existing blob is kept. */
-  putBlob(key: string, source: StoreSource, options?: PutOptions): Promise<void>;
+  /**
+   * Whether a listing this remote already has (the key index, the listing of the sync running) holds a blob. False says
+   * only that none lists it: a push then stores it, conditionally, instead of asking for a blob that is mostly missing.
+   * Over iCloud every such question costs a request and counts as a failed operation, which CloudKit slows the app down for.
+   */
+  listsBlob(key: string): Promise<boolean>;
+  /** Stores a blob under a key of `blobKeyPattern`, from bytes or a local file. An existing blob is kept (`existed`). */
+  putBlob(key: string, source: StoreSource, options?: PutOptions): Promise<{ existed: boolean }>;
   /** A whole blob, or undefined when the remote does not have it (yet). For small blobs. */
   getBlob(key: string): Promise<Uint8Array | undefined>;
   /** Writes a blob to a new local file at `destination`; false when the remote does not have it (yet). For large blobs. */
@@ -379,18 +385,21 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
   }
 
   async hasBlob(key: string) {
+    return await this.listsBlob(key) || !!await this.store.head(key);
+  }
+  async listsBlob(key: string) {
     // Blobs are immutable and only Clean Up or deleting the book removes them: one the key index has is there (over a
     // store without a change feed, one the last listing of the book had). One it lacks may have arrived since, so the
     // store is asked.
     if (this.indexOf(requireBlobKey(key))?.entries.has(key)) return true;
-    if (await this.sessionListing(key.split('/')[1])?.then((listed) => listed.has(key), () => false)) return true;
-    return !!await this.store.head(key);
+    return !!await this.sessionListing(key.split('/')[1])?.then((listed) => listed.has(key), () => false);
   }
   async putBlob(key: string, source: StoreSource, options?: PutOptions) {
     this.refuseDeleted(requireBlobKey(key));
     let size = 0;
-    await this.store.putIfAbsent(requireBlobKey(key), source, { ...options, onProgress: (done, total) => { size = total ?? done; options?.onProgress?.(done, total); } });
+    const { existed } = await this.store.putIfAbsent(requireBlobKey(key), source, { ...options, onProgress: (done, total) => { size = total ?? done; options?.onProgress?.(done, total); } });
     this.noteStored(key, size);
+    return { existed };
   }
   async getBlob(key: string) { return this.store.get(requireBlobKey(key)); }
   async subscribe() {
