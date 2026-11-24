@@ -802,6 +802,9 @@ export class DocumentSession {
   private syncAutomatic = false;
   private async runSync({ start = false, auto = false, trust = false, automatic }: SyncRequest, run: { stopped: boolean }): Promise<SyncOutcome | undefined> {
     if (!this.syncService) throw new Error('Sync is not available.');
+    // Stop Syncing, or a declined “sync here?”, may still be being written: read before that, a book that was just turned
+    // off would be asked about again (`elsewhere`) or sync once more.
+    await this.stopTask?.catch(() => {});
     const connection = await this.syncService.connect(this.book.folder);
     const state = await readSyncState(this.book.folder);
     const standing = bookSync(state, connection.remoteId);
