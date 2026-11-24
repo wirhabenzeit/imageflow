@@ -2,9 +2,11 @@
 
 ## Book check
 
-The Book check runs after each change. It reports missing content, text that does not fit, low-resolution photos and template findings. Click its status-bar icon or choose **Book → Check Book** (⇧⌘K) to see issues and jump to affected spreads.
+The Book check runs after each change. It reports missing content, text that does not fit, low-resolution photos and template findings. Click its status-bar icon or choose **Book → Check Book** (⇧⌘K) to see them.
 
-On a Mac without the photos' originals, the book is shown from previews, and that is no error. A line at the end of the Book check says how many originals are on another Mac, in a Lightroom catalog that can't be reached, not downloaded yet, or still uploading from another Mac. They are only needed for printing. If the originals are on this Mac too, choose **Locate Folder…** and select their folder.
+The panel lists each problem once, with the photos and pages it concerns. What needs something done comes first. Open a row to read what it means and what to do. Click a photo or page to select its spread, with the box outlined, or go through all findings with **Previous** and **Next**. The panel stays open while you work in the book; close it with **×** or Escape.
+
+On a Mac without the photos' originals, the book is shown from previews, and that is no error. A line at the end of the panel, which the icon does not count, says how many originals are on another Mac, in a Lightroom catalog that can't be reached, not downloaded yet, or still uploading from another Mac. They are only needed for printing. If the originals are on this Mac too, choose **Locate Folder…** and select their folder.
 
 A linked file that needs your approval on this Mac, and a file that went missing on the Mac that had it, are still reported.
 

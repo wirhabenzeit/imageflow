@@ -2052,7 +2052,7 @@ async function renderPhysicalCover(root: HTMLElement, book: RenderProject, templ
       const status = box?.photo ? book.sources?.['photo:' + box.photo] : undefined;
       const unavailable = printProblem(status);
       if (unavailable) errors.push({
-        ...issue(cachedPreviewText(unavailable), 'source-unavailable', id), source: box.photo, sourceKind: 'photo', problem: unavailable,
+        ...issue(cachedPreviewText(unavailable), 'source-unavailable', id), source: box.photo, sourceKind: 'photo', state: status?.state, problem: unavailable,
         ...(status?.away ? { away: status.away } : {}), suggestion: unavailableSuggestion(status),
       });
       if (box?.photo && !photo) errors.push({ ...issue(declared.label + ' uses an unavailable photo.', 'photo-missing', id), source: box.photo, sourceKind: 'photo' });
@@ -2405,7 +2405,7 @@ export async function startRender(root: HTMLElement) {
         const unavailable = printProblem(state);
         if (unavailable) errors.push({
           ...located(spread.id, cachedPreviewText(unavailable)),
-          code: 'source-unavailable', ...onPage(page), box, source: id || undefined, sourceKind: kind, problem: unavailable,
+          code: 'source-unavailable', ...onPage(page), box, source: id || undefined, sourceKind: kind, state: state?.state, problem: unavailable,
           ...(state?.away ? { away: state.away } : {}), suggestion: unavailableSuggestion(state),
         });
         if (state?.reshaped) warnings.push({ ...located(spread.id, 'The photo changed its aspect ratio in its source after it was placed. Check how it is cropped.'),

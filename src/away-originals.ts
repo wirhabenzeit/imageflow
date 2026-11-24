@@ -104,7 +104,7 @@ export function withoutReported(warnings: readonly Issue[], errors: readonly Iss
 export function sourceWarnings(sources: Record<string, SourceStatus> | undefined): Issue[] {
   return Object.values(sources ?? {}).filter(({ problem, kind }) => problem && kind !== 'file').map((status): Issue => ({
     message: kindNames[status.kind] + ' ' + status.name + ' · ' + status.problem, code: 'project-input', source: status.id, sourceKind: status.kind,
-    problem: status.problem, ...(status.away ? { away: status.away } : {}),
+    state: status.state, problem: status.problem, ...(status.away ? { away: status.away } : {}),
   })).sort((a, b) => a.message.localeCompare(b.message));
 }
 const kindNames: Record<SourceKind, string> = { photo: 'Photo', markdown: 'Text', file: 'File' };
