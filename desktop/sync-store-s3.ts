@@ -15,7 +15,8 @@ import type { S3SyncBackend } from '../src/settings';
  *
  * - Requests are signed with SigV4 (desktop/sync-s3-signer.ts) and sent with `fetch`; the few calls are written here.
  * - `putIfAbsent` looks first (a large original that is there is not uploaded again), then writes with
- *   `If-None-Match: *`. A service that rejects the header gets plain puts from then on: blobs are content-addressed and
+ *   `If-None-Match: *`. The look is left out for small objects in memory (previews, content) once the service proved that
+ *   it refuses to replace an object (`enforced`). A service that rejects the header gets plain puts from then on: blobs are content-addressed and
  *   commit IDs are UUIDs, so a race of two writers can only put the same bytes under a key, and the remote's identity is
  *   always read back (ADR 0012, Remote identity).
  * - Uploads are single PUTs streamed from the file with the SHA-256 the caller has (`x-amz-content-sha256`), so a
@@ -139,6 +140,17 @@ export class S3Store implements SyncStore {
   readonly addressing: 'path' | 'virtual';
   /** False once the service refused `If-None-Match: *`: puts then look first and write plainly. */
   conditionalWrites = true;
+  /**
+   * Whether the service answered a conditional put with 412, which proves that it enforces the condition. One that
+   * ignores the header answers every put alike, and there only the look keeps a put from replacing an object (a preview
+   * another Mac stored, which its snapshot records by its SHA-256). Until it is proven, every put looks first.
+   */
+  private enforced = false;
+  /** Small puts that stored something before the service was asked for that proof; a sync of a few never asks. */
+  private smallPuts = 0;
+  static readonly proveAfter = 8;
+  /** Objects in memory up to this size are sent without a look: a refused one wastes little. */
+  static readonly smallObject = 2 * 1024 * 1024;
   /** Whether the bucket answered once: until then a 404 without a body (HEAD) is checked to be a key, not the bucket. */
   private bucketConfirmed = false;
   private readonly retries: number;
@@ -316,8 +328,11 @@ export class S3Store implements SyncStore {
     if (size > maxObjectSize) {
       throw new Error('“' + (file ? basename(file) : key) + '” is ' + (size / 1024 ** 3).toFixed(1) + ' GiB, more than the 5 GiB one upload to a bucket can hold, so it is not synced.');
     }
-    // Looked at first, so a large original that is there already is not uploaded to find that out.
-    if (await this.head(key, signal)) return { existed: true };
+    // Looked at first, so a large original that is there already is not uploaded to find that out, and so nothing is
+    // replaced at a service not known to refuse it.
+    const small = !!bytes && size <= S3Store.smallObject;
+    const looked = !(small && this.conditionalWrites && this.enforced);
+    if (looked && await this.head(key, signal)) return { existed: true };
     let digest: string;
     if (bytes) {
       digest = sha256Hex(bytes);
@@ -327,14 +342,19 @@ export class S3Store implements SyncStore {
     }
     signal?.throwIfAborted();
     const report = monotonic(onProgress);
-    const existed = await this.put(full, { bytes, file, size, digest, signal, report, key });
+    const existed = await this.put(full, { bytes, file, size, digest, signal, report, key, looked });
+    // The same bytes again, once: a service that enforces the condition refuses them (`enforced`), and one that ignores it
+    // puts what is there already. The object is stored whatever comes of it.
+    if (small && !existed && this.conditionalWrites && !this.enforced && ++this.smallPuts === S3Store.proveAfter) {
+      await this.put(full, { bytes, size, digest, signal, key }).catch(() => {});
+    }
     if (!existed) report(size, size);
     return { existed };
   }
 
   /** One conditional PUT (a plain one where the service refused the condition); true when the object was there. */
-  private async put(full: string, { bytes, file, size, digest, claimed = digest, signal, report = () => {}, key = full, conditional = this.conditionalWrites }: {
-    bytes?: Uint8Array; file?: string; size: number; digest: string; claimed?: string; signal?: AbortSignal; report?: (n: number, total?: number) => void; key?: string; conditional?: boolean;
+  private async put(full: string, { bytes, file, size, digest, claimed = digest, signal, report = () => {}, key = full, conditional = this.conditionalWrites, looked = true }: {
+    bytes?: Uint8Array; file?: string; size: number; digest: string; claimed?: string; signal?: AbortSignal; report?: (n: number, total?: number) => void; key?: string; conditional?: boolean; looked?: boolean;
   }): Promise<boolean> {
     const url = this.url(full);
     const attempt = (withCondition: boolean) => this.call('write', async (live, poke): Promise<'stored' | 'existed' | S3ResponseError> => {
@@ -342,7 +362,7 @@ export class S3Store implements SyncStore {
       const response = await this.send('PUT', url, { signal: live, body, payloadSha256: claimed,
         headers: { 'content-length': String(size), ...(withCondition ? { 'if-none-match': '*' } : {}) } });
       if (response.ok) { await response.body?.cancel(); return 'stored' as const; }
-      if (response.status === 412) { await response.body?.cancel(); return 'existed' as const; }
+      if (response.status === 412) { this.enforced ||= withCondition; await response.body?.cancel(); return 'existed' as const; }
       const error = await S3Store.fail(response).catch((failure: S3ResponseError) => failure);
       // Perhaps the condition is refused: tried again without it, by the caller.
       if (withCondition && (response.status === 501 || (response.status === 400 && ['NotImplemented', 'InvalidArgument', 'InvalidRequest'].includes(error.code)))) return error;
@@ -351,6 +371,8 @@ export class S3Store implements SyncStore {
     }, signal);
     const outcome = await attempt(conditional);
     if (!(outcome instanceof S3ResponseError)) return outcome === 'existed';
+    // A put sent without a look looks now: nothing is replaced by a plain one.
+    if (!looked && await this.head(key, signal)) return true;
     // The look before found nothing, so the put is tried plainly. Conditional writes go off for this store only when
     // that works, or when the refusal named the condition: a 400 for another reason leaves them on.
     const named = outcome.status === 501 || /if-none-match|conditional/i.test(outcome.message);

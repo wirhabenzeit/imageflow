@@ -2410,6 +2410,8 @@ export async function startRender(root: HTMLElement) {
         });
         if (state?.reshaped) warnings.push({ ...located(spread.id, 'The photo changed its aspect ratio in its source after it was placed. Check how it is cropped.'),
           code: 'source-reshaped', ...onPage(page), box, source: id || undefined });
+        if (state?.outOfDate) warnings.push({ ...located(spread.id, 'The photo is shown as it was before its latest edit in its source. Export prints it as it is now.'),
+          code: 'source-out-of-date', ...onPage(page), box, source: id || undefined, suggestion: 'Return to Lightroom’s Library, or choose Refresh from Lightroom Classic in the asset’s menu.' });
       }
     }
     for (const [i, result] of decoded.entries()) {

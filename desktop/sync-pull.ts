@@ -208,6 +208,11 @@ export class SyncHalfPulledError extends Error {
   }
 }
 
+/** Sync was turned off (Stop Syncing, a withdrawn trust, Delete from Sync) before a sync held the book; no failure. */
+export class SyncStoppedError extends Error {
+  constructor() { super('Syncing this book was stopped.'); this.name = 'SyncStoppedError'; }
+}
+
 /**
  * Makes a book sync on this Mac with the remote `remoteId`, again after Stop Syncing with the history it had. A book
  * that last synced with another remote (or a sync folder before ADR 0012) starts there only with `newHistory`, and
@@ -217,7 +222,9 @@ export class SyncHalfPulledError extends Error {
  * finished (it is given up, `finishPull`, as at every other place) or that was given up before throws
  * `SyncHalfPulledError` and starts nothing. Finishing a pull needs the writer lock.
  */
-export async function startSyncing(folder: string, remoteId: string, { newHistory = false }: { newHistory?: boolean } = {}) {
+export async function startSyncing(folder: string, remoteId: string, { newHistory = false, unless }: { newHistory?: boolean;
+  /** Asked with the record as it is written, so nothing that turned sync off meanwhile is undone: `SyncStoppedError`. */
+  unless?: (state: SyncState) => boolean } = {}) {
   const before = await readSyncState(folder);
   if (syncedElsewhere(before, remoteId)) {
     if (!newHistory) throw new SyncElsewhereError();
@@ -229,6 +236,7 @@ export async function startSyncing(folder: string, remoteId: string, { newHistor
     if (abandoned) throw new SyncHalfPulledError(abandoned.error);
   }
   await updateSyncState(folder, (state) => {
+    if (unless?.(state)) throw new SyncStoppedError();
     if (state.remoteId === remoteId && state.enabled === true) return state;
     if (!syncedElsewhere(state, remoteId)) return { ...state, remoteId, enabled: true };
     if (!newHistory) throw new SyncElsewhereError();

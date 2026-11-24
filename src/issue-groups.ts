@@ -48,6 +48,8 @@ const texts: Record<string, CheckText> = {
   'layout-render-failed': { title: 'Layout failed' },
   'render-impure': { title: 'Layout depends on something outside the book' },
   'source-reshaped': { title: 'Photo changed its shape', detail: 'It has another aspect ratio in its source than when it was placed.', fix: 'Check how it is cropped.' },
+  'source-out-of-date': { title: 'Preview out of date', detail: 'The photo is shown as it was before its latest edit in its source. Export prints it as it is now.',
+    fix: 'Return to Lightroom’s Library, or choose Refresh from Lightroom Classic in the asset’s menu.' },
   'parameter-invalid': { title: 'Setting not allowed' },
   'content-undeclared': { title: 'Content without a box' },
   'element-undeclared': { title: 'Settings without an element' },

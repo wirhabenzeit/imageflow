@@ -10,7 +10,7 @@ import { SourceBadge, sourceOrigin } from './SourceBadge';
 import { TaskStatus, taskProgress } from './TaskStatus';
 import type { TaskProgress } from './desktop';
 import { sourceList } from './source-items';
-import { sourceEntries, sourceFile, sourceFolderName, sourceReach } from './source-locations';
+import { outOfDateNote, sourceEntries, sourceFile, sourceFolderName, sourceReach } from './source-locations';
 import { useListSelection } from './list-selection';
 import { fileExtensionMime, fileMime, photoMime, textMime } from './source-items';
 import type { SourceRef } from './source-items';
@@ -65,6 +65,9 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const offers = (key: string, repair: SourceRepair) => unavailable(key) && (summary.sources![key].repairs ?? ['locate', 'locate-folder']).includes(repair);
   const missing = entries.filter((entry) => offers(entry.key, 'locate-folder')).length;
   const launchable = entries.filter((entry) => offers(entry.key, 'launch'));
+  // Photos edited in Lightroom of which it has no preview as they are now; a request takes up to 1000 assets.
+  const outOfDate = entries.filter((entry) => summary.sources?.[entry.key]?.outOfDate).slice(0, 1000);
+  const loading = entries.filter((entry) => summary.sources?.[entry.key]?.pending).length;
   async function act(request: SourceAction) {
     setBusy(true); busyRef.current = true; setProgress(undefined); setError(undefined); setNotice('');
     try {
@@ -100,7 +103,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const shown = entries.filter((entry) => (kind === 'all' || kind === entry.kind) &&
     (used === 'all' || (used === 'used') === !!placements(entry).length) &&
     // Linked: anything not stored in the book, whether a file elsewhere or a photo of another provider.
-    (storage === 'all' || (storage === 'linked') === (sourceReach(entry) !== 'book')) && (!attention || unavailable(entry.key)) &&
+    (storage === 'all' || (storage === 'linked') === (sourceReach(entry) !== 'book')) && (!attention || (unavailable(entry.key) && !summary.sources?.[entry.key]?.pending) || summary.sources?.[entry.key]?.outOfDate) &&
     entry.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
   const groups = photoGroups(summary, shown.filter((entry) => entry.kind === 'photo').map(({ id }) => id), view.value);
   const headers = new Map(groups.filter((group) => group.label).map((group) => [group.ids[0], group]));
@@ -155,8 +158,8 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
       {shown.map((entry) => {
         const status = summary.sources?.[entry.key];
         const problem = unavailable(entry.key);
-        const badge = problem ? status?.away ? awayBadge[status.away] : status?.state === 'unapproved' ? 'Locate to approve' : status?.state === 'missing' ? 'Missing'
-          : status?.state === 'denied' ? 'Access denied' : status?.state === 'offline' ? 'Offline' : status?.state === 'needs-sign-in' ? 'Sign in needed' : 'Unavailable' : undefined;
+        const badge = status?.pending ? 'Loading preview' : problem ? status?.away ? awayBadge[status.away] : status?.state === 'unapproved' ? 'Locate to approve' : status?.state === 'missing' ? 'Missing'
+          : status?.state === 'denied' ? 'Access denied' : status?.state === 'offline' ? 'Offline' : status?.state === 'needs-sign-in' ? 'Sign in needed' : 'Unavailable' : status?.outOfDate ? 'Out of date' : undefined;
         const file = sourceFile(entry);
         const group = entry.kind === 'photo' ? headers.get(entry.id) : undefined;
         return <Fragment key={entry.key}>
@@ -193,7 +196,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
               }} />
             : <strong>{entry.name}</strong>}
             {(file?.linked || problem) && sourceFolderName(entry) && <span className="muted">{sourceFolderName(entry)}</span>}</span></span>
-          <span className="asset-status">{entry.kind === 'markdown' && <EditMarkdown api={api} id={entry.id} name={entry.name} disabled={locked || problem} failure={(message) => setError({ message })} />}{entry.kind === 'photo' && view.value.showTime && <span className="muted" title={photoDate(summary, entry.id)?.capturedEstimated ? 'Estimated from file modification time' : undefined}>{captureLabel(photoDate(summary, entry.id)?.captured, photoDate(summary, entry.id)?.capturedEstimated)}{photoDate(summary, entry.id)?.capturedEstimated ? ' ≈' : ''}</span>}<span className="muted">{placements(entry).length ? placements(entry).length + '×' : 'Not used'}</span>{badge && <span className={'source-badge' + (status?.away ? '' : ' warning')} title={status?.problem}>{badge}</span>}
+          <span className="asset-status">{entry.kind === 'markdown' && <EditMarkdown api={api} id={entry.id} name={entry.name} disabled={locked || problem} failure={(message) => setError({ message })} />}{entry.kind === 'photo' && view.value.showTime && <span className="muted" title={photoDate(summary, entry.id)?.capturedEstimated ? 'Estimated from file modification time' : undefined}>{captureLabel(photoDate(summary, entry.id)?.captured, photoDate(summary, entry.id)?.capturedEstimated)}{photoDate(summary, entry.id)?.capturedEstimated ? ' ≈' : ''}</span>}<span className="muted">{placements(entry).length ? placements(entry).length + '×' : 'Not used'}</span>{badge && <span className={'source-badge' + (status?.pending || status?.away ? '' : ' warning')} title={status?.outOfDate ? outOfDateNote : status?.problem}>{badge}</span>}
             {view.value.showSource ? <SourceBadge origin={sourceOrigin(entry)!} className="asset-origin" />
               : file?.linked && <span className="asset-linked" role="img" aria-label="Linked to original file" title="Linked to original file"><Icon name="link" size={16} /></span>}
           </span>
@@ -204,8 +207,10 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
     </div>
     <footer className="asset-status-bar">
       {progress ? <span className="asset-progress" role="status"><TaskStatus progress={progress} cancel={progress.cancel ? () => void api.cancelExport() : undefined} /></span>
-        : <span className="muted">{shown.length} of {entries.length}{chosen.length ? ' · ' + chosen.length + ' selected' : ''}</span>}
+        : <span className="muted">{shown.length} of {entries.length}{chosen.length ? ' · ' + chosen.length + ' selected' : ''}{loading ? ' · ' + loading + (loading === 1 ? ' preview' : ' previews') + ' loading' : ''}</span>}
       {missing > 0 && <button disabled={locked} onClick={() => void act({ action: 'locate-folder', keys: everyKey(({ key }) => offers(key, 'locate-folder')) })}>Locate Folder…</button>}
+      {outOfDate.length > 0 && <button disabled={locked} title={outOfDateNote} onClick={() => void act({ action: 'refresh', keys: outOfDate.map(({ key }) => key) })}>
+        Refresh {outOfDate.length === 1 ? '1 Photo' : outOfDate.length + ' Photos'} from Lightroom</button>}
       {launchable.length > 0 && <button disabled={locked} onClick={() => void act({ action: 'launch', keys: launchable.map(({ key }) => key) })}>Open Lightroom Classic</button>}
       {linked > 0 && <button disabled={locked || (chosen.length > 0 && !copyCount)} onClick={() => void act({ action: 'collect', keys: copyKeys })}>
         {chosen.length ? 'Copy ' + copyCount + ' Selected into Book…' : 'Copy All ' + linked + ' into Book…'}</button>}

@@ -89,6 +89,8 @@ export type SyncStatus = {
  * background has fetched; Cancel stops it (`cancel-download`).
  */
 export type SyncView = { folder: string; status?: SyncStatus; syncing?: boolean; message?: string; downloading?: { done: number; total: number };
+  /** With `syncing`: how many of the files and previews this sync sends are on the remote. The book stays usable meanwhile. */
+  sending?: { done: number; total: number };
   /**
    * Owned originals of this book still uploading from this Mac, in the background after the commit that named them:
    * how many went up of those pending. The book itself has synced.
@@ -234,7 +236,7 @@ export type LibraryBook = { bookId: string; title: string; updatedAt?: string; v
  */
 export type LibraryAction = { action: 'download' | 'delete' | 'update'; bookId: string } | { action: 'start' | 'stop' | 'keep-here' | 'sync-again' | 'delete'; id: string };
 
-export type SourceAction = { action: 'retry' | 'launch' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump' | 'import' | 'rename'; spread?: string; key?: string; keys?: string[]; accept?: string[]; paths?: string[]; name?: string };
+export type SourceAction = { action: 'retry' | 'refresh' | 'launch' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump' | 'import' | 'rename'; spread?: string; key?: string; keys?: string[]; accept?: string[]; paths?: string[]; name?: string };
 
 export type ContextMenuItem = import('./commands').RegisteredCommand | { command: import('./commands').RegisteredCommand; value?: string; label?: string; enabled?: boolean; checked?: boolean; items?: ContextMenuItem[] } | { type: 'separator' };
 export type ContextMenuResult = { command: import('./commands').RegisteredCommand; value?: string };

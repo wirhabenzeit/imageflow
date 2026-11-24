@@ -28,13 +28,24 @@ export class FakeLightroom {
   renderOutside?: string;
   /** Holds every render job until this resolves. */
   renderGate?: Promise<void>;
+  /** Photos Lightroom has no preview of now: thumbnails of them are refused, as of one being edited in Develop. */
+  readonly refused = new Set<string>();
+  /** The colour a thumbnail shows instead of the photo's own: one from before an edit. */
+  readonly keptColor = new Map<string, string>();
+  /** The long edge of a thumbnail, where it is not 1440 px. */
+  readonly keptEdge = new Map<string, number>();
+  /** Fails every thumbnails job. */
+  thumbnailsFail = false;
+  /** Holds every thumbnails job until this resolves. */
+  thumbnailGate?: Promise<void>;
   session?: string;
   private running = false;
   private poll?: AbortController;
   private loop?: Promise<void>;
   private bridge?: { port: number; token: string };
 
-  constructor(private readonly file: string) {}
+  /** `version` is the installed plugin's: 1.1.0 is the first to answer `thumbnails`. */
+  constructor(private readonly file: string, private readonly version = '1.0.0') {}
 
   add(n: number, photo: Partial<FakePhoto> = {}) {
     this.photos.set(uuid(n), { lastEditTime: 785_000_000 + n, editCount: 1, width: 6000, height: 4000, develop: { Exposure2012: 0 },
@@ -63,7 +74,7 @@ export class FakeLightroom {
   /** Reads the bridge file, says hello and starts polling. Resolves with the hello's answer. */
   async connect() {
     this.bridge = JSON.parse(await readFile(this.file, 'utf8'));
-    const hello = await this.call('POST', '/lightroom/hello', { catalog: this.catalog, plugin: { version: '1.0.0' }, lightroom: '16.0.1' });
+    const hello = await this.call('POST', '/lightroom/hello', { catalog: this.catalog, plugin: { version: this.version }, lightroom: '16.0.1' });
     if (hello.status !== 200) throw new Error('hello failed: ' + hello.status);
     this.session = hello.body.session as string;
     this.watched = hello.body.watch as string[];
@@ -122,6 +133,24 @@ export class FakeLightroom {
       const photos = job.photos as { uuid: string; known?: string }[];
       return { photos: photos.filter(({ uuid: id }) => this.photos.has(id)).map(({ uuid: id, known }) => this.row(id, known)),
         missing: photos.filter(({ uuid: id }) => !this.photos.has(id)).map(({ uuid: id }) => id) };
+    }
+    if (job.type === 'thumbnails' && this.version !== '1.0.0') {
+      await this.thumbnailGate;
+      if (this.thumbnailsFail) throw new Error('The thumbnails failed.');
+      const thumbnails = [], missing = [], refused = [];
+      for (const { uuid: id, known } of job.photos as { uuid: string; known?: string }[]) {
+        const photo = this.photos.get(id);
+        if (!photo) { missing.push(id); continue; }
+        if (this.refused.has(id)) { refused.push({ uuid: id, error: 'error loading thumb' }); continue; }
+        const before = { revision: this.revision(id) };
+        const scale = (this.keptEdge.get(id) ?? 1440) / Math.max(photo.width, photo.height);
+        const file = join(job.folder as string, 'thumbnail-' + id + '.jpg');
+        await writeFile(file, await sharp({ create: { width: Math.round(photo.width * scale), height: Math.round(photo.height * scale), channels: 3, background: this.keptColor.get(id) ?? photo.color } }).jpeg().toBuffer());
+        this.duringRender?.(id);
+        const revision = this.revision(id);
+        thumbnails.push({ uuid: id, file, before, after: { revision, ...(known === revision ? {} : { developHash: this.developHash(id) }) } });
+      }
+      return { thumbnails, missing, refused };
     }
     if (job.type === 'render') {
       await this.renderGate;

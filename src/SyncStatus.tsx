@@ -39,7 +39,7 @@ export function SyncStatus({ api, notice }: { api?: DesktopApi; notice: (message
   // A remote that refuses this Mac's access key: the click opens Settings → Sync instead of syncing.
   const signIn = !view.syncing && status?.state === 'unavailable' && status.signIn;
   const settings = signIn || (!view.syncing && status?.state === 'unavailable' && status.checkSettings);
-  const label = view.syncing ? 'Syncing…' : signIn ? 'Sign-in needed' : settings ? 'Check sync settings' : status ? labels[status.state] : 'Sync';
+  const label = view.syncing ? (view.sending ? 'Syncing ' + view.sending.done.toLocaleString('en') + ' of ' + view.sending.total.toLocaleString('en') : 'Syncing…') : signIn ? 'Sign-in needed' : settings ? 'Check sync settings' : status ? labels[status.state] : 'Sync';
   const pending = status?.pendingOriginals ? ' ' + status.pendingOriginals + (status.pendingOriginals === 1 ? ' original is' : ' originals are') + ' only a preview on this Mac.' : '';
   // Named by a commit but not on the remote yet: still uploading from another Mac, which is no sync error.
   const elsewhere = status?.neverUploaded ?? (status?.notUploaded ? status.notUploaded + (status.notUploaded === 1 ? ' original is' : ' originals are') + ' still uploading from another Mac.' : '');
@@ -66,7 +66,7 @@ export function SyncStatus({ api, notice }: { api?: DesktopApi; notice: (message
   // Stop Syncing on This Mac from the status bar too, as in File → Sync; the app asks before it stops.
   const menu = (event: { preventDefault: () => void; clientX: number; clientY: number }) => {
     event.preventDefault();
-    if (view.syncing) return;
+    if (view.syncing && !view.sending) return;
     void api.popupMenu([{ id: 'stop', label: 'Stop Syncing on This Mac…' }], { x: Math.round(event.clientX), y: Math.round(event.clientY) })
       .then((chosen) => (chosen === 'stop' ? api.syncAction('stop') : undefined)).then((result) => { if (result && 'error' in result) notice(result.error); });
   };

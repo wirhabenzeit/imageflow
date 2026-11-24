@@ -1,12 +1,13 @@
 import { lstat, mkdtemp, realpath } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
+import { gte, valid } from 'semver';
 import type { LightroomLocator } from '../../src/source-locator';
 import { within } from './files';
 import { LightroomOffline } from '../lightroom/bridge';
 import type { LightroomBridge, LightroomConnection } from '../lightroom/bridge';
-import { metadataResultSchema, parseResult, renderResultSchema } from '../lightroom/protocol';
+import { metadataResultSchema, parseResult, renderResultSchema, thumbnailsResultSchema, thumbnailsSince } from '../lightroom/protocol';
 import type { PhotoRow, RenderState } from '../lightroom/protocol';
-import type { Materialized, MaterializeOptions, Observed, ProvidedFacts, Revisions, SourceProvider, SourceRef, Unavailable } from '../source-provider';
+import type { Materialized, MaterializeOptions, Observed, PreviewOptions, Previewed, ProvidedFacts, Revisions, SourceProvider, SourceRef, Unavailable } from '../source-provider';
 
 /**
  * Photos in a Lightroom Classic catalog (ADR 0011), read through the ImageFlow plugin over the loopback bridge. The
@@ -17,6 +18,9 @@ import type { Materialized, MaterializeOptions, Observed, ProvidedFacts, Revisio
  * - `contentRevision` is the hash of `getDevelopSettings()`: it moves for visual edits, not for metadata edits, and keys
  *   previews. It costs an SDK call per photo, so the plugin reads it only for a photo whose revision moved since the one
  *   the host stored (`known`).
+ * - Previews are the ones Lightroom keeps itself (`requestJpegThumbnail`: 25 ms per photo, against 0.2 to 0.4 s for a
+ *   render), which it keys by the develop settings. While it has none, as of a photo just edited in Develop, the photo is
+ *   deferred if it has an older picture and rendered if it has none (ADR 0011, §2). A plugin older than 1.1.0 renders all.
  * - A photo is `offline` while Lightroom is not running, the plugin is not connected or another catalog is open, and
  *   `missing` once it left the open catalog.
  */
@@ -25,6 +29,11 @@ export type LightroomPort = Pick<LightroomBridge, 'connection' | 'request' | 'tr
 // One `LrExportSession` renders several photos in parallel but cannot be cancelled, so sessions are small and an abort
 // takes effect between them (ADR 0011, §4.3; the spike measured 0.78 s per photo over a session).
 const sessionSize = 5;
+// A preview's session is larger: the more photos, the less each costs (0.32 s in sessions of 5, 0.26 s in 20, 0.19 s in
+// 40, measured), and one that is no longer wanted costs a few seconds at most.
+const previewSessionSize = 20;
+// One thumbnails job asks for this many at once, about half a second's worth, so previews show as they come.
+const thumbnailChunk = 24;
 // One metadata job reads this many photos: about 35 µs each in Lightroom, and a bounded answer.
 const metadataChunk = 500;
 
@@ -85,42 +94,105 @@ async function writtenFile(folder: string, file: string) {
   } catch { return undefined; }
 }
 
-async function* render(bridge: LightroomPort, refs: readonly SourceRef<LightroomLocator>[], size: 'preview' | 'full', { staging, signal }: MaterializeOptions): AsyncGenerator<Materialized> {
-  for (let start = 0; start < refs.length; start += sessionSize) {
-    // Between sessions only: a session cannot be stopped once Lightroom has it, and its files land in the staging folder.
+type Answer = { made: Map<string, { file: string; before: RenderState; after: RenderState }>; missing: Set<string>; failed: Map<string, string> };
+type Batch = { refs: readonly SourceRef<LightroomLocator>[]; down: Map<string, { state: Unavailable; problem: string } | undefined>; folder: string;
+  answer?: Answer; failure?: { state: Unavailable; problem: string } };
+
+/** Runs one job for a batch of photos. Never rejects: a failure of the job is each photo's. */
+async function runBatch(bridge: LightroomPort, refs: readonly SourceRef<LightroomLocator>[], staging: string,
+  job: (reachable: readonly SourceRef<LightroomLocator>[], folder: string) => Promise<Answer>): Promise<Batch> {
+  // Each photo is checked by itself: one of another catalog does not stop the others of its batch.
+  const connection = bridge.connection;
+  const down = new Map(refs.map(({ id, locator }) => [id, unreachable(locator, connection)]));
+  const reachable = refs.filter(({ id }) => !down.get(id));
+  if (!reachable.length) return { refs, down, folder: '' };
+  try {
+    // A folder of its own per job, inside the host's staging folder: what the plugin names must be in it.
+    const folder = await mkdtemp(join(await realpath(staging), 'lightroom-'));
+    try { return { refs, down, folder, answer: await job(reachable, folder) }; }
+    catch (error) { return { refs, down, folder, failure: failure(error) }; }
+  } catch (error) { return { refs, down, folder: '', failure: failure(error) }; }
+}
+
+/** The batches' results in order. `ahead` starts the next one while the host takes this one's files. */
+async function* batches(all: readonly SourceRef<LightroomLocator>[], size: number, signal: AbortSignal, ahead: boolean,
+  run: (refs: readonly SourceRef<LightroomLocator>[]) => Promise<Batch>): AsyncGenerator<Batch> {
+  let next: Promise<Batch> | undefined;
+  for (let start = 0; start < all.length; start += size) {
+    // Between jobs only: a job cannot be stopped once Lightroom has it, and its files land in the staging folder.
     if (signal.aborted) return;
-    const batch = refs.slice(start, start + sessionSize);
-    // Each photo is checked by itself: one of another catalog does not stop the others of its session.
-    const connection = bridge.connection;
-    const down = new Map(batch.map(({ id, locator }) => [id, unreachable(locator, connection)]));
-    const reachable = batch.filter(({ id }) => !down.get(id));
-    let result: { renders: Map<string, { file: string; before: RenderState; after: RenderState }>; missing: Set<string>; failed: Map<string, string> } | undefined;
-    let failed: { state: Unavailable; problem: string } | undefined;
-    // A folder of its own per session, inside the host's staging folder: what the plugin names must be in it.
-    const folder = reachable.length ? await mkdtemp(join(await realpath(staging), 'lightroom-')) : '';
-    if (reachable.length) {
-      try {
-        const answer = parseResult(renderResultSchema, await bridge.request('render', { uuids: reachable.map(({ locator }) => locator.uuid), size, folder },
-          // Full-resolution renders take about 1.5 s each, and Lightroom may be busy with the user's own export.
-          { timeout: 60_000 + reachable.length * (size === 'full' ? 30_000 : 10_000) }), 'render');
-        result = { renders: new Map(answer.renders.map(({ uuid, ...render }) => [uuidKey(uuid), render])), missing: new Set((answer.missing ?? []).map(uuidKey)),
-          failed: new Map((answer.failed ?? []).map(({ uuid, error }) => [uuidKey(uuid), error])) };
-      } catch (error) { failed = failure(error); }
+    const batch = await (next ?? run(all.slice(start, start + size)));
+    next = ahead && start + size < all.length && !signal.aborted ? run(all.slice(start + size, start + 2 * size)) : undefined;
+    yield batch;
+  }
+}
+
+async function* results(batch: Batch, absent: string): AsyncGenerator<Materialized> {
+  for (const { id, locator } of batch.refs) {
+    const unavailable = batch.down.get(id) ?? batch.failure;
+    if (unavailable) { yield { id, ...unavailable }; continue; }
+    const { made: files, missing, failed } = batch.answer!;
+    const key = uuidKey(locator.uuid);
+    const made = files.get(key);
+    if (!made) {
+      yield missing.has(key) ? { id, ...gone } : { id, state: 'unreadable', problem: 'Original unavailable: ' + (failed.get(key) ?? absent) };
+      continue;
     }
-    for (const { id, locator } of batch) {
-      const unavailable = down.get(id) ?? failed;
-      if (unavailable) { yield { id, ...unavailable }; continue; }
-      const key = uuidKey(locator.uuid);
-      const made = result!.renders.get(key);
-      if (!made) {
-        yield result!.missing.has(key) ? { id, ...gone } : { id, state: 'unreadable', problem: 'Original unavailable: ' + (result!.failed.get(key) ?? 'Lightroom Classic rendered nothing for this photo.') };
-        continue;
-      }
-      const file = await writtenFile(folder, made.file);
-      if (!file) { yield { id, state: 'unreadable', problem: 'Original unavailable: The Lightroom plugin wrote its render outside the folder ImageFlow named.' }; continue; }
-      yield { id, file, before: rendered(made.before), after: rendered(made.after) };
+    const file = await writtenFile(batch.folder, made.file);
+    if (!file) { yield { id, state: 'unreadable', problem: 'Original unavailable: The Lightroom plugin wrote its picture outside the folder ImageFlow named.' }; continue; }
+    yield { id, file, before: rendered(made.before), after: rendered(made.after) };
+  }
+}
+
+async function* render(bridge: LightroomPort, refs: readonly SourceRef<LightroomLocator>[], size: 'preview' | 'full', { staging, signal }: MaterializeOptions): AsyncGenerator<Materialized> {
+  const run = (batch: readonly SourceRef<LightroomLocator>[]) => runBatch(bridge, batch, staging, async (reachable, folder) => {
+    const answer = parseResult(renderResultSchema, await bridge.request('render', { uuids: reachable.map(({ locator }) => locator.uuid), size, folder },
+      // Full-resolution renders take about 1.5 s each, and Lightroom may be busy with the user's own export.
+      { timeout: 60_000 + reachable.length * (size === 'full' ? 30_000 : 10_000) }), 'render');
+    return { made: new Map(answer.renders.map(({ uuid, ...made }) => [uuidKey(uuid), made])), missing: new Set((answer.missing ?? []).map(uuidKey)),
+      failed: new Map((answer.failed ?? []).map(({ uuid, error }) => [uuidKey(uuid), error])) };
+  });
+  for await (const batch of batches(refs, size === 'full' ? sessionSize : previewSessionSize, signal, size === 'preview', run)) {
+    yield* results(batch, 'Lightroom Classic rendered nothing for this photo.');
+  }
+}
+
+const keepsThumbnails = (connection: LightroomConnection | undefined) => {
+  const version = connection && valid(connection.plugin.version);
+  return !!version && gte(version, thumbnailsSince);
+};
+
+async function* preview(bridge: LightroomPort, refs: readonly SourceRef<LightroomLocator>[], options: PreviewOptions): AsyncGenerator<Previewed> {
+  const { staging, signal, rendering = 'fallback' } = options;
+  if (rendering === 'always' || !keepsThumbnails(bridge.connection)) { yield* render(bridge, refs, 'preview', options); return; }
+  const refused: SourceRef<LightroomLocator>[] = [];
+  const run = (batch: readonly SourceRef<LightroomLocator>[]) => runBatch(bridge, batch, staging, async (reachable, folder) => {
+    const answer = parseResult(thumbnailsResultSchema, await bridge.request('thumbnails',
+      { photos: reachable.map(({ locator, known }) => ({ uuid: locator.uuid, ...(known?.contentRevision ? { known: known.revision } : {}) })), folder }, { timeout: 180_000 }), 'thumbnails');
+    const knownOf = new Map(reachable.map(({ locator, known }) => [uuidKey(locator.uuid), known]));
+    const made = new Map(answer.thumbnails.map(({ uuid, file, before, after }) => {
+      // The develop hash comes with another revision than the one named; for that one it is the one named with it.
+      const known = knownOf.get(uuidKey(uuid));
+      const state = ({ revision, developHash = known?.revision === revision ? known.contentRevision : undefined }: RenderState): RenderState =>
+        ({ revision, ...(developHash ? { developHash } : {}) });
+      const now = state(after);
+      return [uuidKey(uuid), { file, before: before.revision === after.revision ? now : state(before), after: now }] as const;
+    }));
+    return { made, missing: new Set((answer.missing ?? []).map(uuidKey)), failed: new Map((answer.refused ?? []).map(({ uuid, error }) => [uuidKey(uuid), error])) };
+  });
+  for await (const batch of batches(refs, thumbnailChunk, signal, true, run)) {
+    // Refused by Lightroom, or the whole job failed without Lightroom being gone: a render may still work.
+    const turned = new Set(batch.refs.filter(({ id, locator }) => !batch.down.get(id) &&
+      (batch.answer ? batch.answer.failed.has(uuidKey(locator.uuid)) : batch.failure?.state === 'unreadable')));
+    for (const ref of turned) {
+      if (rendering === 'never') yield { id: ref.id, deferred: true };
+      else refused.push(ref);
+    }
+    for await (const result of results({ ...batch, refs: batch.refs.filter((ref) => !turned.has(ref)) }, 'Lightroom Classic has no preview of this photo.')) {
+      yield 'file' in result ? { ...result, kept: true } : result;
     }
   }
+  if (refused.length) yield* render(bridge, refused, 'preview', options);
 }
 
 /** The Lightroom Classic provider over a bridge (desktop/lightroom/bridge.ts). */
@@ -129,6 +201,9 @@ export function lightroomProvider(bridge: LightroomPort): SourceProvider<Lightro
   // connection when the watch starts: a book that loaded just before Lightroom connected has its photos offline, and
   // the plugin connecting before its watch started must still bring them back.
   const observedWith = new Map<string, string>();
+  // The develop hash last read of each photo, with its revision: a photo whose preview the host does not have yet is
+  // observed again with every load, and the plugin reads a hash once per revision.
+  const hashes = new Map<string, Revisions>();
   const catalogKey = () => JSON.stringify(bridge.connection?.catalog.id ?? null);
   return {
     provider: 'lightroom',
@@ -138,22 +213,29 @@ export function lightroomProvider(bridge: LightroomPort): SourceProvider<Lightro
       const results: (Observed | undefined)[] = refs.map(({ locator }) => unreachable(locator, connection));
       // Only photos of the open catalog are asked for: a UUID means nothing in another one.
       const open = refs.flatMap((ref, index) => results[index] ? [] : [{ ref, index }]);
+      const hashKey = ({ catalog, uuid }: LightroomLocator) => catalog + ':' + uuidKey(uuid);
+      // Without a stored develop hash there is nothing to compare: the plugin then reads it.
+      const known = ({ locator, known: stored }: SourceRef<LightroomLocator>) => stored?.contentRevision ? stored : hashes.get(hashKey(locator));
       for (let start = 0; start < open.length; start += metadataChunk) {
         const chunk = open.slice(start, start + metadataChunk);
         try {
-          const answer = parseResult(metadataResultSchema, await bridge.request('metadata', { photos: chunk.map(({ ref: { locator, known } }) =>
-            // Without a stored develop hash there is nothing to compare: the plugin then reads it.
-            ({ uuid: locator.uuid, ...(known?.contentRevision ? { known: known.revision } : {}) })) }, { timeout: 60_000 }), 'metadata');
+          const answer = parseResult(metadataResultSchema, await bridge.request('metadata', { photos: chunk.map(({ ref }) => {
+            const revision = known(ref)?.revision;
+            return { uuid: ref.locator.uuid, ...(revision ? { known: revision } : {}) };
+          }) }, { timeout: 60_000 }), 'metadata');
           const rows = new Map(answer.photos.map((row) => [uuidKey(row.uuid), row]));
           for (const { ref, index } of chunk) {
             const row = rows.get(uuidKey(ref.locator.uuid));
-            results[index] = row ? { state: 'available', revisions: revisionsOf(row, ref.known), facts: lightroomFacts(row) } : gone;
+            if (!row) { results[index] = gone; continue; }
+            const revisions = revisionsOf(row, known(ref));
+            if (revisions.contentRevision) hashes.set(hashKey(ref.locator), revisions);
+            results[index] = { state: 'available', revisions, facts: lightroomFacts(row) };
           }
         } catch (error) { for (const { index } of chunk) results[index] = failure(error); }
       }
       return results as Observed[];
     },
-    preview: (_book, refs, options) => render(bridge, refs, 'preview', options),
+    preview: (_book, refs, options) => preview(bridge, refs, options),
     materialize: (_book, refs, options) => render(bridge, refs, 'full', options),
     watch(book, refs, changed) {
       const ids = new Map<string, string[]>();

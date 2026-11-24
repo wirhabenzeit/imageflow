@@ -123,6 +123,20 @@ try {
   await app.browserWindow(markdown).then((window) => window.evaluate((window) => window.close()));
   await until(async () => await caption(laptop, 'shore') === 'While the laptop edits text', 'the pull ran once the editor closed');
 
+  // An editor that opens after an automatic pull began, and before it is applied (the 1.5 s it waits here), holds it back
+  // just the same: the pull is asked again as it is applied.
+  const pushedAgain = (await tips(bookId))[0].commitId;
+  await setCaption(desktop, 'shore', 'While the laptop begins to edit');
+  await until(async () => (await tips(bookId))[0]?.commitId !== pushedAgain, 'the desktop pushed once more');
+  await until(async () => { await focus(laptop); return await laptop.evaluate(() => document.querySelector('.sync-status')?.getAttribute('data-state') === 'syncing'); }, 'the laptop begins to pull');
+  const editing = (textEditing) => laptop.evaluate((textEditing) => window.imageflow.setBookMenuState({ document: true, enabled: {}, editing: false, textEditing, writable: true, busy: false,
+    saving: false, undo: null, redo: null, checking: false, checkProblems: 0 }), textEditing);
+  await editing(true);
+  await new Promise((resolve) => setTimeout(resolve, 4000));
+  assert.equal(await caption(laptop, 'shore'), 'While the laptop edits text', 'nothing is pulled under an editor that opened meanwhile');
+  await editing(false);
+  await until(async () => await caption(laptop, 'shore') === 'While the laptop begins to edit', 'the pull ran once that editor closed');
+
   // An edit while the desktop pushes by itself (each automatic sync waits 1.5 s at its start here, as a slow remote
   // would): the edit is neither refused nor lost. It stops the push, and the push follows once the book is idle again.
   const pushedEarlier = (await tips(bookId))[0].commitId;

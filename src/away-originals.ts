@@ -100,9 +100,9 @@ export function withoutReported(warnings: readonly Issue[], errors: readonly Iss
   return warnings.filter(({ code, source, sourceKind }) => code !== 'project-input' || !source || !reported.has(sourceKind + ':' + source));
 }
 
-/** The unavailable sources of a book as asset warnings. A file has no warning of its own: the parameter it is assigned to reports it. */
+/** The unavailable sources of a book as asset warnings. A file has no warning of its own: the parameter it is assigned to reports it. Nor has a preview that is still loading. */
 export function sourceWarnings(sources: Record<string, SourceStatus> | undefined): Issue[] {
-  return Object.values(sources ?? {}).filter(({ problem, kind }) => problem && kind !== 'file').map((status): Issue => ({
+  return Object.values(sources ?? {}).filter(({ problem, kind, pending }) => problem && !pending && kind !== 'file').map((status): Issue => ({
     message: kindNames[status.kind] + ' ' + status.name + ' · ' + status.problem, code: 'project-input', source: status.id, sourceKind: status.kind,
     state: status.state, problem: status.problem, ...(status.away ? { away: status.away } : {}),
   })).sort((a, b) => a.message.localeCompare(b.message));

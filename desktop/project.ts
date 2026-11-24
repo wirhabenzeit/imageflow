@@ -293,7 +293,7 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files'>
   // Each provider is asked about all its photos at once (ADR 0011), and photos it reports facts for get their facts
   // and previews brought up to date before they load.
   const observed = await observePhotos(book.folder, entries, store, facts);
-  const provided = await refreshPhotos(book, observed, facts);
+  const provided = await refreshPhotos(book, observed, facts, writable ? 'background' : 'held');
   // An export prints the placed photos without a file from their full-resolution originals, where their provider can
   // produce them now; the others stay drawn from their previews, as proofs.
   const originals = pinSources ? await pinnedOriginals(book, entries, provided, store, options) : new Map<string, PinnedOriginal>();
@@ -377,14 +377,17 @@ export async function observePhotos(folder: string, entries: readonly SourceEntr
   return result;
 }
 
-/** Brings the facts and previews of the photos whose provider reported facts up to date, one provider at a time. */
-async function refreshPhotos(book: Pick<OpenProject, 'folder' | 'cache'>, observed: Map<string, ObservedPhoto>, facts: AssetFacts) {
+/**
+ * Brings the facts of the photos whose provider reported facts up to date, one provider at a time, and their previews:
+ * an open book's session fetches those after the load (`backgroundPreviews`), any other load waits for them.
+ */
+async function refreshPhotos(book: Pick<OpenProject, 'folder' | 'cache'>, observed: Map<string, ObservedPhoto>, facts: AssetFacts, previews: 'background' | 'held') {
   const reported = [...observed.values()].filter(({ observed }) => observed.state === 'available' && observed.facts);
   const outcomes = new Map<string, ProvidedOutcome>();
   for (const name of new Set(reported.map(({ ref }) => ref.locator.provider))) {
     const group = reported.filter(({ ref }) => ref.locator.provider === name);
     const results = await refreshProvided(book.folder, providerOf(group[0].ref.locator), group.map(({ ref }) => ref), group.map(({ observed }) => observed), facts,
-      { staging: join(book.cache, 'provider-staging') });
+      { staging: join(book.cache, 'provider-staging'), previews });
     for (const [id, outcome] of results) outcomes.set(id, outcome);
   }
   return outcomes;
@@ -423,7 +426,7 @@ export function photoMetadata(entry: PhotoIndex[string], provided?: ProvidedMeta
 
 /**
  * A photo without a file, from what its provider reported: laid out from its fact and drawn from its preview in the
- * proxy store. Available, it has no problem. A photo whose preview could not be stored keeps its state and stands in
+ * proxy store. Available, it has no problem; one drawn from before its latest edit is marked out of date. A photo whose preview could not be stored keeps its state and stands in
  * from what was stored before.
  * An export (`pinned`) prints a photo whose full-resolution original was pinned (`original`) from it, and any other
  * only as a proof (`previewOnly`). The editor marks none of them: an export materializes what its provider can produce.
@@ -437,9 +440,11 @@ async function loadProvidedPhoto(book: Pick<OpenProject, 'folder' | 'photoIndex'
   // The status of a photo that cannot be shown as reported, with the repairs its provider offers.
   const failed = async (failure: { state: Exclude<SourceStatus['state'], 'available'>; problem: string }) =>
     (await store.resolve(book.folder, source, { observed: failure })).status;
+  // Its preview is being fetched: laid out by what its provider reported, and drawn once the preview comes.
+  if (outcome.state === 'pending') return { status: { ...source, state: 'unreadable', pending: true, problem: 'The preview is still loading.', repairs: [] }, loaded: { fact: outcome.fact } };
   if (outcome.state !== 'available' && !('fact' in outcome)) return { status: await failed(outcome) };
   const fact = outcome.fact;
-  const status: SourceStatus = outcome.state === 'available' ? { ...source, state: 'available', ...(pinned ? { previewOnly: true } : {}), digest: outcome.fact.digest } : await failed(outcome);
+  const status: SourceStatus = outcome.state === 'available' ? { ...source, state: 'available', ...(pinned ? { previewOnly: true } : outcome.outOfDate ? { outOfDate: true } : {}), digest: outcome.fact.digest } : await failed(outcome);
   if (!fact) return { status };
   const photo = await proxyPhoto(book, source.id, fact, outcome.state === 'available' ? undefined : outcome.problem);
   if (!photo) return { status, loaded: { fact } };
@@ -702,7 +707,7 @@ const newSourceId = (kind: 'photo' | 'markdown' | 'file') => ({ photo: 'ph-', ma
 /**
  * The host step every import ends in, whatever the sources came from (ADR 0011): the new entries are in `files`
  * already; the first new photo or text goes into the target box, if one was asked for, and the book is saved and
- * loaded again. Loading is what records the new photos' facts and, for photos without a file, fetches their previews
+ * loaded again. Loading is what records the new photos' facts and, for photos without a file, has their previews fetched
  * (`observePhotos`, `refreshProvided`). Nothing new and nothing to place leaves the book as it is.
  */
 async function finishImport(book: OpenProject, { project, photoIndex }: ProjectFiles, { imported, counts }: { imported: string[]; counts: ImportCounts },

@@ -9,7 +9,9 @@ import type { FileSourceEntry, PhotoSourceEntry, SourceEntry } from '../src/sour
 import { isFileLocator } from '../src/source-locator';
 import type { Locator, PhotoLocator } from '../src/source-locator';
 import { providerOf } from './providers';
-import { previewProgress, providedChanges } from './provided-photos';
+import { backgroundPreviews, providedChanges } from './provided-photos';
+import type { ProvidedChanges, WantedPreview } from './provided-photos';
+import { PreviewRequests } from './preview-requests';
 import type { Revisions, SourceProvider, SourceRef } from './source-provider';
 import { assetPageLabels, assetUsage } from '../src/asset-usage';
 import { watchLinkedFiles } from './providers/files';
@@ -19,7 +21,7 @@ import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
-import { mkdtemp, readdir, rm, stat, mkdir, rename, rmdir } from 'node:fs/promises';
+import { mkdtemp, realpath, readdir, rm, stat, mkdir, rename, rmdir } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
 import { channels, desktopScheme, issueText, renderOrigin, renderOrigins } from '../src/desktop';
 import type { AgentLeaseReply, BookMenuState, CanvasLayout, ImportRequest, Issue, ProjectChange, ProjectSummary, Result, TaskProgress } from '../src/desktop';
@@ -53,13 +55,14 @@ import { rebuildTemplateDependencies } from './dependency-install';
 import type { DependencyRebuild } from './dependency-install';
 import { AssetFacts } from './asset-facts';
 import { StoreFullError } from './sync-store';
-import { describeLocalChange, describeSync, originalsNotHere, placeOriginals, stageOriginals, syncBook, unavailableStatus } from './sync-engine';
-import type { SyncOptions, SyncOutcome } from './sync-engine';
+import { describeLocalChange, describeSync, originalsNotHere, placeOriginals, stageOriginals, ensureBookId, syncBook, unavailableStatus, uploadAhead } from './sync-engine';
+import type { SyncOptions, SyncOutcome, UploadedPreviews } from './sync-engine';
 import { BookDeletedError } from './sync-remote';
 import type { SyncRemote } from './sync-remote';
 import { AutomaticRuns, AutoSync, autoSyncTiming, SyncInterruptedError, whenUnblocked } from './sync-auto';
 import type { AutoFailure, AutoLook, AutoSyncTiming } from './sync-auto';
-import { bookSync, readSyncState, startSyncing, SyncElsewhereError, syncedElsewhere, takeAbandonedAtOpen } from './sync-pull';
+import { bookSync, readSyncState, startSyncing, SyncElsewhereError, syncedElsewhere, SyncStoppedError, takeAbandonedAtOpen } from './sync-pull';
+import type { SyncState } from './sync-pull';
 import { UntrustedBookError } from './sync-service';
 import type { SyncService, SyncStanding } from './sync-service';
 import { FirstSync } from './sync-start';
@@ -261,6 +264,7 @@ export class DocumentSession {
         return next;
       },
     });
+    this.previewSource(book.folder);
     this.guardNavigation(window);
     // Watch from the moment the book was read, so edits made while the editor is still loading are not missed.
     this.watchProject(book);
@@ -346,6 +350,7 @@ export class DocumentSession {
     await AssetFacts.release(this.book.folder).catch(() => {});
     this.projectSession.relocate(folder);
     this.projectSession.book = { ...this.book, folder };
+    this.previewSource(await realpath(folder));
     const next = await loadProject(folder, this.cache);
     this.notify({ value: this.activate(next, true) });
     this.watchProject(next);
@@ -366,6 +371,7 @@ export class DocumentSession {
       let release: ProjectLock | undefined;
       try {
         release = await acquireProjectLock(copied);
+        this.previewSource(await realpath(copied));
         const next = await loadProject(copied, this.cache, false);
         this.stopWatch();
         await shell.trashItem(original);
@@ -376,6 +382,7 @@ export class DocumentSession {
       } catch (error) {
         await AssetFacts.release(copied).catch(() => {});
         if (release) { await release(); await rm(copied, { recursive: true, force: true }); }
+        this.previewSource(this.book.folder);
         this.watchProject(this.book);
         throw error;
       }
@@ -388,12 +395,16 @@ export class DocumentSession {
    * watcher is paused while the engine pushes or pulls, and a pull is adopted as an external change, which resets
    * Undo and Redo. With several remote tips the user picks the one to continue from.
    */
-  async sync(remote: SyncRemote, options: Pick<SyncOptions, 'fetchOriginals' | 'fastForwardOnly' | 'pushOnly' | 'signal'> & { remoteId?: string;
+  async sync(remote: SyncRemote, options: Pick<SyncOptions, 'fetchOriginals' | 'fastForwardOnly' | 'pushOnly' | 'signal' | 'ahead' | 'beforeApply'> & { remoteId?: string;
     /** Told when the sync fails because the remote is full (its commit or a preview did not fit). */
-    full?: (error: StoreFullError) => void } = {}) {
+    full?: (error: StoreFullError) => void;
+    /** Whether sync was turned off since the sync began (`startSyncing`). */
+    unless?: (state: SyncState) => boolean } = {}) {
     return this.hold(async () => {
+      // The book may have been sending for minutes: an untrusted one never syncs. Withdrawing the trust needs the hold.
+      if (options.unless && !await bookTrusted(this.book.folder)) throw new SyncStoppedError();
       // Syncing turns on only once the sync holds the book: one that finds it busy changes nothing.
-      if (options.remoteId) await startSyncing(this.book.folder, options.remoteId);
+      if (options.remoteId) await startSyncing(this.book.folder, options.remoteId, { unless: options.unless });
       this.stopWatch();
       // What a pull changes: the book state, or (photos only) the commit this Mac last synced.
       const mark = async () => [await captureBookStateRevision(this.book.folder).catch(() => ''),
@@ -403,12 +414,12 @@ export class DocumentSession {
         // Tests of automatic sync stand in for a slow remote (`IMAGEFLOW_SYNC_TEST_SLOW_MS`, development builds only).
         const slow = DocumentSession.automaticSyncDelay;
         const { signal } = options;
-        if (signal && slow) await new Promise<void>((resolve, reject) => {
+        if (slow) await new Promise<void>((resolve, reject) => {
           const timer = setTimeout(resolve, slow);
-          signal.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
+          signal?.addEventListener('abort', () => { clearTimeout(timer); reject(signal!.reason); }, { once: true });
         });
         const outcome = await syncBook({ remote, book: this.book, fetchOriginals: options.fetchOriginals, chooseTip: (tips) => this.chooseTip(tips), cover: this.cover, device: macName(),
-          fastForwardOnly: options.fastForwardOnly, pushOnly: options.pushOnly, signal: options.signal });
+          fastForwardOnly: options.fastForwardOnly, pushOnly: options.pushOnly, signal: options.signal, ahead: options.ahead, beforeApply: options.beforeApply });
         if (outcome.changed) this.notify({ value: this.activate(await loadProject(this.book.folder, this.cache), true) });
         return outcome;
       } catch (error) {
@@ -475,12 +486,12 @@ export class DocumentSession {
   private storageFull?: SyncView['storageFull'];
   private publishSync(view: SyncView | undefined) {
     if (view) {
-      const { downloading: _, storageFull: __, uploading: ___, uploadFailed: ____, ...rest } = view;
+      const { downloading: _, storageFull: __, uploading: ___, uploadFailed: ____, sending: _____, ...rest } = view;
       // This Mac's originals going up in the background after the commit, or paused because the remote is full.
       const uploads = this.syncService?.uploadState(this.book.folder) ?? {};
       const manage = this.syncService?.kind === 'icloud' ? { manage: true as const } : {};
       const full = this.storageFull ?? (uploads.full && { message: uploads.full.message, notUploaded: uploads.full.left, ...manage });
-      view = { ...rest, ...(this.downloading ? { downloading: this.downloading } : {}), ...(uploads.uploading?.total ? { uploading: uploads.uploading } : {}),
+      view = { ...rest, ...(this.downloading ? { downloading: this.downloading } : {}), ...(rest.syncing && this.sending ? { sending: this.sending } : {}), ...(uploads.uploading?.total ? { uploading: uploads.uploading } : {}),
         ...(full ? { storageFull: full } : {}), ...(!uploads.uploading && uploads.failed && uploads.failed.left !== 0 ? { uploadFailed: uploads.failed } : {}) };
     }
     this.syncView = view;
@@ -507,6 +518,8 @@ export class DocumentSession {
   static autoSyncTiming: AutoSyncTiming = autoSyncTiming;
   /** Development builds only: how long an automatic sync waits, holding the book, before it starts (a slow remote). */
   static automaticSyncDelay = 0;
+  /** Development builds only: how long a sync sends before it holds the book (a large first sync). */
+  static sendingDelay = 0;
   readonly autoSync = new AutoSync({
     allowed: () => this.autoAllowed(),
     blocked: () => this.pullBlocked(),
@@ -701,22 +714,82 @@ export class DocumentSession {
       const running = this.syncTask;
       return running.catch(() => undefined).then(() => this.syncNow(options));
     }
+    // One that is being stopped is not joined: Start Syncing right after Stop Syncing starts again once it ended.
+    if (!options.automatic && this.syncTask && this.syncRun?.stopped) return this.syncTask.catch(() => undefined).then(() => this.syncNow(options));
     // A second request while a sync runs (Start Syncing during the first sync by itself, a click on the status) joins
     // it before it touches anything, so only the request that set the syncing state clears it.
     if (this.syncTask) return this.syncTask;
     // A sync the user asked for ends the backoff, and a book that stopped syncing by itself (deleted from sync, an
     // untrusted book) is looked at again.
     if (!options.automatic && !options.auto) this.autoSync.reset();
-    const task = this.runSync(options).finally(() => { if (this.syncTask === task) { this.syncTask = undefined; this.syncAutomatic = false; } });
+    const run = this.syncRun = { stopped: false };
+    const task = this.runSync(options, run).finally(() => { if (this.syncTask === task) { this.syncTask = undefined; this.syncAutomatic = false; } });
     this.syncTask = task;
     this.syncAutomatic = !!options.automatic;
     return task;
   }
   private syncTask?: Promise<SyncOutcome | undefined>;
+  /** The sync that runs, as what turns sync off sees it: one `stopped` before it holds the book ends without a sync. */
+  private syncRun?: { stopped: boolean };
+  /** Stop Syncing being written; a sync it stopped ends after it, so nothing starts again before. */
+  private stopTask?: Promise<void>;
+  private stopSending() {
+    if (this.syncTask && this.syncRun) this.syncRun.stopped = true;
+    this.aheadJob?.abort(new SyncStoppedError());
+  }
+  /**
+   * What a sync sends before it holds the book (`uploadAhead`): its content files and previews, which take minutes for a
+   * large first sync. Stopped by Stop Syncing and by closing the book. The previews that went up are kept for the remote
+   * they are on, so a sync tried again does not read them back.
+   */
+  private aheadJob?: AbortController;
+  private ahead?: { remoteId: string; previews: UploadedPreviews };
+  private sending?: { done: number; total: number };
+  private sendingTask?: Promise<UploadedPreviews>;
+  /** Whether a sync sends previews now, without holding the book; Stop Syncing then ends it. */
+  get sendingAhead() { return !!this.aheadJob; }
+  private async sendAhead(connection: { remoteId: string; remote: SyncRemote }, run: { stopped: boolean }, closing?: AbortSignal) {
+    if (run.stopped) throw new SyncStoppedError();
+    if (this.ahead?.remoteId !== connection.remoteId) this.ahead = { remoteId: connection.remoteId, previews: new Map() };
+    const { previews } = this.ahead;
+    const job = this.aheadJob = new AbortController();
+    const stop = () => job.abort(closing?.reason);
+    if (closing?.aborted) stop();
+    closing?.addEventListener('abort', stop, { once: true });
+    if (this.closing) job.abort(new Error('The book closed.'));
+    let published = 0;
+    try {
+      this.syncChanged?.();
+      if (DocumentSession.sendingDelay) {
+        this.sending = { done: 0, total: 1 };
+        this.publishSync(this.syncView);
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, DocumentSession.sendingDelay);
+          job.signal.addEventListener('abort', () => { clearTimeout(timer); reject(job.signal.reason); }, { once: true });
+        });
+      }
+      await uploadAhead({ remote: connection.remote, book: this.book, ahead: previews, signal: job.signal, progress: (done, total) => {
+        this.sending = { done, total };
+        if (done < total && Date.now() - published < 250) return;
+        published = Date.now();
+        if (this.syncView && !job.signal.aborted) this.publishSync(this.syncView);
+      } });
+      return previews;
+    } finally {
+      closing?.removeEventListener('abort', stop);
+      this.aheadJob = undefined;
+      this.sending = undefined;
+      // The sync holds the book from here on: no progress is shown, and Stop Syncing is not offered.
+      if (this.syncView && !this.closing) this.publishSync(this.syncView);
+    }
+  }
   /** Whether the sync that runs is automatic. */
   private syncAutomatic = false;
-  private async runSync({ start = false, auto = false, trust = false, automatic }: SyncRequest) {
+  private async runSync({ start = false, auto = false, trust = false, automatic }: SyncRequest, run: { stopped: boolean }): Promise<SyncOutcome | undefined> {
     if (!this.syncService) throw new Error('Sync is not available.');
+    // Stop Syncing, or a declined “sync here?”, may still be being written: read before that, a book that was just turned
+    // off would be asked about again (`elsewhere`) or sync once more.
+    await this.stopTask?.catch(() => {});
     const connection = await this.syncService.connect(this.book.folder);
     const state = await readSyncState(this.book.folder);
     const standing = bookSync(state, connection.remoteId);
@@ -734,10 +807,35 @@ export class DocumentSession {
     try {
       // Originals come after the sync, in the background (`downloadSyncedOriginals`), so the book stays usable.
       const manage = this.syncService.kind === 'icloud' ? { manage: true as const } : {};
+      let ahead: UploadedPreviews;
+      try {
+        // A book that was never saved here since it was made (imports alone) gets its lineage ID first: what goes up is
+        // stored under it.
+        if (!this.book.project.bookId && !automatic?.pushOnly) {
+          await this.hold(async () => {
+            this.stopWatch();
+            try { if (await ensureBookId(this.book.folder)) this.notify({ value: this.activate(await loadProject(this.book.folder, this.cache), true) }); }
+            finally { this.watchProject(this.book); }
+          });
+        }
+        this.sendingTask = this.sendAhead(connection, run, automatic?.signal);
+        ahead = await this.sendingTask;
+      }
+      catch (error) {
+        // Closing the book ends what it was sending; that is no failure to report either.
+        if (this.closing) return undefined;
+        if (error instanceof StoreFullError) this.storageFull = { message: error.message, ...manage };
+        throw error;
+      }
+      // A save, a reload or an agent's change made meanwhile may hold the book for a moment.
+      await this.whenIdle();
+      if (this.closing) return undefined;
       const begun = automatic ? this.automaticRuns.begin(automatic.signal) : undefined;
       let result: SyncOutcome;
       try {
-        result = await this.sync(connection.remote, { remoteId: connection.remoteId, full: (error) => { this.storageFull = { message: error.message, ...manage }; },
+        result = await this.sync(connection.remote, { remoteId: connection.remoteId, ahead,
+          // Turned off meanwhile, here or by its record (Delete from Sync, the sheet that asks which books sync).
+          unless: (now) => run.stopped || (now.enabled === false && state.enabled !== false), full: (error) => { this.storageFull = { message: error.message, ...manage }; },
           ...(automatic && begun ? { fastForwardOnly: true, pushOnly: automatic.pushOnly, signal: begun.run.job.signal,
             // The gate is read again as the pull is applied: an editor may have opened while the sync read the remote.
             beforeApply: () => begun.mayApply(() => this.closing || !!this.pullBlocked({ holding: true })) } : {}) });
@@ -749,6 +847,7 @@ export class DocumentSession {
       if (synced) this.removed = false;
       return result;
     } catch (error) {
+      if (error instanceof SyncStoppedError) { await this.stopTask?.catch(() => {}); return undefined; }
       if (error instanceof BookDeletedError) this.removed = true;
       throw error;
     } finally {
@@ -756,9 +855,9 @@ export class DocumentSession {
       await this.refreshSync({ message }).catch((error) => console.warn('ImageFlow could not read the sync status', error));
       // The originals the commit named go up now, in the background. A remote that was full pauses them until Sync Now
       // (or the book's next open): an automatic sync does not try the same original again at every idle.
-      if (synced) this.uploadOriginals(!automatic);
+      if (synced && !run.stopped) this.uploadOriginals(!automatic);
       // Placing downloaded originals reloads the book, which an automatic sync does only when nothing blocks a pull.
-      if ((!automatic || !automatic.pushOnly) && this.keepOriginals?.() && this.syncView?.status && this.syncView.status.pendingOriginals > (this.syncView.status.notUploaded ?? 0)) void this.downloadSyncedOriginals({ automatic: !!automatic }).catch((error) => { if (!automatic && !this.window.isDestroyed()) this.window.webContents.send(channels.appNotice, 'Originals are still to be downloaded: ' + errorMessage(error)); });
+      if (!run.stopped && (!automatic || !automatic.pushOnly) && this.keepOriginals?.() && this.syncView?.status && this.syncView.status.pendingOriginals > (this.syncView.status.notUploaded ?? 0)) void this.downloadSyncedOriginals({ automatic: !!automatic }).catch((error) => { if (!automatic && !this.window.isDestroyed()) this.window.webContents.send(channels.appNotice, 'Originals are still to be downloaded: ' + errorMessage(error)); });
     }
   }
   /**
@@ -788,7 +887,11 @@ export class DocumentSession {
   }
 
   /** Waits until a sync of the book that is running has ended (Delete from Sync waits for it before it deletes). */
-  async settleSync() { await this.syncTask?.catch(() => {}); }
+  async settleSync() {
+    // One that is still sending is stopped: it would go on for minutes.
+    this.stopSending();
+    await this.syncTask?.catch(() => {});
+  }
   /** Waits, up to 10 s, while a reload or the first save holds the book (a book the library just opened). */
   async whenIdle() {
     for (let attempt = 0; attempt < 50 && this.busy && !this.closing; attempt++) await new Promise((resolve) => setTimeout(resolve, 200));
@@ -827,6 +930,8 @@ export class DocumentSession {
     const service = this.syncService?.configured ? this.syncService : undefined;
     const result = await this.run(() => (service ? service.distrust(this.book.folder) : distrustBook(this.book.folder)));
     if ('error' in result) throw new Error(result.code === 'BOOK_BUSY' ? 'Wait for the book to finish syncing, then stop trusting it.' : result.error);
+    // A sync that does not hold the book yet sends nothing more of it.
+    this.stopSending();
     await this.updateNetwork();
     if (service) await this.refreshSync();
   }
@@ -836,7 +941,10 @@ export class DocumentSession {
    */
   async stopSyncing() {
     if (!this.syncService) throw new Error('Sync is not available.');
-    await this.syncService.stop(this.book.folder);
+    // First, so a sync that is about to hold the book does not turn sync on again.
+    this.stopSending();
+    const stopping = this.stopTask = this.syncService.stop(this.book.folder);
+    try { await stopping; } finally { if (this.stopTask === stopping) this.stopTask = undefined; }
     this.removed = false;
     await this.refreshSync();
   }
@@ -999,12 +1107,16 @@ export class DocumentSession {
     clearTimeout(this.linkedRetry);
     clearTimeout(this.syncTimer);
     this.firstSync.stop();
+    // A sync that is still sending, also one the user asked for, does not hold the book and stops.
+    this.aheadJob?.abort(new Error('The book closed before it finished syncing.'));
     // An automatic sync that runs stops at its next request (it is aborted), so closing never waits for the remote.
     const automatic = this.autoSync.close();
     // A background upload goes on after the book closes: it needs no writer lock, and Quit cancels it.
     this.stopUploads?.();
     this.linkedWatch?.stop();
     this.linkedWatch = undefined;
+    this.stopPreviewSource?.();
+    this.previewJob.abort();
     this.exportJob?.abort();
     for (const job of this.checkJobs) job.abort();
     for (const reply of this.agentLeases.values()) reply(false);
@@ -1014,7 +1126,7 @@ export class DocumentSession {
       // Sync work when closing shares one bound: an automatic sync still reading the remote's identity then finds the
       // book closing, and the push gets what is left of it.
       const deadline = Date.now() + DocumentSession.closePushMs;
-      await Promise.race([automatic.catch(() => {}), new Promise((resolve) => setTimeout(resolve, DocumentSession.closePushMs))]);
+      await Promise.race([Promise.all([automatic.catch(() => {}), this.sendingTask?.catch(() => {})]), new Promise((resolve) => setTimeout(resolve, DocumentSession.closePushMs))]);
       // Published saves must settle before releasing the single-writer capability.
       while (this.busy) await new Promise((resolve) => setTimeout(resolve, 10));
       // What changed since the last sync goes up while the writer lock is still held, for at most a few seconds.
@@ -1164,24 +1276,115 @@ export class DocumentSession {
       return [key, marked];
     })) };
   }
-  // A provider reported photos without a file as changed: their facts and previews are brought up to date, and the
-  // book reloads only for what it shows differently.
-  private async providedChanged(provider: SourceProvider<Locator>, refs: SourceRef<Locator>[], facts: AssetFacts) {
-    if (this.closing || !refs.length) return;
+  // --- Previews of photos without a file ---------------------------------------------------------------------------
+  // A load shows the photos that have no preview yet, or an older one, and leaves the previews to this session: they
+  // are fetched after it, and the book loads again as they come (ADR 0011, §2).
+  private readonly previewJob = new AbortController();
+  private stopPreviewSource?: () => void;
+  private readonly previewRequests = new PreviewRequests();
+  private fetchingPreviews = false;
+  /** `folder` is the book's real path, as a load names it. */
+  private previewSource(folder: string) {
+    this.stopPreviewSource?.();
+    this.stopPreviewSource = backgroundPreviews(folder, { wanted: (previews) => this.wantPreviews(previews), problem: (preview) => this.previewRequests.problem(preview) });
+  }
+  /** Previews a load of this book wants; those of the load that opened it are handed in once the session has it. */
+  wantPreviews(previews: readonly WantedPreview[]) {
+    // After the load that wanted them, so the book it loads is the one they are fetched for.
+    if (this.previewRequests.want(previews)) setImmediate(() => void this.fetchPreviews());
+  }
+  private async fetchPreviews() {
+    if (this.fetchingPreviews || this.closing) return;
+    this.fetchingPreviews = true;
     try {
-      const changes = await providedChanges(this.book.folder, provider, refs, facts, { staging: join(this.cache, 'provider-staging'),
-        available: (id) => this.book.sources?.['photo:' + id]?.state === 'available' });
-      if (this.closing) return;
-      if (changes.revised.length) this.projectSession.inputs.invalidate();
-      const usage = changes.reshaped.length ? assetUsage(this.book, assetPageLabels(this.summary)) : undefined;
-      const placed = changes.reshaped.filter((id) => usage?.photo[id]?.length);
-      if (placed.length) {
-        for (const id of placed) this.reshaped.add(id);
-        if (!this.window.isDestroyed()) this.window.webContents.send(channels.appNotice, (placed.length === 1 ? 'A placed photo changed its' : placed.length + ' placed photos changed their') +
-          ' aspect ratio in its source. Check how ' + (placed.length === 1 ? 'it is' : 'they are') + ' cropped.');
+      for (;;) {
+        // An import saves and loads the book before it becomes the open one.
+        while (this.busy && !this.closing) await new Promise((resolve) => setTimeout(resolve, 100));
+        const ids = this.closing ? [] : this.previewRequests.take();
+        if (!ids.length) return;
+        try {
+          const facts = await this.factsOf(this.book);
+          for (const [provider, refs] of this.providedRefs(ids)) await this.providedChanged(provider, refs, facts);
+        } catch (error) { this.previewsFailed(ids, error); }
+        // Those no longer in the book (an import undone meanwhile) are asked for again if they come back.
+        this.previewRequests.finish(ids);
       }
-      if (changes.reload.length) { this.linkedReloadPending = true; void this.reloadLinked(); }
-    } catch (error) { this.notify({ error: error instanceof Error ? error.message : String(error) }); }
+    } finally { this.fetchingPreviews = false; }
+  }
+  // A fetch that failed as a whole: its photos say so instead of loading for ever.
+  private previewsFailed(ids: readonly string[], error: unknown) {
+    const problem = 'Preview unavailable: ' + errorMessage(error);
+    this.previewRequests.finish(ids, () => ({ state: 'unreadable', problem }));
+    this.notify({ error: errorMessage(error) });
+    if (!this.closing && ids.some((id) => this.book.sources?.['photo:' + id]?.pending)) { this.linkedReloadPending = true; void this.reloadLinked(); }
+  }
+  // The photos without a file among `ids`, by their provider.
+  private providedRefs(ids: readonly string[]): Map<SourceProvider<Locator>, SourceRef<Locator>[]> {
+    const wanted = new Set(ids);
+    const groups = new Map<SourceProvider<Locator>, SourceRef<Locator>[]>();
+    for (const entry of sourceEntries(this.book)) {
+      if (entry.kind !== 'photo' || !wanted.has(entry.id) || isFileLocator(entry.locator)) continue;
+      const provider = providerOf(entry.locator);
+      groups.set(provider, [...groups.get(provider) ?? [], { id: entry.id, locator: entry.locator }]);
+    }
+    return groups;
+  }
+  /** Refresh from Lightroom: makes the previews of these photos again from the photos themselves. Runs in the background. */
+  refreshPreviews(ids: readonly string[]) {
+    const groups = this.providedRefs(ids);
+    void (async () => {
+      const facts = await this.factsOf(this.book);
+      for (const [provider, refs] of groups) await this.providedChanged(provider, refs, facts, true);
+    })().catch((error) => this.notify({ error: errorMessage(error) }));
+    return [...groups.values()].reduce((sum, refs) => sum + refs.length, 0);
+  }
+  /** Retry asks again for previews that failed before. */
+  retryPreviews() { this.previewRequests.clear(); }
+
+  // Reloads as previews come: soon for the first ones, then less often, since each reload renders the book again. Not
+  // while a text is being edited, which a reload would end.
+  private static previewReloadMs = [1500, 5000, 10_000];
+  // A provider reported photos without a file as changed, or a load wants their previews: their facts and previews are
+  // brought up to date, and the book reloads only for what it shows differently. `again` makes every preview anew.
+  private async providedChanged(provider: SourceProvider<Locator>, refs: SourceRef<Locator>[], facts: AssetFacts, again = false) {
+    if (this.closing || !refs.length) return;
+    const ids = refs.map(({ id }) => id);
+    const noticed = new Set<string>();
+    let reloads = 0, last = Date.now();
+    try {
+      const status = (id: string) => this.book.sources?.['photo:' + id];
+      const changes = await providedChanges(this.book.folder, provider, refs, facts, { staging: join(this.cache, 'provider-staging'), signal: this.previewJob.signal, again,
+        available: (id) => status(id)?.state === 'available',
+        shown: (id) => ({ available: status(id)?.state === 'available', outOfDate: !!status(id)?.outOfDate, pending: !!status(id)?.pending }),
+        progress: (id, changed, done, total) => {
+          this.previewRequests.settled(id, changed.problems?.get(id));
+          if (!changed.reload.length || done === total || this.closing || this.menuState?.textEditing || this.menuState?.activeEditor) return;
+          const steps = DocumentSession.previewReloadMs;
+          if (Date.now() - last < steps[Math.min(reloads, steps.length - 1)]) return;
+          reloads++; last = Date.now();
+          this.showProvided(changed, noticed);
+        } });
+      // Photos the provider answered for without a preview being asked for: offline now, say.
+      this.previewRequests.finish(ids, (id) => changes.problems?.get(id));
+      if (this.closing) return;
+      this.showProvided(changes, noticed);
+      if (again && changes.problems?.size && !this.window.isDestroyed()) {
+        const [{ problem }] = changes.problems.values();
+        this.window.webContents.send(channels.appNotice, (changes.problems.size === 1 ? 'One preview could not be refreshed. ' : changes.problems.size + ' previews could not be refreshed. ') + problem);
+      }
+    } catch (error) { this.previewsFailed(ids, error); }
+  }
+  // `noticed`: the photos a notice of this refresh named already, as it shows what has come so far.
+  private showProvided(changes: ProvidedChanges, noticed: Set<string>) {
+    if (changes.revised.length) this.projectSession.inputs.invalidate();
+    const usage = changes.reshaped.length ? assetUsage(this.book, assetPageLabels(this.summary)) : undefined;
+    const placed = changes.reshaped.filter((id) => usage?.photo[id]?.length && !noticed.has(id));
+    if (placed.length) {
+      for (const id of placed) { this.reshaped.add(id); noticed.add(id); }
+      if (!this.window.isDestroyed()) this.window.webContents.send(channels.appNotice, (placed.length === 1 ? 'A placed photo changed its' : placed.length + ' placed photos changed their') +
+        ' aspect ratio in its source. Check how ' + (placed.length === 1 ? 'it is' : 'they are') + ' cropped.');
+    }
+    if (changes.reload.length) { this.linkedReloadPending = true; void this.reloadLinked(); }
   }
   // A pending refresh is consumed after a save/export; it must not invent additional source changes.
   private async reloadLinked() {
@@ -1333,17 +1536,12 @@ export class DocumentSession {
 
   /**
    * Imports photos that are not files, by their locators (Lightroom Classic, ADR 0011), as one undoable step. Photos
-   * the book holds already are counted, not added again. The book's facts and previews of the new photos are read
-   * while it loads again.
+   * the book holds already are counted, not added again. The new photos show at once; their previews follow as their
+   * provider hands them over.
    */
-  async importProvided(locators: readonly PhotoLocator[], label: string, previews?: (done: number, total: number) => void) {
+  async importProvided(locators: readonly PhotoLocator[], label: string) {
     const book = this.book;
-    const run = () => importProvidedPhotos(book, locators, { checkpoint: { origin: 'app', label } });
-    // What the import starts while it loads (the provider's watch, later refreshes) inherits this context: the callback
-    // goes quiet once the import is done, so a later refresh never reports as this import.
-    let active = true;
-    const report = previews && ((done: number, total: number) => { if (active) previews(done, total); });
-    const { book: next, imported, counts } = await (report ? previewProgress.run(report, run) : run()).finally(() => { active = false; });
+    const { book: next, imported, counts } = await importProvidedPhotos(book, locators, { checkpoint: { origin: 'app', label } });
     if (next === book) return { summary: this.summary, imported, counts };
     this.projectSession.adoptExternal(book);
     this.projectSession.record(next, label, true, false);
