@@ -31,7 +31,7 @@ export type AutoFailure = 'stop' | 'full' | 'later' | 'retry' | 'interrupted';
 export type AutoSyncHost = {
   /**
    * Whether the book syncs by itself now: the preference, a configured backend, a trusted, writable book that syncs on
-   * this Mac and is not excluded, the first-configuration sheet answered, and nothing deleting it. Local, no request.
+   * this Mac and is not excluded, and nothing deleting it. Local, no request.
    */
   allowed(): Promise<boolean>;
   /** Why a pull may not change the book now, or undefined. Local, no request. */

@@ -682,16 +682,33 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 
 .settings-content { padding: 22px 28px 24px; }
 .settings-form { display: grid; grid-template-columns: 120px minmax(0, 1fr); column-gap: 10px; row-gap: 20px; align-items: start; }
-.settings-label { padding-top: 5px; text-align: right; font-size: 13px; white-space: nowrap; }
-.settings-control { grid-column: 2; min-width: 0; }
+/* One rule for every pane: a label is as high as a control (26px), and so is the first line of what it names. */
+.settings-label { display: flex; align-items: center; justify-content: flex-end; min-height: 26px; font-size: 13px; white-space: nowrap; }
+.settings-control { grid-column: 2; min-width: 0; min-height: 26px; }
+.studio .settings-control > button, .studio .settings-form .settings-buttons button { min-height: 26px; }
+.settings-control .appearance-options { height: 26px; }
+.settings-control .appearance-options span { padding-block: 0; line-height: 20px; }
 select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .settings-form > .error-text { margin: -8px 0 0; font-size: 12px; }
 .settings-note { margin: 5px 0 0; font-size: 11px; line-height: 1.45; color: var(--muted); }
 .settings-form .pc-switch { min-height: 26px; font-size: 13px; }
-.sync-fields { display: grid; gap: 6px; }
-.sync-fields > .settings-note, .sync-fields > .settings-update-actions { margin-top: 0; }
 .sync-field-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
-.sync-settings .error-text { margin: 0; font-size: 12px; }
+.sync-settings { min-height: 216px; grid-template-rows: auto auto auto minmax(0, 1fr); }
+.sync-through { display: flex; align-items: center; gap: 8px; }
+.sync-through .appearance-options { flex: none; }
+.sync-place { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
+.studio .sync-through > button { flex: none; min-height: 24px; padding: 2px 9px; font-size: 12px; }
+/* Two lines at the bottom are kept for an error, so the pane stays as high with one as without. */
+.sync-problem { grid-column: 1 / -1; align-self: end; min-height: 34px; margin: 0; display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 12px; line-height: 17px; text-align: center; }
+.sync-sheet { width: 420px; max-width: calc(100vw - 32px); margin: 0 auto; padding: 0; border: 1px solid var(--edge); border-top: 0; border-radius: 0 0 10px 10px; background: var(--popup-surface); color: var(--text); box-shadow: 0 8px 30px #0005; }
+.sync-sheet::backdrop { background: #0004; }
+.sync-sheet-form { display: grid; gap: 8px; padding: 16px 18px; }
+.sync-sheet h2 { margin: 0 0 2px; font-size: 13px; font-weight: 600; }
+/* Three lines for what Test Connection says; a longer answer scrolls. */
+.sync-sheet-result { height: 51px; margin: 2px 0 0; overflow-y: auto; font-size: 11px; line-height: 17px; color: var(--muted); }
+.sync-sheet-result.error-text { color: var(--error-text); }
+.sync-sheet-actions { display: flex; gap: 8px; }
+.sync-sheet-actions > button:first-child { margin-right: auto; }
 .settings-form .pc-switch + .settings-note { margin-top: 1px; padding-left: 21px; }
 .settings-status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .settings-buttons { display: inline-grid; gap: 8px; }
@@ -761,9 +778,9 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .appearance-options input:checked + span { background: var(--segment-selected); box-shadow: 0 1px 3px #0000001a; font-weight: 500; }
 .appearance-options input:focus-visible + span { outline: 3px solid var(--focus-ring); outline-offset: 1px; }
 .appearance-options label:hover input:not(:checked) + span { background: var(--segment-hover); }
-/* Sync's backends (#292: iCloud, S3-compatible bucket, Folder) keep each name on one line. */
+/* Sync's backends keep each name on one line, as wide as it is. */
 .sync-settings .appearance-options label { flex: 0 0 auto; }
-.sync-settings .appearance-options span { white-space: nowrap; }
+.sync-settings .appearance-options span { min-width: 56px; white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .settings-disclosure > summary::before { transition: none; } }
 
 /* Template-arranged controls (`controls`): titled groups and descriptions, in the sidebar, popovers and dialogs. */
@@ -819,6 +836,9 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .start-brand-flow { color: #14A687; }
 .start-actions p { color: var(--muted); margin: 0 0 28px; font-size: 14px; line-height: 1.6; }
 .start-actions > button { padding: 8px 12px; margin-bottom: 10px; font-size: 13px; }
+/* Set Up Sync… while sync is off: at the foot of the actions, quiet beside New Book and Open. */
+.studio .start-actions > button.start-sync { margin: auto 0 0; align-self: start; min-height: 0; padding: 2px 0; border: 0; background: none; box-shadow: none; color: var(--muted); font-size: 12px; }
+.studio .start-actions > button.start-sync:hover:not(:disabled) { color: var(--accent); }
 .recent-books { overflow: auto; padding: 48px 24px 20px; }
 .recent-books h2 { font-size: 14px; font-weight: 600; margin: 0 0 18px; }
 .recent-books ul { list-style: none; margin: 0; padding: 0; }

@@ -144,7 +144,7 @@ deleted/<bookId>.json
 
 **Sync window** (#307), opened from Settings → Sync, **File → Sync → Manage Synced Books…** and the Start window's rows, and by itself when a backend is set up. One table of the books on this Mac and on the remote, matched as in the Start window: cover, title and where it is; what it takes up; what sync does with it (transfers and failures, in a few words); and a switch for each book on this Mac, which is Start Syncing and Stop Syncing on This Mac. Sizes fill in as they are counted, two books at a time, since over a bucket each is a listing. The footer has the total and *Clean Up*. A row's menu has Delete from Sync and the other actions.
 
-**Settings → Sync.** Sync is off at first. Turning it on asks for the backend: iCloud (listed when this build can use it and the Mac is signed in) or an S3-compatible bucket, with neither preselected. Then, for a bucket, a connection test, and for either, *Keep originals* and *Sync automatically*. Which books sync, storage and Clean Up are in the Sync window.
+**Settings → Sync.** Sync is off at first. The choice is Off, iCloud (listed when this build can use it) or an S3-compatible bucket, with neither backend preselected. Off and iCloud take one click; a bucket has its fields and connection test in a sheet. Beside it are *Keep originals* and *Sync automatically*. The pane keeps one height in every state (#306). While sync is off, the Start window offers *Set Up Sync…*. Which books sync, storage and Clean Up are in the Sync window.
 
 ## Deferred
 

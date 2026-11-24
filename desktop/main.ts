@@ -643,6 +643,7 @@ async function openDocument(path: string): Promise<DocumentSession | undefined> 
       document.syncChanged = () => {
         updateMenus();
         publishSyncBooks();
+        libraryFollows(tracked);
         // A book that syncs here stays in the library beyond the most recent books (#283); while the remote cannot be
         // read (`unavailable`) tracking stays as it was.
         if (tracked.bookSync === 'unavailable') return;
@@ -1383,6 +1384,19 @@ async function libraryRemote(refresh = false) {
   // A listing that failed is not kept: the next look reads the remote again.
   listing.catch(() => { if (state.listing === listing) state.listing = undefined; });
   return listing;
+}
+/** A listing that lacks a book which just synced, or has one another Mac deleted, is read again. */
+function libraryFollows(document: DocumentSession) {
+  const state = document.syncView?.syncing ? undefined : document.syncView?.status?.state;
+  const bookId = document.book.project.bookId;
+  const cache = libraryCache;
+  if (!bookId || !cache?.listing || (state !== 'in-sync' && state !== 'removed')) return;
+  void cache.listing.then(({ books }) => {
+    const there = books.find((book) => book.bookId === bookId);
+    if (libraryCache !== cache || (state === 'removed' ? !there || there.deleted : there)) return;
+    libraryCache = undefined;
+    publishRecents();
+  }, () => {});
 }
 async function libraryRow(bookId: string) {
   const state = libraryState();

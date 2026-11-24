@@ -154,7 +154,7 @@ export function SyncWindow({ api }: { api?: DesktopApi }) {
   const total = onRemote.reduce((sum, bookId) => sum + (typeof sizes[bookId] === 'number' ? sizes[bookId] : 0), 0);
   const counting = onRemote.some((bookId) => sizes[bookId] === undefined);
   const unknown = onRemote.some((bookId) => sizes[bookId] === 'unknown');
-  const summary = !listing ? '' : counting ? (total ? formatStorage(total) + ' so far…' : 'Counting…') : formatStorage(total) + ' in ' + name + (unknown ? ', without what cannot be read now' : '');
+  const summary = !listing ? '' : counting ? (total ? formatStorage(total) + ' so far…' : 'Counting…') : !onRemote.length ? 'Nothing in ' + name + ' yet' : formatStorage(total) + ' in ' + name + (unknown ? ', without what cannot be read now' : '');
 
   if (remote === null) return <main className="studio sync-window sync-window-off" aria-label="Synced Books">
     <p>Sync is off on this Mac.</p><button onClick={() => void api?.showSettings('sync')}>Set Up Sync…</button></main>;
@@ -187,7 +187,8 @@ function Row({ row, place, details, size, download, state, disabled, turn, act, 
   const loaded = details && 'title' in details ? details : undefined;
   const title = row.kind === 'local' ? bookName(row.book.path) : loaded ? (loaded.newer ? 'A book from a newer ImageFlow' : loaded.title || 'Untitled') : details ? 'Cannot be read now' : 'Loading…';
   const cover = row.kind === 'local' ? row.book.cover : loaded?.cover;
-  const on = syncSwitch(row);
+  // A book that is being downloaded will sync here.
+  const on = syncSwitch(row) ?? (download ? true : undefined);
   const onContextMenu = (event: MouseEvent) => { event.preventDefault(); menu({ x: Math.round(event.clientX), y: Math.round(event.clientY) }); };
   const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); menu(); } };
   const labels = { download: 'Download…', update: 'Update…', 'manage-storage': 'Manage Storage…', settings: 'Settings…' };
@@ -201,7 +202,7 @@ function Row({ row, place, details, size, download, state, disabled, turn, act, 
         {state.text && <span>{state.text}</span>}
         {state.action && <button onClick={() => act(state.action!)}>{labels[state.action]}</button>}</>}
     </span>
-    <span className="sync-switch-cell" role="cell">{on !== undefined && <button className="sync-switch" role="switch" aria-checked={on} aria-label={'Sync ' + title} disabled={disabled} onClick={turn} />}</span>
+    <span className="sync-switch-cell" role="cell">{on !== undefined && <button className="sync-switch" role="switch" aria-checked={on} aria-label={'Sync ' + title} disabled={disabled || !!download} onClick={turn} />}</span>
   </div>;
 }
 

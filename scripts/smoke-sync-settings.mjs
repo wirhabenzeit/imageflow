@@ -1,10 +1,11 @@
-// Settings → Sync (#281) in the app, against the fake S3 server of the unit tests: the pane ships without a flag since
-// #283 and offers a bucket (not iCloud or a folder, which need flags of their own), Test Connection reports what the service does, Save keeps the bucket in settings.json and the
-// access key in the credential store (in memory here, as `IMAGEFLOW_SYNC_CREDENTIALS=memory` allows in development),
+// Settings → Sync (#281, #306) in the app, against the fake S3 server of the unit tests: the pane offers Off and a bucket
+// (not iCloud or a folder, which need an entitled build and a flag), the bucket's fields are in a sheet, Cancel leaves the
+// former choice, and the Settings window keeps its height throughout, also with an error. Test Connection reports what the
+// service does, Save keeps the bucket in settings.json and the access key in the credential store (in memory here, as `IMAGEFLOW_SYNC_CREDENTIALS=memory` allows in development),
 // a book syncs through the bucket from File → Sync (Start Syncing, which trusts the book once, then Sync Now), its
 // originals follow the commit in the background, a wrong key saved in Settings turns its status to "Sign-in needed" and
-// a corrected one clears it without a restart, setting the bucket up again lists the recent books and syncs only those
-// chosen (#282), a settings file that names iCloud leaves sync off in a build started without iCloud's flag, and the
+// a corrected one clears it without a restart, setting the bucket up opens the Sync window (#307), where books that do
+// not sync yet are off and nothing is uploaded, a settings file that names iCloud leaves sync off in a build started without iCloud's flag, and the
 // secret never reaches settings.json, the renderer or the app's output.
 import assert from 'node:assert/strict';
 import { mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -56,23 +57,33 @@ try {
   settings.on('pageerror', (error) => errors.push(error.message));
   await settings.getByRole('tab', { name: 'Sync', selected: true }).waitFor();
   // Keep originals moved here from General.
-  await settings.getByRole('checkbox', { name: 'Keep originals of synced books on this Mac' }).waitFor();
-  // Sync automatically (#284) is on by default, an ordinary preference: unchecking it is saved as `false`.
-  const automatic = settings.getByRole('checkbox', { name: 'Sync automatically' });
-  assert.equal(await automatic.isChecked(), true);
-  await automatic.uncheck();
-  await waitForPage(settings, async () => (await window.imageflow.getSettings()).value?.syncAutomatically === false);
-  await automatic.check();
-  await waitForPage(settings, async () => (await window.imageflow.getSettings()).value?.syncAutomatically === undefined);
-  // Sync is off, and no backend is preselected (ADR 0012): the bucket is chosen first. Neither iCloud nor a folder is
-  // offered without its flag.
-  await settings.getByText('Sync is off: books do not sync on this Mac.', { exact: true }).waitFor();
-  assert.deepEqual(await settings.getByRole('radio').evaluateAll((radios) => radios.map((radio) => [radio.value, radio.checked])), [['s3', false]]);
+  // Sync is off, and no backend is preselected (ADR 0012). Neither iCloud nor a folder is offered without its flag.
+  await waitForPage(settings, async () => !!(await window.imageflow.getSettings()).value && !document.querySelector('input[name=sync-kind]')?.disabled);
+  assert.deepEqual(await settings.getByRole('radio').evaluateAll((radios) => radios.map((radio) => [radio.value, radio.checked])), [['off', true], ['s3', false]]);
   assert.match((await settings.evaluate(() => window.imageflow.chooseSyncFolder())).error ?? '', /only available/);
   // Download asks where each book goes (#303): there is no folder to set for it.
-  assert.equal(await settings.getByText('Downloads:', { exact: true }).count(), 0);
   assert.match((await settings.evaluate(() => window.imageflow.updateSettings({ booksFolder: '/tmp' }))).error ?? '', /Invalid app settings/);
-  await settings.getByRole('radio', { name: 'S3-compatible bucket' }).check();
+  // Which books sync is the Sync window's, which needs a backend; while sync is off the Start window offers to set it up.
+  assert.equal(await settings.getByRole('button', { name: 'Manage Synced Books…' }).isEnabled(), false);
+  await start.getByRole('button', { name: 'Set Up Sync…' }).waitFor();
+  // Every state of the pane has one height, which the native window follows.
+  const height = () => settings.evaluate(() => document.querySelector('.settings-window > div').getBoundingClientRect().height);
+  const pane = await height();
+  const sameHeight = async (what) => assert.equal(await height(), pane, what + ' keeps the height of the pane');
+  // A click on S3 bucket opens the sheet; Cancel, or Escape, leaves the former choice.
+  const sheet = settings.getByRole('dialog', { name: 'S3-compatible bucket' });
+  for (const leave of [() => sheet.getByRole('button', { name: 'Cancel' }).click(), () => settings.keyboard.press('Escape')]) {
+    await settings.locator('input[name=sync-kind][value=s3]').click();
+    await sheet.waitFor();
+    await sameHeight('The sheet');
+    assert.equal(await settings.locator('input[name=sync-kind][value=off]').isChecked(), true);
+    await leave();
+    await sheet.waitFor({ state: 'detached' });
+  }
+  assert.equal((await savedSettings()).sync, undefined);
+  const editBucket = async () => { await settings.getByRole('button', { name: 'Edit…' }).click(); await sheet.waitFor(); };
+  const saveBucket = async () => { await sheet.getByRole('button', { name: 'Save' }).click(); await sheet.waitFor({ state: 'detached' }); };
+  await settings.locator('input[name=sync-kind][value=s3]').click();
   // The S3 URL as R2 shows it, with the bucket: split into Endpoint and Bucket when the field is left.
   const endpoint = settings.getByRole('textbox', { name: 'Endpoint' });
   await endpoint.fill(fake.url + '/books');
@@ -91,17 +102,42 @@ try {
   await settings.getByLabel('Secret access key').fill(wrongSecret);
   // A key the service refuses: sign-in needed, without the key in the message.
   await settings.getByRole('button', { name: 'Test Connection' }).click();
-  const refused = await settings.getByRole('alert').textContent({ timeout: 20000 });
+  const refused = await sheet.getByRole('alert').textContent({ timeout: 20000 });
   assert.match(refused, /^Sign-in needed: .*Settings → Sync\.$/);
   assert.ok(!refused.includes(wrongSecret));
+  await sameHeight('An error');
   await settings.getByLabel('Secret access key').fill(secret);
   await settings.getByRole('button', { name: 'Test Connection' }).click();
   await settings.getByText(/^Connected\. The service refuses to replace an object \(conditional writes\)\. It checks the SHA-256 of every upload\.$/).waitFor();
   assert.deepEqual([...fake.bucket('books').keys()], [], 'the connection test left nothing behind');
-  await settings.getByRole('button', { name: 'Save' }).click();
-  await settings.getByText('Saved.', { exact: true }).waitFor();
-  assert.equal(await settings.getByLabel('Secret access key').inputValue(), '', 'the field is cleared once stored');
+  await saveBucket();
+  // Saved: the choice and the bucket's name on one row, the Sync window opened (there is no book yet), and the sheet,
+  // opened again, holds nothing of the key.
+  await settings.locator('.sync-place', { hasText: /^books$/ }).waitFor();
+  assert.equal(await settings.locator('input[name=sync-kind][value=s3]').isChecked(), true);
+  await sameHeight('A bucket');
+  const syncPage = async () => {
+    for (let attempt = 0; attempt < 400; attempt++) {
+      const page = app.windows().find((page) => page.url() === 'imageflow://editor/sync');
+      if (page) { page.setDefaultTimeout(30000); return page; }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error('The Sync window did not open.');
+  };
+  let sync = await syncPage();
+  await sync.getByText('No books on this Mac or in “books”.').waitFor();
+  await start.getByRole('button', { name: 'Set Up Sync…' }).waitFor({ state: 'detached' });
+  // Sync automatically (#284) is on by default, an ordinary preference: unchecking it is saved as `false`.
+  await settings.getByRole('checkbox', { name: 'Keep originals on this Mac' }).waitFor();
+  const automatic = settings.getByRole('checkbox', { name: 'Sync automatically' });
+  assert.equal(await automatic.isChecked(), true);
+  await automatic.uncheck();
+  await waitForPage(settings, async () => (await window.imageflow.getSettings()).value?.syncAutomatically === false);
+  await automatic.check();
+  await waitForPage(settings, async () => (await window.imageflow.getSettings()).value?.syncAutomatically === undefined);
   await settings.screenshot({ path: join(root, '.build/sync-settings.png') });
+  await editBucket();
+  assert.equal(await settings.getByLabel('Secret access key').inputValue(), '');
   assert.equal(await settings.getByRole('textbox', { name: 'Access key ID' }).getAttribute('placeholder'), 'Stored (…' + fake.credentials.accessKeyId.slice(-4) + ')');
   // settings.json has the bucket and nothing of the key; the memory credential store writes no file.
   const saved = await savedSettings();
@@ -124,7 +160,7 @@ try {
   // Test Connection with the stored key, after Save.
   await settings.getByRole('button', { name: 'Test Connection' }).click();
   await settings.getByText(/^Connected\./).waitFor();
-  await settings.getByText('Books sync through the bucket “books”.', { exact: true }).waitFor();
+  await sheet.getByRole('button', { name: 'Cancel' }).click();
 
   // A book syncs through the bucket from the menu: File → Sync → Start Syncing, then Sync Now after an edit. It is not
   // trusted (a copy of the sample), so Start Syncing asks once to trust it, and agreeing syncs it.
@@ -169,77 +205,73 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   await statusIs('in-sync');
-  // Storage (#285), counted only when asked: the book with what its originals take, and Clean Up, which finds nothing
-  // a week old that no book uses, so it deletes nothing and asks nothing.
-  await settings.getByRole('button', { name: 'Show Storage' }).click();
-  await settings.getByText(/^ImageFlow uses .+ for 1 book, .+ of it originals\.$/).waitFor();
-  await settings.getByRole('list', { name: 'Storage by book' }).getByText('Edited before Sync Now', { exact: true }).waitFor();
-  await settings.getByRole('button', { name: 'Clean Up…' }).click();
-  await settings.getByText('There is nothing to clean up.', { exact: true }).waitFor();
-  assert.equal(await settings.getByRole('button', { name: 'Clean Up', exact: true }).count(), 0, 'nothing to confirm');
-  for (const request of ['syncUsage', 'syncCleanUpPlan', 'syncCleanUp']) {
-    assert.match((await start.evaluate((name) => window.imageflow[name](), request)).error, /only available to Settings/);
-  }
+  // The Sync window lists it as it stands, with what it takes up (#285, #307).
+  const row = sync.locator('.sync-row[data-book="' + bookId + '"]');
+  await row.locator('.sync-state', { hasText: 'Up to date' }).waitFor();
+  assert.equal(await row.getByRole('switch').getAttribute('aria-checked'), 'true');
+  await row.locator('.sync-size', { hasText: /^[0-9.]+ (KB|MB)$/ }).waitFor();
   // A wrong key saved in Settings: the book's status says sign-in needed at once, and a corrected key clears it,
   // with no restart.
+  await editBucket();
   await settings.getByRole('textbox', { name: 'Access key ID' }).fill(fake.credentials.accessKeyId);
   await settings.getByLabel('Secret access key').fill(wrongSecret);
-  await settings.getByRole('button', { name: 'Save' }).click();
-  await settings.getByText('Saved.', { exact: true }).waitFor();
+  await saveBucket();
   await waitForPage(book, () => document.querySelector('.sync-status')?.textContent === 'Sign-in needed');
+  await row.locator('.sync-state', { hasText: 'Sign-in needed' }).waitFor();
+  await row.getByRole('button', { name: 'Settings…' }).waitFor();
   assert.match(await book.locator('.sync-status').getAttribute('title'), /SignatureDoesNotMatch/);
+  await editBucket();
   await settings.getByRole('textbox', { name: 'Access key ID' }).fill(fake.credentials.accessKeyId);
   await settings.getByLabel('Secret access key').fill(secret);
-  await settings.getByRole('button', { name: 'Save' }).click();
-  await settings.getByText('Saved.', { exact: true }).waitFor();
+  await saveBucket();
   await statusIs('in-sync');
 
-  // Turn Off forgets the bucket and its key.
-  await settings.getByRole('button', { name: 'Turn Off' }).click();
-  await settings.getByText('Sync is off on this Mac.', { exact: true }).waitFor();
-  assert.equal((await savedSettings()).sync, undefined);
+  // Off stops syncing and forgets the bucket and its key, in one click.
+  await settings.locator('input[name=sync-kind][value=off]').click();
+  for (let attempt = 0; (await savedSettings()).sync; attempt++) {
+    assert.ok(attempt < 400, 'sync is off');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
   await waitForPage(book, () => !document.querySelector('.sync-status'));
+  await sync.getByText('Sync is off on this Mac.', { exact: true }).waitFor();
+  await sameHeight('Off');
 
-  // Set up again where sync was off: the first configuration uploads nothing by itself, lists the recent books with
-  // what their originals take up, and a book left out stays out on this Mac.
-  await settings.getByRole('radio', { name: 'S3-compatible bucket' }).check();
+  // A second book while sync is off: it was there before the next set-up, and is the user's own. Setting the bucket up
+  // again uploads nothing: the Sync window shows the book that syncs there by its own record on, and the other off, also
+  // after it is opened again.
+  const second = await testBook(app, join(work, 'Second Book.imageflow'), true);
+  await second.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
+  await second.close();
+  const all = () => [...fake.bucket('books').keys()].filter((key) => key.includes('/snapshots/')).length;
+  const before = all();
+  await settings.locator('input[name=sync-kind][value=s3]').click();
   await settings.getByRole('textbox', { name: 'Endpoint' }).fill(fake.url);
   await settings.getByRole('textbox', { name: 'Bucket' }).fill('books');
   await settings.getByRole('textbox', { name: 'Region' }).fill(fake.region);
   await settings.getByRole('textbox', { name: 'Prefix' }).fill('ImageFlow');
   await settings.getByRole('textbox', { name: 'Access key ID' }).fill(fake.credentials.accessKeyId);
   await settings.getByLabel('Secret access key').fill(secret);
-  const commits = () => stored().filter((key) => key.includes('/snapshots/')).length;
-  const before = commits();
-  await settings.getByRole('button', { name: 'Save' }).click();
-  let sheet = settings.getByRole('group', { name: 'Books to sync' });
-  await sheet.waitFor();
-  // Closing Settings leaves the sheet unanswered: it is the main process's record, so Settings → Sync shows it again.
-  await closeSettings(app);
-  for (let attempt = 0; app.windows().some((page) => page.url() === 'imageflow://editor/settings'); attempt++) {
-    assert.ok(attempt < 400, 'Settings closes');
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  assert.equal((await savedSettings()).syncBooksUnchosen, true, 'kept in settings.json, so a restart asks again');
-  settings = (await openSettings(app, 'sync')).settings;
-  settings.on('pageerror', (error) => errors.push(error.message));
-  sheet = settings.getByRole('group', { name: 'Books to sync' });
-  await sheet.waitFor();
-  const choice = sheet.getByRole('checkbox', { name: /Edited before Sync Now/ });
-  assert.equal(await choice.isChecked(), true, 'a book that syncs with the bucket is chosen');
-  assert.match(await sheet.textContent(), /[0-9.]+ (KB|MB|GB) of originals/);
-  await choice.uncheck();
-  await sheet.getByRole('button', { name: 'Sync Chosen Books' }).click();
-  await settings.getByText('No book syncs until you choose File → Sync → Start Syncing in it.', { exact: true }).waitFor();
-  await waitForPage(book, () => !document.querySelector('.sync-status'));
+  await saveBucket();
+  sync = await syncPage();
+  const secondRow = sync.getByRole('row', { name: 'Second Book' });
+  await secondRow.locator('.sync-state', { hasText: 'Not syncing' }).waitFor();
+  assert.equal(await secondRow.getByRole('switch').getAttribute('aria-checked'), 'false');
+  await sync.locator('.sync-row[data-book="' + bookId + '"] .sync-state', { hasText: 'Up to date' }).waitFor();
+  const again = await testBook(app, join(work, 'Second Book.imageflow'), false);
+  await again.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
+  await again.evaluate(() => window.imageflow.currentProject());
   for (let attempt = 0; !await app.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('sync-start')?.enabled); attempt++) {
-    assert.ok(attempt < 400, 'the book left out offers Start Syncing');
+    assert.ok(attempt < 400, 'the book that was not turned on offers Start Syncing');
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  assert.equal(commits(), before, 'nothing was pushed');
-  assert.equal((await savedSettings()).syncBooksUnchosen, undefined, 'answered');
-  await settings.getByRole('button', { name: 'Turn Off' }).click();
-  await settings.getByText('Sync is off on this Mac.', { exact: true }).waitFor();
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  assert.equal(all(), before, 'nothing was pushed');
+  // Turned on in the window while it is open.
+  await secondRow.getByRole('switch').click();
+  await secondRow.locator('.sync-state', { hasText: 'Up to date' }).waitFor();
+  assert.equal(all(), before + 1);
+  await settings.locator('input[name=sync-kind][value=off]').click();
+  await waitForPage(book, () => !document.querySelector('.sync-status'));
   assert.deepEqual(errors, []);
   await closeSettings(app);
   await closeApp(app);
@@ -251,6 +283,7 @@ try {
   const plain = await openSettings(app, 'sync');
   await plain.settings.getByRole('tab', { name: 'Sync', selected: true }).waitFor();
   await plain.settings.getByText('iCloud sync is not available in this build of ImageFlow, so sync is off on this Mac.', { exact: true }).waitFor();
+  assert.equal(await plain.settings.evaluate(() => document.querySelector('.settings-window > div').getBoundingClientRect().height), pane);
   assert.equal((await plain.settings.evaluate(() => window.imageflow.syncBackendState())).value?.icloud, undefined);
   assert.match((await plain.settings.evaluate(() => window.imageflow.saveSyncBackend({ backend: { kind: 'icloud' } }))).error, /not available/);
   assert.match((await plain.settings.evaluate(() => window.imageflow.updateSettings({ sync: { kind: 'icloud' } }))).error, /Settings → Sync/);

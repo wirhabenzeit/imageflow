@@ -179,6 +179,8 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
       <p>Designed in code.<br />Composed by eye.</p>
       <button className="primary" disabled={!api || !!busy} onClick={() => void act('new')}>New Book…</button>
       <button disabled={!api || !!busy} onClick={() => void act('open')}>Open…</button>
+      {/* Sync is off: where one looks for the books of another Mac (#306). */}
+      {remote === null && <button className="start-sync" onClick={() => void api?.showSettings('sync')}>Set Up Sync…</button>}
     </aside>
     <section className="recent-books" aria-labelledby="recent-heading" aria-busy={remote === undefined}>
       <h2 id="recent-heading">{configured ? 'Books' : 'Recent books'}{configured && remote && 'error' in remote && <span className="library-note" role="status" title={remote.error}> · {(listing?.name ? listing.name + ' ' : '') + 'cannot be read now'}</span>}

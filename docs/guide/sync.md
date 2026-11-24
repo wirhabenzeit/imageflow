@@ -1,6 +1,6 @@
 # Syncing books between Macs
 
-ImageFlow can keep your books in sync between your Macs. Each Mac syncs through one place you choose in **Settings → Sync**: an S3-compatible bucket you bring, or iCloud where your version of ImageFlow offers it. Sync is off until you choose one, and nothing leaves your Mac before that.
+ImageFlow can keep your books in sync between your Macs. Each Mac syncs through one place you choose in **Settings → Sync**: an S3-compatible bucket you bring, or iCloud where your version of ImageFlow offers it. Sync is off until you choose one, and nothing leaves your Mac before you turn on a book. **Set Up Sync…** in the Start window opens the setting.
 
 Every Mac that syncs needs this version of ImageFlow or a later one: an older version cannot read what this one syncs, and asks to be updated instead of syncing.
 
@@ -11,17 +11,17 @@ Every Mac that syncs needs this version of ImageFlow or a later one: an older ve
 Any S3-compatible service works: Amazon S3, Cloudflare R2, Backblaze B2, MinIO or Wasabi.
 
 1. Create a bucket for ImageFlow at your provider, and an access key that can read, write, list and delete in it (or under a prefix in it).
-2. In **Settings → Sync**, choose **S3-compatible bucket**. Enter the endpoint, the bucket and its region (`auto` for R2), and an optional prefix if the bucket holds other things. You can paste the URL your provider shows, with the bucket in it; ImageFlow takes the bucket from it.
+2. In **Settings → Sync**, choose **S3 bucket**. Enter the endpoint, the bucket and its region (`auto` for R2), and an optional prefix if the bucket holds other things. You can paste the URL your provider shows, with the bucket in it; ImageFlow takes the bucket from it.
 3. Enter the access key ID and the secret access key, then choose **Test Connection**. It says whether the service refuses to replace objects and whether it checks uploads, which ImageFlow makes up for when it does not.
 4. Choose **Save**.
 
-The secret access key is encrypted with a key in your Mac's keychain and kept apart from the other settings. ImageFlow never shows it again; to change it, enter a new one and save. **Turn Off** stops syncing on this Mac and forgets the key.
+The secret access key is encrypted with a key in your Mac's keychain and kept apart from the other settings. ImageFlow never shows it again; to change it, choose **Edit…**, enter a new one and save. **Off** stops syncing on this Mac and forgets the key.
 
 On your other Macs, enter the same bucket and key. That is all a Mac needs to see and download every book you synced.
 
 ### iCloud
 
-Where your version of ImageFlow offers iCloud, choose **iCloud** in **Settings → Sync** and **Use iCloud**. There is nothing else to set up: the Mac's Apple Account is the sign-in, and your books go into ImageFlow's private storage in your iCloud, which only you can reach.
+Where your version of ImageFlow offers iCloud, choose **iCloud** in **Settings → Sync**. There is nothing else to set up: the Mac's Apple Account is the sign-in, and your books go into ImageFlow's private storage in your iCloud, which only you can reach.
 
 - Books count toward your iCloud storage (5 GB on the free plan). The Sync window says how much each book uses (see [Storage and Clean Up](#storage-and-clean-up)).
 - When your iCloud storage is full, the book itself still syncs as long as it fits; originals that do not fit wait, and the status bar says so with **Manage Storage…**. They upload once there is room.
@@ -66,7 +66,7 @@ What a photo syncs follows from where it comes from:
 
 The book's text, files, template, layout and settings always sync. On a Mac without a photo's original, the book shows its preview, and **Book check** says before an export that the original is needed for print.
 
-Originals upload in the background after the book has synced, so the other Mac can open the book before they arrive; it shows those photos as **Original still uploading from another Mac**. With **Keep originals of synced books on this Mac** (Settings → Sync, on by default), originals download in the background after each sync; without it, only previews are kept until **File → Sync → Download Originals**. An original that a Mac added a week ago and never uploaded (the Mac was not opened again) is shown as **never uploaded from** that Mac: open the book there to upload it.
+Originals upload in the background after the book has synced, so the other Mac can open the book before they arrive; it shows those photos as **Original still uploading from another Mac**. With **Keep originals on this Mac** (Settings → Sync, on by default), originals download in the background after each sync; without it, only previews are kept until **File → Sync → Download Originals**. An original that a Mac added a week ago and never uploaded (the Mac was not opened again) is shown as **never uploaded from** that Mac: open the book there to upload it.
 
 ## The library
 
