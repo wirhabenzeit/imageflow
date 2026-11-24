@@ -1,7 +1,8 @@
 // A long first sync does not hold the book (the first iCloud sync of a book of 1210 photos kept every agent out for over
 // half an hour): while it sends its previews (a wait here, `IMAGEFLOW_SYNC_TEST_SENDING_MS`), agents read and save
-// through MCP, the editor saves, the status shows how far it is, and Stop Syncing and closing the book end it. What was
-// saved meanwhile is in the commit the sync makes.
+// through MCP, the editor saves, the status shows how far it is, and Stop Syncing, withdrawing the trust and closing the
+// book end it, without an error and without turning sync on again. What was saved meanwhile is in the commit the sync
+// makes. While it then holds the book (`IMAGEFLOW_SYNC_TEST_SLOW_MS`), the status says so and Stop Syncing is not offered.
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -21,7 +22,7 @@ const profile = join(work, 'profile');
 for (const path of [join(work, 'Desktop'), folder, profile]) await mkdir(path);
 await writeFile(join(profile, 'settings.json'), JSON.stringify({ agentAccess: true, syncAutomatically: false, sync: { kind: 'folder', path: folder } }));
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + profile],
-  env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1', IMAGEFLOW_SYNC_FOLDER: '1', IMAGEFLOW_SYNC_TEST_SENDING_MS: '12000' } });
+  env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1', IMAGEFLOW_SYNC_FOLDER: '1', IMAGEFLOW_SYNC_TEST_SENDING_MS: '12000', IMAGEFLOW_SYNC_TEST_SLOW_MS: '3000' } });
 const stderr = [];
 app.process().stderr.on('data', (bytes) => stderr.push(String(bytes)));
 const client = new Client({ name: 'ImageFlow sync test', version: '1.0.0' });
@@ -32,6 +33,10 @@ const call = async (name, args = {}) => {
   return { ...structuredContent, took: Date.now() - from };
 };
 const commits = async () => (await readdir(join(folder, 'books'), { recursive: true }).catch(() => [])).filter((name) => name.includes('snapshots/') && name.endsWith('.json'));
+const menuItem = (id) => app.evaluate(({ Menu }, id) => Menu.getApplicationMenu().getMenuItemById(id).enabled, id);
+// As the menu does: an error then reaches the window, or the Start window when the book's is gone.
+const choose = (page, id) => app.browserWindow(page).then((window) => window.evaluate((window, id) => { const { Menu } = process.mainModule.require('electron'); Menu.getApplicationMenu().getMenuItemById(id).click(undefined, window, undefined); }, id));
+const record = async () => { for (const name of await readdir(join(profile, 'persistence'))) { const state = await readFile(join(profile, 'persistence', name, 'sync', 'sync.json'), 'utf8').catch(() => undefined); if (state) return JSON.parse(state); } return {}; };
 const syncing = (page, state) => waitForPage(page, (state) => document.querySelector('.sync-status')?.getAttribute('data-state') === state, state, { timeout: 40000 });
 
 try {
@@ -71,6 +76,10 @@ try {
   assert.ok(edited.value, 'the editor saves meanwhile: ' + JSON.stringify(edited.error));
   assert.match(await page.locator('.sync-status').innerText(), /Syncing \d+ of \d+/);
 
+  // Sent: while the sync holds the book, no progress is shown and Stop Syncing is not offered.
+  assert.equal(await menuItem('sync-stop'), true, 'Stop Syncing is offered while it sends');
+  await waitForPage(page, () => document.querySelector('.sync-status')?.textContent === 'Syncing…', undefined, { timeout: 20000 });
+  assert.equal(await menuItem('sync-stop'), false, 'and not while the book is held');
   await syncing(page, 'in-sync');
   const [commit] = await commits();
   const header = JSON.parse(await readFile(join(folder, 'books', commit), 'utf8'));
@@ -90,15 +99,36 @@ try {
   assert.ok(Date.now() - stopping < 8000);
   assert.ok(!('error' in await page.evaluate(() => window.stopped)), 'stopping is no error');
   assert.equal((await commits()).length, 1, 'the stopped sync committed nothing');
+  assert.equal((await record()).enabled, false, 'and did not turn sync on again');
 
-  // Closing the book ends one too.
-  await page.evaluate(() => { void window.imageflow.syncAction('start'); });
+  // So does withdrawing the trust: an untrusted book never syncs.
+  await page.evaluate(() => { window.stopped = undefined; void window.imageflow.syncAction('start').then((result) => { window.stopped = result; }); });
+  await syncing(page, 'syncing');
+  await choose(page, 'stop-trusting-book');
+  await waitForPage(page, () => window.stopped && document.querySelector('.sync-status')?.getAttribute('data-state') !== 'syncing', undefined, { timeout: 9000 });
+  assert.ok(!('error' in await page.evaluate(() => window.stopped)), JSON.stringify(await page.evaluate(() => window.stopped)));
+  assert.equal((await commits()).length, 1, 'nothing of the untrusted book was committed');
+  assert.equal((await record()).enabled, false);
+
+  // Closing the book ends one too, which is no error. One would be reported in the Start window it opens, so none is open.
+  await app.evaluate(({ app, BrowserWindow }) => {
+    globalThis.sentToWindows = [];
+    app.on('web-contents-created', (_event, contents) => {
+      const send = contents.send.bind(contents);
+      contents.send = (...args) => { globalThis.sentToWindows.push(JSON.stringify(args)); return send(...args); };
+    });
+    for (const window of BrowserWindow.getAllWindows()) if (window.webContents.getURL() === 'imageflow://editor/start') window.destroy();
+  });
+  await choose(page, 'sync-start');
   await syncing(page, 'syncing');
   const closing = Date.now();
   const closed = page.waitForEvent('close', { timeout: 9000 });
   await app.browserWindow(page).then((window) => window.evaluate((window) => window.close()));
   await closed;
   assert.ok(Date.now() - closing < 9000, 'closing does not wait for the sync');
+  await new Promise((resolve) => setTimeout(resolve, 2500));
+  const sent = await app.evaluate(() => globalThis.sentToWindows);
+  assert.deepEqual(sent.filter((message) => /closed before it finished syncing|book is closing/.test(message)), [], 'closing is no error');
   assert.deepEqual(stderr.filter((line) => /Uncaught|unhandled/i.test(line)), []);
   console.log('Sync sending smoke passed');
 } finally {

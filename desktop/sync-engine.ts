@@ -103,8 +103,12 @@ export type SyncOptions = {
   /** The previews `uploadAhead` stored or checked for this remote; a push neither sends nor reads them again. */
   ahead?: UploadedPreviews;
 };
-/** Previews known to be whole on a remote, by the digest of their original, as a snapshot records them. */
+/**
+ * Previews known to be whole on a remote, as a snapshot records them, by book and digest of their original (`aheadKey`):
+ * a book given a new lineage (Sync Again) stores them anew.
+ */
 export type UploadedPreviews = Map<string, { sha256: string; ext: '.jpg' | '.png' }>;
+export const aheadKey = (bookId: string, digest: string) => bookId + '/' + digest;
 
 /**
  * How many blobs go up at once. Each iCloud upload has over a second of fixed cost, so one at a time the previews of a
@@ -404,7 +408,7 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
     const carried = base?.proxies[digest];
     if (carried && (await remote.hasBlob(proxyBlobKey(bookId, digest, carried.ext)) || await restoreProxy(remote, bookId, digest, carried))) { proxies[digest] = carried; return; }
     // Sent before the sync held the book, and still listed: Clean Up may have removed it meanwhile.
-    const ahead = context.options.ahead?.get(digest);
+    const ahead = context.options.ahead?.get(aheadKey(bookId, digest));
     if (ahead && await remote.listsBlob(proxyBlobKey(bookId, digest, ahead.ext))) { proxies[digest] = ahead; return; }
     const here = context.here[id];
     if (here?.path !== undefined && here.digest === digest) {
@@ -468,9 +472,10 @@ export async function uploadAhead({ remote: unbounded, book, ahead, signal, prog
   const remote = abortableRemote(unbounded, signal);
   const record = await readSyncState(root);
   if (record.pull) return;
-  const state = await captureBookState(root);
-  const bookId = state.project.bookId;
-  if (!bookId) return;
+  // The book is not held: a save under way may be seen half-way. Read again then, and left to the push if that fails too.
+  const state = await captureBookState(root).catch(() => new Promise((resolve) => setTimeout(resolve, 500)).then(() => captureBookState(root))).catch(() => undefined);
+  const bookId = state?.project.bookId;
+  if (!state || !bookId) return;
   const endSync = await remote.prepareSync?.(bookId);
   try {
     const commits = await remoteCommits(remote, bookId);
@@ -498,28 +503,30 @@ export async function uploadAhead({ remote: unbounded, book, ahead, signal, prog
       if (!bytes) return;
       const ext = extname(path).toLowerCase() === '.png' ? '.png' : '.jpg';
       const { sha256 } = await uploadProxy(remote, bookId, digest, bytes, ext);
-      ahead.set(digest, { sha256, ext });
+      ahead.set(aheadKey(bookId, digest), { sha256, ext });
     };
     for (const source of sourceEntries({ project: book.project, photoIndex: state.photos })) {
       if (source.kind !== 'photo' || kept.has(source.id)) continue;
       const known = facts[source.id]?.digest;
-      if (known !== undefined && (ahead.has(known) || base[known])) continue;
+      if (known !== undefined && (ahead.has(aheadKey(bookId, known)) || base[known])) continue;
       jobs.push(async () => {
         let digest: string | undefined = known;
         let path = digest === undefined ? undefined : await local?.path(digest);
         if (!path && isFileLocator(source.locator)) {
           // The preview of a file is made only from the very snapshot its digest was read from.
-          let resolved = await store.resolve(root, source);
-          if (resolved.status.state === 'available' && !resolved.status.digest) { await store.digested(); resolved = await store.resolve(root, source); }
+          // A file moved or written meanwhile is left to the push, which looks at it under the hold.
+          const look = () => store.resolve(root, source).catch(() => undefined);
+          let resolved = await look();
+          if (resolved?.status.state === 'available' && !resolved.status.digest) { await store.digested(); resolved = await look(); }
           const photo = book.photos.get(source.id);
-          if (resolved.status.state !== 'available' || !photo || resolved.stored?.snapshot !== photo.original) return;
+          if (resolved?.status.state !== 'available' || !photo || resolved.stored?.snapshot !== photo.original) return;
           digest = resolved.status.digest;
-          path = digest === undefined ? undefined : await photoFile(photo, 'preview');
+          path = digest === undefined ? undefined : await photoFile(photo, 'preview').catch(() => undefined);
           // Kept for the sync that follows, as a push keeps it.
           if (digest && path) await local?.put(digest, path).catch((error) => console.warn('ImageFlow could not keep a sync proxy', error));
         }
         // Two photos of one digest share a preview.
-        if (!digest || !path || started.has(digest) || ahead.has(digest) || base[digest]) return;
+        if (!digest || !path || started.has(digest) || ahead.has(aheadKey(bookId, digest)) || base[digest]) return;
         started.add(digest);
         await sendPreview(digest, path);
       });

@@ -57,7 +57,8 @@ import { BookDeletedError } from './sync-remote';
 import type { SyncRemote } from './sync-remote';
 import { AutomaticRuns, AutoSync, autoSyncTiming, SyncInterruptedError, whenUnblocked } from './sync-auto';
 import type { AutoFailure, AutoLook, AutoSyncTiming } from './sync-auto';
-import { bookSync, readSyncState, startSyncing, SyncElsewhereError, syncedElsewhere, takeAbandonedAtOpen } from './sync-pull';
+import { bookSync, readSyncState, startSyncing, SyncElsewhereError, syncedElsewhere, SyncStoppedError, takeAbandonedAtOpen } from './sync-pull';
+import type { SyncState } from './sync-pull';
 import { UntrustedBookError } from './sync-service';
 import type { SyncService, SyncStanding } from './sync-service';
 import { FirstSync } from './sync-start';
@@ -146,9 +147,6 @@ export async function chooseSyncTip(owner: BrowserWindow, tips: CommitHeader[]) 
  * fast-forward, with `pushOnly` without changing the book, and stops with `signal`.
  */
 export type SyncRequest = { start?: boolean; auto?: boolean; trust?: boolean; automatic?: { pushOnly: boolean; signal?: AbortSignal } };
-
-/** Stop Syncing ended a sync that was still sending what it needs; no failure. */
-class SyncStoppedError extends Error {}
 
 /** How a failed automatic sync is taken (`AutoSync`): what may not sync by itself stops, a full remote waits, a busy book tries again soon. */
 export function automaticFailure(error: unknown): AutoFailure {
@@ -414,10 +412,14 @@ export class DocumentSession {
    */
   async sync(remote: SyncRemote, options: Pick<SyncOptions, 'fetchOriginals' | 'fastForwardOnly' | 'pushOnly' | 'signal' | 'ahead'> & { remoteId?: string;
     /** Told when the sync fails because the remote is full (its commit or a preview did not fit). */
-    full?: (error: StoreFullError) => void } = {}) {
+    full?: (error: StoreFullError) => void;
+    /** Whether sync was turned off since the sync began (`startSyncing`). */
+    unless?: (state: SyncState) => boolean } = {}) {
     return this.hold(async () => {
+      // The book may have been sending for minutes: an untrusted one never syncs. Withdrawing the trust needs the hold.
+      if (options.unless && !await bookTrusted(this.book.folder)) throw new SyncStoppedError();
       // Syncing turns on only once the sync holds the book: one that finds it busy changes nothing.
-      if (options.remoteId) await startSyncing(this.book.folder, options.remoteId);
+      if (options.remoteId) await startSyncing(this.book.folder, options.remoteId, { unless: options.unless });
       this.stopWatch();
       // What a pull changes: the book state, or (photos only) the commit this Mac last synced.
       const mark = async () => [await captureBookStateRevision(this.book.folder).catch(() => ''),
@@ -427,9 +429,9 @@ export class DocumentSession {
         // Tests of automatic sync stand in for a slow remote (`IMAGEFLOW_SYNC_TEST_SLOW_MS`, development builds only).
         const slow = DocumentSession.automaticSyncDelay;
         const { signal } = options;
-        if (signal && slow) await new Promise<void>((resolve, reject) => {
+        if (slow) await new Promise<void>((resolve, reject) => {
           const timer = setTimeout(resolve, slow);
-          signal.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
+          signal?.addEventListener('abort', () => { clearTimeout(timer); reject(signal!.reason); }, { once: true });
         });
         const outcome = await syncBook({ remote, book: this.book, fetchOriginals: options.fetchOriginals, chooseTip: (tips) => this.chooseTip(tips), cover: this.cover, device: macName(),
           fastForwardOnly: options.fastForwardOnly, pushOnly: options.pushOnly, signal: options.signal, ahead: options.ahead });
@@ -727,18 +729,29 @@ export class DocumentSession {
       const running = this.syncTask;
       return running.catch(() => undefined).then(() => this.syncNow(options));
     }
+    // One that is being stopped is not joined: Start Syncing right after Stop Syncing starts again once it ended.
+    if (!options.automatic && this.syncTask && this.syncRun?.stopped) return this.syncTask.catch(() => undefined).then(() => this.syncNow(options));
     // A second request while a sync runs (Start Syncing during the first sync by itself, a click on the status) joins
     // it before it touches anything, so only the request that set the syncing state clears it.
     if (this.syncTask) return this.syncTask;
     // A sync the user asked for ends the backoff, and a book that stopped syncing by itself (deleted from sync, an
     // untrusted book) is looked at again.
     if (!options.automatic && !options.auto) this.autoSync.reset();
-    const task = this.runSync(options).finally(() => { if (this.syncTask === task) { this.syncTask = undefined; this.syncAutomatic = false; } });
+    const run = this.syncRun = { stopped: false };
+    const task = this.runSync(options, run).finally(() => { if (this.syncTask === task) { this.syncTask = undefined; this.syncAutomatic = false; } });
     this.syncTask = task;
     this.syncAutomatic = !!options.automatic;
     return task;
   }
   private syncTask?: Promise<SyncOutcome | undefined>;
+  /** The sync that runs, as what turns sync off sees it: one `stopped` before it holds the book ends without a sync. */
+  private syncRun?: { stopped: boolean };
+  /** Stop Syncing being written; a sync it stopped ends after it, so nothing starts again before. */
+  private stopTask?: Promise<void>;
+  private stopSending() {
+    if (this.syncTask && this.syncRun) this.syncRun.stopped = true;
+    this.aheadJob?.abort(new SyncStoppedError());
+  }
   /**
    * What a sync sends before it holds the book (`uploadAhead`): its content files and previews, which take minutes for a
    * large first sync. Stopped by Stop Syncing and by closing the book. The previews that went up are kept for the remote
@@ -747,9 +760,11 @@ export class DocumentSession {
   private aheadJob?: AbortController;
   private ahead?: { remoteId: string; previews: UploadedPreviews };
   private sending?: { done: number; total: number };
+  private sendingTask?: Promise<UploadedPreviews>;
   /** Whether a sync sends previews now, without holding the book; Stop Syncing then ends it. */
   get sendingAhead() { return !!this.aheadJob; }
-  private async sendAhead(connection: { remoteId: string; remote: SyncRemote }, closing?: AbortSignal) {
+  private async sendAhead(connection: { remoteId: string; remote: SyncRemote }, run: { stopped: boolean }, closing?: AbortSignal) {
+    if (run.stopped) throw new SyncStoppedError();
     if (this.ahead?.remoteId !== connection.remoteId) this.ahead = { remoteId: connection.remoteId, previews: new Map() };
     const { previews } = this.ahead;
     const job = this.aheadJob = new AbortController();
@@ -779,11 +794,13 @@ export class DocumentSession {
       closing?.removeEventListener('abort', stop);
       this.aheadJob = undefined;
       this.sending = undefined;
+      // The sync holds the book from here on: no progress is shown, and Stop Syncing is not offered.
+      if (this.syncView && !this.closing) this.publishSync(this.syncView);
     }
   }
   /** Whether the sync that runs is automatic. */
   private syncAutomatic = false;
-  private async runSync({ start = false, auto = false, trust = false, automatic }: SyncRequest) {
+  private async runSync({ start = false, auto = false, trust = false, automatic }: SyncRequest, run: { stopped: boolean }): Promise<SyncOutcome | undefined> {
     if (!this.syncService) throw new Error('Sync is not available.');
     const connection = await this.syncService.connect(this.book.folder);
     const state = await readSyncState(this.book.folder);
@@ -813,19 +830,24 @@ export class DocumentSession {
             finally { this.watchProject(this.book); }
           });
         }
-        ahead = await this.sendAhead(connection, automatic?.signal);
+        this.sendingTask = this.sendAhead(connection, run, automatic?.signal);
+        ahead = await this.sendingTask;
       }
       catch (error) {
-        if (error instanceof SyncStoppedError) return undefined;
+        // Closing the book ends what it was sending; that is no failure to report either.
+        if (this.closing) return undefined;
         if (error instanceof StoreFullError) this.storageFull = { message: error.message, ...manage };
         throw error;
       }
       // A save, a reload or an agent's change made meanwhile may hold the book for a moment.
       await this.whenIdle();
+      if (this.closing) return undefined;
       const begun = automatic ? this.automaticRuns.begin(automatic.signal) : undefined;
       let result: SyncOutcome;
       try {
-        result = await this.sync(connection.remote, { remoteId: connection.remoteId, ahead, full: (error) => { this.storageFull = { message: error.message, ...manage }; },
+        result = await this.sync(connection.remote, { remoteId: connection.remoteId, ahead,
+          // Turned off meanwhile, here or by its record (Delete from Sync, the sheet that asks which books sync).
+          unless: (now) => run.stopped || (now.enabled === false && state.enabled !== false), full: (error) => { this.storageFull = { message: error.message, ...manage }; },
           ...(automatic && begun ? { fastForwardOnly: true, pushOnly: automatic.pushOnly, signal: begun.run.job.signal,
             // The gate is read again as the pull is applied: an editor may have opened while the sync read the remote.
             beforeApply: () => begun.mayApply(() => this.closing || !!this.pullBlocked({ holding: true })) } : {}) });
@@ -837,6 +859,7 @@ export class DocumentSession {
       if (synced) this.removed = false;
       return result;
     } catch (error) {
+      if (error instanceof SyncStoppedError) { await this.stopTask?.catch(() => {}); return undefined; }
       if (error instanceof BookDeletedError) this.removed = true;
       throw error;
     } finally {
@@ -844,9 +867,9 @@ export class DocumentSession {
       await this.refreshSync({ message }).catch((error) => console.warn('ImageFlow could not read the sync status', error));
       // The originals the commit named go up now, in the background. A remote that was full pauses them until Sync Now
       // (or the book's next open): an automatic sync does not try the same original again at every idle.
-      if (synced) this.uploadOriginals(!automatic);
+      if (synced && !run.stopped) this.uploadOriginals(!automatic);
       // Placing downloaded originals reloads the book, which an automatic sync does only when nothing blocks a pull.
-      if ((!automatic || !automatic.pushOnly) && this.keepOriginals?.() && this.syncView?.status && this.syncView.status.pendingOriginals > (this.syncView.status.notUploaded ?? 0)) void this.downloadSyncedOriginals({ automatic: !!automatic }).catch((error) => { if (!automatic && !this.window.isDestroyed()) this.window.webContents.send(channels.appNotice, 'Originals are still to be downloaded: ' + errorMessage(error)); });
+      if (!run.stopped && (!automatic || !automatic.pushOnly) && this.keepOriginals?.() && this.syncView?.status && this.syncView.status.pendingOriginals > (this.syncView.status.notUploaded ?? 0)) void this.downloadSyncedOriginals({ automatic: !!automatic }).catch((error) => { if (!automatic && !this.window.isDestroyed()) this.window.webContents.send(channels.appNotice, 'Originals are still to be downloaded: ' + errorMessage(error)); });
     }
   }
   /**
@@ -876,7 +899,11 @@ export class DocumentSession {
   }
 
   /** Waits until a sync of the book that is running has ended (Delete from Sync waits for it before it deletes). */
-  async settleSync() { await this.syncTask?.catch(() => {}); }
+  async settleSync() {
+    // One that is still sending is stopped: it would go on for minutes.
+    this.stopSending();
+    await this.syncTask?.catch(() => {});
+  }
   /** Waits, up to 10 s, while a reload or the first save holds the book (a book the library just opened). */
   async whenIdle() {
     for (let attempt = 0; attempt < 50 && this.busy && !this.closing; attempt++) await new Promise((resolve) => setTimeout(resolve, 200));
@@ -915,6 +942,8 @@ export class DocumentSession {
     const service = this.syncService?.configured ? this.syncService : undefined;
     const result = await this.run(() => (service ? service.distrust(this.book.folder) : distrustBook(this.book.folder)));
     if ('error' in result) throw new Error(result.code === 'BOOK_BUSY' ? 'Wait for the book to finish syncing, then stop trusting it.' : result.error);
+    // A sync that does not hold the book yet sends nothing more of it.
+    this.stopSending();
     await this.updateNetwork();
     if (service) await this.refreshSync();
   }
@@ -924,8 +953,10 @@ export class DocumentSession {
    */
   async stopSyncing() {
     if (!this.syncService) throw new Error('Sync is not available.');
-    await this.syncService.stop(this.book.folder);
-    this.aheadJob?.abort(new SyncStoppedError());
+    // First, so a sync that is about to hold the book does not turn sync on again.
+    this.stopSending();
+    const stopping = this.stopTask = this.syncService.stop(this.book.folder);
+    try { await stopping; } finally { if (this.stopTask === stopping) this.stopTask = undefined; }
     this.removed = false;
     await this.refreshSync();
   }
@@ -1105,7 +1136,7 @@ export class DocumentSession {
       // Sync work when closing shares one bound: an automatic sync still reading the remote's identity then finds the
       // book closing, and the push gets what is left of it.
       const deadline = Date.now() + DocumentSession.closePushMs;
-      await Promise.race([automatic.catch(() => {}), new Promise((resolve) => setTimeout(resolve, DocumentSession.closePushMs))]);
+      await Promise.race([Promise.all([automatic.catch(() => {}), this.sendingTask?.catch(() => {})]), new Promise((resolve) => setTimeout(resolve, DocumentSession.closePushMs))]);
       // Published saves must settle before releasing the single-writer capability.
       while (this.busy) await new Promise((resolve) => setTimeout(resolve, 10));
       // What changed since the last sync goes up while the writer lock is still held, for at most a few seconds.

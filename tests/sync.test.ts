@@ -37,7 +37,7 @@ import { MemoryKeyIndexCache } from '../desktop/sync-key-index';
 import { MemoryHeaderCache } from '../desktop/sync-header-cache';
 import { readCommitHeaderV1 } from './sync-v1-reader';
 import { bookTrusted, distrustBook, trustBook } from '../desktop/source-access';
-import { readSyncState, SyncElsewhereError, SyncHalfPulledError, takeAbandonedAtOpen, updateSyncState } from '../desktop/sync-pull';
+import { readSyncState, startSyncing, SyncElsewhereError, SyncHalfPulledError, SyncStoppedError, takeAbandonedAtOpen, updateSyncState } from '../desktop/sync-pull';
 import { insideBook, pendingUploadsText, SyncService, UntrustedBookError } from '../desktop/sync-service';
 import { FirstSync, syncExcludedBook } from '../desktop/sync-start';
 import { AutomaticRuns, AutoSync, autoSyncTiming, SyncInterruptedError } from '../desktop/sync-auto';
@@ -3889,9 +3889,8 @@ coreEach('what goes up ahead of a sync changes nothing in the book, and the sync
     const traffic = recordTraffic(remote);
     assert.equal((await syncBook({ remote, book, ahead })).action, 'initial-push');
     assert.deepEqual(traffic.read.filter((key) => key.includes('/proxies/')), []);
-    assert.deepEqual(traffic.put.filter((key) => key.includes('/proxies/') && [...ahead.keys()].some((digest) => key.includes(digest))), []);
+    assert.deepEqual(traffic.put.filter((key) => key.includes('/proxies/') && [...ahead.keys()].some((kept) => key.includes(kept.split('/')[1]))), []);
   });
-  // A preview Clean Up removed in between is sent again.
   const state = await stateOf(remote, (await tips(remote, a))[0]);
   for (const [digest, { ext, sha256 }] of Object.entries(state.proxies)) {
     assert.equal(sha(await stored(remote, proxyBlobKey(await bookId(a), digest, ext))), sha256);
@@ -3907,12 +3906,82 @@ coreEach('an upload ahead of a sync stops with its signal and goes on where it s
     const why = new Error('Stopped.');
     await assert.rejects(uploadAhead({ remote, book, ahead, signal: job.signal, progress: (done) => { if (done === 10) job.abort(why); } }), (error) => error === why);
     assert.equal(await commitCount(remote), 0);
-    const kept = new Set(ahead.keys());
+    const kept = new Set([...ahead.keys()].map((key) => key.split('/')[1]));
     const traffic = recordTraffic(remote);
     await uploadAhead({ remote, book, ahead });
     for (const digest of kept) assert.ok(![...traffic.put, ...traffic.read].some((key) => key.includes(digest)), 'neither sent nor read again');
     assert.equal((await syncBook({ remote, book, ahead })).action, 'initial-push');
   });
+});
+
+coreEach('a preview Clean Up removes between what went up ahead and the sync is sent again', async (t) => {
+  const { a, remote } = await world(t);
+  await manyPhotos(a, 6);
+  const id = await bookId(a);
+  await on(a, async (book) => {
+    const ahead: UploadedPreviews = new Map();
+    await uploadAhead({ remote, book, ahead });
+    const removed = (await remote.listBook(id, 'proxies')).map(({ key }) => key).slice(0, 3);
+    assert.equal(removed.length, 3);
+    await remote.deleteBlobs(removed);
+    const traffic = recordTraffic(remote);
+    assert.equal((await syncBook({ remote, book, ahead })).action, 'initial-push');
+    for (const key of removed) assert.ok(traffic.put.includes(key), 'sent again: ' + key);
+  });
+  const state = await stateOf(remote, (await tips(remote, a))[0]);
+  for (const [digest, { ext, sha256 }] of Object.entries(state.proxies)) assert.equal(sha(await stored(remote, proxyBlobKey(id, digest, ext))), sha256);
+});
+
+coreEach('a book given a new lineage stores its previews anew, ahead of the sync', async (t) => {
+  const { a, remote } = await world(t);
+  await manyPhotos(a, 6);
+  const ahead: UploadedPreviews = new Map();
+  await on(a, (book) => uploadAhead({ remote, book, ahead }));
+  const file = join(a.folder, 'project.json');
+  const project = JSON.parse(await readFile(file, 'utf8'));
+  const id = randomUUID();
+  await writeFile(file, JSON.stringify({ ...project, bookId: id }, null, 2) + '\n');
+  await on(a, async (book) => {
+    await uploadAhead({ remote, book, ahead });
+    const stored = (await remote.listBook(id, 'proxies')).length;
+    assert.ok(stored >= 6, stored + ' previews under the new lineage');
+    const traffic = recordTraffic(remote);
+    assert.equal((await syncBook({ remote, book, ahead })).action, 'initial-push');
+    assert.deepEqual(traffic.put.filter((key) => key.includes('/proxies/') && [...ahead.keys()].some((kept) => key.includes(kept.split('/')[1]))), []);
+  });
+});
+
+coreEach('a photo whose file cannot be read while it goes up ahead is left to the sync', async (t) => {
+  const { a, remote } = await world(t);
+  await manyPhotos(a, 6);
+  await on(a, async (book) => {
+    // The photo's file goes while the book is not held, after it was looked at and before its preview is made.
+    const [id] = Object.keys(book.photoIndex).slice(-1);
+    const photo = book.photos.get(id)!;
+    let looked = 0;
+    book.photos.set(id, Object.defineProperty({ ...photo }, 'original', { get: () => { if (looked++) throw new Error('The file is gone.'); return photo.original; } }) as typeof photo);
+    const ahead: UploadedPreviews = new Map();
+    await uploadAhead({ remote, book, ahead });
+    assert.ok(looked > 1, 'its preview was tried');
+    assert.ok(ahead.size >= 5, 'the others went up');
+    book.photos.set(id, photo);
+    assert.equal((await syncBook({ remote, book, ahead })).action, 'initial-push');
+  });
+  const state = await stateOf(remote, (await tips(remote, a))[0]);
+  for (const { digest } of Object.values(state.assetsMeta.assets)) assert.ok(state.proxies[digest]);
+});
+
+core('a sync that begins to hold the book does not turn sync on again after it was turned off', async (t) => {
+  const { a } = await world(t);
+  const remoteId = randomUUID();
+  await startSyncing(a.folder, remoteId);
+  // Turned off between the sync's beginning and its hold: the record decides as it is written.
+  const off = updateSyncState(a.folder, (state) => ({ ...state, enabled: false }));
+  await assert.rejects(startSyncing(a.folder, remoteId, { unless: ({ enabled }) => enabled === false }), SyncStoppedError);
+  await off;
+  assert.equal((await readSyncState(a.folder)).enabled, false);
+  await startSyncing(a.folder, remoteId);
+  assert.equal((await readSyncState(a.folder)).enabled, true, 'Start Syncing turns it on');
 });
 
 each('nothing goes up ahead for a book deleted from sync', async (t) => {
