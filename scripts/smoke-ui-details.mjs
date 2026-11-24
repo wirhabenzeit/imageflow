@@ -296,6 +296,7 @@ try {
   // The panel stays open while the findings are gone through: Next selects the spread and outlines its box.
   await page.getByRole('button', { name: 'Next finding' }).click();
   await page.locator('.book-check-panel [aria-current="true"]').waitFor();
+  assert.equal(await page.locator('.book-check-panel [aria-current="true"]').count(), 1, 'one finding is current');
   await page.locator('.canvas').click({ position: { x: 20, y: 20 } });
   assert.equal(await page.locator('.book-check-panel').count(), 1, 'a click in the book leaves the panel open (' + found + ')');
   await page.keyboard.press('Escape');

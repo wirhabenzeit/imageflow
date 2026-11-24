@@ -1,10 +1,10 @@
 import { coverInstance } from './project';
 import type { PageSide } from './project';
 import { Icon } from './Icon';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useId, useMemo, useRef, useState } from 'react';
 import { issueText } from './desktop';
 import type { Issue, ProjectSummary } from './desktop';
-import { checkRows, issueKeys, occurrenceText, rowMessages } from './issue-groups';
+import { checkRows, issueKeys, namedMessage, occurrenceText, rowMessages } from './issue-groups';
 import type { CheckRow } from './issue-groups';
 import { awayText } from './away-originals';
 import { revealIn } from './reveal';
@@ -29,10 +29,11 @@ function sourceOf(summary: ProjectSummary, { source, sourceKind }: Issue): Sourc
 /** A finding's message with the name of its source in place of its ID and stored path. */
 function readableMessage(summary: ProjectSummary, issue: Issue) {
   const { source, message } = issue;
-  const name = sourceOf(summary, issue)?.name;
-  if (!source || !name) return message;
-  const stored = summary.photoIndex[source]?.path ?? summary.project.texts[source] ?? summary.project.files[source];
-  return (stored ? message.replaceAll(sourcePath(stored), name) : message).replaceAll(source, name);
+  const found = sourceOf(summary, issue);
+  if (!source || !found) return message;
+  // Of its own kind: a photo without a file may share its ID with a text.
+  const stored = found.kind === 'photo' ? summary.photoIndex[source].path : found.kind === 'text' ? summary.project.texts[source] : summary.project.files[source];
+  return namedMessage(message, { id: source, path: stored && sourcePath(stored), name: found.name });
 }
 
 // A labeled book-check status in the footer, with a panel above it for going through the findings: it stays open while
@@ -58,6 +59,8 @@ export function BookCheckIndicator({ summary, check, checking, spread, select, r
   const panel = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLUListElement>(null);
   const id = useId();
+  // The finding whose box is outlined in the book.
+  const outlined = useRef<string | undefined>(undefined);
 
   const all = useMemo(() => checkRows({ errors: check?.errors ?? [], warnings: check?.warnings ?? [] }), [check?.errors, check?.warnings]);
   const total = (level: CheckRow['level']) => all.reduce((sum, row) => sum + (row.level === level ? row.items.length : 0), 0);
@@ -80,16 +83,23 @@ export function BookCheckIndicator({ summary, check, checking, spread, select, r
   const nextIndex = at >= 0 ? at + 1 : current ? Math.min(current.index, stops.length) : 0;
   const previousIndex = at >= 0 ? at - 1 : current ? Math.min(current.index, stops.length) - 1 : stops.length - 1;
 
+  function clearOutline() {
+    outlined.current = undefined;
+    select(undefined);
+  }
   function close() {
     const inside = panel.current?.contains(document.activeElement);
     setOpen(false);
     setCurrent(undefined);
-    select(undefined);
+    clearOutline();
     if (inside) root.current?.querySelector('button')?.focus();
   }
   function visit(issue: Issue) {
     const key = keyOf(issue);
-    setCurrent({ key, index: Math.max(0, stops.findIndex((stop) => stop.key === key)) });
+    const index = stops.findIndex((stop) => stop.key === key);
+    // A place of an informational row is none of the stops: Previous and Next go on from where they were.
+    if (index >= 0) setCurrent({ key, index });
+    outlined.current = key;
     select(issue);
   }
   const toggleRow = (key: string) => setOpened((previous) => {
@@ -111,16 +121,22 @@ export function BookCheckIndicator({ summary, check, checking, spread, select, r
   });
 
   // Escape closes the panel, but not while it ends something else, such as a crop.
-  useEffect(() => {
-    if (!open) return;
-    const key = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !event.defaultPrevented && (!editing || root.current?.contains(document.activeElement))) close();
-    };
-    window.addEventListener('keydown', key);
-    return () => window.removeEventListener('keydown', key);
+  const onKey = useEffectEvent((event: KeyboardEvent) => {
+    if (event.key === 'Escape' && !event.defaultPrevented && (!editing || root.current?.contains(document.activeElement))) close();
   });
   useEffect(() => {
-    if (request) { setScope(requestSpread); setOpen(true); setCurrent(undefined); select(undefined); }
+    if (!open) return;
+    const key = (event: KeyboardEvent) => onKey(event);
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [open]);
+  // A finding that was fixed is outlined no more, once the book was checked again.
+  const onChecked = useEffectEvent(() => {
+    if (outlined.current && !checking && ![...keys.values()].includes(outlined.current)) clearOutline();
+  });
+  useEffect(() => { onChecked(); }, [keys, checking]);
+  useEffect(() => {
+    if (request) { setScope(requestSpread); setOpen(true); setCurrent(undefined); clearOutline(); }
   }, [request]);
   // Asked for by the command, the panel takes the focus, so its findings are the next stop for the keyboard.
   useEffect(() => { if (request && open) panel.current?.focus(); }, [request, open]);
@@ -172,27 +188,32 @@ export function BookCheckIndicator({ summary, check, checking, spread, select, r
     const shown = opened.has(row.key);
     const body = id + index;
     const info = row.level === 'info';
-    const messages = shown ? rowMessages(row, (issue) => readableMessage(summary, issue)) : [];
+    const allMessages = rowMessages(row, (issue) => readableMessage(summary, issue));
+    const messages = shown ? allMessages : [];
     const sentence = [row.detail, row.fix].filter(Boolean).join(' ');
     const reason = messages.length === 1 ? messages[0] : undefined;
     // A problem without places or words of its own has nothing to open.
     const single = row.items.length === 1 ? row.items[0] : undefined;
-    const opens = row.items.some((issue) => issueTarget(issue)) || !!sentence || rowMessages(row, (issue) => readableMessage(summary, issue)).length > 0;
+    const opens = row.items.some((issue) => issueTarget(issue) || issue.source) || !!sentence || allMessages.length > 0;
     const head = <><span className="bc-icon"><Icon name={info ? 'info' : row.level === 'error' ? 'error' : 'warning'} size={14} /></span>
       <span className="bc-title">{row.title}</span>
       {!info && row.items.length > 1 && <span className="bc-count">{row.items.length}</span>}
       {opens && <span className="bc-chevron" data-open={shown || undefined}><Icon name="chevron" size={12} /></span>}</>;
     const spoken = info ? row.title : (row.level === 'error' ? 'Error: ' : 'Warning: ') + row.title + (row.items.length > 1 ? ', ' + row.items.length : '');
-    const currentRow = !!current && !info && stops.some((stop) => stop.row === row.key && stop.key === current.key);
+    // Every place is listed in an opened row, and those on a page in a closed one; the row itself is current only for
+    // one that is not listed.
+    const listed = !single || !!issueTarget(single) || !!single.source || allMessages.length > 1;
+    const currentIssue = current && !info ? row.items.find((issue) => keyOf(issue) === current.key) : undefined;
+    const currentRow = !!currentIssue && !(shown ? listed : issueTarget(currentIssue));
     return <li key={row.key} className={'bc-row issue-' + row.level + (row.items.some((issue) => issueTarget(issue) === spread) ? ' has-current' : '')} {...contextMenu(row.items)}
-      aria-current={currentRow && !row.items.some((issue) => issueTarget(issue)) ? 'true' : undefined}>
+      aria-current={currentRow ? 'true' : undefined}>
       {opens ? <button type="button" className="bc-head" aria-expanded={shown} aria-controls={shown ? body : undefined} aria-label={spoken} onClick={() => toggleRow(row.key)}>{head}</button>
         : <div className="bc-head" tabIndex={0}><span className="visually-hidden">{spoken}</span><span className="bc-head-text" aria-hidden="true">{head}</span></div>}
       {row.note?.away === 'other-mac' && locateFolder && <button type="button" className="bc-action" onClick={locateFolder}>Locate Folder…</button>}
       {!shown && !info && places(row)}
       {shown && <div className="bc-body" id={body}>
         {(reason || sentence) && <p>{[reason, sentence].filter(Boolean).join(' ')}</p>}
-        {(!single || issueTarget(single) || messages.length > 1) && <ul className="bc-places" aria-label={row.title + ', places'}>{row.items.map((issue, i) => place(row, issue, true, i))}</ul>}
+        {listed && <ul className="bc-places" aria-label={row.title + ', places'}>{row.items.map((issue, i) => place(row, issue, true, i))}</ul>}
       </div>}
     </li>;
   }

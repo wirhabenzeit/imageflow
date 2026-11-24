@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { checkRows, issueKeys, occurrenceText, rowMessages } from '../src/issue-groups';
+import { checkRows, issueKeys, namedMessage, occurrenceText, rowMessages } from '../src/issue-groups';
 import { cachedPreviewText, printProblem } from '../src/source-locations';
 import type { SourceStatus } from '../src/source-locations';
 import { awayDiagnostics, awayOriginal, awayProblem, awayText, sourceWarnings, takeAway, withoutReported } from '../src/away-originals';
@@ -133,4 +133,16 @@ test('a Lightroom photo is elsewhere while its catalog cannot be reached, and a 
   assert.equal(awayProblem('catalog', 'Lightroom Classic is not running.'), 'Lightroom Classic is not running.', 'what is wrong with the connection stays readable');
   assert.equal(awayOriginal(photo('offline', false)), undefined, 'no preview: the photo is missing from the page');
   for (const state of ['missing', 'unreadable', 'available'] as const) assert.equal(awayOriginal(photo(state)), undefined);
+});
+
+test('a message names its source in place of its ID and path, and leaves its words alone', () => {
+  const named = (message: string, id: string, name: string, path?: string) => namedMessage(message, { id, path, name });
+  assert.equal(named('Missing Markdown source a.', 'a', 'alps.md'), 'Missing Markdown source alps.md.');
+  assert.equal(named('Cover photo is missing photo cover.', 'cover', 'Harbour'), 'Cover photo is missing photo Harbour.');
+  assert.equal(named('Text box is missing text text.', 'text', 'Story'), 'Text box is missing text Story.');
+  assert.equal(named('Main is missing photo ph-12-ab.', 'ph-12-ab', 'Harbour'), 'Main is missing photo Harbour.');
+  assert.equal(named('Main is missing photo ph-12-abc.', 'ph-12-ab', 'Harbour'), 'Main is missing photo ph-12-abc.', 'part of another ID');
+  assert.equal(named('files/map-route.gpx cannot be read (map).', 'map', 'route.gpx', 'files/map-route.gpx'), 'route.gpx cannot be read (map).');
+  assert.equal(named('Original missing: /a/alps.jpg', 'alps', 'alps.jpg', '/a/alps.jpg'), 'Original missing: alps.jpg', 'a name that holds the ID');
+  assert.equal(named('Missing file x1.', 'x1', 'cost $& (1).csv'), 'Missing file cost $& (1).csv.');
 });

@@ -111,6 +111,18 @@ export function checkRows(found: { errors: readonly Issue[]; warnings: readonly 
     ...notes.map((note): CheckRow => ({ key: 'info ' + note.away, level: 'info', title: awayText(note), items: note.placed, note }))];
 }
 
+const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+/**
+ * A message with the name of its source in place of its stored path and ID. An ID that is only letters may be a word of
+ * the message as well ("text", "a"), so it counts as the ID only after the kind of thing it names.
+ */
+export function namedMessage(message: string, { id, path, name }: { id: string; path?: string; name: string }) {
+  const word = /^\p{L}+$/u.test(id) ? '(?<=\\b(?:photo|text|markdown|source|file|asset) )' : '';
+  const token = word + '(?<![\\p{L}\\p{N}_./-])' + escaped(id) + '(?![\\p{L}\\p{N}_/-]|\\.[\\p{L}\\p{N}])';
+  // In one pass, so a name that holds the ID is not replaced in turn.
+  return message.replace(new RegExp([...(path ? [escaped(path)] : []), token].join('|'), 'giu'), (found) => found === path || found === id ? name : found);
+}
+
 /** The messages of a row that has no words of its own, each once. */
 export function rowMessages({ level, title, detail, items }: CheckRow, readable: (issue: Issue) => string) {
   if (level === 'info' || detail) return [];
