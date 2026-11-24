@@ -410,7 +410,7 @@ export class DocumentSession {
    * watcher is paused while the engine pushes or pulls, and a pull is adopted as an external change, which resets
    * Undo and Redo. With several remote tips the user picks the one to continue from.
    */
-  async sync(remote: SyncRemote, options: Pick<SyncOptions, 'fetchOriginals' | 'fastForwardOnly' | 'pushOnly' | 'signal' | 'ahead'> & { remoteId?: string;
+  async sync(remote: SyncRemote, options: Pick<SyncOptions, 'fetchOriginals' | 'fastForwardOnly' | 'pushOnly' | 'signal' | 'ahead' | 'beforeApply'> & { remoteId?: string;
     /** Told when the sync fails because the remote is full (its commit or a preview did not fit). */
     full?: (error: StoreFullError) => void;
     /** Whether sync was turned off since the sync began (`startSyncing`). */
@@ -434,7 +434,7 @@ export class DocumentSession {
           signal?.addEventListener('abort', () => { clearTimeout(timer); reject(signal!.reason); }, { once: true });
         });
         const outcome = await syncBook({ remote, book: this.book, fetchOriginals: options.fetchOriginals, chooseTip: (tips) => this.chooseTip(tips), cover: this.cover, device: macName(),
-          fastForwardOnly: options.fastForwardOnly, pushOnly: options.pushOnly, signal: options.signal, ahead: options.ahead });
+          fastForwardOnly: options.fastForwardOnly, pushOnly: options.pushOnly, signal: options.signal, ahead: options.ahead, beforeApply: options.beforeApply });
         if (outcome.changed) this.notify({ value: this.activate(await loadProject(this.book.folder, this.cache), true) });
         return outcome;
       } catch (error) {
