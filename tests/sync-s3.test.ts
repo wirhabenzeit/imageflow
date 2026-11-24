@@ -212,6 +212,45 @@ test('a service that refuses If-None-Match gets a look, then a plain put, from t
   assert.ok(first === second || objectKeys(fake).includes(remoteIdentityKey));
 });
 
+// A push of a thousand previews asked for each before it sent it. That look is also what keeps a put from replacing an
+// object where the service ignores the condition, so it goes only once the service proved that it does not.
+test('small puts stop looking first once the service proved that it refuses to replace an object', async (t) => {
+  const { fake, store, make } = await server(t);
+  for (let index = 0; index < S3Store.proveAfter; index++) assert.deepEqual(await store.putIfAbsent('books/a/content/' + index, bytes('object ' + index)), { existed: false });
+  const proof = 'books/a/content/' + (S3Store.proveAfter - 1);
+  assert.equal(fake.requests.filter(({ method, key }) => method === 'PUT' && key === proof).length, 2, 'the proof: the same bytes again, refused');
+  fake.requests.length = 0;
+  assert.deepEqual(await store.putIfAbsent('books/a/proxies/new', bytes('new')), { existed: false });
+  assert.deepEqual(fake.requests.map(({ method, headers }) => method + (headers['if-none-match'] ? ' conditional' : '')), ['PUT conditional']);
+  assert.deepEqual(await store.putIfAbsent('books/a/proxies/new', bytes('other')), { existed: true }, 'refused by the service');
+  assert.deepEqual(await store.get('books/a/proxies/new'), bytes('new'));
+  // A file, and a large object, are still looked for before they are sent.
+  fake.requests.length = 0;
+  await store.putIfAbsent('books/a/content/large', new Uint8Array(S3Store.smallObject + 1));
+  assert.deepEqual(fake.requests.map(({ method }) => method), ['HEAD', 'PUT']);
+  const directory = await mkdtemp(join(tmpdir(), 'if-s3-look-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(join(directory, 'original.jpg'), 'original');
+  fake.requests.length = 0;
+  await store.putIfAbsent('books/a/originals/original.jpg', { file: join(directory, 'original.jpg') });
+  assert.deepEqual(fake.requests.map(({ method }) => method), ['HEAD', 'PUT']);
+  // A condition refused after all: the put that did not look looks then, and replaces nothing.
+  await make().putIfAbsent('books/a/proxies/elsewhere', bytes('another Mac'));
+  fake.conditional = 'rejected';
+  assert.deepEqual(await store.putIfAbsent('books/a/proxies/elsewhere', bytes('this Mac')), { existed: true });
+  assert.deepEqual(await store.get('books/a/proxies/elsewhere'), bytes('another Mac'));
+});
+
+test('a service that ignores the condition is looked at before every put, so nothing is ever replaced', async (t) => {
+  const { fake, store, make } = await server(t, (fake) => { fake.conditional = 'ignored'; });
+  for (let index = 0; index < S3Store.proveAfter * 3; index++) await store.putIfAbsent('books/a/content/' + index, bytes('object ' + index));
+  for (let index = 0; index < S3Store.proveAfter * 3; index++) assert.deepEqual(await store.get('books/a/content/' + index), bytes('object ' + index));
+  await make().putIfAbsent('books/a/proxies/one', bytes('another Mac'));
+  assert.deepEqual(await store.putIfAbsent('books/a/proxies/one', bytes('this Mac')), { existed: true });
+  assert.deepEqual(await store.get('books/a/proxies/one'), bytes('another Mac'));
+  assert.equal(fake.requests.filter(({ method }) => method === 'PUT').length, S3Store.proveAfter * 3 + 2, 'it was asked for the proof once');
+});
+
 test('Test Connection reports conditional writes and checksums, and leaves nothing behind', async (t) => {
   for (const [conditional, checksums, expected] of [['enforced', 'verified', { conditionalWrites: 'enforced', checksums: 'verified' }],
     ['ignored', 'ignored', { conditionalWrites: 'ignored', checksums: 'not-verified' }], ['rejected', 'verified', { conditionalWrites: 'unsupported', checksums: 'verified' }]] as const) {
