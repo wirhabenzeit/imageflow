@@ -477,7 +477,8 @@ test('Refresh from Lightroom renders anew, and a failed one keeps the picture an
   f.plugin.renderOutside = join(f.root, 'escaped.jpg');
   const failed = await f.changes(now, true);
   assert.deepEqual(failed.reload, []);
-  assert.match(failed.problems!.get('lr1')!, /outside the folder/);
+  assert.equal(failed.problems!.get('lr1')!.state, 'available');
+  assert.match(failed.problems!.get('lr1')!.problem, /outside the folder/);
   assert.equal((await f.load()).sources!['photo:lr1'].state, 'available');
 });
 
@@ -487,6 +488,24 @@ test('a thumbnail too small to lay out by is replaced by a render', async (t) =>
   f.plugin.edit(uuid(1), { develop: { Exposure2012: 1 }, color: '#00ff00' });
   assert.deepEqual((await f.changes(f.loaded)).reload, ['lr1']);
   assert.equal(renderJobs(f.plugin).length, 1);
+});
+
+test('a small thumbnail of a panorama is too small by the panorama’s long edge, and its new shape is still reported', async (t) => {
+  const f = await bookWithLightroom(t);
+  f.plugin.keptEdge.set(uuid(1), 800);
+  f.plugin.edit(uuid(1), { develop: { CropTop: 0.4 }, crop: { width: 6000, height: 800 }, color: '#00ff00' });
+  const changes = await f.changes(f.loaded);
+  assert.equal(renderJobs(f.plugin).length, 1, '800 px of a 6000 px photo, though its short edge is 800 px');
+  // The small preview already recorded the new shape when the render replaced it.
+  assert.deepEqual([changes.reload, changes.reshaped], [['lr1'], ['lr1']]);
+  assert.equal(f.facts.get('lr1')!.height, 800);
+});
+
+test('a photo that cannot be observed has its problem reported, with its state', async (t) => {
+  const f = await bookWithLightroom(t);
+  await f.plugin.quit();
+  const changes = await f.changes(f.loaded);
+  assert.deepEqual([...changes.problems!.values()].map(({ state }) => state), ['offline', 'offline']);
 });
 
 test('an export of an out-of-date photo asks for no preview and prints the photo as it is now', async (t) => {

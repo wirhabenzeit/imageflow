@@ -104,6 +104,12 @@ function jobs.render(job)
   local ok, result = LrTasks.pcall(Catalog.render, job.uuids, job.size, job.folder)
   state.rendering = false
   if not ok then error(result, 0) end
+  for _, uuid in ipairs(result.missing) do state.refused[uuid] = nil end
+  -- A preview rendered instead of a thumbnail is as good as one. A full-size render is not: an export of a photo out of
+  -- date leaves its preview as it was, and the photo is still reported once Lightroom has one.
+  if job.size == 'preview' then
+    for _, made in ipairs(result.renders) do state.refused[made.uuid] = nil end
+  end
   return result
 end
 

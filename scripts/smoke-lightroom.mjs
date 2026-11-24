@@ -99,6 +99,31 @@ try {
   await menuAction(app, 'Import Selected from Lightroom Classic…');
   await until(async () => { const all = await statuses(); return all.length === count + 1 && all.every(({ state }) => state === 'available'); }, 'the refused photo has a picture');
   assert.equal(plugin.jobs.filter(({ type }) => type === 'render').length, 2);
+
+  // An import undone while its preview is on the way, and done again: the photo is not left loading.
+  plugin.selection = [plugin.add(count + 2, { color: '#408080' })];
+  plugin.thumbnailGate = new Promise((resolve) => { open = resolve; });
+  await menuAction(app, 'Import Selected from Lightroom Classic…');
+  await until(async () => (await statuses()).some(({ pending }) => pending), 'the photo is loading');
+  await menuAction(app, 'Undo Book Edit');
+  await until(async () => Object.keys((await summary()).photoIndex).length === count + 1, 'the import is undone');
+  open();
+  await menuAction(app, 'Redo Book Edit');
+  await until(async () => Object.keys((await summary()).photoIndex).length === count + 2, 'and done again');
+  await until(async () => { const all = await statuses(); return all.length === count + 2 && all.every(({ state }) => state === 'available'); }, 'its preview came');
+
+  // A preview that cannot be had says so, and Retry asks again.
+  plugin.selection = [plugin.add(count + 3, { color: '#804040' })];
+  plugin.thumbnailsFail = true;
+  plugin.renderOutside = join(work, 'outside.jpg');
+  await menuAction(app, 'Import Selected from Lightroom Classic…');
+  await until(async () => (await statuses()).some(({ state, pending }) => state === 'unreadable' && !pending), 'the failure shows');
+  plugin.thumbnailsFail = false;
+  plugin.renderOutside = undefined;
+  const key = (await statuses()).find(({ state }) => state === 'unreadable').key;
+  const retried = await page.evaluate((key) => window.imageflow.sourceAction({ action: 'retry', keys: [key] }), key);
+  assert.ok(retried.value, JSON.stringify(retried));
+  await until(async () => (await statuses()).every(({ state }) => state === 'available'), 'Retry fetched it');
   assert.deepEqual(errors, []);
   console.log('Lightroom: import without waiting, out of date in Develop, updated in Library, refreshed on request.');
 } finally {

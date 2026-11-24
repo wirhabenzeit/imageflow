@@ -7,6 +7,7 @@ import type { AssetFact } from '../src/asset-facts';
 import { canonicalJson } from '../src/canonical-json';
 import type { Locator } from '../src/source-locator';
 import type { AssetFacts } from './asset-facts';
+import type { PreviewFailure } from './preview-requests';
 import { proxyStore } from './proxy-store';
 import type { Observed, Previewed, PreviewRendering, ProvidedFacts, Revisions, SourceProvider, SourceRef, Unavailable } from './source-provider';
 
@@ -236,7 +237,8 @@ export async function refreshProvided(folder: string, provider: SourceProvider<L
   return serialized(folder, () => fetchPreviews(folder, provider, refs, observed, facts, options));
 }
 
-type Wanted = { reported: Reported; /** Its older preview is stored. */ held: boolean; rendering: PreviewRendering };
+type Wanted = { reported: Reported; /** Its older preview is stored. */ held: boolean; rendering: PreviewRendering;
+  /** The fact from before this refresh stored a preview that another is to replace (`null`: there was none). */ first?: AssetFact | null };
 /**
  * The part of a refresh that needs no preview: records the facts of the photos whose stored preview still shows them,
  * and returns the others. With `previews`, a photo that has an older preview is recorded as out of date instead.
@@ -326,7 +328,7 @@ async function fetchPreviews(folder: string, provider: SourceProvider<Locator>, 
             const previous = facts.get(ref.id);
             // Too small to lay out by: used only until one made from the photo replaces it.
             const { width = 0, height = 0 } = result.kept ? await sharp(input).metadata() : {};
-            const small = result.kept && Math.max(width, height) < Math.min(smallestKept, reported.facts.width, reported.facts.height);
+            const small = result.kept && Math.max(width, height) < Math.min(smallestKept, Math.max(reported.facts.width, reported.facts.height));
             const bytes = await compactPreview(input);
             const digest = createHash('sha256').update(bytes).digest('hex');
             const moved = !!previous?.revisions && contentKey(previous.revisions) !== contentKey(result.after);
@@ -339,8 +341,10 @@ async function fetchPreviews(folder: string, provider: SourceProvider<Locator>, 
             await store.put(digest, bytes);
             const fact = factOf(facts, ref.id, digest, { facts: reported.facts, revisions: result.after });
             if (!fact) { failed(reported, invalidFacts); return; }
-            settle(reported, { state: 'available', fact, ...(previous ? { previous } : {}), change: previous?.digest === digest ? previous.revisions?.revision === result.after.revision ? 'unchanged' : 'metadata' : 'content' });
-            if (small) next.push({ ...entry, held: true, rendering: 'always' });
+            // What changed is told from before this refresh, not from a preview it stored a moment ago and replaces now.
+            const first = entry.first === undefined ? previous : entry.first ?? undefined;
+            settle(reported, { state: 'available', fact, ...(first ? { previous: first } : {}), change: first?.digest === digest ? first.revisions?.revision === result.after.revision ? 'unchanged' : 'metadata' : 'content' });
+            if (small) next.push({ ...entry, held: true, first: first ?? null, rendering: 'always' });
           } catch (error) { keep({ ...entry, held: false }, 'Preview unavailable: ' + (error instanceof Error ? error.message : String(error))); }
           finally { await rm(result.file, { force: true }); }
         };
@@ -415,7 +419,7 @@ export type ProvidedChanges = {
   /** The photos whose aspect ratio changed with a new preview: a crop placed on them may frame another part. */
   reshaped: string[];
   /** The photos no preview could be had of as they are now, with why; left out where there are none. */
-  problems?: Map<string, string>;
+  problems?: Map<string, PreviewFailure>;
 };
 /** How the open book shows a photo, for `providedChanges` to tell what is different now. */
 export type ShownPhoto = { available: boolean; outOfDate?: boolean; pending?: boolean };
@@ -470,7 +474,7 @@ function changesOf(outcomes: Iterable<[string, ProvidedOutcome]>, shown: Readonl
   for (const [id, outcome] of outcomes) {
     const before = shown.get(id)!;
     const problem = 'problem' in outcome ? outcome.problem : undefined;
-    if (problem !== undefined) (changes.problems ??= new Map()).set(id, problem);
+    if (problem !== undefined) (changes.problems ??= new Map()).set(id, { state: outcome.state === 'pending' ? 'unreadable' : outcome.state, problem });
     if (shownDifferently(outcome, before)) changes.reload.push(id);
     if (outcome.state !== 'available') {
       if (before.available) changes.revised.push(id);

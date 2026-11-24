@@ -76,7 +76,7 @@ export function SourceInspector({ summary, source, template, render, usage, writ
         ? <button type="button" className="si-preview" title="Quick Look (Space)" onClick={quickLook}>
             <img src={renderOrigin + '/render/' + summary.id + '/photo/' + source.id} alt={photo.altText || photo.title || ''} />
           </button>
-        : <p className="error-text">{file ? 'The photo file is missing from photos/.' : 'No preview of this photo is on this Mac.'}</p>}
+        : status?.pending ? null : <p className="error-text">{file ? 'The photo file is missing from photos/.' : 'No preview of this photo is on this Mac.'}</p>}
       {(date || size) && <dl className="si-facts">
         {date && <><dt className={photoDate(summary, source.id)?.capturedEstimated ? 'muted' : undefined}>{date.label}</dt><dd title={date.title} className={photoDate(summary, source.id)?.capturedEstimated ? 'muted' : undefined}>{date.value}</dd></>}
         {size && <><dt>Size</dt><dd>{size.width} × {size.height} px · {(size.width * size.height / 1e6).toFixed(1)} MP</dd></>}
