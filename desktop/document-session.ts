@@ -119,8 +119,9 @@ function exportErrorList(errors: Issue[]) {
   }
   const summaries = [...unavailable].map(([cause, issues]) => {
     const photos = new Set(issues.map(({ source, spread, box }) => source ?? spread + ':' + box)).size;
-    const spreads = new Set(issues.map(({ spread }) => spread)).size;
-    return cause + ': ' + (photos === 1 ? '1 photo' : photos + ' photos') + ' on ' + (spreads === 1 ? '1 spread' : spreads + ' spreads') + ' will print from cached previews.';
+    const spreads = new Set(issues.flatMap(({ spread }) => spread ?? [])).size;
+    const where = [spreads && (spreads === 1 ? '1 spread' : spreads + ' spreads'), issues.some(({ cover }) => cover) && 'the cover'].filter(Boolean).join(' and ');
+    return cause + ': ' + (photos === 1 ? '1 photo' : photos + ' photos') + ' on ' + where + ' will print from cached previews.';
   });
   const shown = other.slice(0, Math.max(0, shownExportErrors - summaries.length)).map(issueText);
   const more = other.length - shown.length;

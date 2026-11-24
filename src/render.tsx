@@ -2,7 +2,7 @@ import { textAssignments } from './text-assignments';
 import { layoutFootprint, shownLayoutStates, planLayoutChange, sheetLayoutLabel } from './layouts';
 import type { PresentationView } from './presentation-model';
 import { presentationPhotoSource } from './presentation-model';
-import { cachedPreviewNote, printProblem, sourceFileName, sourcePath } from './source-locations';
+import { cachedPreviewText, printProblem, sourceFileName, sourcePath } from './source-locations';
 import { renameIds } from './svg-ids';
 import { bundlesFamily, familiesOf, missingCharacters, setTemplateFonts } from './fonts';
 import { parseSentinel, sentinelStrip, sentinelWidth } from './capture-sentinel';
@@ -2046,7 +2046,7 @@ async function renderPhysicalCover(root: HTMLElement, book: RenderProject, templ
       const photo = box?.photo && book.photos[box.photo];
       const unavailable = box?.photo ? printProblem(book.sources?.['photo:' + box.photo]) : undefined;
       if (unavailable) errors.push({
-        ...issue(unavailable + '. The cover preview uses a cached image.', 'source-unavailable', id), source: box.photo,
+        ...issue(cachedPreviewText(unavailable), 'source-unavailable', id), source: box.photo,
       });
       if (box?.photo && !photo) errors.push({ ...issue(declared.label + ' uses an unavailable photo.', 'photo-missing', id), source: box.photo });
       else if (!box?.photo) warnings.push(issue(declared.label + ' is empty.', 'cover-box-empty', id));
@@ -2397,7 +2397,7 @@ export async function startRender(root: HTMLElement) {
         const state = id ? book.sources?.[kind + ':' + id] : undefined;
         const unavailable = printProblem(state);
         if (unavailable) errors.push({
-          ...located(spread.id, unavailable.replace(/\.+$/, '') + cachedPreviewNote),
+          ...located(spread.id, cachedPreviewText(unavailable)),
           code: 'source-unavailable', ...onPage(page), box, source: id || undefined,
           suggestion: state?.previewOnly ? 'Export a proof, or copy the photo into the book on a Mac that can read its original.'
             : state?.state === 'offline' ? 'Retry after opening the photo’s source app or reconnecting its server.' : 'Locate the original or retry after reconnecting its location.',

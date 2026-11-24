@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { groupExtent, groupIssues, issueCause } from '../src/issue-groups';
 import type { LeveledIssue } from '../src/issue-groups';
-import { cachedPreviewNote } from '../src/source-locations';
+import { cachedPreviewNote, cachedPreviewText } from '../src/source-locations';
 
 const placed = (spread: string, message: string): LeveledIssue => ({ level: 'error', issue: { message, spread, where: 'Pages ' + spread, code: 'source-unavailable' } });
 const asset = (message: string): LeveledIssue => ({ level: 'warning', issue: { message, code: 'project-input' } });
@@ -12,6 +12,16 @@ test('an issue’s cause leaves out the file, the asset and the cached-preview n
   assert.equal(issueCause({ message: 'photo aurora · Missing project file: photos/aurora.jpg' }), 'Missing project file');
   assert.equal(issueCause({ message: 'photo ph-1 · Lightroom Classic is not running, or its ImageFlow plugin is not connected.' }),
     'Lightroom Classic is not running, or its ImageFlow plugin is not connected');
+});
+
+test('an unavailable original on the cover has the cause of those on spreads, and one full stop', () => {
+  const problem = 'Locate this original to approve access on this Mac.';
+  const message = cachedPreviewText(problem);
+  assert.doesNotMatch(message, /\.\./);
+  const cover: LeveledIssue = { level: 'error', issue: { message, cover: true, where: 'Cover', code: 'source-unavailable' } };
+  const rows = groupIssues([placed('a', message), cover, placed('b', message)]);
+  assert.equal(rows.length, 1);
+  assert.ok('group' in rows[0] && rows[0].group.cause === problem.slice(0, -1));
 });
 
 test('three or more issues with one cause and level become one group in place of the first; fewer stay single', () => {

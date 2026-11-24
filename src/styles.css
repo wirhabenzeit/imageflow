@@ -62,7 +62,10 @@ body { margin: 0; }
 .book-check-panel { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 30; width: min(420px, 70vw); padding: 10px 12px;
   border: 1px solid var(--control-border); border-radius: 9px; background: var(--control-surface); box-shadow: 0 10px 30px #0003; overflow-wrap: anywhere; }
 .book-check-heading { margin: 0 0 6px; font-weight: 500; color: var(--muted); }
-.book-check-panel ul { margin: 0; padding-left: 17px; max-height: 300px; overflow: auto; }
+.book-check-panel { text-align: left; }
+/* Room at the right for a focus ring, which the list's scrolling would cut off. */
+.book-check-panel ul { margin: 0; padding: 0 4px 0 17px; max-height: 300px; overflow: auto; }
+.book-check-panel summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; border-radius: 4px; }
 .book-check-panel li { margin: 4px 0; }
 .book-check-panel .issue-error { color: var(--error-text); }
 .book-check-panel .issue-warning { color: var(--warning-text); }
