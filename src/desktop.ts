@@ -35,7 +35,7 @@ export const channels = {
   showAssets: 'document:show-assets', showTemplates: 'library:show', templatePreview: 'library:preview',
   current: 'document:current', appError: 'app:error', appNotice: 'app:notice',
   recents: 'app:recents', recentsChanged: 'app:recents-changed', recentAction: 'app:recent-action',
-  libraryRemote: 'books:remote', libraryBook: 'books:book', libraryAction: 'books:action',
+  libraryRemote: 'books:remote', libraryBook: 'books:book', libraryAction: 'books:action', downloads: 'books:downloads', downloadsChanged: 'books:downloads-changed',
   sourceCommand: 'document:source-command', templateAction: 'library:action', sourceAction: 'document:source-action', saveCopy: 'document:save-copy',
   chooseStarter: 'app:choose-starter', documentAction: 'document:action',
   open: 'project:open', save: 'project:save', import: 'project:import', network: 'project:editor-network',
@@ -230,11 +230,16 @@ export type LibraryRemote = { remoteId: string; name: string; books: { bookId: s
  */
 export type LibraryBook = { bookId: string; title: string; updatedAt?: string; versions: number; cover?: string; newer?: true };
 /**
- * What the Start window asks of a book (#283): Download a book only on the remote, Delete from Sync (asked in the main
+ * A book that is being downloaded (#305): how many of its files and previews are here, of how many. Without a `total`
+ * it is still reading what there is to download; `waiting` for another book's download to end.
+ */
+export type BookDownload = { bookId: string; done?: number; total?: number; waiting?: true };
+/**
+ * What the Start window asks of a book (#283): Download a book only on the remote (and cancel that), Delete from Sync (asked in the main
  * process first), Update for one a newer ImageFlow synced, and for a book on this Mac (`id`, its recent entry) Start
  * Syncing, Stop Syncing on This Mac, and for one deleted from sync elsewhere Keep Here Only or Sync Again.
  */
-export type LibraryAction = { action: 'download' | 'delete' | 'update'; bookId: string } | { action: 'start' | 'stop' | 'keep-here' | 'sync-again' | 'delete'; id: string };
+export type LibraryAction = { action: 'download' | 'cancel-download' | 'delete' | 'update'; bookId: string } | { action: 'start' | 'stop' | 'keep-here' | 'sync-again' | 'delete'; id: string };
 
 export type SourceAction = { action: 'retry' | 'refresh' | 'launch' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump' | 'import' | 'rename'; spread?: string; key?: string; keys?: string[]; accept?: string[]; paths?: string[]; name?: string };
 
@@ -294,6 +299,9 @@ export type DesktopApi = {
   /** A book on the remote as its library row shows it, loaded as the row comes into view. */
   libraryBook(bookId: string): Promise<Result<LibraryBook>>;
   libraryAction(request: LibraryAction): Promise<Result<null>>;
+  /** The books being downloaded now, and changes to them. */
+  downloads(): Promise<BookDownload[]>;
+  onDownloadsChanged(listener: (downloads: BookDownload[]) => void): () => void;
   // The New Book picker's choice; nothing cancels.
   chooseStarter(choice?: NewBookChoice): Promise<Result<boolean>>;
   // The template library, and changes to it from any window.

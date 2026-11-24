@@ -47,8 +47,10 @@ import { photoFile } from './photos';
 import { captureBookPreview, checkBookRender } from './preview';
 import { PreviewError } from '../src/preview';
 import { chooseSyncTip, DocumentSession } from './document-session';
+import { BookDownloads } from './downloads';
 import { cloneFromRemote, downloadName, originalsAway, ownedOriginalsSize } from './sync-engine';
 import { BookDeletedError, BookDeleteError, BookNotDeletedError, remoteTips } from './sync-remote';
+import type { SyncRemote } from './sync-remote';
 import { readSyncState, SyncElsewhereError } from './sync-pull';
 import { deleteFromSyncQuestion, libraryBook, libraryListing, limited, syncsWithRemote } from './sync-library';
 import { insideBook, pendingUploadsText, SyncService, UntrustedBookError } from './sync-service';
@@ -1308,7 +1310,60 @@ async function libraryRow(bookId: string) {
 }
 /** Books downloaded from the library and not opened yet: their first open names the sites their template reaches. */
 const downloadedBooks = new Set<string>();
-/** Where Download saves a book, asked in a sheet of the Start window (#303); undefined when cancelled. */
+/** The books being downloaded (#305): the app's, so closing the window one was started in does not end it. */
+const downloads = new BookDownloads(() => publishDownloads());
+function publishDownloads() {
+  const value = downloads.list();
+  if (startWindow && !startWindow.isDestroyed()) startWindow.webContents.send(channels.downloadsChanged, value);
+}
+/** Books whose Download is asking where to save (or which version): asked once, whichever window asks. */
+const choosingDownload = new Set<string>();
+/** Tests of a download's progress stand in for a slow remote (`IMAGEFLOW_SYNC_TEST_DOWNLOAD_MS`, development builds only). */
+const downloadDelay = app.isPackaged ? 0 : Number(process.env.IMAGEFLOW_SYNC_TEST_DOWNLOAD_MS) || 0;
+function slowRemote(remote: SyncRemote, signal: AbortSignal): SyncRemote {
+  if (!downloadDelay) return remote;
+  return new Proxy(remote, { get(target, name, receiver) {
+    const value = Reflect.get(target, name, receiver) as unknown;
+    if (typeof value !== 'function' || (name !== 'getBlob' && name !== 'downloadBlob')) return typeof value === 'function' ? value.bind(target) : value;
+    return async (...args: unknown[]) => {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, downloadDelay);
+        signal.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
+      });
+      return (value as (...values: unknown[]) => unknown).apply(target, args);
+    };
+  } });
+}
+/**
+ * Download (#283): which version when there are several, where to save it (#303), then the download itself, which every
+ * window shows with its progress and Cancel. Cancelled, it leaves nothing behind and opens nothing.
+ */
+async function downloadBook(owner: BrowserWindow, bookId: string) {
+  if (downloads.has(bookId) || choosingDownload.has(bookId)) return;
+  choosingDownload.add(bookId);
+  let destination: string | undefined, tip: Awaited<ReturnType<typeof remoteTips>>[number] | undefined, connection: Awaited<ReturnType<SyncService['connect']>>;
+  try {
+    connection = await syncService.connect();
+    const tips = await remoteTips(connection.remote, bookId);
+    if (!tips.length) throw new Error('This book has not fully arrived in “' + connection.name + '” yet. Try again in a moment.');
+    // Several versions (Macs changed it at once): which one to download.
+    const tipId = tips.length === 1 ? tips[0].commitId : await chooseSyncTip(owner, tips);
+    tip = tips.find(({ commitId }) => commitId === tipId);
+    if (!tip || owner.isDestroyed()) return;
+    destination = await chooseDownload(owner, tip.title);
+  } finally { choosingDownload.delete(bookId); }
+  if (!destination) return;
+  const { remote, remoteId } = connection;
+  const chosen = { tip, destination };
+  const folder = await downloads.start(bookId, ({ signal, progress }) => cloneFromRemote({ remote: slowRemote(remote, signal), ...chosen, remoteId, progress, signal }));
+  if (!folder) return;
+  downloadedBooks.add(folder);
+  libraryCache = undefined;
+  if (quitting) return;
+  const document = await openDocument(folder);
+  if (document && settings.value.keepOriginals !== false) void document.downloadSyncedOriginals().catch((error) => report(document.window, error));
+}
+/** Where Download saves a book, asked in a sheet of the window it was chosen in (#303); undefined when cancelled. */
 async function chooseDownload(owner: BrowserWindow, title: string) {
   // Only a name: the panel opens where it was last used, so the app points at no folder the user did not choose.
   const choice = await dialog.showSaveDialog(owner, { title: 'Download Book', buttonLabel: 'Download',
@@ -1363,25 +1418,13 @@ async function libraryAction(owner: BrowserWindow, request: LibraryAction) {
     else { showSettings('general'); updates.check(); }
     return;
   }
+  if (request.action === 'cancel-download') { await downloads.cancel(request.bookId); return; }
   if (!syncService.configured) { showSettings('sync'); return; }
   const entry = 'id' in request ? await recents.get(request.id) : undefined;
   const bookId = 'bookId' in request ? request.bookId : entry?.bookId;
   if (request.action === 'download') {
     if (!bookId) throw new Error('Choose a book to download.');
-    const { remote, remoteId, name } = await syncService.connect();
-    const tips = await remoteTips(remote, bookId);
-    if (!tips.length) throw new Error('This book has not fully arrived in “' + name + '” yet. Try again in a moment.');
-    // Several versions (Macs changed it at once): which one to download.
-    const tipId = tips.length === 1 ? tips[0].commitId : await chooseSyncTip(owner, tips);
-    const tip = tips.find(({ commitId }) => commitId === tipId);
-    if (!tip || owner.isDestroyed()) return;
-    const destination = await chooseDownload(owner, tip.title);
-    if (!destination) return;
-    const folder = await cloneFromRemote({ remote, tip, destination, remoteId });
-    downloadedBooks.add(folder);
-    libraryCache = undefined;
-    const document = await openDocument(folder);
-    if (document && settings.value.keepOriginals !== false) void document.downloadSyncedOriginals().catch((error) => report(document.window, error));
+    await downloadBook(owner, bookId);
     return;
   }
   if (request.action === 'delete') {
@@ -1960,6 +2003,14 @@ void app.whenReady().then(async () => {
           message: 'Originals are still uploading.', detail: uploading });
         if (response !== 0) return;
       }
+      // A download that is cancelled starts again from nothing.
+      const downloading = downloads.list().length;
+      if (downloading) {
+        const { response } = await dialog.showMessageBox({ type: 'question', buttons: ['Quit', 'Keep Downloading'], defaultId: 0, cancelId: 1,
+          message: downloading === 1 ? 'A book is still downloading.' : downloading + ' books are still downloading.',
+          detail: 'Quitting cancels the download. Nothing of it stays on this Mac.' });
+        if (response !== 0) return;
+      }
       await Promise.allSettled([...opening.values()]);
       for (const document of documents.values()) {
         if (document.closing || document.window.isDestroyed()) continue;
@@ -2042,6 +2093,8 @@ void app.whenReady().then(async () => {
       // Uploads of originals stop cleanly: what is half-sent is never stored, and the next open resumes them. None starts
       // after this, also not for a book whose bounded push on closing (below) names new originals.
       await syncService.shutdown();
+      // A download under way leaves nothing behind.
+      await downloads.shutdown();
       await connectionSettingsQueue;
       await disableMcp();
       // The plugin sees the bridge file go and waits for the next run of ImageFlow.
@@ -2228,16 +2281,19 @@ void app.whenReady().then(async () => {
     if (!owner || quitting) return { error: 'Request is only available to the start window.' };
     const { action, bookId, id } = (request ?? {}) as { action?: unknown; bookId?: unknown; id?: unknown };
     const uuid = (value: unknown) => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-    const valid = ((action === 'download' || action === 'update') && uuid(bookId) && id === undefined) || (action === 'delete' && (uuid(bookId) !== uuid(id))) ||
+    const valid = ((action === 'download' || action === 'cancel-download' || action === 'update') && uuid(bookId) && id === undefined) || (action === 'delete' && (uuid(bookId) !== uuid(id))) ||
       ((action === 'start' || action === 'stop' || action === 'keep-here' || action === 'sync-again') && uuid(id) && bookId === undefined);
     if (!valid) return { error: 'Unknown library action.' };
     try { await libraryAction(owner, request as LibraryAction); return { value: null }; }
     catch (error) {
       // The library showed something the remote no longer says: it reads the remote again.
       if (error instanceof BookDeletedError || error instanceof BookNotDeletedError || error instanceof BookDeleteError) libraryCache = undefined;
+      // A download goes on after its window closed; what it failed with is then said in the Start window, shown again.
+      if (owner.isDestroyed() && !quitting) report(startWindow, error);
       return { error: errorMessage(error) };
     } finally { publishRecents(); }
   });
+  ipcMain.handle(channels.downloads, (event) => startOwner(event) ? downloads.list() : []);
   ipcMain.handle(channels.recentAction, async (event, id: string, action: 'open' | 'locate' | 'remove' | 'reveal') => {
     const owner = startOwner(event);
     if (!owner || typeof id !== 'string') return { error: 'Request is only available to the start window.' };

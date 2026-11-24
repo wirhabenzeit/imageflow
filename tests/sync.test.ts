@@ -17,6 +17,7 @@ import type { OpenProject } from '../desktop/project';
 import { collectSources, relinkFolder, relocateSource, removeSources, saveDocumentCopy } from '../desktop/source-actions';
 import { cleanUp, cleanUpQuestion, planCleanUp, storageReport } from '../desktop/sync-sweep';
 import { captureBookStateRevision } from '../desktop/revisions';
+import { BookDownloads } from '../desktop/downloads';
 import { cloneFromRemote, describeLocalChange, describeSync, downloadName, downloadOriginals, newBookHistory, originalsAway, originalsNotHere, pendingOriginals, pendingUploads, placeOriginals, RemoteSyncingError, stageOriginals, stageSyncPull, syncBook, ensureBookId, uploadAhead, uploadOriginals } from '../desktop/sync-engine';
 import type { SyncOptions, UploadedPreviews } from '../desktop/sync-engine';
 import { memoryRemote, remoteBooks, remoteTips, StoreRemote } from '../desktop/sync-remote';
@@ -2912,6 +2913,93 @@ each('a push records the cached cover, uploads it once, and carries the parentâ€
   await sync(a, remote, { cover: async () => blue });
   assert.equal((await tips(remote, a))[0].coverDigest, sha(blue));
   assert.deepEqual((await remote.listBook(first.bookId, 'covers')).map(({ key }) => key).sort(), [coverBlobKey(first.bookId, sha(red)), coverBlobKey(first.bookId, sha(blue))].sort());
+});
+
+coreEach('Download counts the files and previews it brings, and one that is cancelled leaves nothing behind', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  const [tip] = await tips(remote, a);
+  await use(b);
+  const folder = join(b.base, 'Books');
+  await mkdir(folder);
+  const destination = join(folder, 'Book.imageflow');
+  const remoteId = await remote.remoteId();
+  const counts = async (stopAt?: number) => {
+    const seen: [number, number][] = [];
+    const job = new AbortController();
+    const made = cloneFromRemote({ remote, tip, destination, remoteId, signal: job.signal, progress: (done, total) => {
+      seen.push([done, total]);
+      if (done === stopAt) job.abort(new Error('cancelled'));
+    } });
+    return { seen, made };
+  };
+  const state = await stateOf(remote, tip);
+  const files = Object.keys(state.content).length;
+  // Cancelled before anything, in the middle of its files, and at the last preview, when everything has arrived.
+  for (const stopAt of [0, 2, files + 1]) {
+    const { seen, made } = await counts(stopAt);
+    await assert.rejects(made, /cancelled/);
+    assert.deepEqual(await readdir(folder), [], 'neither the book nor its staging folder after ' + stopAt);
+    assert.equal(seen.at(-1)![0], stopAt, 'nothing was fetched after the cancel');
+    assert.equal(await bookTrusted(destination).catch(() => false), false);
+  }
+  // A transfer that runs when the download is cancelled stops, with the signal it was given.
+  const job = new AbortController();
+  const signals: (AbortSignal | undefined)[] = [];
+  const stalled = new Proxy(remote, { get(target, name, receiver) {
+    const value = Reflect.get(target, name, receiver) as unknown;
+    if (name === 'getBlob') return (key: string, options?: { signal?: AbortSignal }) => { signals.push(options?.signal); return target.getBlob(key, options); };
+    if (name === 'downloadBlob') return (_key: string, _file: string, options?: { signal?: AbortSignal }) => new Promise((_, reject) => {
+      signals.push(options?.signal);
+      options?.signal?.addEventListener('abort', () => reject(options.signal!.reason), { once: true });
+      job.abort(new Error('stopped'));
+    });
+    return typeof value === 'function' ? value.bind(target) : value;
+  } });
+  await assert.rejects(cloneFromRemote({ remote: stalled, tip, destination, remoteId, signal: job.signal }), /stopped/);
+  assert.ok(signals.length >= 2 && signals.every((signal) => signal === job.signal), 'the state blob and the files are given the signal');
+  assert.deepEqual(await readdir(folder), []);
+  // Not cancelled: every file and preview is counted once, and the total is known from the start.
+  const { seen, made } = await counts();
+  await made;
+  const total = seen[0][1];
+  assert.ok(total > files, 'previews count too');
+  assert.deepEqual(seen, Array.from({ length: total + 1 }, (_, done) => [done, total]));
+});
+
+test('downloads run one at a time, are cancelled before or during their turn, and end with the app', async () => {
+  let changes = 0;
+  const downloads = new BookDownloads(() => { changes++; }, 0);
+  const ends = new Map<string, () => void>();
+  const download = (id: string) => downloads.start(id, ({ signal, progress }) => new Promise<string>((resolve, reject) => {
+    progress(1, 4);
+    ends.set(id, () => resolve(id));
+    signal.addEventListener('abort', () => reject(new Error('the transfer stopped')), { once: true });
+  }));
+  const first = download('a'), second = download('b'), third = download('c');
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.deepEqual(downloads.list(), [{ bookId: 'a', done: 1, total: 4 }, { bookId: 'b', waiting: true }, { bookId: 'c', waiting: true }]);
+  assert.equal(await download('a'), undefined, 'one that runs is not started again');
+  // Waiting: cancelled at once, while the first goes on.
+  await downloads.cancel('b');
+  assert.equal(await second, undefined);
+  assert.deepEqual(downloads.list().map(({ bookId }) => bookId), ['a', 'c']);
+  ends.get('a')!();
+  assert.equal(await first, 'a');
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.deepEqual(downloads.list(), [{ bookId: 'c', done: 1, total: 4 }]);
+  // Running: a cancel is no failure, and a real failure is.
+  await downloads.cancel('c');
+  assert.equal(await third, undefined);
+  await assert.rejects(downloads.start('d', async () => { throw new Error('offline'); }), /offline/);
+  // Quit cancels what runs and starts nothing more.
+  const last = download('e');
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await downloads.shutdown();
+  assert.equal(await last, undefined);
+  assert.equal(await download('f'), undefined);
+  assert.deepEqual(downloads.list(), []);
+  assert.ok(changes > 8, 'the windows are told');
 });
 
 coreEach('Download makes the book under the chosen name, never over a book or file that is there, trusted, with its originals left on the remote', async (t) => {

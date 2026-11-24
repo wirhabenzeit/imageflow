@@ -847,6 +847,11 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .recent-books li.library-remote .recent-cover { opacity: .85; }
 .recent-books li.library-removed .recent-description > span:last-child, .recent-books li[data-state="newer"] .recent-description > span:last-child { color: var(--text); }
 .recent-actions > button:not(.recent-remove) { font-size: 12px; padding: 3px 9px; }
+/* A book's download on its row: the bar, then how much is here beside Cancel, in a fixed width so nothing moves. */
+.book-progress { display: grid; gap: 4px; width: 118px; flex: none; }
+.book-progress .task-status-bar { width: 100%; }
+.book-progress-line { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 11px; color: var(--muted); }
+.book-progress-text { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .recent-empty { text-align: center; max-width: 260px; margin: 74px auto 0; color: var(--muted); }
 .recent-empty > img { display: block; width: 96px; height: 96px; margin: 0 auto; }
 .recent-empty h3 { font-weight: 500; color: var(--text); font-size: 17px; margin: 16px 0 8px; }

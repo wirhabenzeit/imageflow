@@ -78,7 +78,7 @@ export interface SyncRemote {
   /** Stores a blob under a key of `blobKeyPattern`, from bytes or a local file. An existing blob is kept (`existed`). */
   putBlob(key: string, source: StoreSource, options?: PutOptions): Promise<{ existed: boolean }>;
   /** A whole blob, or undefined when the remote does not have it (yet). For small blobs. */
-  getBlob(key: string): Promise<Uint8Array | undefined>;
+  getBlob(key: string, options?: TransferOptions): Promise<Uint8Array | undefined>;
   /** Writes a blob to a new local file at `destination`; false when the remote does not have it (yet). For large blobs. */
   downloadBlob(key: string, destination: string, options?: TransferOptions): Promise<boolean>;
   /** Copies a blob to its key in another book inside the remote (a duplicated book's originals), without uploading it
@@ -401,7 +401,7 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
     this.noteStored(key, size);
     return { existed };
   }
-  async getBlob(key: string) { return this.store.get(requireBlobKey(key)); }
+  async getBlob(key: string, options?: TransferOptions) { return this.store.get(requireBlobKey(key), options); }
   async subscribe() {
     if (!this.store.subscribe) throw new Error('This sync backend does not tell other Macs about changes.');
     await this.store.subscribe();
