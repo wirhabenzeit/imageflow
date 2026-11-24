@@ -2,8 +2,12 @@ import type { BrowserWindow } from 'electron';
 import { join } from 'node:path';
 import type { Rect } from '../src/desktop';
 
-type MacHeader = { configure(handle: Buffer): void; setDragRegions(handle: Buffer, regions: Rect[]): void };
-const macHeader = () => require(join(__dirname, 'native', 'mac-header.node')) as MacHeader;
+type MacHeader = { configure(handle: Buffer): void; setDragRegions(handle: Buffer, regions: Rect[]): void;
+  savePanel(handle: Buffer, panel: SavePanel): Promise<{ filePath: string; value: number } | null> };
+/** A save panel with a pop-up button (`options`, `value` the selected index) or a checkbox (`value` 1 when checked). */
+export type SavePanel = { defaultPath: string; extension: string; buttonLabel?: string;
+  label: string; note?: string; options?: string[]; value: number };
+export const macHeader = () => require(join(__dirname, 'native', 'mac-header.node')) as MacHeader;
 
 export function validToolbarDragRegions(value: unknown): value is Rect[] {
   return Array.isArray(value) && value.length <= 128 && value.every((rect) => rect &&

@@ -265,14 +265,12 @@ try {
   assert.match(await loadedFile(), /private dummy fixture/);
   // Save a Copy exposes collection as an explicit choice and opens an independent, portable document.
   const portable = join(work, 'Portable.imageflow');
-  await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, portable);
-  await app.evaluate(({ dialog }) => {
-    dialog.showMessageBox = async (...args) => {
-      const options = args.at(-1);
-      globalThis.duplicateOptions = options;
-      return { response: 0, checkboxChecked: true };
+  await app.evaluate(({ dialog }, filePath) => {
+    dialog.showSaveDialog = async (...args) => {
+      globalThis.duplicateOptions = args.at(-1);
+      return { canceled: false, filePath, value: true };
     };
-  });
+  }, portable);
   const before = new Set(app.windows());
   await menuAction(app, 'Save a Copy…');
   await page.waitForFunction(() => !document.querySelector('.save-copy-dialog'));
@@ -280,7 +278,10 @@ try {
     assert.ok(attempt < 300, 'Duplicate opens the copied book');
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  assert.equal((await app.evaluate(() => globalThis.duplicateOptions)).checkboxLabel, 'Include all files');
+  const { control } = await app.evaluate(() => globalThis.duplicateOptions);
+  assert.equal(control.label, 'Include all files');
+  assert.equal(control.value, true);
+  assert.match(control.note, /linked files keep their full paths/);
   const copy = app.windows().find((page) => !before.has(page) && page.url() === 'imageflow://editor/');
   assert.ok(copy);
   await ready(copy);

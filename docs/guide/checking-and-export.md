@@ -26,7 +26,7 @@ A rendering failure that prevents creating a usable PDF still stops export.
 
 ## Export a proof
 
-To read the book through or send it to someone for comments, choose **File → Export Proof…** (⌥⌘E). Pick 1, 4 or 12 spreads per sheet. The proof keeps each spread together and prints it at trim size on A4 sheets. Each spread is labelled with its pages and layout, and with any Book check problems, such as an unavailable original.
+To read the book through or send it to someone for comments, choose **File → Export Proof…** (⌥⌘E). Pick 1, 4 or 12 **Spreads per sheet** in the save panel. The proof keeps each spread together and prints it at trim size on A4 sheets. Each spread is labelled with its pages and layout, and with any Book check problems, such as an unavailable original.
 
 A proof is much quicker than the print PDF. It shows the book as it is on screen, uses screen-sized photos, and skips the print checks. Don't send it to a printer: export the print PDF for that. The proof leaves out the cover.
 
