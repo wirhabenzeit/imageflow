@@ -280,7 +280,9 @@ test('Settings → Sync offers iCloud only in an entitled build, and saves it on
   let status: CloudKitStatus | undefined = { entitled: false };
   const changed: unknown[] = [];
   let setUps = 0;
-  registerSyncSettings({ ipcMain, owner: () => true, windowOwner: () => false, setUp: () => { setUps++; }, settings, credentials: () => credentials, cloudKit: async () => status, changed: (value) => changed.push(value.sync) });
+  let leave = false;
+  const asked: string[] = [];
+  registerSyncSettings({ ipcMain, owner: () => true, windowOwner: () => false, setUp: () => { setUps++; }, forgetKey: async (_, bucket) => { asked.push(bucket); return leave; }, settings, credentials: () => credentials, cloudKit: async () => status, changed: (value) => changed.push(value.sync) });
   const state = () => handlers.get(channels.syncBackend)!({});
   const save = (request: unknown) => handlers.get(channels.saveSyncBackend)!({}, request);
   assert.deepEqual((await state()).value, { available: true }, 'not offered by a build without the entitlements');
@@ -294,6 +296,12 @@ test('Settings → Sync offers iCloud only in an entitled build, and saves it on
   const bucket = { kind: 's3' as const, endpoint: 'https://s3.example.com', region: 'auto', bucket: 'books' };
   await credentials.write(credentialScope(bucket), { accessKeyId: 'AKIAEXAMPLE', secretAccessKey: 'secret' });
   await settings.update({ sync: bucket });
+  // It asks first, as Off does: the key cannot be shown again. Declined, all stays.
+  await save({ backend: { kind: 'icloud' } });
+  await save(null);
+  assert.deepEqual([settings.value.sync, asked, changed, setUps], [bucket, ['books', 'books'], [], 0]);
+  assert.ok(await credentials.read(credentialScope(bucket)));
+  leave = true;
   assert.deepEqual((await save({ backend: { kind: 'icloud' } })).value?.icloud, { available: true });
   assert.deepEqual(settings.value.sync, { kind: 'icloud' });
   assert.deepEqual(changed, [{ kind: 'icloud' }]);

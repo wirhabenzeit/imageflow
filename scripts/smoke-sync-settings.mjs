@@ -226,12 +226,13 @@ try {
   await saveBucket();
   await statusIs('in-sync');
 
-  // Off stops syncing and forgets the bucket and its key, in one click.
+  // Off stops syncing and forgets the bucket and its key, after asking.
   await settings.locator('input[name=sync-kind][value=off]').click();
   for (let attempt = 0; (await savedSettings()).sync; attempt++) {
     assert.ok(attempt < 400, 'sync is off');
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
+  assert.ok((await app.evaluate(() => globalThis.asked)).includes('Stop syncing through “books”?'));
   await waitForPage(book, () => !document.querySelector('.sync-status'));
   await sync.getByText('Sync is off on this Mac.', { exact: true }).waitFor();
   await sameHeight('Off');

@@ -86,7 +86,7 @@ export function syncSetupPatch(previous: SyncBackend | undefined, next: SyncBack
   return JSON.stringify(previous) === JSON.stringify(next) ? {} : { syncSetup: randomUUID(), syncBooksUnchosen: null };
 }
 
-export function registerSyncSettings({ ipcMain, owner, windowOwner = owner, settings, credentials, cloudKit, cleanUp, changed, setUp }: {
+export function registerSyncSettings({ ipcMain, owner, windowOwner = owner, settings, credentials, cloudKit, cleanUp, changed, setUp, forgetKey }: {
   ipcMain: IpcMain;
   /** What the CloudKit addon says about this build and account; undefined where there is no addon (#292). */
   cloudKit?: () => Promise<CloudKitStatus | undefined>;
@@ -103,7 +103,17 @@ export function registerSyncSettings({ ipcMain, owner, windowOwner = owner, sett
   changed: (value: AppSettings) => void;
   /** Called once another backend (or the first one) was set up: the app opens the Sync window, where books are turned on. */
   setUp?: () => void;
+  /**
+   * Asks, in the main process and on the window that asked, whether to leave a bucket whose key is stored: choosing Off
+   * or iCloud is one click, and forgets a key that nothing can show again.
+   */
+  forgetKey?: (event: IpcMainInvokeEvent, bucket: string) => Promise<boolean>;
 }) {
+  const leaves = async (event: IpcMainInvokeEvent) => {
+    const backend = settings.value.sync;
+    if (backend?.kind !== 's3' || !forgetKey || !await credentials().read(credentialScope(backend)).catch(() => undefined)) return true;
+    return forgetKey(event, backend.bucket);
+  };
   const state = async (): Promise<SyncBackendState> => {
     const backend = settings.value.sync;
     const stored = backend?.kind === 's3' ? credentialHint(await credentials().read(credentialScope(backend)).catch(() => undefined)) : undefined;
@@ -135,6 +145,7 @@ export function registerSyncSettings({ ipcMain, owner, windowOwner = owner, sett
   ipcMain.handle(channels.saveSyncBackend, (event, request: unknown) => guard(event, async () => {
     const previous = settings.value.sync;
     if (request === null) {
+      if (!await leaves(event)) return state();
       const value = await settings.update({ sync: null });
       await credentials().remove();
       changed(value);
@@ -145,6 +156,7 @@ export function registerSyncSettings({ ipcMain, owner, windowOwner = owner, sett
       const offered = (await icloud()).icloud;
       if (!offered) throw new Error('iCloud sync is not available in this build of ImageFlow.');
       if (!offered.available) throw new Error(offered.message);
+      if (!await leaves(event)) return state();
       const value = await settings.update({ sync: { kind: 'icloud' }, ...syncSetupPatch(previous, { kind: 'icloud' }) });
       await forgetOtherCredentials(credentials(), previous, value.sync);
       saved(previous, value);

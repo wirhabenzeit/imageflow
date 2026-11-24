@@ -2718,6 +2718,13 @@ void app.whenReady().then(async () => {
         return cleanUp(remote, plan);
       },
     },
+    forgetKey: async (event, bucket) => {
+      const owner = settingsOwner(event);
+      if (!owner) return false;
+      const { response } = await dialog.showMessageBox(owner, { type: 'question', buttons: ['Stop Using Bucket', 'Cancel'], defaultId: 1, cancelId: 1,
+        message: 'Stop syncing through “' + bucket + '”?', detail: 'ImageFlow forgets its access key on this Mac. The books here and in the bucket stay as they are.' });
+      return response === 0;
+    },
     changed: (value) => { syncBackendChanged(); for (const owner of appWindows()) if (!owner.isDestroyed()) owner.webContents.send(channels.settingsChanged, value); } });
   ipcMain.handle(channels.settings, (event) => appOwner(event) ? { value: settings.value } : { error: 'Request is only available to an app window.' });
   ipcMain.handle(channels.updateSettings, async (event, patch: unknown) => {

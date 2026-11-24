@@ -15,7 +15,7 @@ Any S3-compatible service works: Amazon S3, Cloudflare R2, Backblaze B2, MinIO o
 3. Enter the access key ID and the secret access key, then choose **Test Connection**. It says whether the service refuses to replace objects and whether it checks uploads, which ImageFlow makes up for when it does not.
 4. Choose **Save**.
 
-The secret access key is encrypted with a key in your Mac's keychain and kept apart from the other settings. ImageFlow never shows it again; to change it, choose **Edit…**, enter a new one and save. **Off** stops syncing on this Mac and forgets the key.
+The secret access key is encrypted with a key in your Mac's keychain and kept apart from the other settings. ImageFlow never shows it again; to change it, choose **Edit…**, enter a new one and save. **Off** stops syncing on this Mac and, after asking, forgets the key.
 
 On your other Macs, enter the same bucket and key. That is all a Mac needs to see and download every book you synced.
 
