@@ -33,7 +33,7 @@ function renderBox(options: { mode?: 'edit' | 'export'; assigned?: string; crops
         createElement(ctx.PhotoBox, { id: 'hero', ...(rect ? { rect: { x: 0, y: 0, width: 100, height: 50 } } : {}) }, callback as never)) } } }));
   const project = projectSchema.parse({ schemaVersion: 1, title: 'P', template: { id: 'pr', version: '1' },
     spreads: [{ id: 'one', definition: 'main', boxes: { hero: { ...(assigned ? { photo: assigned } : {}), ...(crops ? { crops } : {}), params: { tilt: -4 } } } }] });
-  const book = { project, photos: structuredClone(photos), texts: {}, files: {}, problems: [], mode, template: { script: '', assets: {} } } as RenderProject;
+  const book = { project, photos: structuredClone(photos), texts: {}, files: {}, mode, template: { script: '', assets: {} } } as RenderProject;
   const html = renderToStaticMarkup(createElement(SpreadView, { book, template, format: resolveFormat(template.format), spread: project.spreads[0],
     page: { left: 1, right: 2 }, index: { pages: 2, anchors: [] }, positions: {}, renderPhotos: true, lazyPhotos: !!options.lazy }));
   return { html, received };

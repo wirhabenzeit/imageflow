@@ -455,6 +455,9 @@ export type Issue = {
   // The page of a spread shown as page layouts that the box or element is on.
   page?: PageSide;
   details?: Record<string, string | number>; suggestion?: string;
+  // Of a finding about a source (`source` is its ID): its kind, why it cannot be used, without the location or the note
+  // a message adds, and, for an original that is elsewhere, where (#308).
+  sourceKind?: import('./source-locations').SourceKind; problem?: string; away?: import('./source-locations').SourceAway;
 };
 export const issueText = ({ message, where, page }: Issue) => [where, page ? page + ' page' : undefined, message].filter(Boolean).join(' · ');
 export type RenderStatus = {

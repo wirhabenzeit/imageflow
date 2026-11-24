@@ -61,6 +61,8 @@ import { Fields } from './Fields';
 import { Inspector } from './Inspector';
 import type { Edit } from './Inspector';
 import { BookCheckIndicator } from './BookCheck';
+import { takeAway, withoutReported } from './away-originals';
+import { foundText } from './export-errors';
 import type { PictureStatus } from './BookFrame';
 import type { BookCheck } from './BookCheck';
 import { QuickLook, Sources } from './Sources';
@@ -796,10 +798,7 @@ export function App() {
         if ('error' in result) throw new Error(result.error);
         if (!result.value) return;
         // A proof saves whatever it finds: the notice says how much is missing or wrong in it, as Export PDF does.
-        const { errors, warnings } = result.value;
-        const counted = (n: number, word: string) => n ? n + ' ' + word + (n === 1 ? '' : 's') : '';
-        const found = [counted(errors.length, 'error'), counted(warnings.length, 'warning')].filter(Boolean).join(', ');
-        setNotice('Proof saved.' + (found ? ' ' + found + ' in Book check; problem spreads are marked in the proof.' : ''));
+        setNotice('Proof saved.' + foundText(result.value, 'proof'));
         return;
       }
       if (command === 'export') {
@@ -812,9 +811,7 @@ export function App() {
         if (!result.value) return;
         // The export rendered the whole book; its result is the complete Book check for that project state.
         const { errors, warnings } = result.value;
-        const counted = (n: number, word: string) => n ? n + ' ' + word + (n === 1 ? '' : 's') : '';
-        const found = [counted(errors.length, 'error'), counted(warnings.length, 'warning')].filter(Boolean).join(', ');
-        setNotice('PDF saved.' + (found ? ' ' + found + ' in Book check.' : ''));
+        setNotice('PDF saved.' + foundText(result.value, 'print'));
         if (!coverActive && before.id === current.current?.id) setCheck({ id: before.id, errors, warnings });
         return;
       }
@@ -1073,9 +1070,12 @@ export function App() {
       : currentCoverStatus?.state === 'error' ? { errors: [{ cover: true as const, where: 'Cover', message: currentCoverStatus.message }], warnings: [] }
         : undefined;
   const combinedCheck = check && currentCoverCheck && coverState && coverGeometry && checkCurrent
-    ? { ...check, errors: [...check.errors, ...currentCoverCheck.errors], warnings: [...check.warnings, ...currentCoverCheck.warnings] } : check;
+    ? { ...check, errors: [...check.errors, ...currentCoverCheck.errors],
+      warnings: withoutReported([...check.warnings, ...currentCoverCheck.warnings], currentCoverCheck.errors) } : check;
   const spreadIssues = new Map<string, 'error' | 'warning'>();
-  for (const [level, list] of [['warning', check?.warnings ?? []], ['error', check?.errors ?? []]] as const) {
+  // An original that is elsewhere marks no spread: nothing is wrong with it while editing (#308).
+  const spreadFindings = takeAway({ errors: check?.errors ?? [], warnings: check?.warnings ?? [] });
+  for (const [level, list] of [['warning', spreadFindings.warnings], ['error', spreadFindings.errors]] as const) {
     for (const { spread } of list as Issue[]) if (spread) spreadIssues.set(spread, level);
   }
 
@@ -2517,7 +2517,8 @@ export function App() {
       {summary && <SyncStatus api={api} notice={setNotice} />}
       <AgentStatus api={api} />
       {summary && <BookCheckIndicator requestSpread={checkScope} request={checkRequest} check={combinedCheck} checking={!checkCurrent || checkingCover}
-        spread={coverActive ? coverInstance : spreadSelected ? spread?.id ?? '' : ''} select={(id, page) => select(id, true, page)} refresh={refreshCoverCheck} />}
+        spread={coverActive ? coverInstance : spreadSelected ? spread?.id ?? '' : ''} select={(id, page) => select(id, true, page)} refresh={refreshCoverCheck}
+        locateFolder={writable && !busy ? () => void runSourceAction({ action: 'locate-folder' }) : undefined} />}
     </footer>
     </div>
   </div></ProjectFilesContext.Provider>;

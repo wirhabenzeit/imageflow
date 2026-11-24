@@ -1,3 +1,4 @@
+import { awayBadge } from './away-originals';
 import { EditMarkdown, NewMarkdown } from './MarkdownActions';
 import { assetMenu, assetMenuState, assetActions } from './asset-menu';
 import { PhotoViewMenu } from './PhotoViewMenu';
@@ -142,7 +143,7 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
   function renderItem({ id, title }: typeof items[number]) {
     const placed = usage[tab][id];
     const sourceState = summary.sources?.[(tab === 'photo' ? 'photo:' : 'markdown:') + id];
-    const sourceLabel = sourceState?.state !== 'available' && sourceState?.problem ? (sourceState.cached ? sourceState.state === 'offline' ? 'Cached · Offline' : 'Cached · Missing' : sourceState.state === 'offline' ? 'Offline' : 'Unavailable')
+    const sourceLabel = sourceState?.state !== 'available' && sourceState?.problem ? sourceState.away ? awayBadge[sourceState.away] : (sourceState.cached ? sourceState.state === 'offline' ? 'Cached · Offline' : 'Cached · Missing' : sourceState.state === 'offline' ? 'Offline' : 'Unavailable')
       : sourceState && sourceFile(sourceState)?.linked && !view.value.showSource ? 'Linked' : undefined;
     const origin = view.value.showSource ? sourceOrigin(sourceState) : undefined;
     const common = {

@@ -253,7 +253,7 @@ test('a book asks each provider once for all its photos, and records facts, revi
   // The editor does not call it a proof: an export materializes what its provider can produce.
   assert.equal(f.book.sources!['photo:mem1'].previewOnly, undefined);
   assert.equal(printProblem(f.book.sources!['photo:mem1']), undefined);
-  assert.equal(f.book.problems.some((problem) => problem.includes('mem1')), false);
+  assert.equal(f.book.sources!['photo:mem1'].problem, undefined);
   // The book is format 4 on disk, so older builds ask for an update.
   assert.equal(JSON.parse(await readFile(join(f.folder, 'project.json'), 'utf8')).schemaVersion, 4);
   // A second load reuses the stored previews: the content revision has not moved.

@@ -36,7 +36,7 @@ The provider contract gains one declared property, `reach`. The engine reads it 
 
 - **Every photo syncs facts and a 1400 px preview, whatever its reach.** This includes online photos: the preview is small, a Mac that is offline or not signed in can still lay out the book, and the web companion (#212) then needs one rule. Fact updates from non-file providers (`lightroom`, `online`) participate in change detection and per-asset auto-resolution just like local files.
 - **Copy into Book is the only per-photo control.** It changes a photo's reach to `book`, as it changes its provider to `package` today.
-- **Printing on another Mac** is unchanged from ADR 0011: a `mac` photo prints only where its folder or catalog is. Book check says so before the export.
+- **Printing on another Mac** is unchanged from ADR 0011: a `mac` photo prints only where its folder or catalog is. Book check says so before the export, in one line for all of them (#308).
 - **Syncing full-resolution renders of placed `mac` photos** (0011, deferred) becomes practical with object storage. If built, it is one per-Mac preference, not a per-book one.
 
 Where things are configured follows the same split:

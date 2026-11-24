@@ -14,6 +14,7 @@ import { PreviewError } from '../src/preview';
 import { authoringErrorResult } from '../desktop/authoring-errors';
 import { CheckRenditionCache } from '../desktop/check-cache';
 import { photoFile } from '../desktop/photos';
+import { diagnosticSchema } from '../src/mcp-results';
 
 // These tests exercise the consistency boundary; rendering itself is checked by the desktop smoke tests.
 const status: Extract<RenderStatus, { state: 'ready' }> = {
@@ -232,4 +233,19 @@ test('typechecking reports failures alongside usable artwork and discards diagno
   assert.equal(changed.diagnostics[0].code, 'source-changed');
   assert.equal(changed.typecheck, undefined);
   assert.equal(changed.checks.typescript, 'not-run');
+});
+
+test('a check sums up originals that are elsewhere, and keeps every other finding and the render’s own list', async (t) => {
+  const { book, cache } = await fixture(t);
+  const away = (spread: string, box: string, source: string) => ({ message: 'Original on another Mac. Showing a cached preview; the original is required for print.', code: 'source-unavailable',
+    spread, where: 'Pages 2–3', box, source, sourceKind: 'photo' as const, problem: 'Original on another Mac', away: 'other-mac' as const });
+  const errors = [away('one', 'hero', 'a'), { message: 'Original missing: /b.jpg. Showing a cached preview; the original is required for print.', code: 'source-unavailable', spread: 'one', box: 'side', source: 'b', sourceKind: 'photo' as const, problem: 'Original missing: /b.jpg' },
+    away('two', 'hero', 'c')];
+  const result = await checkProject(book, cache, {}, async () => ({ status: { ...status, errors, warnings: [{ message: 'Photo d.jpg · Original on another Mac', code: 'project-input', source: 'd', sourceKind: 'photo', away: 'other-mac' }] } }),
+    new AbortController().signal);
+  assert.equal(result.state, 'ready', JSON.stringify(result.diagnostics));
+  assert.deepEqual(result.diagnostics.map(({ code, severity, location, occurrences }) => [code, severity, location?.source, occurrences?.map(({ spread, source }) => spread + ':' + source)]),
+    [['source-unavailable', 'error', 'b', undefined], ['source-unavailable', 'error', undefined, ['one:a', 'two:c']]]);
+  assert.ok(result.diagnostics.every((diagnostic) => diagnosticSchema.safeParse(diagnostic).success));
+  assert.equal(result.render!.errors.length, 3, 'the editor and the pages marked as proofs go by the render itself');
 });

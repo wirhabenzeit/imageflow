@@ -85,7 +85,7 @@ const alpsBook = (): RenderProject => ({
     project: projectSchema.parse({ schemaVersion: 2, title: 'Alps', template: { id: 'chapters', version: '1' },
       texts: { alps: 'texts/alps.md', note: 'texts/note.md', plain: 'texts/plain.md' },
       spreads: [spread('one', 'alps', 'note'), spread('two', 'alps', 'plain')] }),
-    mode: 'edit', problems: [], template: { script: '', assets: {} }, photos: {}, files: {},
+    mode: 'edit', template: { script: '', assets: {} }, photos: {}, files: {},
     texts: { alps: header, note: '---\ntitle: A note\n---\nAside.', plain: 'No header.' },
 });
 

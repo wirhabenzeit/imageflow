@@ -29,7 +29,7 @@ function book(spreads: object[], anchors: Record<string, (context: { params: Rec
   }));
   const project = projectSchema.parse({ schemaVersion: 1, title: 'Anchors', template: { id: 'anchors', version: '1' }, spreads });
   const sequence = pageSequence(project.spreads.map(({ definition }) => template.spreads[definition].span), template.format);
-  const rendered = { project, photos: {}, texts: {}, files: {}, problems: [], mode: 'export', template: { script: '', assets: {} } } as RenderProject;
+  const rendered = { project, photos: {}, texts: {}, files: {}, mode: 'export', template: { script: '', assets: {} } } as RenderProject;
   return bookIndex(rendered, template, sequence);
 }
 

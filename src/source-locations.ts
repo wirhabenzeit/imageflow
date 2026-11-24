@@ -31,11 +31,18 @@ export type SourceEntry = FileSourceEntry | PhotoSourceEntry;
  * providers without files; a file is never in either.
  */
 export type SourceState = 'available' | 'missing' | 'unreadable' | 'denied' | 'unapproved' | 'offline' | 'needs-sign-in';
+/**
+ * Where an original is that is not on this Mac and need not be (#308, `awayOriginal`): on the Mac the photo was linked
+ * on, in a Lightroom catalog that cannot be reached now, in the sync remote, or still uploading from another Mac.
+ */
+export type SourceAway = 'other-mac' | 'catalog' | 'not-downloaded' | 'uploading';
 /** What can be offered for a source that cannot be read, as its provider answers (`SourceProvider.repairs`). */
 export type SourceRepair = 'locate' | 'locate-folder' | 'launch' | 'sign-in';
 export type SourceStatus = SourceEntry & { state: SourceState; problem?: string; cached?: boolean; digest?: string;
   /** The repairs to offer while the source is unavailable; Retry is always offered. */
   repairs?: SourceRepair[];
+  /** The original is elsewhere and the photo drawn from its preview: normal while editing, needed for print. `state` stays what reading it ran into. */
+  away?: SourceAway;
   /**
    * An export prints only the provider's preview of this photo (ADR 0011): its provider could not produce the
    * full-resolution original when the export asked for it, so the page is a proof. Set only in an export's load.

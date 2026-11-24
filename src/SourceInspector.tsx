@@ -69,7 +69,7 @@ export function SourceInspector({ summary, source, template, render, usage, writ
         <p className="eyebrow">Photo</p>
         <h2>{photoName(summary, source.id)}</h2>
         <p className="muted si-source">{origin && <SourceBadge origin={origin} labelled />}<span title={file?.path}>{photoSourceName(summary, source.id)}</span></p>
-        {summary.sources?.['photo:' + source.id]?.problem && <p className="error-text">{summary.sources['photo:' + source.id].problem}{summary.sources['photo:' + source.id].cached ? ' · Showing cached preview' : ''}</p>}
+        {summary.sources?.['photo:' + source.id]?.problem && <p className={summary.sources['photo:' + source.id].away ? 'muted' : 'error-text'}>{summary.sources['photo:' + source.id].problem}{summary.sources['photo:' + source.id].cached ? ' · Showing cached preview' : ''}</p>}
       </div>
       {summary.photos[source.id]
         ? <button type="button" className="si-preview" title="Quick Look (Space)" onClick={quickLook}>

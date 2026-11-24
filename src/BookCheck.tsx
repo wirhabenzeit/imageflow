@@ -4,6 +4,7 @@ import { Icon } from './Icon';
 import { useEffect, useRef, useState } from 'react';
 import { issueText } from './desktop';
 import type { Issue } from './desktop';
+import { awayText, takeAway } from './away-originals';
 import { groupExtent, groupIssues } from './issue-groups';
 import type { IssueLevel, LeveledIssue } from './issue-groups';
 
@@ -12,16 +13,20 @@ export type BookCheck = { id: string; errors: Issue[]; warnings: Issue[]; pictur
 const issueTarget = (issue: Issue) => issue.cover ? coverInstance : issue.spread;
 
 // A labeled book-check status in the footer, with a popover for findings.
-export function BookCheckIndicator({ check, checking, spread, select, request = 0, requestSpread, refresh }: {
+export function BookCheckIndicator({ check, checking, spread, select, request = 0, requestSpread, refresh, locateFolder }: {
   requestSpread?: string; request?: number; check?: BookCheck; checking: boolean; spread: string; select: (spread: string, page?: PageSide) => void;
   refresh?: () => void;
+  /** Finds originals that are elsewhere in a folder the user chooses; absent while the book cannot change. */
+  locateFolder?: () => void;
 }) {
   const [scope, setScope] = useState<string>();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  // Originals that are elsewhere are no errors or warnings: each reason is one line, which the counts leave out (#308).
+  const { errors, warnings, notes } = takeAway({ errors: check?.errors ?? [], warnings: check?.warnings ?? [] });
   const items: LeveledIssue[] = [
-    ...(check?.errors ?? []).map((issue) => ({ issue, level: 'error' as IssueLevel })),
-    ...(check?.warnings ?? []).map((issue) => ({ issue, level: 'warning' as IssueLevel })),
+    ...errors.map((issue) => ({ issue, level: 'error' as IssueLevel })),
+    ...warnings.map((issue) => ({ issue, level: 'warning' as IssueLevel })),
   ];
   async function menu(issue: Issue) {
     const target = issueTarget(issue);
@@ -30,9 +35,9 @@ export function BookCheckIndicator({ check, checking, spread, select, request = 
   }
   const count = (n: number, word: string) => n + ' ' + word + (n === 1 ? '' : 's');
   const label = !check ? 'Checking book…' : !items.length ? 'No issues' :
-    [check.errors.length && count(check.errors.length, 'error'), check.warnings.length && count(check.warnings.length, 'warning')]
+    [errors.length && count(errors.length, 'error'), warnings.length && count(warnings.length, 'warning')]
       .filter(Boolean).join(' · ');
-  const level = check?.errors.length ? 'error' : check?.warnings.length ? 'warning' : 'clean';
+  const level = errors.length ? 'error' : warnings.length ? 'warning' : 'clean';
 
   // A click elsewhere or Escape closes the list.
   useEffect(() => {
@@ -78,6 +83,8 @@ export function BookCheckIndicator({ check, checking, spread, select, request = 
             <ul>{row.group.items.map((item, j) => issueItem(item, j))}</ul>
           </details>
         </li>)}</ul>
+      {!scope && notes.map((note) => <p key={note.away} className="book-check-note">{awayText(note)}{note.away === 'other-mac' && locateFolder &&
+        <> <button type="button" className="link" onClick={locateFolder}>Locate Folder…</button></>}</p>)}
     </div>}
   </div>;
 }

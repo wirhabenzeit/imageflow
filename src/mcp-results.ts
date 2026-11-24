@@ -18,6 +18,8 @@ const history = z.looseObject({
   redo: z.string().optional().describe('Name of the step Redo would apply.'),
 }).describe('The app\'s shared Undo history after this call.');
 
+// `occurrences`, the places of a finding that is one problem in many places, is described in docs/mcp.md only: this schema is
+// repeated in most tools, and the advertised list has a size budget.
 export const diagnosticSchema = z.looseObject({
   code: z.string().describe('Stable diagnostic code.'),
   stage: z.enum(['project', 'template', 'render', 'preview']),
