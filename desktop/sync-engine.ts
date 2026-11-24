@@ -1149,21 +1149,6 @@ async function fetchOriginals(root: string, remote: SyncRemote, ids?: readonly s
 }
 
 /**
- * What a book's owned originals take up on this Mac, in bytes: what syncing it would upload at most, for the sheet that
- * asks which books to sync when a backend is first set up. Reads only photos.json and the files' sizes.
- */
-export async function ownedOriginalsSize(folder: string) {
-  const root = await realpath(folder);
-  const photos = photoIndexSchema.parse(JSON.parse(await readFile(join(root, 'photos.json'), 'utf8')));
-  let bytes = 0;
-  for (const path of new Set(Object.values(photos).flatMap((photo) => { const path = syncedOriginalPath(photo); return path?.startsWith('photos/') ? [path] : []; }))) {
-    const info = await lstat(await bookPath(root, path, { checking: true })).catch(() => undefined);
-    if (info?.isFile()) bytes += info.size;
-  }
-  return bytes;
-}
-
-/**
  * How many of a book's owned originals are not on this Mac, from its own files alone: owned photos whose file photos/
  * lacks, and those a pull kept at an older version (their new version is elsewhere). For the question Delete from Sync
  * asks; reads photos.json, the sync record and the files' presence, nothing else.

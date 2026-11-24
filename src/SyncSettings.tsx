@@ -1,10 +1,7 @@
 import { useEffect, useState } from 'react';
-import type { DesktopApi, SyncBackendState, SyncCleanUpPlan, SyncConnectionReport, SyncSetupBook, SyncStorage } from './desktop';
+import type { DesktopApi, SyncBackendState, SyncConnectionReport } from './desktop';
 import type { AppSettings, S3SyncBackend, SyncBackend } from './settings';
 import { splitEndpoint } from './sync-endpoint';
-import { cleanUpText, formatStorage, storageSummary } from './sync-storage-text';
-
-export { cleanUpText, formatStorage, storageSummary };
 
 type Fields = { endpoint: string; region: string; bucket: string; prefix: string; addressing: '' | 'path' | 'virtual'; accessKeyId: string; secretAccessKey: string };
 const fieldsOf = (backend?: S3SyncBackend): Fields => ({ endpoint: backend?.endpoint ?? '', region: backend?.region ?? '', bucket: backend?.bucket ?? '',
@@ -46,63 +43,6 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
     void api.syncBackendState().then((answer) => { if (active && 'value' in answer) setState(answer.value); });
     return () => { active = false; };
   }, [api, configuredKey]);
-
-  // What the books take up on the remote, and Clean Up (#285): computed only when asked, since over a bucket each book
-  // is a listing of everything it stores. Forgotten when the backend changes.
-  const [usage, setUsage] = useState<SyncStorage | { error: string } | 'counting'>();
-  const [cleanUp, setCleanUp] = useState<{ state: 'looking' } | { state: 'found'; plan: SyncCleanUpPlan } | { state: 'cleaning'; plan: SyncCleanUpPlan }
-    | { state: 'done'; text: string } | { state: 'failed'; text: string }>();
-  useEffect(() => { setUsage(undefined); setCleanUp(undefined); }, [configuredKey, settings?.sync?.kind]);
-  async function countStorage() {
-    if (!api) return;
-    setUsage('counting');
-    const answer = await api.syncUsage().catch(() => ({ error: 'ImageFlow could not complete the request.' }));
-    setUsage('value' in answer ? answer.value : { error: answer.error });
-  }
-  async function findCleanUp() {
-    if (!api) return;
-    setCleanUp({ state: 'looking' });
-    const answer = await api.syncCleanUpPlan().catch(() => ({ error: 'ImageFlow could not complete the request.' }));
-    setCleanUp('value' in answer ? { state: 'found', plan: answer.value } : { state: 'failed', text: answer.error });
-  }
-  async function runCleanUp(plan: SyncCleanUpPlan) {
-    if (!api) return;
-    setCleanUp({ state: 'cleaning', plan });
-    const answer = await api.syncCleanUp().catch(() => ({ error: 'ImageFlow could not complete the request.' }));
-    if ('error' in answer) { setCleanUp({ state: 'failed', text: answer.error }); return; }
-    // Not confirmed in the question the app asked: the plan stays shown.
-    const done = answer.value;
-    if ('cancelled' in done) { setCleanUp({ state: 'found', plan }); return; }
-    setCleanUp({ state: 'done', text: done.objects ? 'Freed ' + formatStorage(done.bytes) + '.' : 'Nothing was deleted: the books use everything they store by now.' });
-    // The figures shown are out of date now.
-    if (usage && usage !== 'counting' && !('error' in usage)) void countStorage();
-  }
-
-  // The first-configuration sheet (ADR 0012, section 3): once a backend is saved where sync was off, the recent books
-  // with what their originals take up, to choose which sync. Nothing is uploaded before; books left out are opted out.
-  const [setup, setSetup] = useState<{ books: SyncSetupBook[]; chosen: Record<string, boolean>; saving?: boolean; error?: string }>();
-  async function offerBooks() {
-    if (!api) return;
-    const answer = await api.syncSetupBooks().catch(() => ({ error: 'ImageFlow could not complete the request.' }));
-    if ('error' in answer) { setResult({ text: answer.error, error: true }); return; }
-    if (!answer.value.length) return;
-    // Preselected: the books that sync already and the trusted ones; an untrusted book is trusted only when chosen.
-    setSetup({ books: answer.value, chosen: Object.fromEntries(answer.value.map((book) => [book.id, book.syncing || book.trusted])) });
-  }
-  async function chooseBooks() {
-    if (!api || !setup) return;
-    setSetup({ ...setup, saving: true, error: undefined });
-    const answer = await api.chooseSyncBooks(setup.books.map(({ id }) => ({ id, sync: !!setup.chosen[id] }))).catch(() => ({ error: 'ImageFlow could not complete the request.' }));
-    if ('error' in answer) { setSetup({ ...setup, saving: false, error: answer.error }); return; }
-    const count = setup.books.filter(({ id }) => setup.chosen[id]).length;
-    setSetup(undefined);
-    setState((current) => current && { ...current, booksUnchosen: undefined });
-    setResult({ text: count ? (count === 1 ? '1 book syncs' : count + ' books sync') + ' from the next time it opens, or now if it is open.' : 'No book syncs until you choose File → Sync → Start Syncing in it.' });
-  }
-  // The main process says when books wait to be chosen (a backend was set up or changed); the sheet shows until it is
-  // answered, also after Settings was closed or the app quit.
-  const unchosen = !!state?.booksUnchosen;
-  useEffect(() => { if (unchosen && !setup) void offerBooks(); }, [unchosen]);
 
   const set = (name: keyof Fields) => (event: { target: { value: string } }) => { setFields({ ...fields, [name]: event.target.value }); setResult(undefined); };
   /**
@@ -168,7 +108,7 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
       setState(answer.value);
       // Stored in the main process: nothing of the key stays here.
       setFields((current) => ({ ...current, accessKeyId: '', secretAccessKey: '' }));
-      if (action === 'off') { setKind(''); setSetup(undefined); }
+      if (action === 'off') setKind('');
       setResult({ text: action === 'off' ? 'Sync is off on this Mac.' : 'Saved.' });
 
     } catch {
@@ -255,49 +195,9 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
       {result && <p role={result.error ? 'alert' : 'status'} className={result.error ? 'error-text' : 'settings-note sync-test-result'}>{result.text}</p>}
     </div>
     </>}
-    {setup && <>
-      <span className="settings-label">Books:</span>
-      <div className="settings-control sync-setup" role="group" aria-label="Books to sync">
-        <p className="settings-note">Which books sync through {current ?? 'this backend'}? Nothing is uploaded until you choose. A book left out does not sync on this Mac until you choose File → Sync → Start Syncing in it.</p>
-        <ul className="sync-setup-books">
-          {setup.books.map((book) => <li key={book.id}><label>
-            <input type="checkbox" checked={!!setup.chosen[book.id]} disabled={setup.saving} onChange={(event) => setSetup({ ...setup, chosen: { ...setup.chosen, [book.id]: event.target.checked } })} />
-            <span className="sync-setup-title">{book.title || 'Untitled'}</span>
-            <span className="settings-note">{book.bytes ? formatStorage(book.bytes) + ' of originals' : 'No originals'}{book.trusted ? '' : ' · not trusted on this Mac: choosing it trusts it'}</span>
-          </label></li>)}
-        </ul>
-        <div className="settings-update-actions">
-          <button className="primary" disabled={setup.saving} onClick={() => void chooseBooks()}>Sync Chosen Books</button>
-        </div>
-        {setup.error && <p role="alert" className="error-text">{setup.error}</p>}
-      </div>
-    </>}
     {current && <>
-      <span className="settings-label">Storage:</span>
-      <div className="settings-control sync-storage">
-        {usage && <p className="settings-note sync-usage" role="status">{usage === 'counting' ? 'Counting what ImageFlow stores…'
-          : 'error' in usage ? 'What ImageFlow stores cannot be counted now: ' + usage.error
-          : storageSummary(usage, settings?.sync?.kind === 'icloud')}</p>}
-        {usage && usage !== 'counting' && !('error' in usage) && usage.books.length > 0 && <ul className="sync-storage-books" aria-label="Storage by book">
-          {usage.books.map((book) => <li key={book.bookId}>
-            <span className="sync-storage-title">{book.deleted ? 'Deleted book (what is left of it)' : book.title || 'Untitled'}</span>
-            <span className="settings-note">{formatStorage(book.bytes)}{book.originals ? ' · originals ' + formatStorage(book.originals) + ', the rest ' + formatStorage(book.bytes - book.originals) : ''}</span>
-          </li>)}
-        </ul>}
-        {cleanUp && cleanUp.state !== 'found' && cleanUp.state !== 'cleaning' && <p role={cleanUp.state === 'failed' ? 'alert' : 'status'}
-          className={cleanUp.state === 'failed' ? 'error-text' : 'settings-note sync-clean-up-result'}>{cleanUp.state === 'looking' ? 'Looking for what no book uses…' : cleanUp.text}</p>}
-        {cleanUp && (cleanUp.state === 'found' || cleanUp.state === 'cleaning') && <p className="settings-note sync-clean-up-plan" role="status">{cleanUpText(cleanUp.plan)}</p>}
-        <div className="settings-update-actions">
-          {cleanUp && (cleanUp.state === 'found' || cleanUp.state === 'cleaning') && cleanUp.plan.objects > 0 ? <>
-            <button className="primary" disabled={cleanUp.state === 'cleaning'} onClick={() => void runCleanUp(cleanUp.plan)}>{cleanUp.state === 'cleaning' ? 'Cleaning Up…' : 'Clean Up'}</button>
-            <button disabled={cleanUp.state === 'cleaning'} onClick={() => setCleanUp(undefined)}>Cancel</button>
-          </> : <>
-            <button disabled={!api || usage === 'counting'} onClick={() => void countStorage()}>{usage && usage !== 'counting' && !('error' in usage) ? 'Count Again' : 'Show Storage'}</button>
-            <button disabled={!api || cleanUp?.state === 'looking'} onClick={() => void findCleanUp()}>Clean Up…</button>
-          </>}
-        </div>
-        <p className="settings-note">Clean Up deletes originals, previews and covers that no book has used for a week, and what is left of books deleted from sync. It asks before it deletes anything. Every book’s text, files and history stay.</p>
-      </div>
+      <span className="settings-label">Books:</span>
+      <div className="settings-control"><button disabled={disabled} onClick={() => void api!.showSync()}>Manage Synced Books…</button></div>
     </>}
     <span className="settings-label">Originals:</span>
     <div className="settings-control">

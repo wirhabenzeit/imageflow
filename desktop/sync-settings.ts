@@ -1,4 +1,5 @@
 import type { IpcMain, IpcMainInvokeEvent } from 'electron';
+import { randomUUID } from 'node:crypto';
 import { s3BackendError, normalizeS3Backend } from './sync-backend';
 import { credentialHint, credentialScope, credentialsError } from './sync-credentials';
 import type { CredentialStore } from './sync-credentials';
@@ -8,7 +9,7 @@ import { cloudKitAvailability } from './sync-store-cloudkit';
 import type { CloudKitStatus } from './sync-store-cloudkit';
 import type { SettingsStore } from './settings';
 import { channels } from '../src/desktop';
-import type { Result, SyncBackendState, SyncCleanUpPlan, SyncConnectionReport, SyncCredentialsInput, SyncStorage } from '../src/desktop';
+import type { Result, SyncBackendState, SyncCleanUpPlan, SyncConnectionReport, SyncCredentialsInput } from '../src/desktop';
 import type { AppSettings, S3SyncBackend, SyncBackend } from '../src/settings';
 
 /**
@@ -34,14 +35,14 @@ export function usableBackend(backend: SyncBackend | undefined, icloud = icloudE
 }
 
 /**
- * Why a settings patch from a window may not carry `sync` or `syncBooksUnchosen`, or undefined. A backend is set only
+ * Why a settings patch from a window may not carry `sync`, `syncSetup` or `syncBooksUnchosen`, or undefined. A backend is set only
  * through Settings → Sync (`saveSyncBackend`), which checks it with its credentials and forgets those of the backend it
  * replaces; the generic patch may only turn sync off (`null` or `undefined`). Settings read from disk are not patches
  * from a window and keep their values.
  */
 export function syncPatchError(patch: unknown) {
-  // Whether books wait to be chosen for a backend is the main process's to say (`syncBooksUnchosen`), never a window's.
-  if (patch && typeof patch === 'object' && 'syncBooksUnchosen' in patch) return 'Choose the books to sync in Settings → Sync.';
+  // Which books may start by themselves with a backend is the main process's to say, never a window's.
+  if (patch && typeof patch === 'object' && ('syncBooksUnchosen' in patch || 'syncSetup' in patch)) return 'Sync is set up in Settings → Sync.';
   if (!patch || typeof patch !== 'object' || !('sync' in patch)) return undefined;
   const value = (patch as { sync?: unknown }).sync;
   return value === null || value === undefined ? undefined : 'Choose the sync backend in Settings → Sync.';
@@ -77,39 +78,38 @@ function parseRequest(request: unknown): { backend: S3SyncBackend; credentials?:
  * answer, an error or the log.
  */
 /**
- * The part of a settings patch that says whether books wait to be chosen, for a backend that replaces `previous`:
- * another backend (or the first one) waits when there are books to list (`booksToChoose`); one that stays the same (only
- * its key changed) keeps what it had.
+ * The part of a settings patch that begins a set-up (`AppSettings.syncSetup`), for a backend that replaces `previous`:
+ * another backend, or the first one, begins a new one, under which no book there before starts by itself; one that stays
+ * the same (only its key changed) keeps what it had.
  */
-export async function chooseBooksPatch(previous: SyncBackend | undefined, next: SyncBackend, booksToChoose?: () => Promise<number>) {
-  if (JSON.stringify(previous) === JSON.stringify(next)) return {};
-  return { syncBooksUnchosen: (await booksToChoose?.().catch(() => 1) ?? 0) > 0 ? true as const : null };
+export function syncSetupPatch(previous: SyncBackend | undefined, next: SyncBackend): { syncSetup?: string; syncBooksUnchosen?: null } {
+  return JSON.stringify(previous) === JSON.stringify(next) ? {} : { syncSetup: randomUUID(), syncBooksUnchosen: null };
 }
 
-export function registerSyncSettings({ ipcMain, owner, settings, credentials, cloudKit, usage, cleanUp, changed, booksToChoose }: {
+export function registerSyncSettings({ ipcMain, owner, windowOwner = owner, settings, credentials, cloudKit, cleanUp, changed, setUp }: {
   ipcMain: IpcMain;
   /** What the CloudKit addon says about this build and account; undefined where there is no addon (#292). */
   cloudKit?: () => Promise<CloudKitStatus | undefined>;
-  /** What the books take up on the configured remote, per book (`storageReport`), computed when asked. */
-  usage?: () => Promise<SyncStorage>;
   /** Clean Up (#285): `plan` finds what it would delete and deletes nothing; `run` deletes what the last plan found. */
   cleanUp?: { plan: () => Promise<SyncCleanUpPlan>;
     /** Asks in the main process, on the window that asked, then deletes; `cancelled` when the user said no. */
     run: (event: IpcMainInvokeEvent) => Promise<{ bytes: number; objects: number } | { cancelled: true }> };
   owner: (event: IpcMainInvokeEvent) => unknown;
+  /** The Sync window, which Clean Up belongs to. */
+  windowOwner?: (event: IpcMainInvokeEvent) => unknown;
   settings: SettingsStore;
   credentials: () => CredentialStore;
   /** Called with the new settings after the backend changed, to tell every window. */
   changed: (value: AppSettings) => void;
-  /** How many recent books the first-configuration sheet would list; none means there is nothing to choose. */
-  booksToChoose?: () => Promise<number>;
+  /** Called once another backend (or the first one) was set up: the app opens the Sync window, where books are turned on. */
+  setUp?: () => void;
 }) {
   const state = async (): Promise<SyncBackendState> => {
     const backend = settings.value.sync;
     const stored = backend?.kind === 's3' ? credentialHint(await credentials().read(credentialScope(backend)).catch(() => undefined)) : undefined;
     // A setting that names iCloud in a build without the entitlements leaves sync off, and the pane says so.
     const unusable = !!backend && !usableBackend(backend);
-    return { available: true, ...(stored ? { credentials: stored } : {}), ...(settings.value.syncBooksUnchosen && !unusable ? { booksUnchosen: true as const } : {}),
+    return { available: true, ...(stored ? { credentials: stored } : {}),
       ...(unusable ? { unusable: 'iCloud sync is not available in this build of ImageFlow, so sync is off on this Mac.' } : {}),
       ...(folderSyncFlag() ? { folder: true as const } : {}), ...await icloud() };
   };
@@ -120,9 +120,14 @@ export function registerSyncSettings({ ipcMain, owner, settings, credentials, cl
     const availability = cloudKitAvailability(status);
     return { icloud: availability.available ? { available: true } : { available: false, message: availability.message } };
   };
-  const guard = async <T>(event: IpcMainInvokeEvent, run: () => Promise<T>): Promise<Result<T>> => {
-    if (!owner(event)) return { error: 'Request is only available to Settings.' };
+  const guard = async <T>(event: IpcMainInvokeEvent, run: () => Promise<T>, allowed: typeof owner = owner, name = 'Settings'): Promise<Result<T>> => {
+    if (!allowed(event)) return { error: 'Request is only available to ' + name + '.' };
     try { return { value: await run() }; } catch (error) { return { error: message(error) }; }
+  };
+  /** Tells every window about the backend that was saved, and begins its set-up where it is another one. */
+  const saved = (previous: SyncBackend | undefined, value: AppSettings) => {
+    changed(value);
+    if (value.syncSetup && JSON.stringify(previous) !== JSON.stringify(value.sync)) setUp?.();
   };
 
   ipcMain.handle(channels.syncBackend, (event): Promise<Result<SyncBackendState>> => guard(event, state));
@@ -140,35 +145,30 @@ export function registerSyncSettings({ ipcMain, owner, settings, credentials, cl
       const offered = (await icloud()).icloud;
       if (!offered) throw new Error('iCloud sync is not available in this build of ImageFlow.');
       if (!offered.available) throw new Error(offered.message);
-      const value = await settings.update({ sync: { kind: 'icloud' }, ...await chooseBooksPatch(previous, { kind: 'icloud' }, booksToChoose) });
+      const value = await settings.update({ sync: { kind: 'icloud' }, ...syncSetupPatch(previous, { kind: 'icloud' }) });
       await forgetOtherCredentials(credentials(), previous, value.sync);
-      changed(value);
+      saved(previous, value);
       return state();
     }
     const { backend, credentials: entered } = parseRequest(request);
     const scope = credentialScope(backend);
     if (entered) await credentials().write(scope, entered);
     else if (!await credentials().read(scope)) throw new Error('Enter the access key ID and the secret access key for this bucket.');
-    const value = await settings.update({ sync: backend, ...await chooseBooksPatch(previous, backend, booksToChoose) });
+    const value = await settings.update({ sync: backend, ...syncSetupPatch(previous, backend) });
     await forgetOtherCredentials(credentials(), previous, value.sync);
     // Told also when only the key changed: the books look at the bucket again with it.
-    changed(value);
+    saved(previous, value);
     return state();
-  }));
-
-  ipcMain.handle(channels.syncUsage, (event) => guard(event, async () => {
-    if (!usage || !usableBackend(settings.value.sync)) throw new Error('Sync is off on this Mac.');
-    return usage();
   }));
 
   ipcMain.handle(channels.syncCleanUpPlan, (event) => guard(event, async () => {
     if (!cleanUp || !usableBackend(settings.value.sync)) throw new Error('Sync is off on this Mac.');
     return cleanUp.plan();
-  }));
+  }, windowOwner, 'the Sync window'));
   ipcMain.handle(channels.syncCleanUp, (event) => guard(event, async () => {
     if (!cleanUp || !usableBackend(settings.value.sync)) throw new Error('Sync is off on this Mac.');
     return cleanUp.run(event);
-  }));
+  }, windowOwner, 'the Sync window'));
 
   ipcMain.handle(channels.testSyncConnection, (event, request: unknown) => guard(event, async (): Promise<SyncConnectionReport> => {
     const { backend, credentials: entered } = parseRequest(request);

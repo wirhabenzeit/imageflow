@@ -4,7 +4,7 @@ import type { CommitHeader } from '../src/sync-snapshot';
 import type { SyncCleanUpPlan } from '../src/desktop';
 import { cleanUpText } from '../src/sync-storage-text';
 import { remoteCommits, sweepableKey } from './sync-remote';
-import type { RemoteUsage, SyncRemote } from './sync-remote';
+import type { SyncRemote } from './sync-remote';
 import type { StoreEntry } from './sync-store';
 
 /**
@@ -134,7 +134,7 @@ export async function cleanUp(remote: SyncRemote, plan: CleanUpPlan, now = new D
   return { bytes, objects };
 }
 
-/** What a plan says in Settings → Sync and in the question before Clean Up: totals, without keys. */
+/** What a plan says in the Sync window and in the question before Clean Up: totals, without keys. */
 export const cleanUpSummary = (plan: CleanUpPlan): SyncCleanUpPlan => ({ bytes: plan.bytes, objects: plan.objects,
   books: plan.books.filter(({ deleted }) => !deleted).length, deletedBooks: plan.books.filter(({ deleted }) => deleted).length, skipped: plan.skipped });
 
@@ -145,26 +145,4 @@ export const cleanUpSummary = (plan: CleanUpPlan): SyncCleanUpPlan => ({ bytes: 
 export function cleanUpQuestion(plan: CleanUpPlan, backend: string) {
   return { message: 'Clean up “' + backend + '”?', buttons: ['Clean Up', 'Cancel'], defaultId: 1, cancelId: 1,
     detail: cleanUpText(cleanUpSummary(plan)) + ' They are deleted for every Mac. Every book’s text, files and history stay.' };
-}
-
-/** A book as Settings → Sync lists it: its title where its tips give one, what it stores, and the part that is originals. */
-export type StorageBook = { bookId: string; title: string; bytes: number; originals: number; deleted?: true };
-export type StorageReport = { bytes: number; originals: number; books: StorageBook[] };
-
-/**
- * The storage figures of Settings → Sync, computed on demand: `SyncRemote.usage` with each book's title from its newest
- * tip, largest book first. A book whose title cannot be read is listed by its ID.
- */
-export async function storageReport(remote: SyncRemote, usage?: RemoteUsage): Promise<StorageReport> {
-  const counted = usage ?? await remote.usage();
-  const books: StorageBook[] = [];
-  for (const book of counted.books) {
-    let title = '';
-    if (!book.deleted) {
-      try { title = deriveTips(await remoteCommits(remote, book.bookId)).at(-1)?.title ?? ''; } catch { /* listed without a title */ }
-    }
-    books.push({ ...book, title });
-  }
-  books.sort((a, b) => b.bytes - a.bytes || a.title.localeCompare(b.title));
-  return { bytes: counted.bytes, originals: counted.originals, books };
 }

@@ -2,7 +2,8 @@
 // desktop syncs a book; the laptop's Start window lists it as a book only on the remote, loads its title as the row
 // shows, and Download makes a trusted copy where its save panel says, showing how much is here on the book's row while
 // the rest of the window stays usable, and leaving nothing behind when it is cancelled; the laptop deletes it from sync, which
-// asks first; the desktop's Start window then shows the book as removed from sync, with Keep Here Only and Sync Again,
+// asks first; the Sync window (#307) lists the same books with switches: turning one on that is closed asks to trust it
+// and syncs it without opening it, and turning it off stops it here; the desktop's Start window then shows the book as removed from sync, with Keep Here Only and Sync Again,
 // and Sync Again makes it a new book on the remote while the deleted one stays deleted.
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -55,6 +56,21 @@ async function startWindow(app) {
   }
   throw new Error('The Start window did not open.');
 }
+/** The Sync window, as File → Sync → Manage Synced Books… opens it. */
+async function syncWindow(app) {
+  await app.evaluate(({ Menu }) => {
+    const item = Menu.getApplicationMenu().getMenuItemById('sync-manage');
+    if (!item.enabled) throw new Error('Manage Synced Books… is disabled.');
+    item.click();
+  });
+  for (let attempt = 0; attempt < 400; attempt++) {
+    const page = app.windows().find((page) => page.url() === 'imageflow://editor/sync');
+    if (page) { page.setDefaultTimeout(30000); await page.waitForFunction(() => !!window.imageflow); return page; }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error('The Sync window did not open.');
+}
+const stateIs = (row, text) => row.locator('.sync-state', { hasText: text }).waitFor();
 async function nextEditor(app, before) {
   for (let attempt = 0; attempt < 600; attempt++) {
     const page = app.windows().find((page) => !before.has(page) && page.url() === 'imageflow://editor/');
@@ -152,6 +168,48 @@ try {
   assert.deepEqual(await start.evaluate((id) => window.imageflow.libraryAction({ action: 'delete', bookId: id }), bookId), { value: null });
   assert.deepEqual(await keys(bookId), ['deleted.json']);
   await waitForPage(start, (id) => document.querySelector('li[data-book="' + id + '"]')?.getAttribute('data-state') === 'not-syncing', bookId);
+  await closeApp(app);
+
+  // The laptop again: the Sync window lists a book that is closed and was never turned on, off; nothing of it went up.
+  app = await launch('Laptop Profile');
+  const own = join(work, 'Laptop Books', 'Own Book.imageflow');
+  const ownEditor = await testBook(app, own, true);
+  const ownId = (await current(ownEditor)).project.bookId;
+  await ownEditor.close();
+  await startWindow(app);
+  let sync = await syncWindow(app);
+  assert.equal((await syncWindow(app)), sync, 'one window');
+  const ownRow = sync.getByRole('row', { name: 'Own Book' });
+  await stateIs(ownRow, 'Not syncing');
+  const ownSwitch = ownRow.getByRole('switch', { name: 'Sync Own Book' });
+  assert.equal(await ownSwitch.getAttribute('aria-checked'), 'false');
+  assert.equal(await ownRow.locator('.sync-size').textContent(), '–');
+  // Declining to trust it changes nothing; agreeing syncs it without opening it, and its size is counted.
+  await answer(app, 'Trust this book and sync it?', 'Cancel');
+  await ownSwitch.click();
+  await waitForPage(sync, () => [...document.querySelectorAll('.sync-switch')].every((button) => !button.disabled));
+  assert.equal(await ownSwitch.getAttribute('aria-checked'), 'false');
+  await answer(app, 'Trust this book and sync it?', 'Trust and Sync');
+  await ownSwitch.click();
+  await stateIs(ownRow, 'Up to date');
+  assert.equal(await ownSwitch.getAttribute('aria-checked'), 'true');
+  await ownRow.locator('.sync-size', { hasText: /^[0-9.]+ (KB|MB)$/ }).waitFor();
+  await sync.locator('.sync-summary', { hasText: / in “Sync”$/ }).waitFor();
+  assert.equal(app.windows().some((page) => page.url() === 'imageflow://editor/'), false, 'no book was opened');
+  const ownRemote = (await sync.evaluate(() => window.imageflow.recentDocuments())).value.find(({ path }) => path.endsWith('/Own Book.imageflow')).bookId;
+  if (ownId) assert.equal(ownRemote, ownId);
+  assert.ok((await keys(ownRemote)).includes('snapshots'));
+  // The book deleted from sync stays here, not syncing. Clean Up belongs to this window alone.
+  await stateIs(sync.getByRole('row', { name: 'Field Notes' }), 'Not syncing');
+  await sync.getByRole('button', { name: 'Clean Up…' }).click();
+  await sync.locator('.sync-summary', { hasText: 'There is nothing to clean up.' }).waitFor();
+  start = await startWindow(app);
+  for (const request of ['syncCleanUpPlan', 'syncCleanUp', 'syncBooks']) assert.match((await start.evaluate((name) => window.imageflow[name](), request)).error, /only available to the Sync window/);
+  // Turned off here, its copy on the remote stays.
+  await answer(app, 'Stop syncing “Own Book” on this Mac?', 'Stop Syncing');
+  await ownSwitch.click();
+  await stateIs(ownRow, 'Not syncing');
+  assert.ok((await keys(ownRemote)).includes('snapshots'));
   await closeApp(app);
 
   // The desktop again: its book shows as removed from sync, and Sync Again makes it a new book.

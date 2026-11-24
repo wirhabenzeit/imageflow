@@ -6,7 +6,8 @@ import type { LibraryRemote, RecentDocument } from './desktop';
  *
  * - A book on this Mac that syncs with the configured remote shows its sync state: `synced`, or `removed` when another
  *   Mac deleted it from sync (its tombstone), or `newer` when a newer ImageFlow marked it. One the remote does not have
- *   (its first sync has not happened, or did not finish) is `unsynced`, "Not synced yet".
+ *   (its first sync has not happened, or did not finish) is `unsynced`, "Not synced yet", as is one that starts syncing by
+ *   itself at its next open (a book made under this set-up of sync).
  * - One that does not sync here (stopped, never started, or last synced with another remote) is `not-syncing`.
  * - While the remote is being read, a book that syncs here by its record is `checking`; when it cannot be read,
  *   `unavailable`. The books on this Mac are listed first, before the remote has answered.
@@ -30,10 +31,10 @@ export function libraryRows(local: readonly RecentDocument[], remote?: LibraryRe
   const byId = new Map(listing?.books.map((book) => [book.bookId, book]));
   const state = (book: RecentDocument): LocalLibraryState => {
     if (!book.available) return 'missing';
-    if (!syncsHere(book)) return 'not-syncing';
+    if (!syncsHere(book)) return book.sync?.starts ? 'unsynced' : 'not-syncing';
     if (!remote) return 'checking';
     if (!listing) return 'unavailable';
-    if (!syncsHere(book, listing.remoteId)) return 'not-syncing';
+    if (!syncsHere(book, listing.remoteId)) return book.sync?.starts ? 'unsynced' : 'not-syncing';
     const there = book.bookId ? byId.get(book.bookId) : undefined;
     return !there ? 'unsynced' : there.deleted ? 'removed' : there.newer ? 'newer' : 'synced';
   };

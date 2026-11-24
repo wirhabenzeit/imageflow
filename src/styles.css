@@ -692,14 +692,6 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .sync-fields > .settings-note, .sync-fields > .settings-update-actions { margin-top: 0; }
 .sync-field-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
 .sync-settings .error-text { margin: 0; font-size: 12px; }
-.sync-setup-books { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 4px; max-height: 180px; overflow-y: auto; }
-.sync-setup-books label { display: flex; align-items: baseline; gap: 6px; }
-.sync-setup-books .settings-note { margin: 0; }
-.sync-setup-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sync-storage-books { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 4px; max-height: 180px; overflow-y: auto; }
-.sync-storage-books li { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
-.sync-storage-books .settings-note { margin: 0; white-space: nowrap; }
-.sync-storage-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .settings-form .pc-switch + .settings-note { margin-top: 1px; padding-left: 21px; }
 .settings-status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .settings-buttons { display: inline-grid; gap: 8px; }
@@ -833,6 +825,8 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .recent-books li { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--subtle-border); padding: 10px 0; }
 .studio .recent-open { display: flex; gap: 14px; align-items: center; width: 100%; min-width: 0; padding: 4px; text-align: left; background: none; border: 0; box-shadow: none; }
 .recent-open:hover:not(:disabled) { background: var(--subtle-hover); }
+/* A row that downloads keeps its colors: its button only waits for the download to end. */
+.studio .recent-open.recent-downloading:disabled { opacity: 1; }
 .recent-cover { flex: 0 0 60px; height: 66px; background: var(--canvas-surface); display: grid; place-items: center; border-radius: 3px; overflow: hidden; color: var(--muted); font-size: 26px; }
 .recent-cover img { width: 100%; height: 100%; object-fit: contain; }
 .recent-cover img.recent-cover-icon { width: 52px; height: 52px; }
@@ -852,6 +846,42 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .book-progress .task-status-bar { width: 100%; }
 .book-progress-line { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 11px; color: var(--muted); }
 .book-progress-text { font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* The Sync window (#307): one table of the books here and on the remote, and a footer with the total. */
+.studio.sync-window { display: grid; grid-template-rows: minmax(0, 1fr) auto; background: var(--panel-surface); }
+.studio.sync-window-off { display: grid; place-content: center; justify-items: center; gap: 12px; color: var(--muted); }
+.sync-window-off p { margin: 0; }
+.sync-table { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
+.sync-rows { overflow-y: auto; scrollbar-gutter: stable; }
+.sync-row { display: grid; grid-template-columns: 46px minmax(0, 1fr) 72px 176px 40px; column-gap: 12px; align-items: center; min-height: 58px; padding: 8px 16px; border-bottom: 1px solid var(--subtle-border); }
+.sync-row:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.sync-head { min-height: 0; padding: 7px 16px; overflow: hidden; scrollbar-gutter: stable; border-bottom-color: var(--edge); color: var(--muted); font-size: 11px; }
+.sync-cover { width: 46px; height: 40px; display: grid; place-items: center; overflow: hidden; border-radius: 3px; background: var(--canvas-surface); }
+.sync-cover img { width: 100%; height: 100%; object-fit: contain; }
+.sync-cover img.sync-cover-icon { width: 34px; height: 34px; }
+.sync-book { display: grid; gap: 2px; min-width: 0; }
+.sync-book strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; }
+.sync-book > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted); }
+.sync-size { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sync-row:not(.sync-head) .sync-size, .sync-state { font-size: 12px; }
+.sync-state { display: grid; justify-items: start; gap: 4px; min-width: 0; }
+.sync-state > span:not(.book-progress) { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sync-state .book-progress, .sync-state > .task-status-bar { width: 100%; }
+.sync-state-muted { color: var(--muted); }
+.sync-state-problem { color: var(--error-text); }
+.studio .sync-state > button, .studio .sync-foot button { font-size: 12px; white-space: nowrap; }
+.studio .sync-state > button { padding: 2px 9px; }
+.sync-switch-cell { justify-self: end; display: grid; }
+.studio .sync-switch { position: relative; width: 32px; height: 19px; min-height: 0; padding: 0; border: 0; border-radius: 10px; background: var(--control-border); box-shadow: none; transition: background 150ms; }
+.sync-switch::after { content: ''; position: absolute; left: 2px; top: 2px; width: 15px; height: 15px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px #00000050; transition: left 150ms; }
+.studio .sync-switch[aria-checked="true"] { background: var(--button-primary); }
+.sync-switch[aria-checked="true"]::after { left: 15px; }
+.studio .sync-switch:disabled { opacity: .5; }
+.studio .sync-switch:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 1px; }
+@media (prefers-reduced-motion: reduce) { .studio .sync-switch, .sync-switch::after { transition: none; } }
+.sync-empty { margin: 60px 20px; text-align: center; color: var(--muted); }
+.sync-foot { display: flex; align-items: center; gap: 8px; padding: 9px 16px; border-top: 1px solid var(--edge); background: var(--footer-surface); }
+.sync-summary { flex: 1; min-width: 0; display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; color: var(--muted); font-size: 12px; }
+.sync-summary.sync-state-problem { color: var(--error-text); }
 .recent-empty { text-align: center; max-width: 260px; margin: 74px auto 0; color: var(--muted); }
 .recent-empty > img { display: block; width: 96px; height: 96px; margin: 0 auto; }
 .recent-empty h3 { font-weight: 500; color: var(--text); font-size: 17px; margin: 16px 0 8px; }

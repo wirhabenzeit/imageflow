@@ -11,8 +11,8 @@ import type { PutOptions, StoreEntry, StoreSource, SyncStore, TransferOptions } 
 
 /** The parts of a book's prefix (ADR 0012, section 4). */
 export type BookFolder = 'snapshots' | 'content' | 'originals' | 'proxies' | 'covers';
-/** What a remote stores (`SyncRemote.usage`): bytes in all and per book, and the part of each that is originals. */
-export type RemoteUsage = { bytes: number; originals: number; books: { bookId: string; bytes: number; originals: number; deleted?: true }[] };
+/** What a book takes up on a remote (`SyncRemote.usage`): in bytes, and the part of it that is originals. */
+export type BookUsage = { bytes: number; originals: number };
 /** The keys Clean Up may delete: originals, previews and covers of a book (ADR 0012, section 4). */
 export const sweepableKey = /^books\/[^/]+\/(originals|proxies|covers)\//;
 /** A book on a remote: there, or deleted from sync (its tombstone), or marked by a newer ImageFlow in a way this one cannot read. */
@@ -92,11 +92,10 @@ export interface SyncRemote {
    */
   listBook(bookId: string, folder?: BookFolder, options?: { full?: boolean }): Promise<StoreEntry[]>;
   /**
-   * What the books on this remote store, in bytes, per book and in all, with the part that is originals (Settings → Sync;
-   * #292, #285). Deleted books count only what is left of them. Over a store with a change feed it comes from the key
-   * indexes.
+   * What a book takes up, in bytes, with the part that is originals (the Sync window; #285, #307). Of a book deleted from
+   * sync, what is left of it. Over a store with a change feed it comes from the key index; over a bucket it lists the book.
    */
-  usage(): Promise<RemoteUsage>;
+  usage(bookId: string): Promise<BookUsage>;
   /**
    * Deletes blobs that Clean Up found unreferenced (`desktop/sync-sweep.ts`): originals, previews and covers only, never
    * a commit, a state blob or other content. Each key is also forgotten wherever this remote answers `hasBlob` without
@@ -442,19 +441,10 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
       if (--session.count === 0 && this.sessions.get(bookId) === session) this.sessions.delete(bookId);
     };
   }
-  async usage(): Promise<RemoteUsage> {
-    const books: RemoteUsage['books'] = [];
-    const listed = await this.listBooks();
-    // A few books at a time: over a store without a feed, or without an index yet, each is a full listing.
-    for (let start = 0; start < listed.length; start += 4) {
-      books.push(...await Promise.all(listed.slice(start, start + 4).map(async ({ bookId, deleted }) => {
-        const entries = await this.listBook(bookId);
-        const originals = bookPrefix(bookId) + 'originals/';
-        return { bookId, bytes: entries.reduce((sum, { size }) => sum + size, 0),
-          originals: entries.reduce((sum, { key, size }) => sum + (key.startsWith(originals) ? size : 0), 0), ...(deleted ? { deleted: true as const } : {}) };
-      })));
-    }
-    return { bytes: books.reduce((sum, book) => sum + book.bytes, 0), originals: books.reduce((sum, book) => sum + book.originals, 0), books };
+  async usage(bookId: string): Promise<BookUsage> {
+    const entries = await this.listBook(bookId);
+    const originals = bookPrefix(bookId) + 'originals/';
+    return { bytes: entries.reduce((sum, { size }) => sum + size, 0), originals: entries.reduce((sum, { key, size }) => sum + (key.startsWith(originals) ? size : 0), 0) };
   }
   async deleteRemains(bookId: string) {
     if (!await this.bookTombstone(bookId, { fresh: true })) throw new Error('Only what is left of a book deleted from sync is removed whole.');

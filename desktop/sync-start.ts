@@ -1,5 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import { sep } from 'node:path';
+import type { AppSettings } from '../src/settings';
+import { bookTrusted } from './source-access';
+import { updateSyncState } from './sync-pull';
 
 /**
  * How a book starts syncing by itself (ADR 0012, section 3; #282), apart from Electron so it can be tested: which books
@@ -21,8 +25,36 @@ export async function syncExcludedBook(folder: string, roots: readonly (string |
 }
 
 /**
+ * Gives an installation from before #307 its set-up (`AppSettings.syncSetup`), at launch and before any book opens.
+ * Those versions synced every trusted book that was opened, after asking once which of the recent books to leave out.
+ *
+ * - Answered: what syncs now goes on as it is, by its own record. A recent trusted book without a record was chosen and
+ *   not opened since (one that was left out has a record that says so), so it is marked and starts at its next open, as
+ *   it would have. No other book starts by itself any more.
+ * - Never answered: nothing synced by itself, and nothing starts. The recent books that have a record of syncing are
+ *   turned off, so that only turning one on in the Sync window starts it; what they last synced stays known.
+ *
+ * Local: reads and writes sync records, sends no request. A record that cannot be written leaves an unanswered question
+ * as it is (nothing syncs by itself while it is), to be settled at the next launch.
+ */
+export async function settleSyncSetup(settings: { value: AppSettings; update: (patch: unknown) => Promise<unknown> }, books: readonly string[]) {
+  const { sync, syncSetup, syncBooksUnchosen } = settings.value;
+  if (!sync || (syncSetup && !syncBooksUnchosen)) return;
+  const setup = syncSetup ?? randomUUID();
+  for (const folder of books) {
+    if (syncBooksUnchosen) {
+      await updateSyncState(folder, (state) => (state.remoteId && state.enabled !== false ? { ...state, enabled: false } : state));
+    } else if (await bookTrusted(folder).catch(() => false)) {
+      await updateSyncState(folder, (state) => (state.enabled === false || state.lastSynced || state.pull || state.abandoned ? state : { ...state, startWith: setup }))
+        .catch((error) => console.warn('ImageFlow could not keep that a book starts syncing', error));
+    }
+  }
+  await settings.update({ syncSetup: setup, syncBooksUnchosen: null });
+}
+
+/**
  * The first sync of a book that starts by itself. `attempt` decides again each time whether the book starts (the sync
- * service's `startsOnOpen`: exclusions, trust, opt-out, the unanswered first-configuration sheet, a book synced
+ * service's `startsOnOpen`: exclusions, trust, opt-out, whether it was turned on or made under this set-up, a book synced
  * elsewhere being asked about) and syncs it when it does. One that fails (the book was busy, the remote could not be
  * read) is tried again after the book's next save (`saved`), once per save and after `delay`, never in a loop. A save
  * made while the attempt was still running counts as that save.

@@ -93,7 +93,7 @@ export class BookBusyError extends Error {
   constructor() { super('ImageFlow is finishing another operation in this book.'); this.name = 'BookBusyError'; }
 }
 /** This Mac's name as other Macs see it in "never uploaded from …": its network name without `.local`. */
-function macName() { return hostname().replace(/\.local$/i, '').slice(0, 100) || undefined; }
+export function macName() { return hostname().replace(/\.local$/i, '').slice(0, 100) || undefined; }
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'ImageFlow could not complete the request.'; }
 async function fingerprint(path: string) {
   try {

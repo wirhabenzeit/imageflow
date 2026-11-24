@@ -15,7 +15,7 @@ const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month
  * The Start window, which is the library (ADR 0012, section 5; #283): the books on this Mac, listed at once, and once
  * the configured remote has answered, the books on it, matched by lineage (`libraryRows`). A book only on the remote
  * loads its title and cover as its row comes into view. The window names books and actions; the main process decides,
- * and asks before anything that changes other Macs (Delete from Sync). A download shows on its book's row and leaves
+ * and asks before anything that changes other Macs. Syncing is managed in the Sync window, which rows link to. A download shows on its book's row and leaves
  * the other rows usable (#305).
  */
 export function StartWindow({ api }: { api?: DesktopApi }) {
@@ -104,6 +104,8 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
   const rows = libraryRows(recents, remote);
   const listing = remote && 'books' in remote ? remote : undefined;
 
+  // Which books sync, and what sync does with them, is managed in the Sync window (#307); this one opens and downloads.
+  const manage: PopupItem = { id: 'manage', label: 'Manage Synced Books…' };
   /** The actions a row offers in its context menu, by state. */
   function menuItems(row: LibraryRow): { items: PopupItem[]; run: (id: string) => void } {
     const bookId = row.kind === 'remote' ? row.bookId : row.book.bookId;
@@ -111,26 +113,24 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
     if (row.kind === 'remote') {
       // A book a newer ImageFlow synced is not this version's to delete: only Update.
       return { items: row.state === 'newer' ? [{ id: 'update', label: 'Update ImageFlow…' }]
-        : [{ id: 'download', label: 'Download…' }, { type: 'separator' }, { id: 'delete', label: 'Delete from Sync…' }],
-      run: (id) => void (id === 'download' ? download(row.bookId) : library({ action: id as 'delete' | 'update', bookId: row.bookId })) };
+        : [{ id: 'download', label: 'Download…' }, { type: 'separator' }, manage],
+      run: (id) => void (id === 'download' ? download(row.bookId) : id === 'manage' ? api?.showSync() : library({ action: id as 'update', bookId: row.bookId })) };
     }
     const { book, state } = row;
-    const syncing = configured && (state === 'synced' || state === 'unsynced' || state === 'checking' || state === 'unavailable' || state === 'newer');
     const items: PopupItem[] = [{ id: 'open', label: 'Open', enabled: book.available }, { id: 'reveal', label: 'Show in Finder', enabled: book.available }];
     if (configured && book.available) {
       items.push({ type: 'separator' });
-      if (state === 'not-syncing') items.push({ id: 'start', label: 'Start Syncing' });
       if (state === 'removed') items.push({ id: 'keep-here', label: 'Keep Here Only' }, { id: 'sync-again', label: 'Sync Again' });
-      if (syncing) items.push({ id: 'stop', label: 'Stop Syncing on This Mac…' });
-      if (syncing && book.bookId && state !== 'unsynced' && state !== 'newer') items.push({ id: 'delete', label: 'Delete from Sync…' });
+      items.push(manage);
     }
     if (!book.available && row.onRemote) items.push({ type: 'separator' }, { id: 'download', label: 'Download…' });
     items.push({ type: 'separator' }, ...(!book.available ? [{ id: 'locate', label: 'Locate…' }] : []),
       { id: 'remove', label: 'Remove from Recents', enabled: !configured || !(state === 'synced' || state === 'unsynced' || state === 'newer' || state === 'removed') });
     return { items, run: (id) => {
       if (id === 'open' || id === 'reveal' || id === 'remove' || id === 'locate') void act(id, book.id);
+      else if (id === 'manage') void api?.showSync();
       else if (id === 'download' && book.bookId) void download(book.bookId);
-      else void library({ action: id as 'start' | 'stop' | 'keep-here' | 'sync-again' | 'delete', id: book.id });
+      else void library({ action: id as 'keep-here' | 'sync-again', id: book.id });
     } };
   }
   async function menu(row: LibraryRow, point?: { x: number; y: number }) {
@@ -188,7 +188,7 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
           progress={downloading(row.bookId)} cancel={() => cancelDownload(row.bookId)} download={() => void download(row.bookId)} update={() => void library({ action: 'update', bookId: row.bookId })} />)}</ul>
         : <div className="recent-empty"><img src={bookIcon} alt="" /><h3>A place for your stories</h3></div>}
     </section>
-    <div className="start-status" role={error ? 'alert' : 'status'}>{error || (busy === 'delete' ? 'Deleting from sync…' : busy ? 'Opening…' : '')}</div>
+    <div className="start-status" role={error ? 'alert' : 'status'}>{error || (busy ? 'Opening…' : '')}</div>
   </main>;
 }
 
@@ -211,7 +211,7 @@ function RemoteRow({ row, book, name, load, reload, busy, handlers, progress, ca
   const line: ReactNode = newer ? libraryStateLabels.newer : details?.updatedAt ? 'In ' + (name ?? 'sync') + ' · changed ' + day(details.updatedAt) + (details.versions > 1 ? ' · ' + details.versions + ' versions' : '')
     : book && 'error' in book ? book.error : 'In ' + (name ?? 'sync');
   return <li ref={item} className="library-remote" data-state={newer ? 'newer' : 'remote'} data-book={row.bookId} {...handlers}>
-    <button className="recent-open" disabled={busy || !!progress} onClick={newer ? update : download} title={progress ? 'Downloading to this Mac.' : newer ? 'Update ImageFlow to open this book.' : 'Download this book to this Mac.'}>
+    <button className={'recent-open' + (progress ? ' recent-downloading' : '')} disabled={busy || !!progress} onClick={newer ? update : download} title={progress ? 'Downloading to this Mac.' : newer ? 'Update ImageFlow to open this book.' : 'Download this book to this Mac.'}>
       <span className="recent-cover">{details?.cover ? <img src={details.cover} alt="" /> : <img className="recent-cover-icon" src={bookIcon} alt="" />}</span>
       <span className="recent-description"><strong>{title}</strong><span>{line}</span></span>
     </button>

@@ -15,7 +15,7 @@ import { acquireProjectLock, bookStateFolder, readSaveLedger } from '../desktop/
 import { importIntoProject, loadProject, updateProject } from '../desktop/project';
 import type { OpenProject } from '../desktop/project';
 import { collectSources, relinkFolder, relocateSource, removeSources, saveDocumentCopy } from '../desktop/source-actions';
-import { cleanUp, cleanUpQuestion, planCleanUp, storageReport } from '../desktop/sync-sweep';
+import { cleanUp, cleanUpQuestion, planCleanUp } from '../desktop/sync-sweep';
 import { captureBookStateRevision } from '../desktop/revisions';
 import { BookDownloads } from '../desktop/downloads';
 import { cloneFromRemote, describeLocalChange, describeSync, downloadName, downloadOriginals, newBookHistory, originalsAway, originalsNotHere, pendingOriginals, pendingUploads, placeOriginals, RemoteSyncingError, stageOriginals, stageSyncPull, syncBook, ensureBookId, uploadAhead, uploadOriginals } from '../desktop/sync-engine';
@@ -38,12 +38,13 @@ import { MemoryKeyIndexCache } from '../desktop/sync-key-index';
 import { MemoryHeaderCache } from '../desktop/sync-header-cache';
 import { readCommitHeaderV1 } from './sync-v1-reader';
 import { bookTrusted, distrustBook, trustBook } from '../desktop/source-access';
-import { readSyncState, startSyncing, SyncElsewhereError, SyncHalfPulledError, SyncStoppedError, takeAbandonedAtOpen, updateSyncState } from '../desktop/sync-pull';
+import { configureSyncSetup, readSyncState, startNewBook, startSyncing, SyncElsewhereError, SyncHalfPulledError, SyncStoppedError, takeAbandonedAtOpen, updateSyncState } from '../desktop/sync-pull';
 import { insideBook, pendingUploadsText, SyncService, UntrustedBookError } from '../desktop/sync-service';
-import { FirstSync, syncExcludedBook } from '../desktop/sync-start';
+import { ClosedBookSyncs } from '../desktop/sync-closed';
+import { FirstSync, settleSyncSetup, syncExcludedBook } from '../desktop/sync-start';
 import { AutomaticRuns, AutoSync, autoSyncTiming, SyncInterruptedError } from '../desktop/sync-auto';
 import { SettingsStore } from '../desktop/settings';
-import { chooseBooksPatch, syncPatchError } from '../desktop/sync-settings';
+import { syncPatchError, syncSetupPatch } from '../desktop/sync-settings';
 import type { FolderSyncBackend, S3SyncBackend, SyncBackend } from '../src/settings';
 import { blobKeyPattern, bookPrefix, commitKey, contentBlobKey, coverBlobKey, deletedMarkerKey, decideSync, readBookTombstone, readCommitHeader, readRemoteIdentity, NewerSyncFormatError, deriveTips, isUnlocatedPath, originalBlobKey, portableManifests,
   projectManifests, proxyBlobKey, stateBlobSchema, tombstoneKey } from '../src/sync-snapshot';
@@ -2309,30 +2310,70 @@ async function ownBook(mac: Mac) {
   await trustBook(mac.folder);
 }
 
-core('a new trusted book syncs after its first save, without any setup', async (t) => {
-  const { root, a } = await world(t);
-  const service = new SyncService(() => undefined);
-  await ownBook(a);
-  // Without a backend nothing starts.
-  assert.equal(await service.startsOnOpen(a.folder), false);
+core('only a book made under this set-up, or turned on, starts by itself; one that was there before does not', async (t) => {
+  const { root, a, b } = await world(t);
   const backend = await folderBackend(root, 'Sync');
-  const configured = new SyncService(() => backend);
-  await edit(a, caption('shore', 'First save'));
-  assert.equal(await configured.startsOnOpen(a.folder), true, 'no sync state for this remote: it starts');
-  assert.deepEqual(await readSyncState(a.folder), { version: 1 }, 'deciding writes nothing');
-  assert.equal((await syncWith(a, configured)).action, 'initial-push');
-  const { remote } = await configured.connect();
-  assert.equal((await remoteTips(remote, await bookId(a))).length, 1);
-  assert.deepEqual(await pendingUploads(a.folder, remote), [], 'and its originals went up after the commit');
-  assert.equal((await configured.standing(a.folder)).sync, 'syncing');
-  assert.equal(await configured.startsOnOpen(a.folder), false, 'a book that synced is not started again');
+  let setup: string | undefined;
+  configureSyncSetup(() => setup);
+  t.after(async () => configureSyncSetup(() => undefined));
+  const service = new SyncService(() => (setup ? backend : undefined), { setup: () => setup });
+  // Made with sync off, and with sync on.
+  await ownBook(a);
+  await startNewBook(a.folder);
+  assert.equal(await service.startsOnOpen(a.folder), false, 'without a backend nothing starts');
+  setup = randomUUID();
+  assert.equal(await service.startsOnOpen(a.folder), false, 'a trusted book that was there before sync was turned on');
+  await copySample(resolve('sample/starter'), b.folder);
+  await trustBook(b.folder);
+  assert.equal(await service.startsOnOpen(b.folder), false);
+  assert.deepEqual(await readSyncState(b.folder), { version: 1 }, 'deciding writes nothing');
+  await startNewBook(b.folder);
+  assert.equal(await service.startsOnOpen(b.folder), true, 'a book made under this set-up');
+  const { remote, remoteId } = await service.connect();
+  assert.deepEqual(await remoteBooks(remote), [], 'nothing went up for any of them');
+  // Another set-up (another backend, or sync turned off and on again) starts neither.
+  const first = setup;
+  setup = randomUUID();
+  assert.equal(await service.startsOnOpen(b.folder), false);
+  setup = first;
+  // Its first sync replaces the mark, and it is not started again.
+  await edit(b, caption('shore', 'First save'));
+  assert.equal((await syncWith(b, service)).action, 'initial-push');
+  assert.equal((await readSyncState(b.folder)).startWith, undefined);
+  assert.deepEqual(await pendingUploads(b.folder, remote), [], 'its originals went up after the commit');
+  assert.equal(await service.startsOnOpen(b.folder), false);
+  // Turned on (the switch in the Sync window): it starts at its next open when its first sync did not happen at once.
+  await on(a, () => service.start(a.folder));
+  assert.deepEqual(await readSyncState(a.folder), { version: 1, remoteId, enabled: true });
+  assert.equal(await service.startsOnOpen(a.folder), true);
+  // Turned off again before it synced: it does not.
+  await service.stop(a.folder);
+  assert.equal(await service.startsOnOpen(a.folder), false);
+  // A copy does what its book does: one of a book that syncs starts with the same remote, one of a book that does not stays.
+  const copies = { syncing: join(b.base, 'Syncing.imageflow'), stopped: join(a.base, 'Stopped.imageflow'), off: join(b.base, 'Off.imageflow'), moved: join(a.base, 'Moved.imageflow') };
+  await on(b, (book) => saveDocumentCopy(book, copies.syncing, false));
+  assert.equal(await service.startsOnOpen(copies.syncing), true);
+  await on(a, (book) => saveDocumentCopy(book, copies.stopped, false));
+  assert.equal(await service.startsOnOpen(copies.stopped), false);
+  assert.equal((await readSyncState(copies.stopped)).remoteId, undefined);
+  // Made while sync is off, a copy of a book that synced is a book that was there before.
+  setup = undefined;
+  await on(b, (book) => saveDocumentCopy(book, copies.off, false));
+  setup = first;
+  assert.equal(await service.startsOnOpen(copies.off), false);
+  // Moved to another volume, a book keeps its answer.
+  await on(a, (book) => saveDocumentCopy(book, copies.moved, false, undefined, true));
+  assert.equal((await readSyncState(copies.moved)).enabled, false);
+  assert.equal((await remoteBooks(remote)).length, 1, 'only the book made under the set-up went up');
 });
 
 core('the sample, template previews, read-only opens and untrusted books never start by themselves; Start Syncing trusts an untrusted book once', async (t) => {
   const { root, a } = await world(t);
   const backend = await folderBackend(root, 'Sync');
-  const service = new SyncService(() => backend);
+  const setup = randomUUID();
+  const service = new SyncService(() => backend, { setup: () => setup });
   await use(a);
+  await updateSyncState(a.folder, (state) => ({ ...state, startWith: setup }));
   assert.equal(await bookTrusted(a.folder), false);
   assert.equal(await service.startsOnOpen(a.folder), false, 'an untrusted book');
   await trustBook(a.folder);
@@ -2343,6 +2384,7 @@ core('the sample, template previews, read-only opens and untrusted books never s
   assert.deepEqual(await remoteBooks(remote), [], 'nothing went up for any of them');
   // Start Syncing on an untrusted book asks to trust it first; agreeing trusts it and it syncs.
   await distrustBook(a.folder);
+  await updateSyncState(a.folder, () => ({ version: 1 }));
   await assert.rejects(on(a, () => service.start(a.folder)), UntrustedBookError);
   assert.deepEqual(await readSyncState(a.folder), { version: 1 }, 'refusing wrote nothing');
   await on(a, () => service.start(a.folder, { trust: true }));
@@ -2360,36 +2402,148 @@ core('the sample, template previews, read-only opens and untrusted books never s
   // The trust is local: another Mac keeps the book trusted and syncing (its own registry, untouched here).
 });
 
-test('a book left out in the first-configuration sheet stays opted out when it opens later, and the chosen ones start', async (t) => {
-  const { root, a, b } = await world(t);
-  await copySample(resolve('sample/starter'), b.folder);
+core('an installation from before the Sync window goes on syncing exactly what it synced, and one that never answered which books sync starts nothing', async (t) => {
+  const { root, a } = await world(t);
+  await use(a);
+  const backend = await folderBackend(root, 'Sync');
+  const settingsFile = join(root, 'settings.json');
+  const book = async (name: string, trust = true) => {
+    const folder = join(a.base, name + '.imageflow');
+    await copySample(resolve('sample/starter'), folder);
+    if (trust) await trustBook(folder);
+    return folder;
+  };
+  const store = new SettingsStore(settingsFile);
+  const service = new SyncService(() => store.value.sync, { setup: () => store.value.syncSetup, booksUnchosen: () => !!store.value.syncBooksUnchosen });
+  const { remoteId } = await new SyncService(() => backend).connect();
+  // What such an installation holds: a book that syncs, one chosen and not opened since (no record), one left out, one
+  // that synced with another remote, an untrusted one, and a trusted one that was never among the recent books.
+  const synced = { commitId: randomUUID(), bookStateRevision: 'a'.repeat(64), stateDigest: 'b'.repeat(64), photoDigests: {} };
+  const make = async (answered: string) => {
+    const books = { syncing: await book(answered + ' Syncing'), chosen: await book(answered + ' Chosen'), left: await book(answered + ' Left'), elsewhere: await book(answered + ' Elsewhere'),
+      untrusted: await book(answered + ' Untrusted', false), unseen: await book(answered + ' Unseen') };
+    await updateSyncState(books.syncing, () => ({ version: 1, remoteId, enabled: true, lastSynced: synced }));
+    await updateSyncState(books.left, () => ({ version: 1, remoteId, enabled: false }));
+    await updateSyncState(books.elsewhere, () => ({ version: 1, remoteId: randomUUID(), enabled: true, lastSynced: synced }));
+    return books;
+  };
+  const recent = ({ unseen: _, ...books }: Awaited<ReturnType<typeof make>>) => Object.values(books);
+  const standing = async (folder: string) => [await service.startsOnOpen(folder), (await service.standing(folder)).sync];
+
+  // Answered: the same books sync, and the one chosen starts at its next open. Nothing else does.
+  const answered = await make('Answered');
+  await store.update({ sync: backend });
+  const before = await Promise.all(Object.values(answered).map((folder) => readSyncState(folder)));
+  await settleSyncSetup(store, recent(answered));
+  const setup = store.value.syncSetup;
+  assert.ok(setup);
+  assert.deepEqual(await standing(answered.syncing), [false, 'syncing'], 'it goes on syncing');
+  assert.deepEqual(await standing(answered.chosen), [true, 'off'], 'chosen: it starts when it opens');
+  assert.deepEqual(await standing(answered.left), [false, 'stopped']);
+  assert.deepEqual(await standing(answered.elsewhere), [false, 'elsewhere'], 'it is asked about, as before');
+  assert.deepEqual(await standing(answered.untrusted), [false, 'off']);
+  assert.deepEqual(await standing(answered.unseen), [false, 'off'], 'a book that was never turned on does not start when it opens');
+  const after = await Promise.all(Object.values(answered).map((folder) => readSyncState(folder)));
+  assert.deepEqual(after, before.map((state, index) => (index === 1 ? { ...state, startWith: setup } : state)), 'only the chosen book is marked');
+  // Settled once: a launch later changes nothing, also for a book made recent since.
+  await settleSyncSetup(store, Object.values(answered));
+  assert.equal(store.value.syncSetup, setup);
+  assert.equal((await readSyncState(answered.unseen)).startWith, undefined);
+  // A key changed keeps the set-up; another backend begins one, under which the chosen book no longer starts.
+  assert.deepEqual(syncSetupPatch(backend, { ...backend }), {});
+  await store.update({ sync: backend, ...syncSetupPatch({ kind: 'icloud' }, backend) });
+  assert.notEqual(store.value.syncSetup, setup);
+  assert.equal(await service.startsOnOpen(answered.chosen), false);
+
+  // Never answered: until it is settled nothing syncs by itself, and then nothing starts, also not the book that synced
+  // with this remote before; it keeps what it last synced, so turning it on continues its history.
+  await writeFile(settingsFile, JSON.stringify({ sync: backend, syncBooksUnchosen: true }));
+  await store.load();
+  await store.update({ syncSetup: null });
+  const unanswered = await make('Unanswered');
+  assert.equal(service.booksUnchosen, true);
+  for (const folder of Object.values(unanswered)) assert.equal(await service.startsOnOpen(folder), false);
+  // A record that cannot be written leaves the question as it is, for the next launch.
+  await assert.rejects(settleSyncSetup(store, [join(a.base, 'Gone.imageflow')]));
+  assert.equal(store.value.syncBooksUnchosen, true);
+  await settleSyncSetup(store, recent(unanswered));
+  assert.equal(store.value.syncBooksUnchosen, undefined);
+  assert.ok(store.value.syncSetup);
+  for (const [name, folder] of Object.entries(unanswered)) {
+    assert.equal(await service.startsOnOpen(folder), false, name);
+    assert.notEqual((await service.standing(folder)).sync, 'syncing', name);
+  }
+  const kept = await readSyncState(unanswered.syncing);
+  assert.deepEqual([kept.enabled, kept.remoteId, kept.lastSynced], [false, remoteId, synced]);
+  assert.deepEqual(await remoteBooks((await service.connect()).remote), [], 'nothing was uploaded');
+  // Kept over a restart, gone with sync.
+  const restarted = new SettingsStore(settingsFile);
+  await restarted.load();
+  assert.equal(restarted.value.syncSetup, store.value.syncSetup);
+  await restarted.update({ sync: null });
+  assert.deepEqual([restarted.value.syncSetup, restarted.value.syncBooksUnchosen], [undefined, undefined]);
+  // Without a backend there is nothing to settle, and a window sets neither.
+  await settleSyncSetup(restarted, recent(answered));
+  assert.equal(restarted.value.syncSetup, undefined);
+  for (const patch of [{ syncBooksUnchosen: null }, { syncSetup: randomUUID() }]) assert.match(syncPatchError(patch)!, /Settings → Sync/);
+});
+
+core('a book turned on while it is closed syncs without being opened, and lets go of the book when it is', async (t) => {
+  const { root, a } = await world(t);
   const backend = await folderBackend(root, 'Sync');
   const service = new SyncService(() => backend);
   await use(a);
-  await trustBook(a.folder);
-  const { remote, remoteId } = await service.connect();
-  // The desktop's own book is left out; an untrusted book from elsewhere is chosen, which trusts it.
-  assert.equal(await bookTrusted(b.folder), false);
-  await service.chooseBooks([{ folder: a.folder, sync: false }, { folder: b.folder, sync: true }]);
-  assert.deepEqual(await readSyncState(a.folder), { version: 1, remoteId, enabled: false });
-  assert.deepEqual(await remoteBooks(remote), [], 'the sheet uploads nothing by itself');
-  assert.equal(await service.startsOnOpen(a.folder), false, 'opened later, it does not start');
-  assert.equal((await service.standing(a.folder)).sync, 'stopped');
-  assert.equal(await bookTrusted(b.folder), true);
-  assert.equal(await service.startsOnOpen(b.folder), true, 'the chosen book starts when it opens');
-  // Start Syncing brings the one left out in, as any stopped book.
-  await on(a, () => service.start(a.folder));
-  assert.equal(await service.startsOnOpen(a.folder), true, 'chosen to sync and never synced: it starts at its next open');
-  // A book that last synced with another remote is only stopped, so it still asks before a new history here.
-  const other = await folderBackend(root, 'Other');
-  const elsewhere = new SyncService(() => other);
-  await on(a, () => elsewhere.start(a.folder));
-  await syncWith(a, elsewhere);
-  await service.chooseBooks([{ folder: a.folder, sync: false }]);
-  const state = await readSyncState(a.folder);
-  assert.equal(state.enabled, false);
-  assert.notEqual(state.remoteId, remoteId, 'the record keeps the remote it synced with');
-  await assert.rejects(on(a, () => service.start(a.folder)), SyncElsewhereError);
+  const events: string[] = [];
+  let holding = 0, wait: Promise<void> | undefined;
+  const closed = new ClosedBookSyncs({ service, lock: acquireProjectLock, device: 'Desk', changed: () => { events.push(JSON.stringify(closed.state(a.folder) ?? null)); }, synced: (folder) => { events.push('synced ' + folder); },
+    hold: async (folder) => {
+      const release = await acquireProjectLock(folder);
+      holding++;
+      await wait;
+      return { book: await loadProject(folder, a.cache), close: async () => { holding--; await AssetFacts.release(folder); await SourceStore.drain(); await release(); } };
+    } });
+  const settled = async () => { for (let attempt = 0; closed.state(a.folder)?.syncing && attempt < 2000; attempt++) await new Promise((resolve) => setTimeout(resolve, 10)); };
+  // Untrusted: refused before anything is written; trusting it is the caller's question.
+  await assert.rejects(closed.start(a.folder), UntrustedBookError);
+  assert.deepEqual(await readSyncState(a.folder), { version: 1 });
+  assert.equal(closed.state(a.folder), undefined);
+  await closed.start(a.folder, { trust: true });
+  assert.equal(closed.state(a.folder)?.syncing, true, 'it syncs in the background');
+  await settled();
+  const { remote } = await service.connect();
+  assert.equal((await tips(remote, a)).length, 1);
+  assert.equal(holding, 0);
+  assert.ok(events.includes('synced ' + a.folder) && events.some((event) => event.includes('sending')), 'what it sends is shown');
+  await service.upload(a.folder);
+  assert.deepEqual(await pendingUploads(a.folder, remote), [], 'its originals follow');
+  // Opening the book ends a sync that runs, which lets go of the lock first; its record stays, so the open book goes on.
+  await service.stop(a.folder);
+  await edit(a, caption('shore', 'While off'));
+  let release = () => {};
+  wait = new Promise((resolve) => { release = resolve; });
+  await closed.start(a.folder);
+  for (let attempt = 0; !holding && attempt < 500; attempt++) await new Promise((resolve) => setTimeout(resolve, 5));
+  const stopped = closed.stop(a.folder);
+  release();
+  await stopped;
+  assert.equal(holding, 0);
+  assert.equal(closed.state(a.folder), undefined, 'being opened is no failure');
+  assert.equal((await service.standing(a.folder)).sync, 'syncing');
+  assert.equal((await tips(remote, a)).length, 1, 'nothing was committed');
+  wait = undefined;
+  assert.equal((await syncWith(a, service)).action, 'push');
+  // A failure is kept for the window until the book is opened or turned on again.
+  await service.stop(a.folder);
+  const failing = new ClosedBookSyncs({ service, lock: acquireProjectLock, hold: async () => { throw new Error('This book cannot be read.'); }, changed: () => {} });
+  await failing.start(a.folder);
+  for (let attempt = 0; failing.state(a.folder)?.syncing && attempt < 500; attempt++) await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(failing.state(a.folder)?.failed?.message, 'This book cannot be read.');
+  await failing.stop(a.folder);
+  assert.equal(failing.state(a.folder), undefined);
+  // After Quit nothing starts.
+  await closed.shutdown();
+  await closed.start(a.folder);
+  assert.equal(closed.state(a.folder), undefined);
 });
 
 test('Stop Syncing and Start Syncing again continue the same history', async (t) => {
@@ -2714,45 +2868,6 @@ coreEach('a pull keeps this Mac’s original until the remote has the one that r
   assert.equal(book.sources!['photo:shore'].problem, undefined);
 });
 
-test('an unanswered first-configuration sheet starts no book by itself, also one opened while it shows and after a restart, until it is answered', async (t) => {
-  const { root, a } = await world(t);
-  const backend = await folderBackend(root, 'Sync');
-  const settingsFile = join(root, 'settings.json');
-  const store = new SettingsStore(settingsFile);
-  // Saving a backend where sync was off: books wait to be chosen when there are books to list.
-  assert.deepEqual(await chooseBooksPatch(undefined, backend, async () => 2), { syncBooksUnchosen: true });
-  assert.deepEqual(await chooseBooksPatch(undefined, backend, async () => 0), { syncBooksUnchosen: null }, 'with no book to list there is nothing to answer');
-  assert.deepEqual(await chooseBooksPatch(backend, { ...backend }, async () => 2), {}, 'the same backend (a key changed) keeps what it had');
-  assert.deepEqual(await chooseBooksPatch({ kind: 'icloud' }, backend, async () => 2), { syncBooksUnchosen: true }, 'another backend asks again');
-  await store.update({ sync: backend, ...await chooseBooksPatch(undefined, backend, async () => 1) });
-  assert.equal(store.value.syncBooksUnchosen, true);
-  // Never from the generic patch of a window.
-  assert.match(syncPatchError({ syncBooksUnchosen: null })!, /Settings → Sync/);
-  const service = new SyncService(() => store.value.sync, { booksUnchosen: () => !!store.value.syncBooksUnchosen });
-  await ownBook(a);
-  assert.equal(await service.startsOnOpen(a.folder), false, 'a trusted book opened while the sheet shows does not start');
-  // Start Syncing, chosen by the user, still works, and its originals upload.
-  await on(a, () => service.start(a.folder));
-  await syncWith(a, service);
-  assert.deepEqual(await pendingUploads(a.folder, (await service.connect()).remote), []);
-  // After a restart it still waits.
-  const restarted = new SettingsStore(settingsFile);
-  await restarted.load();
-  assert.equal(restarted.value.syncBooksUnchosen, true);
-  const after = new SyncService(() => restarted.value.sync, { booksUnchosen: () => !!restarted.value.syncBooksUnchosen });
-  const other: Mac = { ...a, folder: join(a.base, 'Other.imageflow') };
-  await copySample(resolve('sample/starter'), other.folder);
-  await trustBook(other.folder);
-  assert.equal(await after.startsOnOpen(other.folder), false);
-  // Answered: books start again.
-  await restarted.update({ syncBooksUnchosen: null });
-  assert.equal(await after.startsOnOpen(other.folder), true);
-  // Turning sync off clears it.
-  await restarted.update({ syncBooksUnchosen: true });
-  await restarted.update({ sync: null });
-  assert.equal(restarted.value.syncBooksUnchosen, undefined);
-});
-
 core('the sample books and template preview books are excluded by where they lie', async (t) => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'if-excluded-')));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -2769,12 +2884,14 @@ core('the sample books and template preview books are excluded by where they lie
   assert.equal(await syncExcludedBook(join(root, 'Books', 'Mine.imageflow'), [undefined]), false);
 });
 
-test('a first sync by itself that failed is tried again after the next save, and still not while books wait to be chosen', async (t) => {
+test('a first sync by itself that failed is tried again after the next save, and still not while an earlier version’s question is to be settled', async (t) => {
   const { root, a } = await world(t);
   const path = join(root, 'Later');
   let unchosen = false;
-  const service = new SyncService(() => ({ kind: 'folder', path }), { booksUnchosen: () => unchosen });
+  const setup = randomUUID();
+  const service = new SyncService(() => ({ kind: 'folder', path }), { setup: () => setup, booksUnchosen: () => unchosen });
   await ownBook(a);
+  await updateSyncState(a.folder, (state) => ({ ...state, startWith: setup }));
   let synced = 0;
   const first = new FirstSync(async () => {
     if (!await service.startsOnOpen(a.folder)) return;
@@ -2793,10 +2910,11 @@ test('a first sync by itself that failed is tried again after the next save, and
   // A save after it worked starts nothing again.
   first.saved();
   assert.equal(first.waiting, false);
-  // While books wait to be chosen the retry starts nothing.
+  // Until an earlier version's question which books sync is settled, the retry starts nothing.
   const b: Mac = { ...a, folder: join(a.base, 'Second.imageflow') };
   await copySample(resolve('sample/starter'), b.folder);
   await trustBook(b.folder);
+  await updateSyncState(b.folder, (state) => ({ ...state, startWith: setup }));
   unchosen = true;
   let started = false;
   const second = new FirstSync(async () => { if (await service.startsOnOpen(b.folder)) started = true; }, 10, () => {});
@@ -3735,7 +3853,7 @@ each('Clean Up empties what is left of a book deleted from sync down to its tomb
   await assert.rejects(remote.deleteRemains(randomUUID()), /deleted from sync/);
 });
 
-test('storage figures: per book, with the part that is originals, titled from the tips, largest first, a deleted book by what is left', async (t) => {
+test('storage figures: what a book takes up, with the part that is originals, and what is left of a deleted one', async (t) => {
   const { a, remote } = await world(t);
   await sync(a, remote);
   const book = await bookId(a);
@@ -3743,14 +3861,12 @@ test('storage figures: per book, with the part that is originals, titled from th
   const originals = listed.filter(({ key }) => key.includes('/originals/')).reduce((sum, { size }) => sum + size, 0);
   const total = listed.reduce((sum, { size }) => sum + size, 0);
   assert.ok(originals > 0 && originals < total);
+  assert.deepEqual(await remote.usage(book), { bytes: total, originals });
   const other = randomUUID();
   await remote.store.putIfAbsent(proxyBlobKey(other, 'f'.repeat(64), '.jpg'), new Uint8Array(10));
   await remote.deleteBook(other);
-  const report = await storageReport(remote);
-  assert.equal(report.bytes, total + report.books[1].bytes);
-  assert.equal(report.originals, originals);
-  assert.deepEqual(report.books[0], { bookId: book, title: (await tips(remote, a))[0].title, bytes: total, originals });
-  assert.deepEqual({ ...report.books[1], bytes: 0 }, { bookId: other, title: '', bytes: 0, originals: 0, deleted: true });
+  const left = await remote.usage(other);
+  assert.ok(left.bytes > 0 && left.originals === 0);
 });
 
 coreEach('Duplicate of a synced book copies its originals inside the store at the copy’s first sync, and uploads none where it can', async (t) => {
