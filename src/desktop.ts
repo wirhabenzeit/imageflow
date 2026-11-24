@@ -35,7 +35,7 @@ export const channels = {
   showAssets: 'document:show-assets', showTemplates: 'library:show', templatePreview: 'library:preview',
   current: 'document:current', appError: 'app:error', appNotice: 'app:notice',
   recents: 'app:recents', recentsChanged: 'app:recents-changed', recentAction: 'app:recent-action',
-  libraryRemote: 'books:remote', libraryBook: 'books:book', libraryAction: 'books:action', chooseBooksFolder: 'sync:choose-books-folder',
+  libraryRemote: 'books:remote', libraryBook: 'books:book', libraryAction: 'books:action',
   sourceCommand: 'document:source-command', templateAction: 'library:action', sourceAction: 'document:source-action', saveCopy: 'document:save-copy',
   chooseStarter: 'app:choose-starter', documentAction: 'document:action',
   open: 'project:open', save: 'project:save', import: 'project:import', network: 'project:editor-network',
@@ -294,8 +294,6 @@ export type DesktopApi = {
   /** A book on the remote as its library row shows it, loaded as the row comes into view. */
   libraryBook(bookId: string): Promise<Result<LibraryBook>>;
   libraryAction(request: LibraryAction): Promise<Result<null>>;
-  /** Settings → Sync: asks, in the app's own dialog, for the folder Download puts books in; null when cancelled. */
-  chooseBooksFolder(): Promise<Result<AppSettings | null>>;
   // The New Book picker's choice; nothing cancels.
   chooseStarter(choice?: NewBookChoice): Promise<Result<boolean>>;
   // The template library, and changes to it from any window.

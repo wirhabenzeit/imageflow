@@ -90,7 +90,7 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
     if (row.kind === 'remote') {
       // A book a newer ImageFlow synced is not this version's to delete: only Update.
       return { items: row.state === 'newer' ? [{ id: 'update', label: 'Update ImageFlow…' }]
-        : [{ id: 'download', label: 'Download' }, { type: 'separator' }, { id: 'delete', label: 'Delete from Sync…' }],
+        : [{ id: 'download', label: 'Download…' }, { type: 'separator' }, { id: 'delete', label: 'Delete from Sync…' }],
       run: (id) => void library({ action: id as 'download' | 'delete' | 'update', bookId: row.bookId }) };
     }
     const { book, state } = row;
@@ -103,7 +103,7 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
       if (syncing) items.push({ id: 'stop', label: 'Stop Syncing on This Mac…' });
       if (syncing && book.bookId && state !== 'unsynced' && state !== 'newer') items.push({ id: 'delete', label: 'Delete from Sync…' });
     }
-    if (!book.available && row.onRemote) items.push({ type: 'separator' }, { id: 'download', label: 'Download' });
+    if (!book.available && row.onRemote) items.push({ type: 'separator' }, { id: 'download', label: 'Download…' });
     items.push({ type: 'separator' }, ...(!book.available ? [{ id: 'locate', label: 'Locate…' }] : []),
       { id: 'remove', label: 'Remove from Recents', enabled: !configured || !(state === 'synced' || state === 'unsynced' || state === 'newer' || state === 'removed') });
     return { items, run: (id) => {
@@ -137,7 +137,7 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
       </button>
       <div className="recent-actions">
         {!book.available && <button disabled={!!busy} onClick={() => void act('locate', book.id)}>Locate…</button>}
-        {!book.available && row.onRemote && book.bookId && <button disabled={!!busy} onClick={() => void library({ action: 'download', bookId: book.bookId! })}>Download</button>}
+        {!book.available && row.onRemote && book.bookId && <button disabled={!!busy} onClick={() => void library({ action: 'download', bookId: book.bookId! })}>Download…</button>}
         {state === 'removed' && configured && <>
           <button disabled={!!busy} title="Stop syncing this book on this Mac. It stays here." onClick={() => void library({ action: 'keep-here', id: book.id })}>Keep Here Only</button>
           <button disabled={!!busy} title="Sync this book again, as a new book." onClick={() => void library({ action: 'sync-again', id: book.id })}>Sync Again</button>
@@ -192,7 +192,7 @@ function RemoteRow({ row, book, name, load, reload, busy, handlers, download, up
       <span className="recent-description"><strong>{title}</strong><span>{line}</span></span>
     </button>
     <div className="recent-actions">
-      {newer ? <button disabled={busy} onClick={update}>Update</button> : <button disabled={busy || !details} onClick={download}>Download</button>}
+      {newer ? <button disabled={busy} onClick={update}>Update</button> : <button disabled={busy || !details} onClick={download}>Download…</button>}
     </div>
   </li>;
 }

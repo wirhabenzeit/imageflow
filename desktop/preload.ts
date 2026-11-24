@@ -52,7 +52,6 @@ const api: DesktopApi = {
   libraryRemote: (refresh) => ipcRenderer.invoke(channels.libraryRemote, refresh),
   libraryBook: (bookId) => ipcRenderer.invoke(channels.libraryBook, bookId),
   libraryAction: (request) => ipcRenderer.invoke(channels.libraryAction, request),
-  chooseBooksFolder: () => ipcRenderer.invoke(channels.chooseBooksFolder),
   chooseStarter: (choice) => ipcRenderer.invoke(channels.chooseStarter, choice),
   library: () => ipcRenderer.invoke(channels.library),
   onLibraryChanged: (listener) => listen(channels.libraryChanged, listener),

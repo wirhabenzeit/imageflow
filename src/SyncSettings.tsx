@@ -24,9 +24,9 @@ export function describeReport(report: SyncConnectionReport) {
  * Settings → Sync (#281, shipped with the library in #283): the one backend this Mac syncs through (ADR 0012), off until
  * one is chosen and none preselected: an S3-compatible bucket with its access key and Test Connection, or iCloud where
  * this build offers it (its own flag until #292 is done). A folder is offered only for development and tests
- * (`IMAGEFLOW_SYNC_FOLDER=1`), chosen in the app's own dialog. Keep originals and the folder for downloaded books are
- * here too. The secret access key is sent to the main process when saved or tested and then cleared here; the main
- * process never sends it back.
+ * (`IMAGEFLOW_SYNC_FOLDER=1`), chosen in the app's own dialog. Keep originals is here too. The
+ * secret access key is sent to the main process when saved or tested and then cleared here; the main process never sends
+ * it back.
  */
 export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; settings?: AppSettings; choose: (patch: Partial<AppSettings>) => Promise<void> }) {
   const configured = settings?.sync?.kind === 's3' ? settings.sync : undefined;
@@ -137,12 +137,6 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
     } catch {
       setResult({ text: 'ImageFlow could not complete the request.', error: true });
     } finally { setBusy(''); }
-  }
-
-  async function chooseBooksFolder() {
-    if (!api) return;
-    const answer = await api.chooseBooksFolder().catch(() => ({ error: 'ImageFlow could not complete the request.' }));
-    if ('error' in answer) setResult({ text: answer.error, error: true });
   }
 
   async function useICloud() {
@@ -305,14 +299,6 @@ export function SyncSettings({ api, settings, choose }: { api?: DesktopApi; sett
         <p className="settings-note">Clean Up deletes originals, previews and covers that no book has used for a week, and what is left of books deleted from sync. It asks before it deletes anything. Every book’s text, files and history stay.</p>
       </div>
     </>}
-    <span className="settings-label">Downloads:</span>
-    <div className="settings-control">
-      <p className="settings-note sync-books-folder" title={settings?.booksFolder}>Books you download from the Start window are saved in {settings?.booksFolder
-        ? '“' + (settings.booksFolder.split('/').filter(Boolean).at(-1) ?? settings.booksFolder) + '”' : 'Documents → ImageFlow'}.</p>
-      <div className="settings-update-actions" style={{ marginTop: 0 }}>
-        <button disabled={!api || !settings} onClick={() => void chooseBooksFolder()}>Change Folder…</button>
-      </div>
-    </div>
     <span className="settings-label">Originals:</span>
     <div className="settings-control">
       <label className="pc-switch" title="Synced books download their originals in the background. Off: only previews, until File → Sync → Download Originals.">

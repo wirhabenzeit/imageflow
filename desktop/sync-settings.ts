@@ -34,16 +34,14 @@ export function usableBackend(backend: SyncBackend | undefined, icloud = icloudE
 }
 
 /**
- * Why a settings patch from a window may not carry `sync`, `syncBooksUnchosen` or `booksFolder`, or undefined. A backend
- * is set only through Settings → Sync (`saveSyncBackend`), which checks it with its credentials and forgets those of the
- * backend it replaces; the generic patch may only turn sync off (`null` or `undefined`). The folder downloads go to is
- * chosen in the app's own dialog (`chooseBooksFolder`). Settings read from disk are not patches from a window and keep
- * their values.
+ * Why a settings patch from a window may not carry `sync` or `syncBooksUnchosen`, or undefined. A backend is set only
+ * through Settings → Sync (`saveSyncBackend`), which checks it with its credentials and forgets those of the backend it
+ * replaces; the generic patch may only turn sync off (`null` or `undefined`). Settings read from disk are not patches
+ * from a window and keep their values.
  */
 export function syncPatchError(patch: unknown) {
   // Whether books wait to be chosen for a backend is the main process's to say (`syncBooksUnchosen`), never a window's.
   if (patch && typeof patch === 'object' && 'syncBooksUnchosen' in patch) return 'Choose the books to sync in Settings → Sync.';
-  if (patch && typeof patch === 'object' && 'booksFolder' in patch) return 'Choose the folder for downloaded books in Settings → Sync.';
   if (!patch || typeof patch !== 'object' || !('sync' in patch)) return undefined;
   const value = (patch as { sync?: unknown }).sync;
   return value === null || value === undefined ? undefined : 'Choose the sync backend in Settings → Sync.';

@@ -1,6 +1,6 @@
 // The Start window as the library (#283), in the app, with two "Macs" (two profiles) on one folder backend: the
 // desktop syncs a book; the laptop's Start window lists it as a book only on the remote, loads its title as the row
-// shows, and Download makes a trusted copy in its folder for downloaded books; the laptop deletes it from sync, which
+// shows, and Download makes a trusted copy where its save panel says; the laptop deletes it from sync, which
 // asks first; the desktop's Start window then shows the book as removed from sync, with Keep Here Only and Sync Again,
 // and Sync Again makes it a new book on the remote while the deleted one stays deleted.
 import assert from 'node:assert/strict';
@@ -17,6 +17,7 @@ const backend = join(work, 'Sync');
 const book = join(work, 'Desktop', 'Field Notes.imageflow');
 const downloads = join(work, 'Laptop Books');
 await mkdir(backend);
+await mkdir(downloads);
 await mkdir(join(work, 'Desktop'));
 const stderr = [];
 
@@ -26,7 +27,7 @@ async function launch(name) {
   await mkdir(profile, { recursive: true });
   const settings = join(profile, 'settings.json');
   const saved = JSON.parse(await readFile(settings, 'utf8').catch(() => '{}'));
-  await writeFile(settings, JSON.stringify({ ...saved, sync: { kind: 'folder', path: backend }, booksFolder: downloads }));
+  await writeFile(settings, JSON.stringify({ ...saved, sync: { kind: 'folder', path: backend } }));
   const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + profile],
     env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
   app.process().stderr.on('data', (bytes) => stderr.push(String(bytes)));
@@ -100,11 +101,13 @@ try {
   await row.locator('strong', { hasText: 'Field Notes' }).waitFor();
   assert.match(await row.textContent(), /In Sync · changed/);
   const before = new Set(app.windows());
-  await row.getByRole('button', { name: 'Download' }).click();
+  // Its save panel names the book; the user picks the folder (#303).
+  await app.evaluate(({ dialog }, folder) => { dialog.showSaveDialog = async (_owner, { defaultPath }) => ({ canceled: false, filePath: folder + '/' + defaultPath }); }, downloads);
+  await row.getByRole('button', { name: 'Download…', exact: true }).click();
   editor = await nextEditor(app, before);
   assert.equal((await current(editor)).project.bookId, bookId);
   await statusIs(editor, 'in-sync');
-  assert.deepEqual(await readdir(downloads), ['Field Notes.imageflow'], 'the copy is in the folder for downloaded books');
+  assert.deepEqual(await readdir(downloads), ['Field Notes.imageflow'], 'the copy is where the panel said');
   assert.equal((await asked(app)).includes('Trust this book and sync it?'), false, 'a downloaded book is trusted');
   await editor.close();
   start = await startWindow(app);

@@ -1308,11 +1308,15 @@ async function libraryRow(bookId: string) {
 }
 /** Books downloaded from the library and not opened yet: their first open names the sites their template reaches. */
 const downloadedBooks = new Set<string>();
-/** The folder Download puts books in: the one set in Settings → Sync, or ~/Documents/ImageFlow. Made when missing. */
-async function booksFolder() {
-  const folder = settings.value.booksFolder ?? join(app.getPath('documents'), 'ImageFlow');
-  await mkdir(folder, { recursive: true });
-  return folder;
+/** Where Download saves a book, asked in a sheet of the Start window (#303); undefined when cancelled. */
+async function chooseDownload(owner: BrowserWindow, title: string) {
+  // Only a name: the panel opens where it was last used, so the app points at no folder the user did not choose.
+  const choice = await dialog.showSaveDialog(owner, { title: 'Download Book', buttonLabel: 'Download',
+    defaultPath: downloadName(title) + '.imageflow', filters: [{ name: 'ImageFlow Book', extensions: ['imageflow'] }] });
+  if (choice.canceled || !choice.filePath || owner.isDestroyed()) return undefined;
+  const destination = documentPath(choice.filePath), parent = dirname(destination);
+  if (insideBook(await realpath(parent).catch(() => parent)) || insideBook(parent)) throw new Error('Choose a place outside every book.');
+  return destination;
 }
 /** The open session of the book at `folder`, if any. */
 const openSession = (folder: string) => [...documents.values()].find((document) => !document.closing && document.book.folder === folder);
@@ -1370,8 +1374,10 @@ async function libraryAction(owner: BrowserWindow, request: LibraryAction) {
     // Several versions (Macs changed it at once): which one to download.
     const tipId = tips.length === 1 ? tips[0].commitId : await chooseSyncTip(owner, tips);
     const tip = tips.find(({ commitId }) => commitId === tipId);
-    if (!tip) return;
-    const folder = await cloneFromRemote({ remote, tip, destination: join(await booksFolder(), downloadName(tip.title) + '.imageflow'), remoteId, unique: true });
+    if (!tip || owner.isDestroyed()) return;
+    const destination = await chooseDownload(owner, tip.title);
+    if (!destination) return;
+    const folder = await cloneFromRemote({ remote, tip, destination, remoteId });
     downloadedBooks.add(folder);
     libraryCache = undefined;
     const document = await openDocument(folder);
@@ -2535,22 +2541,6 @@ void app.whenReady().then(async () => {
         void document.refreshSync().then(() => document.syncOnOpen()).catch((error) => report(document.window, error));
       }
       return { value: undefined };
-    } catch (error) { return { error: errorMessage(error) }; }
-  });
-  // The folder downloads go to (#283), chosen in the app's own dialog: a window never names a path for it.
-  ipcMain.handle(channels.chooseBooksFolder, async (event) => {
-    const owner = settingsOwner(event);
-    if (!owner) return { error: 'Request is only available to Settings.' };
-    try {
-      const current = settings.value.booksFolder ?? join(app.getPath('documents'), 'ImageFlow');
-      const choice = await dialog.showOpenDialog(owner, { title: 'Folder for Downloaded Books', buttonLabel: 'Choose', properties: ['openDirectory', 'createDirectory'],
-        message: 'Books you download from sync are saved here.', defaultPath: current });
-      const path = choice.filePaths[0];
-      if (choice.canceled || !path) return { value: null };
-      if (insideBook(await realpath(path).catch(() => path)) || insideBook(path)) throw new Error('Choose a folder outside every book.');
-      const value = await settings.update({ booksFolder: path });
-      for (const window of appWindows()) if (!window.isDestroyed()) window.webContents.send(channels.settingsChanged, value);
-      return { value };
     } catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.handle(channels.chooseSyncFolder, async (event) => {

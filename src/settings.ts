@@ -24,8 +24,6 @@ export type SyncBackend = FolderSyncBackend | S3SyncBackend | ICloudSyncBackend;
 // `syncBooksUnchosen`: the backend was set up (or changed) and the sheet that asks which recent books sync has not been
 // answered yet (#282): no book starts syncing by itself until it is. Only the Sync settings requests and the sheet's
 // answer set or clear it, never the generic settings patch; it goes when sync is turned off.
-// `booksFolder`: where Download puts books from the library (#283), `~/Documents/ImageFlow` unless set. Only the app's
-// own folder dialog sets it (Settings → Sync), never the generic settings patch.
 export type AppSettings = { appearance: Appearance; automaticUpdates: boolean; updateChannel: UpdateChannel; newBookSize?: { width: number; height: number }; agentAccess?: boolean;
-  keepOriginals?: boolean; syncAutomatically?: boolean; sync?: SyncBackend; syncBooksUnchosen?: true; booksFolder?: string };
+  keepOriginals?: boolean; syncAutomatically?: boolean; sync?: SyncBackend; syncBooksUnchosen?: true };
 export const defaultSettings: AppSettings = { appearance: 'system', automaticUpdates: true, updateChannel: 'stable' };

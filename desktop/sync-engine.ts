@@ -1382,21 +1382,23 @@ export function downloadName(title: string) {
  * has not located them) and the snapshot's facts are written into a staging folder and checked against the commit's
  * revision before the book appears under its name; proxies go to the proxy store, and owned originals stay on the
  * remote until downloaded. The new book records the commit as synced and, with `remoteId`, syncs on this Mac with that
- * remote. With `unique`, a name that is taken (a book, or any file) gets a number ("Book 2"); without, it is refused.
- * Nothing that is there is ever replaced. A book deleted from sync is refused (`BookDeletedError`).
+ * remote. A name that is taken (a book, or any file) is refused: nothing that is there is ever replaced. A book deleted
+ * from sync is refused (`BookDeletedError`).
  *
  * The book arrives trusted (ADR 0012, section 2): the configured backend lies inside the user's trust boundary, so the
  * book is one of their own. Returns the folder it made.
  */
-export async function cloneFromRemote({ remote, tip, destination, remoteId, unique = false }: { remote: SyncRemote; tip: CommitHeader; destination: string; remoteId?: string; unique?: boolean }) {
+export async function cloneFromRemote({ remote, tip, destination, remoteId }: { remote: SyncRemote; tip: CommitHeader; destination: string; remoteId?: string }) {
   const parent = await realpath(dirname(destination));
-  const name = basename(documentPath(destination)).slice(0, -'.imageflow'.length);
+  const folder = join(parent, basename(documentPath(destination)));
+  const taken = 'A book named “' + basename(folder) + '” already exists there. Choose another name.';
+  // Refused before anything is downloaded; the name is reserved below, in case it is taken meanwhile.
+  if (await lstat(folder).catch(() => undefined)) throw new Error(taken);
   const tombstone = await remote.bookTombstone(tip.bookId);
   if (tombstone) throw new BookDeletedError(tombstone);
   const { blob } = await fetchStateBytes(remote, tip.bookId, tip.stateDigest, tip);
   const staging = join(parent, '.imageflow-create-' + randomUUID());
-  let reserved: string | undefined;
-  let folder = join(parent, name + '.imageflow');
+  let reserved = false;
   let facts: Record<string, AssetFact> = {};
   try {
     await mkdir(staging);
@@ -1419,19 +1421,13 @@ export async function cloneFromRemote({ remote, tip, destination, remoteId, uniq
       throw new Error('The book on the remote does not match its commit. Nothing was created.');
     }
     // Reserve the name exclusively: never replace a book or file that is already there, even an empty package.
-    for (let number = 2; ; number++) {
-      try { await mkdir(folder); reserved = folder; break; }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-        if (!unique || number > 999) throw new Error('A book named “' + basename(folder) + '” already exists there. Choose another name.', { cause: error });
-        folder = join(parent, name + ' ' + number + '.imageflow');
-      }
-    }
+    try { await mkdir(folder); reserved = true; }
+    catch (error) { throw (error as NodeJS.ErrnoException).code === 'EEXIST' ? new Error(taken, { cause: error }) : error; }
     await rename(staging, folder);
-    reserved = undefined;
+    reserved = false;
   } finally {
     await rm(staging, { recursive: true, force: true });
-    if (reserved) await rmdir(reserved).catch(() => {});
+    if (reserved) await rmdir(folder).catch(() => {});
   }
   await updateSyncState(folder, () => ({ version: 1, ...(remoteId ? { remoteId, enabled: true } : {}),
     lastSynced: { commitId: tip.commitId, bookId: tip.bookId, bookStateRevision: tip.bookStateRevision, stateDigest: tip.stateDigest, photoDigests: digestsOf(facts), localDigests: {} } }));

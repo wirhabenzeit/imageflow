@@ -19,6 +19,23 @@ test('old app import preferences migrate without losing appearance or window siz
   await assert.rejects(() => store.update({ importMode: 'link' }), /Invalid app settings/);
 });
 
+test('the removed folder for downloaded books is ignored, whatever it holds, and costs the other settings nothing', async (t) => {
+  const folder = await mkdtemp(join(tmpdir(), 'if-settings-'));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  const file = join(folder, 'settings.json');
+  const saved = { appearance: 'dark', automaticUpdates: false, updateChannel: 'beta', newBookSize: { width: 800, height: 600 }, agentAccess: true,
+    keepOriginals: false, syncAutomatically: false, sync: { kind: 'icloud' }, syncBooksUnchosen: true };
+  for (const booksFolder of ['/Users/someone/Books', null, 7]) {
+    await writeFile(file, JSON.stringify({ ...saved, booksFolder }));
+    const store = new SettingsStore(file);
+    await store.load();
+    assert.deepEqual(store.value, saved);
+    await store.update({ appearance: 'light' });
+    assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), { ...saved, appearance: 'light' });
+    await assert.rejects(store.update({ booksFolder: '/tmp' }), /Invalid app settings/);
+  }
+});
+
 test('automatic update preference is validated and survives reload and unrelated changes', async (t) => {
   const folder = await mkdtemp(join(tmpdir(), 'if-settings-'));
   t.after(() => rm(folder, { recursive: true, force: true }));

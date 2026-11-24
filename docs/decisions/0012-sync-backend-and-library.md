@@ -1,6 +1,6 @@
 # 0012: One sync backend per Mac, sync by source reach, and a book library
 
-Status: accepted, 2026-11-23, with the implementation (#278–#285; see [What the implementation settled](#what-the-implementation-settled)). Proposed the same day, revised after review and amended after the CloudKit spike (#286). Builds on [0010](0010-sync-revisions-and-cloud-assets.md) (snapshots, `SyncRemote`, the folder transport) and [0011](0011-lightroom-classic.md) (source providers). Supersedes 0010's choice of a synced folder as the first transport, its per-book sync folder, and its untrusted-remote rule for a user's own backend (with the matching wording of [0006](0006-template-capabilities.md) about templates that arrive over sync); the snapshot model, the engine and the fast-forward-or-keep-both policy stay as they are.
+Status: accepted, 2026-11-23, with the implementation (#278–#285; see [What the implementation settled](#what-the-implementation-settled)). Proposed the same day, revised after review and amended after the CloudKit spike (#286). Amended 2026-11-24: Download asks where a book goes, and there is no folder for downloaded books (#303). Builds on [0010](0010-sync-revisions-and-cloud-assets.md) (snapshots, `SyncRemote`, the folder transport) and [0011](0011-lightroom-classic.md) (source providers). Supersedes 0010's choice of a synced folder as the first transport, its per-book sync folder, and its untrusted-remote rule for a user's own backend (with the matching wording of [0006](0006-template-capabilities.md) about templates that arrive over sync); the snapshot model, the engine and the fast-forward-or-keep-both policy stay as they are.
 
 ## Problem
 
@@ -46,7 +46,6 @@ Where things are configured follows the same split:
 | The sync backend and its credentials | Its photos and their locators |
 | Keep originals | Whether it syncs on this Mac |
 | Where linked folders and the Lightroom catalog are | |
-| The default folder for downloaded books | |
 
 ## 2. The backend
 
@@ -135,11 +134,11 @@ deleted/<bookId>.json
 | Removed on another Mac | *Removed from sync* | Keep Here Only, Sync Again |
 | Synced by a newer ImageFlow | *Needs an update* | Update |
 
-- *Download* is `cloneFromRemote`, into the default books folder, without a save dialog. It opens trusted.
+- *Download* is `cloneFromRemote`, to where a save panel of the Start window asks for, with the book's title as the name. With several versions, which one is asked first. A name that is taken and a place inside another book are refused. It opens trusted. (Amended by #303: it first saved into a default books folder, `~/Documents/ImageFlow` unless changed in Settings, without asking, so macOS asked for access to a folder the user never chose.)
 - *Update* opens Settings → General and checks for updates (or restarts if an update is already ready).
 - **Open from Sync Folder** and **Sync with Folder…** are removed; **File → Sync** offers *Set Up Sync…* when no backend is configured.
 
-**Settings → Sync.** Sync is off at first. Turning it on asks for the backend: iCloud (listed when this build can use it and the Mac is signed in) or an S3-compatible bucket, with neither preselected. Then, for a bucket, a connection test, and for either, total and per-book storage (computed on demand, not at launch), *Keep originals*, *Sync automatically*, the default books folder, and *Clean Up*.
+**Settings → Sync.** Sync is off at first. Turning it on asks for the backend: iCloud (listed when this build can use it and the Mac is signed in) or an S3-compatible bucket, with neither preselected. Then, for a bucket, a connection test, and for either, total and per-book storage (computed on demand, not at launch), *Keep originals*, *Sync automatically* and *Clean Up*.
 
 ## Deferred
 

@@ -262,10 +262,9 @@ test('Sync automatically is an ordinary preference a window may change, beside t
   assert.equal((await store.update({ syncAutomatically: false })).syncAutomatically, false);
   assert.equal((await store.update({ syncAutomatically: true })).syncAutomatically, undefined);
   await assert.rejects(store.update({ syncAutomatically: 'yes' } as never), /automatic sync/);
-  // The guard is unchanged: a window still cannot set a backend, the books to choose or the downloads folder with it.
+  // The guard is unchanged: a window still cannot set a backend or the books to choose with it.
   assert.match(syncPatchError({ syncAutomatically: true, sync: { kind: 'icloud' } })!, /Settings → Sync/);
   assert.match(syncPatchError({ syncAutomatically: true, syncBooksUnchosen: true })!, /Settings → Sync/);
-  assert.match(syncPatchError({ syncAutomatically: true, booksFolder: '/tmp' })!, /Settings → Sync/);
 });
 
 test('a focus always ends with a current status: also for a book that does not sync by itself, a stopped scheduler and during a backoff', async (t) => {
