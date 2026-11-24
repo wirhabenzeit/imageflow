@@ -131,6 +131,8 @@ try {
   assert.match(await status.textContent(), /^PDF saved\./);
   await window.waitForFunction(() => /Book check · [1-9]\d* errors?/.test(document.querySelector('.book-check-toggle')?.getAttribute('title') ?? ''));
   await window.locator('.book-check-toggle').click();
+  // A row says what it is about when it is opened.
+  await window.locator('.book-check-panel .bc-head', { hasText: 'Pages don’t fit the format' }).click();
   assert.match(await window.locator('.book-check-panel').textContent(), /Page count is 2\./);
   await window.locator('.book-check-toggle').click();
   checkProof(await PDFDocument.load(await readFile(output)), previewLines);

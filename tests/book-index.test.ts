@@ -34,7 +34,7 @@ function setup(spreads: object[], facingPages = true) {
     } : { month: { label: 'Month', boxes: { hero: photo('Hero') }, render } },
   }));
   const project = projectSchema.parse({ schemaVersion: 1, title: 'Index', template: { id: 'index', version: '1' }, spreads });
-  const book = { project, photos: structuredClone(photos), texts: {}, files: {}, problems: [], mode: 'export', template: { script: '', assets: {} } } as RenderProject;
+  const book = { project, photos: structuredClone(photos), texts: {}, files: {}, mode: 'export', template: { script: '', assets: {} } } as RenderProject;
   const sequence = pageSequence(project.spreads.map(({ definition }) => template.spreads[definition]?.span ?? 'spread'), template.format);
   return { template, book, sequence, index: bookIndex(book, template, sequence) };
 }
@@ -119,7 +119,7 @@ test('render reads its own spread ID and layout, to find itself in the book inde
   }));
   const project = projectSchema.parse({ schemaVersion: 1, title: 'Index', template: { id: 'index', version: '1' }, spreads: [
     { id: 'one', definition: 'pair' }, { id: 'two', definition: 'pair' }] });
-  const book = { project, photos: {}, texts: {}, files: {}, problems: [], mode: 'export', template: { script: '', assets: {} } } as unknown as RenderProject;
+  const book = { project, photos: {}, texts: {}, files: {}, mode: 'export', template: { script: '', assets: {} } } as unknown as RenderProject;
   const sequence = pageSequence(project.spreads.map(() => 'spread' as const), template.format);
   const index = bookIndex(book, template, sequence);
   const formatted = resolveFormat(template.format);
@@ -150,7 +150,7 @@ test('credits are collected once per ID from every spread, with their pages, fro
   const project = projectSchema.parse({ schemaVersion: 1, title: 'Credits', template: { id: 'credits', version: '1' }, spreads: [
     { id: 'o', definition: 'opening' }, { id: 'm1', definition: 'map' },
     { id: 'm2', definition: 'map', elements: { map: { params: { style: 'contours' } } } }, { id: 'c', definition: 'closing' }] });
-  const book = { project, photos: {}, texts: {}, files: {}, problems: [], mode: 'export', template: { script: '', assets: {} } } as RenderProject;
+  const book = { project, photos: {}, texts: {}, files: {}, mode: 'export', template: { script: '', assets: {} } } as RenderProject;
   const sequence = pageSequence(project.spreads.map(({ definition }) => template.spreads[definition]?.span ?? 'spread'), template.format);
   const index = bookIndex(book, template, sequence);
   assert.deepEqual(index.credits, [
@@ -184,7 +184,7 @@ test('credits read box parameters and photos, credit one page by side, reject sp
     { id: 'p1', definition: 'photo', boxes: { hero: { photo: 'a' }, note: { params: { source: 'Atlas' } } } },
     { id: 'p2', definition: 'photo', boxes: { hero: { photo: 'b' }, note: { params: { source: 'Other atlas' } } } },
     { id: 'p3', definition: 'photo' }] });
-  const book = { project, photos: structuredClone(photos), texts: {}, files: {}, problems: [], mode: 'export', template: { script: '', assets: {} } } as RenderProject;
+  const book = { project, photos: structuredClone(photos), texts: {}, files: {}, mode: 'export', template: { script: '', assets: {} } } as RenderProject;
   const sequence = pageSequence(project.spreads.map(({ definition }) => template.spreads[definition]?.span ?? 'spread'), template.format);
   const index = bookIndex(book, template, sequence);
   assert.deepEqual(index.credits, [

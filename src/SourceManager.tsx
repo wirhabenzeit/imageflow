@@ -1,3 +1,4 @@
+import { awayBadge } from './away-originals';
 import { EditMarkdown, NewMarkdown } from './MarkdownActions';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -157,7 +158,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
       {shown.map((entry) => {
         const status = summary.sources?.[entry.key];
         const problem = unavailable(entry.key);
-        const badge = status?.pending ? 'Loading preview' : problem ? status?.state === 'unapproved' ? 'Locate to approve' : status?.state === 'missing' ? 'Missing'
+        const badge = status?.pending ? 'Loading preview' : problem ? status?.away ? awayBadge[status.away] : status?.state === 'unapproved' ? 'Locate to approve' : status?.state === 'missing' ? 'Missing'
           : status?.state === 'denied' ? 'Access denied' : status?.state === 'offline' ? 'Offline' : status?.state === 'needs-sign-in' ? 'Sign in needed' : 'Unavailable' : status?.outOfDate ? 'Out of date' : undefined;
         const file = sourceFile(entry);
         const group = entry.kind === 'photo' ? headers.get(entry.id) : undefined;
@@ -195,7 +196,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
               }} />
             : <strong>{entry.name}</strong>}
             {(file?.linked || problem) && sourceFolderName(entry) && <span className="muted">{sourceFolderName(entry)}</span>}</span></span>
-          <span className="asset-status">{entry.kind === 'markdown' && <EditMarkdown api={api} id={entry.id} name={entry.name} disabled={locked || problem} failure={(message) => setError({ message })} />}{entry.kind === 'photo' && view.value.showTime && <span className="muted" title={photoDate(summary, entry.id)?.capturedEstimated ? 'Estimated from file modification time' : undefined}>{captureLabel(photoDate(summary, entry.id)?.captured, photoDate(summary, entry.id)?.capturedEstimated)}{photoDate(summary, entry.id)?.capturedEstimated ? ' ≈' : ''}</span>}<span className="muted">{placements(entry).length ? placements(entry).length + '×' : 'Not used'}</span>{badge && <span className={'source-badge' + (status?.pending ? '' : ' warning')} title={status?.outOfDate ? outOfDateNote : status?.problem}>{badge}</span>}
+          <span className="asset-status">{entry.kind === 'markdown' && <EditMarkdown api={api} id={entry.id} name={entry.name} disabled={locked || problem} failure={(message) => setError({ message })} />}{entry.kind === 'photo' && view.value.showTime && <span className="muted" title={photoDate(summary, entry.id)?.capturedEstimated ? 'Estimated from file modification time' : undefined}>{captureLabel(photoDate(summary, entry.id)?.captured, photoDate(summary, entry.id)?.capturedEstimated)}{photoDate(summary, entry.id)?.capturedEstimated ? ' ≈' : ''}</span>}<span className="muted">{placements(entry).length ? placements(entry).length + '×' : 'Not used'}</span>{badge && <span className={'source-badge' + (status?.pending || status?.away ? '' : ' warning')} title={status?.outOfDate ? outOfDateNote : status?.problem}>{badge}</span>}
             {view.value.showSource ? <SourceBadge origin={sourceOrigin(entry)!} className="asset-origin" />
               : file?.linked && <span className="asset-linked" role="img" aria-label="Linked to original file" title="Linked to original file"><Icon name="link" size={16} /></span>}
           </span>

@@ -102,7 +102,7 @@ test('platform components forward issue() markers to their own node', () => {
     spreads: { main: { label: 'Main', boxes: { hero: box.photo('Hero'), story: box.markdown('Story') }, elements: { note: { label: 'Note' } }, render } },
   }));
   const project = projectSchema.parse({ schemaVersion: 1, title: 'Issues', template: { id: 'issues', version: '1' }, spreads: [{ id: 'one', definition: 'main' }] });
-  const book = { project, photos: {}, texts: {}, files: {}, problems: [], mode: 'export', template: { script: '', assets: {} } } as RenderProject;
+  const book = { project, photos: {}, texts: {}, files: {}, mode: 'export', template: { script: '', assets: {} } } as RenderProject;
   const html = renderToStaticMarkup(createElement(SpreadView, { book, template, format: resolveFormat(template.format), spread: project.spreads[0],
     page: { left: 1, right: 2 }, index: { pages: 2, anchors: [] }, positions: {}, renderPhotos: false }));
   // Each finding sits on the node the component renders, where the Book check finds it and its owner.
@@ -125,7 +125,7 @@ test('Text inherits display-only fallback for empty values, with explicit hiding
         createElement(runtime.Spread, {}, createElement(ctx.Text, { parameter: 'place', fallback, fallbackLabel: 'photo caption', hidden })) } } }));
     const project = projectSchema.parse({ schemaVersion: 1, title: 'Text', template: { id: 'text', version: '1' },
       spreads: [{ id: 'one', definition: 'main', params: { place: value } }] });
-    const book = { project, photos: {}, texts: {}, files: {}, problems: [], mode, template: { script: '', assets: {} } } as RenderProject;
+    const book = { project, photos: {}, texts: {}, files: {}, mode, template: { script: '', assets: {} } } as RenderProject;
     const html = renderToStaticMarkup(createElement(SpreadView, { book, template, format: resolveFormat(template.format), spread: project.spreads[0],
       page: { left: 1, right: 2 }, index: { pages: 2, anchors: [] }, positions: {}, renderPhotos: false }));
     assert.equal(project.spreads[0].params.place, value);
@@ -157,7 +157,7 @@ test('render view tells the canvas apart from thumbnails and layout previews, an
   const project = projectSchema.parse({ schemaVersion: 1, title: 'View', template: { id: 'view', version: '1' },
     spreads: [{ id: 'one', definition: 'main' }] });
   const render = (mode: 'edit' | 'export', view?: RenderView) => {
-    const book = { project, photos: {}, texts: {}, files: {}, problems: [], mode, view, template: { script: '', assets: {} } } as RenderProject;
+    const book = { project, photos: {}, texts: {}, files: {}, mode, view, template: { script: '', assets: {} } } as RenderProject;
     return renderToStaticMarkup(createElement(SpreadView, { book, template, format: resolveFormat(template.format), spread: project.spreads[0],
       page: { left: 1, right: 2 }, index: { pages: 2, anchors: [] }, positions: {}, renderPhotos: false }));
   };
@@ -191,7 +191,7 @@ test('inline Text validates its opt-in and string binding and renders pure multi
         createElement(runtime.Spread, {}, createElement(ctx.Text, { parameter: 'heading', presentation: presentation as 'inline' })) } } }));
     const project = projectSchema.parse({ schemaVersion: 1, title: 'Text', template: { id: 'text', version: '1' },
       spreads: [{ id: 'one', definition: 'main', params: { heading: value } }] });
-    const book = { project, photos: {}, texts: {}, files: {}, problems: [], mode, template: { script: '', assets: {} } } as RenderProject;
+    const book = { project, photos: {}, texts: {}, files: {}, mode, template: { script: '', assets: {} } } as RenderProject;
     return renderToStaticMarkup(createElement(SpreadView, { book, template, format: resolveFormat(template.format), spread: project.spreads[0],
       page: { left: 1, right: 2 }, index: { pages: 2, anchors: [] }, positions: {}, renderPhotos: false }));
   };
@@ -232,7 +232,7 @@ test('Text shows formatting only for markdown strings, and never as HTML', () =>
           createElement('p', { className: 'plain' }, runtime.plainText(String(ctx.params.heading)))) } } }));
     const project = projectSchema.parse({ schemaVersion: 1, title: 'Text', template: { id: 'text', version: '1' },
       spreads: [{ id: 'one', definition: 'main', params: { heading: value } }] });
-    const book = { project, photos: {}, texts: {}, files: {}, problems: [], mode: 'export', template: { script: '', assets: {} } } as RenderProject;
+    const book = { project, photos: {}, texts: {}, files: {}, mode: 'export', template: { script: '', assets: {} } } as RenderProject;
     return renderToStaticMarkup(createElement(SpreadView, { book, template, format: resolveFormat(template.format), spread: project.spreads[0],
       page: { left: 1, right: 2 }, index: { pages: 2, anchors: [] }, positions: {}, renderPhotos: false }));
   };
@@ -261,7 +261,7 @@ test('decorative marks text, boxes and elements so the Book check can skip them'
           createElement(ctx.Element, { id: 'art', decorative })) } } }));
     const project = projectSchema.parse({ schemaVersion: 1, title: 'Decor', template: { id: 'decor', version: '1' },
       spreads: [{ id: 'one', definition: 'main', params: {} }] });
-    const book = { project, photos: {}, texts: {}, files: {}, problems: [], mode: 'export', template: { script: '', assets: {} } } as RenderProject;
+    const book = { project, photos: {}, texts: {}, files: {}, mode: 'export', template: { script: '', assets: {} } } as RenderProject;
     return renderToStaticMarkup(createElement(SpreadView, { book, template, format: resolveFormat(template.format), spread: project.spreads[0],
       page: { left: 1, right: 2 }, index: { pages: 2, anchors: [] }, positions: {}, renderPhotos: false }));
   };

@@ -2,7 +2,9 @@ import { bookName } from '../src/book-name';
 import { agentFootprint } from '../src/agent-footprint';
 import type { AgentFootprint } from '../src/agent-footprint';
 import { SourceStore } from './source-store';
-import { cachedPreviewNote, sourceEntries } from '../src/source-locations';
+import { withoutReported } from '../src/away-originals';
+import { exportErrorList } from '../src/export-errors';
+import { sourceEntries } from '../src/source-locations';
 import type { FileSourceEntry, PhotoSourceEntry, SourceEntry } from '../src/source-locations';
 import { isFileLocator } from '../src/source-locator';
 import type { Locator, PhotoLocator } from '../src/source-locator';
@@ -106,29 +108,6 @@ async function fingerprint(path: string) {
 
 
 /** A window owns its writer, history, watchers, jobs and agent queue until all work has settled. */
-// The export confirmation names the first few errors; Book check lists them all.
-const shownExportErrors = 8;
-/**
- * The errors an export asks about. Unavailable originals are summed up by their cause, one line for all the photos of a
- * Lightroom Classic that is not running, say, instead of one line per box; the other errors are listed as they are.
- */
-function exportErrorList(errors: Issue[]) {
-  const unavailable = new Map<string, Issue[]>();
-  const other: Issue[] = [];
-  for (const issue of errors) {
-    if (issue.code !== 'source-unavailable') { other.push(issue); continue; }
-    const cause = issue.message.endsWith(cachedPreviewNote) ? issue.message.slice(0, -cachedPreviewNote.length) : issue.message;
-    unavailable.set(cause, [...unavailable.get(cause) ?? [], issue]);
-  }
-  const summaries = [...unavailable].map(([cause, issues]) => {
-    const photos = new Set(issues.map(({ source, spread, box }) => source ?? spread + ':' + box)).size;
-    const spreads = new Set(issues.map(({ spread }) => spread)).size;
-    return cause + ': ' + (photos === 1 ? '1 photo' : photos + ' photos') + ' on ' + (spreads === 1 ? '1 spread' : spreads + ' spreads') + ' will print from cached previews.';
-  });
-  const shown = other.slice(0, Math.max(0, shownExportErrors - summaries.length)).map(issueText);
-  const more = other.length - shown.length;
-  return [...summaries, ...shown].join('\n') + (more > 0 ? '\n…and ' + more + ' more ' + (more === 1 ? 'error' : 'errors') + ' in Book check.' : '');
-}
 
 /** Asks which of several versions on the remote to continue with. At most four fit; Cancel follows them and answers nothing. */
 export async function chooseSyncTip(owner: BrowserWindow, tips: CommitHeader[]) {
@@ -1289,8 +1268,9 @@ export class DocumentSession {
       // An original another Mac synced and this one has not downloaded yet is not missing: it is on its way.
       if (status.state === 'missing' && this.neverUploaded.has(status.id)) {
         const by = this.neverUploaded.get(status.id);
-        marked = { ...marked, problem: 'Original never uploaded' + (by ? ' from “' + by + '”' : ' from the Mac that added it') };
-      } else if (status.state === 'missing' && this.stillUploading.has(status.id)) marked = { ...marked, problem: 'Original still uploading from another Mac' };
+        // Nothing brings it here by itself, so it is a finding like any missing original.
+        marked = { ...marked, away: undefined, problem: 'Original never uploaded' + (by ? ' from “' + by + '”' : ' from the Mac that added it') };
+      } else if (status.state === 'missing' && this.stillUploading.has(status.id)) marked = { ...marked, ...(marked.away ? { away: 'uploading' as const } : {}), problem: 'Original still uploading from another Mac' };
       else if (status.state === 'missing' && this.notDownloaded.has(status.id)) marked = { ...marked, problem: 'Original not downloaded yet' +
         (this.downloading ? ' (downloading)' : ' (File → Sync → Download Originals)') };
       return [key, marked];
@@ -1839,7 +1819,7 @@ export class DocumentSession {
           const coverImage = coverPreview ? await captureBookPreview(url, coverPreview, signal, coverInspect, arm) : undefined;
           const checked = coverImage?.status ?? (coverInspect ? await checkBookRender(url, signal, coverInspect, arm) : await checkCoverRender(url, signal, arm));
           return { status: interior ? { ...interior, cover: checked.cover, errors: [...interior.errors, ...checked.errors],
-            warnings: [...interior.warnings, ...checked.warnings], inspection: checked.inspection ?? interior.inspection } : checked,
+            warnings: withoutReported([...interior.warnings, ...checked.warnings], checked.errors), inspection: checked.inspection ?? interior.inspection } : checked,
             preview: coverImage ?? interiorImage };
         } finally {
           this.renders.delete(id);

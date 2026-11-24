@@ -35,6 +35,8 @@
   --error-surface: #f6d6d0;
   --warning-text: #6b5212;
   --warning-surface: #f5e8c6;
+  --check-error: #b3382c;
+  --check-warning: #946c0c;
   --info-text: #316396;
   --info-surface: #e5edf8;
   --flash-surface: #e4eefb;
@@ -91,6 +93,8 @@
     --error-surface: #542d2a;
     --warning-text: #f5d77c;
     --warning-surface: #4c3b16;
+    --check-error: #ff8f84;
+    --check-warning: #e0b64a;
     --info-text: #a3d1ff;
     --info-surface: #203f59;
     --flash-surface: #27425f;

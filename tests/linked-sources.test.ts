@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { chmod, cp, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { configureSourceStore, pruneSourceCache, SourceStore } from '../desktop/source-store';
 import { approveSource, configureSourceAccess } from '../desktop/source-access';
@@ -19,6 +19,8 @@ import { acquireProjectLock, readSaveLedger, recoverProjectSave } from '../deskt
 import { ProjectSession } from '../desktop/project-session';
 import { sourceEntries, sourceFile } from '../src/source-locations';
 import { copySample } from '../desktop/sample-book.mjs';
+import { unlocatedPath } from '../src/source-locator';
+import { updateSyncState } from '../desktop/sync-pull';
 import './persistence-root';
 
 async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
@@ -729,7 +731,7 @@ test('a missing original keeps its state and print blocking but still lays out f
   await rm(taken);
   const missing = await loadProject(f.folder, f.cache, true);
   assert.equal(missing.sources!['photo:' + id].state, 'missing');
-  assert.ok(missing.problems.some((problem) => problem.includes(id)));
+  assert.ok(missing.sources!['photo:' + id].problem);
   assert.equal(missing.photos.has(id), false, 'the photo itself stays missing, so its boxes stay empty and export is blocked');
   assert.equal(id in renderData(missing, 'x', 'export').photos, false);
   const summary = projectSummary(missing, 'x');
@@ -820,7 +822,10 @@ test('a second Mac renders pulled proxies with the originals\u2019 size and capt
     const source = book.sources!['photo:' + id];
     assert.equal(source.state, state, 'the source keeps its honest state');
     assert.equal(source.cached, true, 'shown like a cached preview, which the render frame reports as source-unavailable for print');
-    assert.ok(book.problems.some((problem) => problem.includes(id)));
+    // Nothing says that these originals are elsewhere: the linked path may be a file here that needs approval, and no
+    // sync record says that the owned file was never here. Both stay findings, though a preview stands in (#308).
+    assert.ok(source.problem);
+    assert.equal(source.away, undefined);
     const photo = book.photos.get(id)!;
     assert.equal(photo.original, proxy);
     assert.ok(photo.problem);
@@ -868,6 +873,43 @@ test('a second Mac renders pulled proxies with the originals\u2019 size and capt
   const restored = await loadProject(f.folder, mac.cache, true);
   assert.equal(restored.sources!['photo:shore'].state, 'available');
   assert.equal(restored.photos.get('shore')!.original, mac.owned);
+});
+
+test('an original that is elsewhere is told from one that needs approval or is missing, from what this Mac knows alone (#308)', async (t) => {
+  const f = await fixture(t);
+  const mac = await secondMac(t, f);
+  const release = await acquireProjectLock(f.folder);
+  t.after(async () => { await AssetFacts.release(f.folder); await release(); });
+  const relocate = async (path: string) => {
+    const index = JSON.parse(await readFile(join(f.folder, 'photos.json'), 'utf8'));
+    index[mac.linked].path = path;
+    await writeFile(join(f.folder, 'photos.json'), JSON.stringify(index, null, 2) + '\n');
+  };
+  const sources = async () => (await loadProject(f.folder, mac.cache)).sources!;
+  // Without a preview the photo is not on the page at all: the placeholder of a pull asks to be located like any path.
+  await relocate(unlocatedPath('dated.jpg'));
+  let linked = (await sources())['photo:' + mac.linked];
+  assert.deepEqual([linked.state, linked.away, linked.problem], ['unapproved', undefined, 'Locate this original to approve access on this Mac.']);
+  await mac.proxies.put(mac.facts[mac.linked].digest as string, await proxyOf(40, 40));
+  await mac.proxies.put(mac.facts.shore.digest as string, await proxyOf(30, 50));
+  linked = (await sources())['photo:' + mac.linked];
+  assert.deepEqual([linked.state, linked.cached, linked.away, linked.problem], ['unapproved', true, 'other-mac', 'Original on another Mac']);
+  assert.deepEqual(linked.repairs, ['locate', 'locate-folder']);
+  // A path that was never approved here is a file that needs approval, also with a preview at hand, and is never read.
+  await relocate(mac.taken);
+  linked = (await sources())['photo:' + mac.linked];
+  assert.deepEqual([linked.state, linked.away], ['unapproved', undefined]);
+  // An owned original is on its way only if this Mac's own sync record says it never had that version.
+  const record = (localDigests: Record<string, string> | undefined) => updateSyncState(f.folder, () => ({ version: 1, lastSynced: { commitId: randomUUID(),
+    bookStateRevision: 'a'.repeat(64), stateDigest: 'b'.repeat(64), photoDigests: { shore: mac.facts.shore.digest as string }, ...(localDigests ? { localDigests } : {}) } }));
+  assert.equal((await sources())['photo:shore'].away, undefined);
+  await record({});
+  const shore = (await sources())['photo:shore'];
+  assert.deepEqual([shore.state, shore.cached, shore.away, shore.problem], ['missing', true, 'not-downloaded', 'Original not downloaded yet']);
+  await record({ shore: mac.facts.shore.digest as string });
+  assert.equal((await sources())['photo:shore'].away, undefined, 'this Mac had it: it is missing here');
+  await record(undefined);
+  assert.equal((await sources())['photo:shore'].away, undefined, 'an older record does not say');
 });
 
 test('an unapproved linked photo without a synced proxy exposes nothing from its path on this Mac', async (t) => {

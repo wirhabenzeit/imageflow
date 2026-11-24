@@ -1,7 +1,8 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { BookFrame } from './BookFrame';
 import { PhotoContent } from './BoxContent';
 import { Fields } from './Fields';
+import { revealIn } from './reveal';
 import type { CoverLayoutInfo, ProjectSummary, Rect, RenderStatus } from './desktop';
 import type { CoverResolution, ResolvedCover } from './cover';
 import type { CoverState } from './project';
@@ -73,12 +74,24 @@ export function CoverCanvas({ project, geometry: cover, definition, guides, togg
   </main>;
 }
 
-export function CoverInspector({ summary, cover, layouts, writable, choose, change }: {
-  summary: ProjectSummary; cover?: CoverState; layouts: Record<string, CoverLayoutInfo>; writable: boolean;
+export function CoverInspector({ summary, cover, layouts, writable, choose, change, focus }: {
+  /** The box or element to point out, as a Book check finding asks for. */
+  focus?: { box: string; at: number }; summary: ProjectSummary; cover?: CoverState; layouts: Record<string, CoverLayoutInfo>; writable: boolean;
   choose: (layout: string) => void; change: (apply: (cover: CoverState) => void, label?: string) => void;
 }) {
   const definition = cover && Object.hasOwn(layouts, cover.definition) ? layouts[cover.definition] : undefined;
-  return <aside className="inspector cover-inspector" aria-label="Cover inspector">
+  const panel = useRef<HTMLElement>(null);
+  const [flash, setFlash] = useState<string>();
+  useEffect(() => {
+    const item = focus && panel.current?.querySelector<HTMLDetailsElement>('[data-cover-item="' + CSS.escape(focus.box) + '"]');
+    if (!item) return;
+    item.open = true;
+    revealIn(panel.current!, item, true);
+    setFlash(focus.box);
+    const timer = setTimeout(() => setFlash(undefined), 900);
+    return () => clearTimeout(timer);
+  }, [focus]);
+  return <aside ref={panel} className="inspector cover-inspector" aria-label="Cover inspector">
     <fieldset disabled={!writable}>
       <label className="field">Cover layout
         <select aria-label="Cover layout" value={definition && cover ? cover.definition : ''} onChange={(event) => choose(event.target.value)}>
@@ -89,13 +102,13 @@ export function CoverInspector({ summary, cover, layouts, writable, choose, chan
       {definition && cover && <>
         <Fields schema={definition.parameters} values={cover.params} controls={definition.controls}
           update={(id, value) => change((state) => { state.params[id] = value; }, 'Cover text and settings changed')} />
-        {Object.entries(definition.boxes).map(([id, box]) => <details key={id} open>
+        {Object.entries(definition.boxes).map(([id, box]) => <details key={id} open data-cover-item={id} className={flash === id ? 'flash' : undefined}>
           <summary>{box.label}</summary>
           <PhotoContent summary={summary} spread={cover} box={id} label={box.label} values change={change} />
           <Fields schema={box.parameters} controls={box.controls} values={cover.boxes[id]?.params ?? {}}
             update={(key, value) => change((state) => { (state.boxes[id] ??= { params: {} }).params[key] = value; }, 'Cover photo settings changed')} />
         </details>)}
-        {Object.entries(definition.elements).map(([id, element]) => <details key={id}>
+        {Object.entries(definition.elements).map(([id, element]) => <details key={id} data-cover-item={id} className={flash === id ? 'flash' : undefined}>
           <summary>{element.label}</summary>
           <Fields schema={element.parameters} controls={element.controls} values={cover.elements[id]?.params ?? {}}
             update={(key, value) => change((state) => { (state.elements[id] ??= { params: {} }).params[key] = value; }, 'Cover element changed')} />

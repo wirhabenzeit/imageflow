@@ -57,7 +57,7 @@ for (const name of names) {
     const book = await loadProject(folder, cache);
     // Books without page states stay in format 1, which every released version reads.
     assert.equal(book.project.schemaVersion, 1);
-    assert.deepEqual(book.problems, []);
+    assert.deepEqual(Object.values(book.sources!).filter(({ problem }) => problem), []);
     assert.ok(book.project.spreads.length > 0);
     // Every registered source resolved.
     assert.equal(book.photos.size, Object.keys(book.photoIndex).length);

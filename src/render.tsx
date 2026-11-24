@@ -2,7 +2,8 @@ import { textAssignments } from './text-assignments';
 import { layoutFootprint, shownLayoutStates, planLayoutChange, sheetLayoutLabel } from './layouts';
 import type { PresentationView } from './presentation-model';
 import { presentationPhotoSource } from './presentation-model';
-import { cachedPreviewNote, printProblem, sourceFileName, sourcePath } from './source-locations';
+import { awaySuggestion, sourceWarnings, withoutReported } from './away-originals';
+import { cachedPreviewText, printProblem, sourceFileName, sourcePath } from './source-locations';
 import { renameIds } from './svg-ids';
 import { bundlesFamily, familiesOf, missingCharacters, setTemplateFonts } from './fonts';
 import { parseSentinel, sentinelStrip, sentinelWidth } from './capture-sentinel';
@@ -10,7 +11,7 @@ import type { Sentinel } from './capture-sentinel';
 import { impureMessage, impureSuggestion, installPurityGuards, unlocatedImpureSuggestion } from './purity';
 import { activateAllRenderedImages, activateRenderedImageSpreads, configureRenderedImages, renderedImageNotes, renderedImageState, renderingImages, settleRenderedImages, settleRestoredImages, watchRenderedImages } from './rendered-image';
 import type { RenderedImageFailure } from './rendered-image';
-import type { ImportMode, SourceReference } from './source-locations';
+import type { ImportMode, SourceReference, SourceStatus } from './source-locations';
 import React from 'react';
 import * as jsx from 'react/jsx-runtime';
 import { flushSync } from 'react-dom';
@@ -243,7 +244,7 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
       const assignment = scopeState(spread, page)?.boxes[id];
       if (assignment?.photo && box.hasAttribute('data-empty')) {
         errors.push(issue(layout.boxes[id].label + ' is missing photo ' + assignment.photo + '.', {
-          code: 'photo-missing', box: id, ...at, source: assignment.photo,
+          code: 'photo-missing', box: id, ...at, source: assignment.photo, sourceKind: 'photo',
           suggestion: 'Restore the original file, import it again with import_sources, or assign another photo to box ' + id + '.',
         }));
       }
@@ -1967,6 +1968,10 @@ function coverArtworkPreview(root: HTMLElement, sheet: HTMLElement, cover: Exclu
   window.imageflowPreview = { state: 'ready', metadata };
 }
 
+const unavailableSuggestion = (state: SourceStatus | undefined) => state?.away ? awaySuggestion(state.away)
+  : state?.previewOnly ? 'Export a proof, or copy the photo into the book on a Mac that can read its original.'
+  : state?.state === 'offline' ? 'Retry after opening the photo’s source app or reconnecting its server.' : 'Locate the original or retry after reconnecting its location.';
+
 async function renderPhysicalCover(root: HTMLElement, book: RenderProject, template: ReturnType<typeof chooseFormat>,
   info: TemplateInfo, sequence: ReturnType<typeof pageSequence>, query: URLSearchParams, renderIssues: () => string[]) {
   const formats = template.coverFormats;
@@ -2044,11 +2049,13 @@ async function renderPhysicalCover(root: HTMLElement, book: RenderProject, templ
       if (!node) errors.push(issue('Draw ' + declared.label + ' exactly once.', 'cover-box-count', id));
       const box = state.boxes[id];
       const photo = box?.photo && book.photos[box.photo];
-      const unavailable = box?.photo ? printProblem(book.sources?.['photo:' + box.photo]) : undefined;
+      const status = box?.photo ? book.sources?.['photo:' + box.photo] : undefined;
+      const unavailable = printProblem(status);
       if (unavailable) errors.push({
-        ...issue(unavailable + '. The cover preview uses a cached image.', 'source-unavailable', id), source: box.photo,
+        ...issue(cachedPreviewText(unavailable), 'source-unavailable', id), source: box.photo, sourceKind: 'photo', state: status?.state, problem: unavailable,
+        ...(status?.away ? { away: status.away } : {}), suggestion: unavailableSuggestion(status),
       });
-      if (box?.photo && !photo) errors.push({ ...issue(declared.label + ' uses an unavailable photo.', 'photo-missing', id), source: box.photo });
+      if (box?.photo && !photo) errors.push({ ...issue(declared.label + ' uses an unavailable photo.', 'photo-missing', id), source: box.photo, sourceKind: 'photo' });
       else if (!box?.photo) warnings.push(issue(declared.label + ' is empty.', 'cover-box-empty', id));
       if (node) {
         const finding = photoResolutionIssue(node, geometry.output.resolution?.minimum, mmPerPixel, declared.label, box?.photo);
@@ -2338,7 +2345,7 @@ export async function startRender(root: HTMLElement) {
     const warnings: Issue[] = [
       ...placeControlWarnings(declaration, rendered).map(({ code, message: text, path, details, suggestion, spread, page }) =>
         ({ ...(spread ? located(spread, text) : message(text)), code, ...onPage(page), details: { ...details, path }, suggestion })),
-      ...book.problems.map((text) => ({ ...message(text), code: 'project-input' })),
+      ...sourceWarnings(book.sources),
       ...(book.template.warnings ?? []).map((text) => ({ ...message(text), code: 'template-dependencies',
         suggestion: 'Run npm install in template/, then run the template dependency rebuild script.' })),
       ...parameterWarnings(template.parameters, book.project.params, 'Document').map((text) => ({ ...message(text), code: 'parameter-invalid',
@@ -2397,10 +2404,9 @@ export async function startRender(root: HTMLElement) {
         const state = id ? book.sources?.[kind + ':' + id] : undefined;
         const unavailable = printProblem(state);
         if (unavailable) errors.push({
-          ...located(spread.id, unavailable.replace(/\.+$/, '') + cachedPreviewNote),
-          code: 'source-unavailable', ...onPage(page), box, source: id || undefined,
-          suggestion: state?.previewOnly ? 'Export a proof, or copy the photo into the book on a Mac that can read its original.'
-            : state?.state === 'offline' ? 'Retry after opening the photo’s source app or reconnecting its server.' : 'Locate the original or retry after reconnecting its location.',
+          ...located(spread.id, cachedPreviewText(unavailable)),
+          code: 'source-unavailable', ...onPage(page), box, source: id || undefined, sourceKind: kind, state: state?.state, problem: unavailable,
+          ...(state?.away ? { away: state.away } : {}), suggestion: unavailableSuggestion(state),
         });
         if (state?.reshaped) warnings.push({ ...located(spread.id, 'The photo changed its aspect ratio in its source after it was placed. Check how it is cropped.'),
           code: 'source-reshaped', ...onPage(page), box, source: id || undefined });
@@ -2473,7 +2479,7 @@ export async function startRender(root: HTMLElement) {
     for (const [source, chain] of activeChains) {
       const first = chain[0];
       if (book.texts[source] === undefined) {
-        errors.push({ ...located(first.spread, 'Missing Markdown source ' + source + '.'), code: 'text-source-missing', ...onPage(first.page), box: first.box, source,
+        errors.push({ ...located(first.spread, 'Missing Markdown source ' + source + '.'), code: 'text-source-missing', ...onPage(first.page), box: first.box, source, sourceKind: 'markdown',
           suggestion: 'Restore ' + (book.project.texts[source] ? sourcePath(book.project.texts[source]) : 'the Markdown file') + ', or assign another text to box ' + first.box + '.' });
         continue;
       }
@@ -2644,7 +2650,7 @@ export async function startRender(root: HTMLElement) {
       sides.map((side) => ({ side, spread: spreads[i].id, where: where[i] })));
     step('output');
     publish({
-      state: 'ready', template: info, pages: sequence.count, units, errors, warnings,
+      state: 'ready', template: info, pages: sequence.count, units, errors, warnings: withoutReported(warnings, errors),
       flow: Object.fromEntries(Object.entries(positions).map(([key, { meta: _meta, ...position }]) => [key, position])), anchors: index.anchors,
       ...(inspection ? { inspection } : {}),
     });

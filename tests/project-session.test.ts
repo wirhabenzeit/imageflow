@@ -36,7 +36,7 @@ async function fixture(t: TestContext) {
   const book: OpenProject = {
     folder, cache: join(folder, 'cache'), readOnly: false,
     project: projectSchema.parse({ schemaVersion: 1, title: 'Original', template: { id: 'test', version: '1' }, spreads: [{ id: 'one', definition: 'main' }] }),
-    photoIndex: {}, assets: { files: new Map(), urls: {}, pictureScopes: {} }, photos: new Map(), texts: {}, files: {}, problems: [],
+    photoIndex: {}, assets: { files: new Map(), urls: {}, pictureScopes: {} }, photos: new Map(), texts: {}, files: {},
     manifests: { 'project.json': Buffer.alloc(0), 'photos.json': Buffer.alloc(0) },
   };
   const session = new ProjectSession(await writeManifests(book));
@@ -134,7 +134,7 @@ test('imported source registries and files survive earlier Undo and Redo', async
   assert.equal(session.book.texts.note, '# Imported note');
   assert.equal(session.book.files.route.text, '<gpx/>');
   assert.equal(session.book.photos.has('image'), true);
-  assert.deepEqual(session.book.problems, []);
+  assert.deepEqual(Object.values(session.book.sources!).filter(({ problem }) => problem), []);
 });
 
 test('closing a project session closes its input index', async (t) => {
