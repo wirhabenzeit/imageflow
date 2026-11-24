@@ -16,6 +16,9 @@ export type AuthoringDiagnostic = {
     // Path inside the template's default export, such as `spreads.chapter.parameters.heading.default`.
     declaration?: string;
   };
+  // Every place of a finding that is one problem in many places, such as originals that are on another Mac; `location`
+  // is then left out.
+  occurrences?: Pick<NonNullable<AuthoringDiagnostic['location']>, 'spread' | 'cover' | 'page' | 'box' | 'source' | 'where'>[];
   // Measured and allowed values, such as `{ ppi: 180, minimumPpi: 240 }`.
   details?: Record<string, string | number>;
   // A concrete repair, phrased in terms of template edits or project commands.

@@ -161,7 +161,7 @@ function renderSpread(render: (ctx: RenderContext) => unknown, mode: 'edit' | 'e
     }) }),
   })));
   const project = projectSchema.parse({ schemaVersion: 1, title: 'Text', template: { id: 'text', version: '1' }, spreads: [{ id: 'one', definition: 'main', params }] });
-  const book = { project, photos: {}, texts: {}, files: {}, problems: [], mode, template: { script: '', assets: {} } } as RenderProject;
+  const book = { project, photos: {}, texts: {}, files: {}, mode, template: { script: '', assets: {} } } as RenderProject;
   const resolved = resolveFormat(template.format);
   return renderToStaticMarkup(createElement(SpreadView, { book, template, format: resolved, spread: project.spreads[0],
     page: { left: 1, right: 2 }, index: { pages: 2, anchors: [] }, positions: {}, renderPhotos: false }));

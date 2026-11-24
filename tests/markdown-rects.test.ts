@@ -27,7 +27,7 @@ const markup = (props: Record<string, unknown>) => {
   const input: RenderProject = {
     project: projectSchema.parse({ schemaVersion: 2, title: 'Rects', template: { id: 'rects', version: '1' }, texts: { story: 'texts/story.md' },
       spreads: [{ id: 's', definition: 'story', params: {}, boxes: { body: { text: 'story' } }, elements: {} }] }),
-    mode: 'edit', problems: [], template: { script: '', assets: {} }, photos: {}, texts: { story: 'Story' }, files: {},
+    mode: 'edit', template: { script: '', assets: {} }, photos: {}, texts: { story: 'Story' }, files: {},
   };
   const sequence = pageSequence(input.project.spreads.map((spread) => layoutFootprint(spread, template.spreads)), format);
   return renderToStaticMarkup(createElement(SpreadView, { book: input, template, format: resolveFormat(format),

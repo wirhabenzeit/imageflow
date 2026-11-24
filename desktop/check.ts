@@ -1,5 +1,6 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { awayDiagnostics, takeAway } from '../src/away-originals';
 import { authoringCheckSchema } from '../src/authoring-check';
 import type { AuthoringCheckResult, AuthoringDraftSummary } from '../src/authoring-check';
 import type { AuthoringDiagnostic } from '../src/authoring';
@@ -128,10 +129,13 @@ export async function checkProject(
     result.render = checked.status;
     result.checks.declarations = 'passed';
     result.checks.layout = 'completed';
+    const found = takeAway(checked.status);
     result.diagnostics = [
       ...types?.diagnostics ?? [],
-      ...checked.status.errors.map((issue) => diagnostic(issue, 'error')),
-      ...checked.status.warnings.map((issue) => diagnostic(issue, 'warning')),
+      // Originals that are elsewhere are one finding with its places, not one per photo and box (#308); `render` keeps each.
+      ...found.errors.map((issue) => diagnostic(issue, 'error')),
+      ...found.warnings.map((issue) => diagnostic(issue, 'warning')),
+      ...awayDiagnostics(found.notes),
     ];
     if (checked.preview) {
       const { bytes, mimeType, status: _status, ...metadata } = checked.preview;

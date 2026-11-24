@@ -221,7 +221,6 @@ export type RenderProject = {
   texts: Record<string, string>;
   // Registered files with their text, or why they could not be read.
   files: Record<string, ProjectFile>;
-  problems: string[];
   sources?: Record<string, SourceStatus>;
   // `fonts`: the code points each bundled font file covers, as [first, last] ranges, by its file name under template/.
   // `hash` identifies the template files as loaded. `pictureScopes`: the picture cache scope of each template file that

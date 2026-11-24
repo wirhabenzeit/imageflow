@@ -31,11 +31,18 @@ export type SourceEntry = FileSourceEntry | PhotoSourceEntry;
  * providers without files; a file is never in either.
  */
 export type SourceState = 'available' | 'missing' | 'unreadable' | 'denied' | 'unapproved' | 'offline' | 'needs-sign-in';
+/**
+ * Where an original is that is not on this Mac and need not be (#308, `awayOriginal`): on the Mac the photo was linked
+ * on, in a Lightroom catalog that cannot be reached now, in the sync remote, or still uploading from another Mac.
+ */
+export type SourceAway = 'other-mac' | 'catalog' | 'not-downloaded' | 'uploading';
 /** What can be offered for a source that cannot be read, as its provider answers (`SourceProvider.repairs`). */
 export type SourceRepair = 'locate' | 'locate-folder' | 'launch' | 'sign-in';
 export type SourceStatus = SourceEntry & { state: SourceState; problem?: string; cached?: boolean; digest?: string;
   /** The repairs to offer while the source is unavailable; Retry is always offered. */
   repairs?: SourceRepair[];
+  /** The original is elsewhere and the photo drawn from its preview: normal while editing, needed for print. `state` stays what reading it ran into. */
+  away?: SourceAway;
   /**
    * An export prints only the provider's preview of this photo (ADR 0011): its provider could not produce the
    * full-resolution original when the export asked for it, so the page is a proof. Set only in an export's load.
@@ -50,14 +57,16 @@ export type SourceStatus = SourceEntry & { state: SourceState; problem?: string;
   pending?: boolean;
   /** The photo's aspect ratio changed in its source after it was placed: a crop may frame another part of it. */
   reshaped?: boolean };
+/** What a Book check error for an unavailable original adds after its cause; the export summary strips it again. */
+export const cachedPreviewNote = '. Showing a cached preview; the original is required for print.';
+/** A Book check error's text for an unavailable original, on a spread or the cover: its cause, which may end with a full stop of its own, and the note. */
+export const cachedPreviewText = (problem: string) => problem.replace(/\.+$/, '') + cachedPreviewNote;
+/** What an out-of-date photo is marked with (`SourceStatus.outOfDate`). */
+export const outOfDateNote = 'Edited in Lightroom Classic since this preview. It updates when you are back in Lightroom’s Library; export prints the photo as it is now.';
 /**
  * Why print cannot use a source's original here, or undefined when it can: it is drawn from a cached preview, or only
  * its provider's preview is on this Mac (ADR 0011). Print marks such a page ORIGINAL UNAVAILABLE and is a proof only.
  */
-/** What a Book check error for an unavailable original adds after its cause; the export summary strips it again. */
-export const cachedPreviewNote = '. Showing a cached preview; the original is required for print.';
-/** What an out-of-date photo is marked with (`SourceStatus.outOfDate`). */
-export const outOfDateNote = 'Edited in Lightroom Classic since this preview. It updates when you are back in Lightroom’s Library; export prints the photo as it is now.';
 export function printProblem(status: SourceStatus | undefined): string | undefined {
   if (!status) return undefined;
   if (status.state !== 'available' && status.cached) return status.problem ?? 'Original unavailable';

@@ -2,7 +2,13 @@
 
 ## Book check
 
-The Book check runs after each change. It reports missing content, text that does not fit, low-resolution photos and template findings. Click its status-bar icon or choose **Book → Check Book** (⇧⌘K) to see issues and jump to affected spreads.
+The Book check runs after each change. It reports missing content, text that does not fit, low-resolution photos and template findings. Click its status-bar icon or choose **Book → Check Book** (⇧⌘K) to see them.
+
+The panel lists each problem once, with the photos and pages it concerns. What needs something done comes first. Open a row to read what it means and what to do. Click a photo or page to select its spread, with the box outlined, or go through all findings with **Previous** and **Next**. The panel stays open while you work in the book; close it with **×** or Escape.
+
+On a Mac without the photos' originals, the book is shown from previews, and that is no error. A line at the end of the panel, which the icon does not count, says how many originals are on another Mac, in a Lightroom catalog that can't be reached, not downloaded yet, or still uploading from another Mac. They are only needed for printing. If the originals are on this Mac too, choose **Locate Folder…** and select their folder.
+
+A linked file that needs your approval on this Mac, and a file that went missing on the Mac that had it, are still reported.
 
 Review errors and warnings before ordering a printed book.
 
@@ -14,7 +20,7 @@ Use **Export Cover PDF…** in Cover and **Export Content PDF…** in Content to
 
 Choose **File → Export PDF…** (⌘E), or click **Export PDF…** in the toolbar. Export uses the book's print format, including trim size and bleed, and reduces photos to its maximum resolution. It checks page count, photo resolution, missing content, unplaced text, PDF fonts, transparency restrictions and file-size limits.
 
-If there are errors, export lists them and offers **Cancel** or **Export Anyway**. Exporting anyway saves the PDF with those problems; pages with unavailable originals are marked and may use cached previews or placeholders. Warnings remain in Book check and do not require confirmation.
+If there are errors, export lists them and offers **Cancel** or **Export Anyway**. Exporting anyway saves the PDF with those problems; pages with unavailable originals, also those on another Mac, are marked and may use cached previews or placeholders. Warnings remain in Book check and do not require confirmation.
 
 A rendering failure that prevents creating a usable PDF still stops export.
 

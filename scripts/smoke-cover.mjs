@@ -81,7 +81,7 @@ try {
   assert.equal((await readProject()).cover.params.title, 'A physical cover');
   await window.locator('.book-check-toggle').click();
   await window.locator('.book-check-heading').filter({ hasText: 'This cover' }).waitFor();
-  await window.locator('.book-check-panel .issue-current').filter({ hasText: 'Cover photo is empty.' }).waitFor();
+  await window.locator('.book-check-panel .has-current').filter({ hasText: 'Empty photo on the cover' }).locator('.bc-thumb.issue-current').waitFor();
   await window.locator('.book-check-list:not(.book-check-stale)').waitFor();
   await window.keyboard.press('Escape');
   const photos = JSON.parse(await readFile(join(folder, 'photos.json'), 'utf8'));

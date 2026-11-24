@@ -82,7 +82,7 @@ const template = chooseFormat(templateSchema.parse(declaration({ body: box.markd
 const book: RenderProject = {
   project: projectSchema.parse({ schemaVersion: 2, title: 'Composed', template: { id: 'composed', version: '1' }, texts: { story: 'texts/story.md' },
     spreads: ['opener', 'plain'].map((definition) => ({ id: definition, definition, params: {}, boxes: { body: { text: 'story', params: {} } }, elements: {} })) }),
-  mode: 'export', problems: [], template: { script: '', assets: {} }, photos: {}, texts: { story: source }, files: {},
+  mode: 'export', template: { script: '', assets: {} }, photos: {}, texts: { story: source }, files: {},
 };
 
 test('a box names a declared composition, and only a Markdown box does', () => {

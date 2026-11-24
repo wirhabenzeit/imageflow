@@ -32,7 +32,8 @@ import { digestBytes, SourceStore } from './source-store';
 import type { ResolvedSource, StoredSource } from './source-store';
 import { AssetFacts } from './asset-facts';
 import { proxyStore } from './proxy-store';
-import { keptOriginalProblem, keptOriginals, resumeSyncPull } from './sync-pull';
+import { keptOriginalProblem, keptOriginals, readSyncState, resumeSyncPull } from './sync-pull';
+import { awayOriginal, awayProblem } from '../src/away-originals';
 import { providedFieldNames } from '../src/asset-facts';
 import type { AssetFact, ProvidedField, ProvidedMetadata } from '../src/asset-facts';
 import { captureFields } from '../src/photo-metadata';
@@ -229,7 +230,7 @@ export async function bundleTemplate(folder: string) {
 type TemplateAssets = Awaited<ReturnType<typeof bundleTemplate>>;
 export type OpenProject = ProjectFiles & {
   folder: string; viewKey?: string; cache: string; assets: TemplateAssets; photos: Map<string, ProjectPhoto>;
-  texts: Record<string, string>; files: Record<string, ProjectFile>; problems: string[]; readOnly: boolean;
+  texts: Record<string, string>; files: Record<string, ProjectFile>; readOnly: boolean;
   sources?: Record<string, SourceStatus>;
   // Derived facts (assets-meta.json) of photos whose original is missing and that nothing else stands in for: their size
   // and capture time still lay out the book, while the source stays missing (ADR 0005, ADR 0010).
@@ -268,12 +269,11 @@ export async function loadProject(path: string, fallback: string, readOnly = fal
   return readContent({ folder, viewKey: createHash('sha256').update(await sourceBookKey(folder)).digest('hex'), assets, cache, readOnly, project: withBookFormat(project, photoIndex), photoIndex, ...(hash ? { templateHash: hash } : {}), manifests: { 'project.json': projectFile, 'photos.json': photoFile } }, pinSources, options);
 }
 
-async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' | 'problems'>, pinSources = false, options: MaterializeOptions = {}): Promise<OpenProject> {
+async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files'>, pinSources = false, options: MaterializeOptions = {}): Promise<OpenProject> {
   const photos = new Map<string, ProjectPhoto>();
   const texts: Record<string, string> = {};
   const files: Record<string, ProjectFile> = {};
   const sources: Record<string, SourceStatus> = {};
-  const problems: string[] = [];
   const entries = sourceEntries(book);
   // Only a writable, unpinned load keeps derived facts up to date, and only that one registers them for the session
   // that owns the book; read-only, pinned and temporary loads just read the file.
@@ -282,7 +282,7 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
   if (!entries.length) {
     // The last source was removed: its facts go too.
     if (writable) facts.prune([]);
-    return { ...book, photos, texts, files, sources, problems };
+    return { ...book, photos, texts, files, sources };
   }
   const store = await SourceStore.forBook(book.folder, book.cache);
   // Derived facts follow photos the editor reads in place; a private export read changes nothing.
@@ -302,14 +302,12 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
       if (source.kind === 'photo' && provided.has(source.id)) {
         const { status, loaded } = await loadProvidedPhoto(book, source, provided.get(source.id)!, store, pinSources, originals.get(source.id));
         sources[source.key] = status;
-        if (status.problem && !status.pending) problems.push('photo ' + source.id + ' · ' + status.problem);
         if (loaded?.photo) photos.set(source.id, loaded.photo);
         if (loaded?.fact) unavailablePhotos[source.id] = loaded.fact;
         return;
       }
       const { status, stored } = await store.resolve(book.folder, source, { pin: pinSources, cache: book.cache, observed: source.kind === 'photo' ? observed.get(source.id)?.observed : undefined });
       sources[source.key] = status;
-      if (status.problem && source.kind !== 'file') problems.push(source.kind + ' ' + source.id + ' · ' + status.problem);
       // An older original a pull kept (#295, #283): the book state, crop and size are the new version's, so the photo is
       // drawn from the new version's preview and marked as still uploading from another Mac, in the editor, an export and
       // print alike, until the new file replaces the kept one. Its fact stays the new version's. A file changed here
@@ -320,8 +318,7 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
         const photo = fact?.digest === older.current ? await proxyPhoto(book, source.id, fact, keptOriginalProblem) : undefined;
         // Nothing to locate: the file is here, at its older version. Replace stays, and what the user chooses then is this
         // Mac's own change; Remove, Copy into Book and Locate Folder leave the kept file where it is.
-        sources[source.key] = { ...status, state: 'missing', problem: keptOriginalProblem, repairs: [], ...(photo ? { cached: true } : {}) };
-        problems.push('photo ' + source.id + ' · ' + keptOriginalProblem);
+        sources[source.key] = { ...status, state: 'missing', problem: keptOriginalProblem, repairs: [], ...(photo ? { cached: true, away: 'uploading' } : {}) };
         if (photo) photos.set(source.id, photo);
         else if (fact) unavailablePhotos[source.id] = fact;
         return;
@@ -340,9 +337,15 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
       }
     }));
   }
+  // Photos whose original is elsewhere, told from this Mac's sync record and what was found out above: nothing is read.
+  const synced = (await readSyncState(book.folder).catch(() => undefined))?.lastSynced;
+  for (const [key, status] of Object.entries(sources)) {
+    const away = status.away ?? awayOriginal(status, synced);
+    if (away) sources[key] = { ...status, away, problem: awayProblem(away, status.problem) };
+  }
   await store.settled();
   if (writable) facts.prune(Object.keys(book.photoIndex));
-  return { ...book, photos, texts, files, sources, problems: problems.sort(), ...(Object.keys(unavailablePhotos).length ? { unavailablePhotos } : {}),
+  return { ...book, photos, texts, files, sources, ...(Object.keys(unavailablePhotos).length ? { unavailablePhotos } : {}),
     ...(originals.size ? { materialized: Object.fromEntries([...originals].map(([id, { revision }]) => [id, revision])) } : {}) };
 }
 
@@ -786,7 +789,7 @@ export function renderData(book: OpenProject, id: string, mode: RenderProject['m
     })),
     texts: book.texts,
     files: book.files,
-    problems: book.problems, sources: book.sources,
+    sources: book.sources,
     ...(book.fixture ? { fixture: book.fixture } : {}),
     template: {
       script: templateBase + 'template.js',

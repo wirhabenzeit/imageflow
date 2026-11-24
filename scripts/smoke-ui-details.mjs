@@ -288,11 +288,19 @@ try {
   assert.equal(templates.isClosed(), false, 'Cancelling New Book leaves the library open');
   await templates.close();
   await page.locator('.book-check-toggle').click();
-  const issue = page.locator('.book-check-panel li').first(); await issue.waitFor();
-  const message = await issue.innerText();
-  await popup('issue-copy'); await issue.click({ button: 'right' });
-  assert.equal(await app.evaluate(({ clipboard }) => clipboard.readText()), message);
+  const issue = page.locator('.book-check-panel .bc-row').first(); await issue.waitFor();
+  await popup('issue-copy'); await issue.locator('.bc-head').click({ button: 'right' });
+  const copied = await app.evaluate(({ clipboard }) => clipboard.readText());
+  const found = await page.locator('.book-check-toggle').getAttribute('title');
+  assert.ok(copied.length > 10 && !/^Book check/.test(copied), 'the finding’s own message is copied: ' + copied);
+  // The panel stays open while the findings are gone through: Next selects the spread and outlines its box.
+  await page.getByRole('button', { name: 'Next finding' }).click();
+  await page.locator('.book-check-panel [aria-current="true"]').waitFor();
+  assert.equal(await page.locator('.book-check-panel [aria-current="true"]').count(), 1, 'one finding is current');
+  await page.locator('.canvas').click({ position: { x: 20, y: 20 } });
+  assert.equal(await page.locator('.book-check-panel').count(), 1, 'a click in the book leaves the panel open (' + found + ')');
   await page.keyboard.press('Escape');
+  await page.locator('.book-check-panel').waitFor({ state: 'detached' });
   assert.deepEqual(errors, []);
   await page.screenshot({ path: join(work, 'details.png') });
   await page.close();

@@ -45,8 +45,7 @@ body { margin: 0; }
 .crop-controls { display: grid; gap: 0; }
 .crop-controls > button { grid-column: 1 / -1; justify-self: start; }
 
-/* Book check: the whole-book render runs in an invisible frame; its findings are listed in the inspector. */
-/* Book check: an indicator at the right of the status bar; its list opens above the bar */
+/* Book check: an indicator at the right of the status bar; its panel opens above the bar and stays open. */
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .book-check-list { position: relative; flex: none; margin-right: 16px; font-size: 12px; }
 .studio .book-check-toggle { display: inline-flex; align-items: center; gap: 4px; min-height: 0; height: 20px; padding: 0 7px 0 3px;
@@ -59,20 +58,57 @@ body { margin: 0; }
 .studio .book-check-clean .book-check-toggle { cursor: default; padding: 0 3px; }
 .book-check-clean .book-check-icon { color: var(--muted); background: transparent; font-size: 11px; }
 .book-check-stale .book-check-toggle { opacity: .55; }
-.book-check-panel { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 30; width: min(420px, 70vw); padding: 10px 12px;
-  border: 1px solid var(--control-border); border-radius: 9px; background: var(--control-surface); box-shadow: 0 10px 30px #0003; overflow-wrap: anywhere; }
-.book-check-heading { margin: 0 0 6px; font-weight: 500; color: var(--muted); }
-.book-check-panel ul { margin: 0; padding-left: 17px; max-height: 300px; overflow: auto; }
-.book-check-panel li { margin: 4px 0; }
-.book-check-panel .issue-error { color: var(--error-text); }
-.book-check-panel .issue-warning { color: var(--warning-text); }
-.book-check-panel .issue-current { font-weight: 600; }
-.book-check-panel .issue-group > details > summary { cursor: default; }
-.book-check-panel .issue-group > details > ul { max-height: none; margin: 4px 0 6px; padding-left: 14px; color: var(--text); }
-.book-check-panel .issue-group > details > ul > li { font-size: 11px; }
-.book-check-stale .book-check-panel ul { opacity: .6; }
-.book-check-panel button.link { all: unset; cursor: default; text-decoration: none; }
-.book-check-panel button.link:focus-visible { outline: 2px solid var(--accent); }
+.book-check-panel { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 30; display: flex; flex-direction: column; width: min(400px, 70vw); max-height: min(440px, 60vh);
+  border: 1px solid var(--control-border); border-radius: 9px; box-shadow: 0 10px 30px #0003; text-align: left; color: var(--text); overflow: hidden; }
+.book-check-panel:focus { outline: none; }
+.bc-header { display: flex; align-items: center; gap: 8px; flex: none; padding: 7px 7px 7px 12px; border-bottom: 1px solid var(--edge); }
+.book-check-heading { flex: 1; min-width: 0; margin: 0; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.book-check-heading .muted { font-weight: 400; }
+.bc-nav { display: flex; align-items: center; gap: 2px; font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+.studio .bc-nav button, .studio .bc-close { display: inline-grid; place-items: center; width: 22px; height: 22px; min-height: 0; padding: 0; border: 0; border-radius: 5px; background: transparent; box-shadow: none; color: var(--icon-color); }
+.studio :is(.bc-nav button, .bc-close):hover:not(:disabled) { background: var(--subtle-hover); }
+.bc-empty { margin: 0; padding: 10px 12px; color: var(--muted); }
+.book-check-panel ul { margin: 0; padding: 0; list-style: none; }
+.bc-rows { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scroll-padding: 8px; }
+.bc-row + .bc-row { border-top: 1px solid var(--edge); }
+.bc-row { position: relative; padding-bottom: 1px; }
+/* Focus rings stay inside: the list scrolls and would cut them off. */
+.studio .book-check-panel :is(button, .bc-head, .bc-place):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.studio .bc-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 6px 10px 6px 12px; border: 0; border-radius: 0; background: transparent; box-shadow: none;
+  color: var(--text); font: 500 12px/1.35 var(--ui-font); text-align: left; }
+.bc-head-text { display: contents; }
+.studio button.bc-head:hover { background: var(--subtle-hover); }
+.bc-icon { flex: none; display: grid; }
+.issue-error > .bc-head .bc-icon { color: var(--check-error); }
+.issue-warning > .bc-head .bc-icon { color: var(--check-warning); }
+.issue-info > .bc-head { color: var(--muted); font-weight: 400; }
+.bc-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.bc-count { flex: none; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--segment-surface); color: var(--muted); font-size: 11px; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+.bc-chevron { flex: none; display: grid; color: var(--muted); transform: rotate(-90deg); }
+.bc-chevron[data-open] { transform: none; }
+.studio .book-check-panel .bc-action { margin: 0 12px 9px 34px; }
+.bc-thumbs { display: flex; gap: 5px; padding: 0 12px 9px 34px !important; }
+.studio .bc-thumb { display: grid; justify-items: center; gap: 2px; min-width: 40px; min-height: 0; padding: 3px; border: 0; border-radius: 5px; background: transparent; box-shadow: none; color: var(--muted); font: 400 11px/1.2 var(--ui-font); font-variant-numeric: tabular-nums; }
+.bc-thumb img { display: block; width: 40px; height: 30px; object-fit: cover; border-radius: 3px; background: var(--segment-surface); }
+.bc-thumb .bc-glyph { width: 40px; height: 30px; }
+.bc-glyph { display: grid; place-items: center; border-radius: 3px; background: var(--segment-surface); color: var(--muted); font-size: 12px; }
+.bc-thumb .bc-page:only-child { padding: 1px 6px; }
+.studio :is(.bc-thumb, .bc-place):is(button):hover { background: var(--subtle-hover); }
+.studio :is(.bc-thumb, .bc-place).issue-current { color: var(--text); font-weight: 600; }
+.studio :is(.bc-thumb, .bc-place)[aria-current="true"], .bc-row[aria-current="true"] { background: var(--selection-surface); box-shadow: inset 0 0 0 1px var(--selection-border); color: var(--text); }
+.studio .bc-more { height: 36px; min-height: 0; padding: 0 8px; border: 0; background: transparent; box-shadow: none; color: var(--muted); font-size: 11px; }
+.studio .bc-more:hover { background: var(--subtle-hover); }
+.bc-body { padding: 0 8px 8px 34px; }
+.bc-body p { margin: 0 4px 6px 0; color: var(--muted); overflow-wrap: anywhere; }
+.studio .bc-place { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 3px 6px; margin-left: -6px; border: 0; border-radius: 5px; background: transparent; box-shadow: none;
+  color: var(--text); font: 400 11px/1.35 var(--ui-font); text-align: left; }
+.bc-place :is(img, .bc-glyph) { flex: none; width: 36px; height: 27px; border-radius: 3px; object-fit: cover; }
+.bc-place-text { flex: 1; min-width: 0; display: grid; }
+.bc-place-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bc-place .bc-place-text .muted { font-weight: 400; overflow-wrap: anywhere; }
+.bc-place .bc-page { flex: none; color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+.book-check-stale .bc-rows { opacity: .6; }
+.book-check-panel button.link { all: unset; cursor: default; }
 .issue-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
 .issue-dot.issue-error { background: #b3382c; }
 .issue-dot.issue-warning { background: #c99a1e; }
@@ -574,7 +610,7 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .studio .layout-option[aria-checked="true"] { background: var(--selection-surface); box-shadow: inset 0 0 0 1px var(--selection-border); }
 .status-bar { min-width: 0; background: var(--sidebar-surface); }
 .status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-height: 28px; padding: 4px 14px; font-size: 11px; }
-.book-check-list { min-width: 140px; text-align: right; font-size: 11px; }
+.book-check-list { min-width: 140px; font-size: 11px; }
 .studio .book-check-toggle { font-weight: 400; padding: 1px 6px; }
 .book-check-clean { color: var(--muted); }
 .sources-bar { height: 38px; padding-top: 0; white-space: nowrap; overflow-x: auto; }

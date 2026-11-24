@@ -18,6 +18,7 @@ import { copySample } from '../desktop/sample-book.mjs';
 import type { Materialized, Observed, Previewed, SourceRef } from '../desktop/source-provider';
 import type { LightroomLocator } from '../src/source-locator';
 import { lightroomLocator } from '../src/source-locator';
+import { sourceWarnings } from '../src/away-originals';
 import { assetMenu } from '../src/asset-menu';
 import { catalogId, FakeLightroom, otherCatalogId, uuid } from './lightroom-fake';
 import './persistence-root';
@@ -550,7 +551,7 @@ test('a book open in a session loads without waiting for previews: it names thos
   assert.equal(status.pending, true);
   assert.equal(loaded.unavailablePhotos!.lr3.width, 6000, 'laid out at its size');
   assert.equal(f.facts.get('lr3'), undefined, 'nothing is recorded of it yet');
-  assert.ok(!loaded.problems.some((problem) => problem.includes('lr3')));
+  assert.ok(!sourceWarnings(loaded.sources).some(({ source }) => source === 'lr3'), 'a preview that is loading is no finding');
   // Fetched in the background; a load meanwhile waits for none of it and shows what has come.
   const refs = [3, 4].map((n) => ({ id: 'lr' + n, locator: lightroomLocator.read(loaded.photoIndex['lr' + n] as Record<string, unknown>)! }));
   const seen: string[] = [];

@@ -27,7 +27,7 @@ const book = (): RenderProject => ({ project: projectSchema.parse({ title: 'Page
       left: { definition: 'page', params: { title: 'First' } }, right: { definition: 'page', params: { title: 'Second' } } } },
     { id: 'second', definition: 'full', split: true, pages: {
       left: { definition: 'page', params: { title: 'Third' } }, right: { definition: 'page', params: { title: 'Fourth' } } } },
-  ] }), photos: {}, files: {}, texts: {}, mode: 'edit', problems: [], template: { script: '', assets: {} } });
+  ] }), photos: {}, files: {}, texts: {}, mode: 'edit', template: { script: '', assets: {} } });
 const sequence = (input: RenderProject, template: Template) => pageSequence(input.project.spreads.map((spread) => layoutFootprint(spread, template.spreads)), format);
 
 test('shown page anchors and credits use their own page and attribute conflicts separately', () => {

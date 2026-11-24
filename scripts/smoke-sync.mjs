@@ -118,6 +118,22 @@ try {
   assert.equal(await menuEnabled('sync-setup'), true, 'without a backend, File → Sync offers Set Up Sync…');
   assert.equal(await menuEnabled('sync-start'), false);
 
+  // A placed photo linked on the desktop, whose original never leaves it.
+  const linkedPhoto = join(work, 'Harbour.jpg');
+  await sharp({ create: { width: 4800, height: 3600, channels: 3, background: '#335577' } }).jpeg().toFile(linkedPhoto);
+  const linked = await desktop.evaluate(async (path) => {
+    const { value } = await window.imageflow.currentProject();
+    const result = await window.imageflow.importFiles(value.id, { kind: 'photo', mode: 'link', paths: [path] });
+    const { value: summary } = await window.imageflow.currentProject();
+    const [id] = result.value.imported;
+    summary.project.spreads.find(({ id }) => id === 'arriving').pages.left.boxes.hero = { photo: id, params: {} };
+    const saved = await window.imageflow.saveProject(summary.id, { project: summary.project, photoIndex: summary.photoIndex });
+    return 'error' in saved ? saved : id;
+  }, linkedPhoto);
+  assert.equal(typeof linked, 'string', JSON.stringify(linked));
+  await desktop.reload();
+  await ready(desktop);
+
   // A folder inside a book is no sync folder.
   await mkdir(join(desktopBook, 'files', 'Sync'), { recursive: true });
   await choosePaths({ open: join(desktopBook, 'files', 'Sync') });
@@ -273,6 +289,32 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   await stat(join(laptopBook, (await current(laptop)).photoIndex.shore.path));
+
+  // The linked original stays on the desktop. Here that is one line and no error or warning (#308); a check names it
+  // once with its place, and an export asks and marks the page.
+  const isCurrent = async (page) => {
+    await waitForPage(page, async () => document.querySelector('iframe.book-frame-book[data-current][data-ready]')?.dataset.revision === (await window.imageflow.currentProject()).value.id
+      && /Book check · (No issues|\d)/.test(document.querySelector('.book-check-toggle')?.title ?? ''));
+    return page.locator('.book-check-toggle').getAttribute('title');
+  };
+  const away = (await current(laptop)).sources['photo:' + linked];
+  assert.deepEqual([away.state, away.cached, away.away], ['unapproved', true, 'other-mac']);
+  assert.equal(await isCurrent(laptop), await isCurrent(desktop), 'the laptop counts no error or warning the desktop does not have');
+  await laptop.locator('.book-check-toggle').click();
+  await laptop.locator('.book-check-panel').getByText('1 original is on another Mac. Needed for printing.').waitFor();
+  await laptop.locator('.book-check-panel').getByRole('button', { name: 'Locate Folder…' }).waitFor();
+  await laptop.keyboard.press('Escape');
+  const checkedHere = await laptop.evaluate(async () => window.imageflow.checkBook((await window.imageflow.currentProject()).value.id, {}));
+  const findings = checkedHere.value.diagnostics.filter(({ occurrences }) => occurrences);
+  assert.deepEqual(findings.map(({ code, severity, occurrences }) => [code, severity, occurrences.map(({ spread, page, box, source }) => [spread, page, box, source])]),
+    [['source-unavailable', 'error', [['arriving', 'left', 'hero', linked]]]], JSON.stringify(checkedHere.value.diagnostics));
+  await answer('Export PDF with cached previews?', 'cancel');
+  await choosePaths({ save: join(work, 'Laptop.pdf') });
+  const exported = await laptop.evaluate(async () => window.imageflow.exportBook((await window.imageflow.currentProject()).value.id));
+  assert.equal(exported.value, null, 'the export asks first, and was cancelled: ' + JSON.stringify(exported));
+  const asked = (await prompts()).filter(({ message }) => message === 'Export PDF with cached previews?');
+  assert.equal(asked.length, 1);
+  assert.match(asked[0].detail, /^Original on another Mac: 1 photo on 1 spread will print from cached previews\.\n/);
 
   // A normal sync: the laptop pushes a caption, the desktop pulls it and its editor reloads.
   assert.ok((await setCaption(laptop, 'shore', 'From the laptop')).value);

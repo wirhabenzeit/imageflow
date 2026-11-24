@@ -47,7 +47,7 @@ const months = () => [
 ];
 const photo = (caption: string) => ({ width: 1200, height: 800, caption, src: '/photo' });
 const rendered = (state: Project, photos: RenderProject['photos'] = { shore: photo('Shore'), cliffs: photo('Cliffs') }) =>
-  ({ project: state, photos, texts: {}, files: {}, problems: [], mode: 'edit', template: { script: '', assets: {} } }) as RenderProject;
+  ({ project: state, photos, texts: {}, files: {}, mode: 'edit', template: { script: '', assets: {} } }) as RenderProject;
 const markedDays: EditorTarget = { kind: 'document', spread: 'feb', layout: 'month', editor: 'markedDays' };
 const key = (state: Project, target: EditorTarget) => editingContext(info, editorState(state, target.spread)!, target);
 

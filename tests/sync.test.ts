@@ -259,6 +259,8 @@ coreEach('desktop and laptop: adopt, push after import, proxies first, originals
   await on(b, async (book) => {
     assert.equal(book.sources!['photo:' + linked].state, 'unapproved');
     assert.equal(book.sources!['photo:' + linked].cached, true);
+    assert.equal(book.sources!['photo:' + linked].away, 'other-mac', 'the normal state of a linked photo here (#308)');
+    assert.equal(printProblem(book.sources!['photo:' + linked]), 'Original on another Mac', 'print still needs it');
     assert.equal(book.photos.get(linked)!.original, await proxyFile(b, linkedDigest));
     assert.deepEqual([book.photos.get(linked)!.width, book.photos.get(linked)!.height], [120, 80]);
   });
@@ -296,6 +298,8 @@ coreEach('desktop and laptop: adopt, push after import, proxies first, originals
   assert.equal(await lstat(ownedPath).catch(() => undefined), undefined);
   await on(a, async (book) => {
     assert.equal(book.sources!['photo:' + owned].state, 'missing');
+    assert.equal(book.sources!['photo:' + owned].away, 'not-downloaded');
+    assert.equal(printProblem(book.sources!['photo:' + owned]), 'Original not downloaded yet');
     assert.equal(book.photos.get(owned)!.original, await proxyFile(a, ownedDigest));
   });
 
@@ -324,6 +328,25 @@ coreEach('desktop and laptop: adopt, push after import, proxies first, originals
   await rm((await proxyFile(b, linkedDigest))!);
   assert.equal((await sync(b, remote)).action, 'in-sync');
   assert.ok(await proxyFile(b, linkedDigest), 'the proxy is back');
+  // A file that went missing on the Mac that had it stays a finding there, whatever the remote has (#308): the laptop's
+  // located copy, the original the desktop downloaded, and one the desktop pushed, also after it synced without it.
+  await on(b, async (book) => {
+    assert.equal(book.sources!['photo:' + linked].state, 'missing');
+    assert.equal(book.sources!['photo:' + linked].cached, true);
+    assert.equal(book.sources!['photo:' + linked].away, undefined);
+  });
+  await on(a, async () => { await rm(ownedPath); await rm(join(a.folder, 'photos/shore.jpg')); });
+  const gone = async (book: OpenProject) => {
+    for (const id of [owned, 'shore']) {
+      assert.equal(book.sources!['photo:' + id].state, 'missing');
+      assert.equal(book.sources!['photo:' + id].cached, true);
+      assert.equal(book.sources!['photo:' + id].away, undefined);
+    }
+  };
+  await on(a, gone);
+  await edit(a, caption('segla', 'Without them'));
+  assert.equal((await sync(a, remote)).action, 'push');
+  await on(a, gone);
 });
 
 coreEach('an in-place re-export and a caption edit elsewhere fast-forward, merge facts and push, with no conflict copy', async (t) => {
@@ -2872,6 +2895,7 @@ coreEach('a pull keeps this Mac’s original until the remote has the one that r
     assert.deepEqual([photo.width, photo.height], [160, 100], 'laid out at the new version’s size');
     const status = book.sources!['photo:shore'];
     assert.equal(status.problem, 'Original still uploading from another Mac');
+    assert.equal(status.away, 'uploading');
     assert.equal(printProblem(status), 'Original still uploading from another Mac', 'print warns as for any original that is not here');
   }
   assert.equal((await readAssetFacts(b.folder)).shore.digest, replaced, 'the fact stays the new version’s');

@@ -64,7 +64,7 @@ What a photo syncs follows from where it comes from:
 | Linked file | Its details, a preview and its file name | Stays on its Mac; locate it on each Mac |
 | Lightroom Classic | Its details and a preview | Stays in the catalog on its Mac |
 
-The book's text, files, template, layout and settings always sync. On a Mac without a photo's original, the book shows its preview, and **Book check** says before an export that the original is needed for print.
+The book's text, files, template, layout and settings always sync. On a Mac without a photo's original, the book shows its preview, and **Book check** says in one line that the originals are needed for printing. Exporting without them asks first and marks the pages.
 
 Originals upload in the background after the book has synced, so the other Mac can open the book before they arrive; it shows those photos as **Original still uploading from another Mac**. With **Keep originals on this Mac** (Settings → Sync, on by default), originals download in the background after each sync; without it, only previews are kept until **File → Sync → Download Originals**. An original that a Mac added a week ago and never uploaded (the Mac was not opened again) is shown as **never uploaded from** that Mac: open the book there to upload it.
 

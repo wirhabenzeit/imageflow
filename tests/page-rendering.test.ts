@@ -39,7 +39,7 @@ const template = chooseFormat(templateSchema.parse(normalizeTemplate({ id: 'page
 const book = (spread: SpreadState = split): RenderProject => ({
   project: projectSchema.parse({ schemaVersion: 2, title: 'Pages', template: { id: 'pages', version: '1' },
     texts: { story: 'texts/story.md' }, spreads: [structuredClone(spread)] }),
-  mode: 'edit', problems: [], template: { script: '', assets: {} }, photos: {}, texts: { story: 'Story' }, files: {},
+  mode: 'edit', template: { script: '', assets: {} }, photos: {}, texts: { story: 'Story' }, files: {},
 });
 const markup = (input: RenderProject) => {
   const sequence = pageSequence(input.project.spreads.map((spread) => layoutFootprint(spread, template.spreads)), format);

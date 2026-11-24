@@ -61,6 +61,8 @@ import { Fields } from './Fields';
 import { Inspector } from './Inspector';
 import type { Edit } from './Inspector';
 import { BookCheckIndicator } from './BookCheck';
+import { takeAway, withoutReported } from './away-originals';
+import { foundText } from './export-errors';
 import type { PictureStatus } from './BookFrame';
 import type { BookCheck } from './BookCheck';
 import { QuickLook, Sources } from './Sources';
@@ -262,6 +264,8 @@ export function App() {
   // Selection is exclusive: a source from the strip, or else the current spread.
   const [selectedSource, setSelectedSource] = useState<SourceRef>();
   const [focusBox, setFocusBox] = useState<{ box: string; at: number }>();
+  // The box of the Book check finding being looked at.
+  const [found, setFound] = useState<{ spread: string; box: string; page?: PageSide }>();
   const [quick, setQuick] = useState<SourceRef>();
   const [busy, setBusy] = useState('');
   // The count and Cancel of the task `busy` names, when it reports them (`TaskProgress`).
@@ -796,10 +800,7 @@ export function App() {
         if ('error' in result) throw new Error(result.error);
         if (!result.value) return;
         // A proof saves whatever it finds: the notice says how much is missing or wrong in it, as Export PDF does.
-        const { errors, warnings } = result.value;
-        const counted = (n: number, word: string) => n ? n + ' ' + word + (n === 1 ? '' : 's') : '';
-        const found = [counted(errors.length, 'error'), counted(warnings.length, 'warning')].filter(Boolean).join(', ');
-        setNotice('Proof saved.' + (found ? ' ' + found + ' in Book check; problem spreads are marked in the proof.' : ''));
+        setNotice('Proof saved.' + foundText(result.value, 'proof'));
         return;
       }
       if (command === 'export') {
@@ -812,9 +813,7 @@ export function App() {
         if (!result.value) return;
         // The export rendered the whole book; its result is the complete Book check for that project state.
         const { errors, warnings } = result.value;
-        const counted = (n: number, word: string) => n ? n + ' ' + word + (n === 1 ? '' : 's') : '';
-        const found = [counted(errors.length, 'error'), counted(warnings.length, 'warning')].filter(Boolean).join(', ');
-        setNotice('PDF saved.' + (found ? ' ' + found + ' in Book check.' : ''));
+        setNotice('PDF saved.' + foundText(result.value, 'print'));
         if (!coverActive && before.id === current.current?.id) setCheck({ id: before.id, errors, warnings });
         return;
       }
@@ -1073,9 +1072,12 @@ export function App() {
       : currentCoverStatus?.state === 'error' ? { errors: [{ cover: true as const, where: 'Cover', message: currentCoverStatus.message }], warnings: [] }
         : undefined;
   const combinedCheck = check && currentCoverCheck && coverState && coverGeometry && checkCurrent
-    ? { ...check, errors: [...check.errors, ...currentCoverCheck.errors], warnings: [...check.warnings, ...currentCoverCheck.warnings] } : check;
+    ? { ...check, errors: [...check.errors, ...currentCoverCheck.errors],
+      warnings: withoutReported([...check.warnings, ...currentCoverCheck.warnings], currentCoverCheck.errors) } : check;
   const spreadIssues = new Map<string, 'error' | 'warning'>();
-  for (const [level, list] of [['warning', check?.warnings ?? []], ['error', check?.errors ?? []]] as const) {
+  // An original that is elsewhere marks no spread: nothing is wrong with it while editing (#308).
+  const spreadFindings = takeAway({ errors: check?.errors ?? [], warnings: check?.warnings ?? [] });
+  for (const [level, list] of [['warning', spreadFindings.warnings], ['error', spreadFindings.errors]] as const) {
     for (const { spread } of list as Issue[]) if (spread) spreadIssues.set(spread, level);
   }
 
@@ -1249,6 +1251,24 @@ export function App() {
     setSelectedSide(side ?? (id === spreadId ? selectedSide : undefined));
     setSelectedSource(undefined);
     if (scroll) reveal(id);
+  }
+
+  /** Goes to a Book check finding: its spread and page, with its box outlined in the book and pointed out in the Inspector. */
+  function showFinding(issue: Issue | undefined) {
+    const owner = issue?.box ?? issue?.element;
+    setFound(issue?.spread && owner ? { spread: issue.spread, box: owner, page: issue.page } : undefined);
+    const target = issue?.cover ? coverInstance : issue?.spread;
+    if (!issue || !target) return;
+    select(target, true, issue.page);
+    if (owner) setFocusBox({ box: owner, at: Date.now() });
+  }
+  /** The page a finding is on, as printed, or the pages of its spread. */
+  function findingPages(issue: Issue) {
+    if (issue.cover) return 'Cover';
+    const at = spreads.findIndex(({ id }) => id === issue.spread);
+    if (at < 0) return undefined;
+    const page = issue.page && sequence?.spreads[at]?.page[issue.page];
+    return page === undefined ? pageLabels[at] : String(page);
   }
 
   function move(offset: number, id = spread?.id) {
@@ -1981,8 +2001,10 @@ export function App() {
   const coverBoxIds = useMemo(() => coverGeometry && coverDefinition ? Object.keys(coverDefinition.boxes) : undefined, [coverGeometry, coverDefinition]);
   const usage = useMemo(() => summary ? assetUsage(summary, pageLabels, coverBoxIds ?? null) : { photo: {}, text: {} },
     [summary, pageLabels.join(), coverBoxIds]);
+  // The box a Book check finding is about stays outlined while it is looked at.
+  const foundBox = found && found.spread === spread?.id ? geometry?.boxes.find(({ spread: owner, id, page }) => owner === found.spread && id === found.box && page === found.page) : undefined;
   const activeBox = dropTarget ? geometry?.boxes.find(({ spread, id, page }) => spread + ':' + (page ? page + ':' : '') + id === dropTarget) :
-    highlight ? geometry?.boxes.find(({ spread: owner, id, page }) => owner === spread?.id && id === highlight && page === selectedPage) : undefined;
+    highlight ? geometry?.boxes.find(({ spread: owner, id, page }) => owner === spread?.id && id === highlight && page === selectedPage) : foundBox;
   const selectedSheetRect = spreadSelected ? geometry?.sheets.find(({ spread: id }) => id === spread?.id) : undefined;
   const selectionPages = sequence?.spreads[index]?.page;
   const selectedLayoutMode = spread?.split ? 'pages' : selectionPages?.left !== undefined && selectionPages?.right !== undefined ? 'spread' : 'page';
@@ -2327,6 +2349,7 @@ export function App() {
               onClick={(event) => {
                 // A click that ended a photo move is not a click.
                 if (moved.current) return;
+                setFound(undefined);
                 const { sheet, side, top, target } = locate(event);
                 if (!sheet || !spreads.some(({ id }) => id === sheet)) return;
                 // Select the clicked page first, even when one image spans both halves. Only a click on the
@@ -2478,7 +2501,7 @@ export function App() {
       </div>
       {summary && (!panels.rightHidden ? <PanelDivider side="right" size={panels.right} resize={resizePanel} onResizing={setResizing} /> : <div />)}
       <div className={'inspector-host' + (panels.rightHidden ? ' is-collapsed' : '')} inert={panels.rightHidden} aria-hidden={panels.rightHidden || !summary}>
-        {summary && coverActive ? <CoverInspector summary={summary} cover={coverState} layouts={coverLayouts} writable={canChangeBook && canvasReady}
+        {summary && coverActive ? <CoverInspector focus={focusBox} summary={summary} cover={coverState} layouts={coverLayouts} writable={canChangeBook && canvasReady}
           choose={(definition) => {
             if (!Object.hasOwn(coverLayouts, definition)) return;
             void edit(({ project }) => {
@@ -2517,7 +2540,9 @@ export function App() {
       {summary && <SyncStatus api={api} notice={setNotice} />}
       <AgentStatus api={api} />
       {summary && <BookCheckIndicator requestSpread={checkScope} request={checkRequest} check={combinedCheck} checking={!checkCurrent || checkingCover}
-        spread={coverActive ? coverInstance : spreadSelected ? spread?.id ?? '' : ''} select={(id, page) => select(id, true, page)} refresh={refreshCoverCheck} />}
+        spread={coverActive ? coverInstance : spreadSelected ? spread?.id ?? '' : ''} summary={summary} select={showFinding} pages={findingPages} refresh={refreshCoverCheck}
+        editing={!!(editing || elementEditor || cropping || quick || photoView.dialog)}
+        locateFolder={writable && !busy ? () => void runSourceAction({ action: 'locate-folder' }) : undefined} />}
     </footer>
     </div>
   </div></ProjectFilesContext.Provider>;
