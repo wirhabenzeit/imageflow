@@ -236,7 +236,7 @@ export type LibraryBook = { bookId: string; title: string; updatedAt?: string; v
  */
 export type LibraryAction = { action: 'download' | 'delete' | 'update'; bookId: string } | { action: 'start' | 'stop' | 'keep-here' | 'sync-again' | 'delete'; id: string };
 
-export type SourceAction = { action: 'retry' | 'launch' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump' | 'import' | 'rename'; spread?: string; key?: string; keys?: string[]; accept?: string[]; paths?: string[]; name?: string };
+export type SourceAction = { action: 'retry' | 'refresh' | 'launch' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump' | 'import' | 'rename'; spread?: string; key?: string; keys?: string[]; accept?: string[]; paths?: string[]; name?: string };
 
 export type ContextMenuItem = import('./commands').RegisteredCommand | { command: import('./commands').RegisteredCommand; value?: string; label?: string; enabled?: boolean; checked?: boolean; items?: ContextMenuItem[] } | { type: 'separator' };
 export type ContextMenuResult = { command: import('./commands').RegisteredCommand; value?: string };

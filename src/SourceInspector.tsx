@@ -1,4 +1,4 @@
-import { photoName, photoSourceName, sourceFile, sourcePath } from './source-locations';
+import { outOfDateNote, photoName, photoSourceName, sourceFile, sourcePath } from './source-locations';
 import { SourceBadge, sourceOrigin } from './SourceBadge';
 import { usageLabel } from './asset-usage';
 import { Fragment, useMemo, useState } from 'react';
@@ -69,7 +69,8 @@ export function SourceInspector({ summary, source, template, render, usage, writ
         <p className="eyebrow">Photo</p>
         <h2>{photoName(summary, source.id)}</h2>
         <p className="muted si-source">{origin && <SourceBadge origin={origin} labelled />}<span title={file?.path}>{photoSourceName(summary, source.id)}</span></p>
-        {summary.sources?.['photo:' + source.id]?.problem && <p className="error-text">{summary.sources['photo:' + source.id].problem}{summary.sources['photo:' + source.id].cached ? ' · Showing cached preview' : ''}</p>}
+        {status?.outOfDate && <p className="muted">{outOfDateNote}</p>}
+        {status?.pending ? <p className="muted">{status.problem}</p> : summary.sources?.['photo:' + source.id]?.problem && <p className="error-text">{summary.sources['photo:' + source.id].problem}{summary.sources['photo:' + source.id].cached ? ' · Showing cached preview' : ''}</p>}
       </div>
       {summary.photos[source.id]
         ? <button type="button" className="si-preview" title="Quick Look (Space)" onClick={quickLook}>

@@ -68,7 +68,9 @@ const knownKeys = new Set(Object.keys(assetFactSchema.shape));
 // additions survive this one noting the photo again.
 const unknownOf = (fact: AssetFact | undefined) => Object.fromEntries(Object.entries(fact ?? {}).filter(([key]) => !knownKeys.has(key)));
 /** What a provider reported for a photo without a file, once its preview is stored (desktop/provided-photos.ts). */
-export type ProvidedFact = Pick<AssetFact, 'digest' | 'width' | 'height' | 'revisions'> & Capture & { provided?: ProvidedMetadata; extra?: Record<string, unknown> };
+export type ProvidedFact = Pick<AssetFact, 'digest' | 'width' | 'height' | 'revisions'> & Capture & { provided?: ProvidedMetadata; extra?: Record<string, unknown>;
+  /** When the preview was last of what the source shows, where that is not now. */
+  verified?: string };
 type Note = { observation: string; width: number; height: number; capture: Capture };
 const captureOf = (source: Capture): Capture => Object.fromEntries(captureFields.flatMap((field) => source[field] ? [[field, source[field]]] : []));
 
@@ -163,10 +165,9 @@ export class AssetFacts {
    */
   provide(id: string, reported: ProvidedFact): boolean | undefined {
     const previous = this.facts[id];
-    const { digest, width, height, revisions, provided, extra } = reported;
+    const { digest, width, height, revisions, provided, extra, verified = new Date().toISOString() } = reported;
     const fact = assetFactSchema.safeParse({ ...(previous?.digest === digest ? unknownOf(previous) : {}), digest, width, height, ...captureOf(reported),
-      ...(revisions ? { revisions } : {}), ...(provided && Object.keys(provided).length ? { provided } : {}), ...(extra ? { extra } : {}),
-      verified: new Date().toISOString() });
+      ...(revisions ? { revisions } : {}), ...(provided && Object.keys(provided).length ? { provided } : {}), ...(extra ? { extra } : {}), verified });
     if (!fact.success) return undefined;
     if (same(previous, fact.data)) return false;
     this.facts[id] = fact.data;

@@ -100,6 +100,8 @@ import type { LightroomLocator } from '../src/source-locator';
 import { launchLightroom } from './lightroom/launch';
 import { defaultModules, installMessage, installPlugin, lightroomRunning, pluginStatus } from './lightroom/plugin-install';
 import { lightroomProvider } from './providers/lightroom';
+import { backgroundPreviews } from './provided-photos';
+import type { WantedPreview } from './provided-photos';
 import { registerProvider } from './providers';
 
 const presentationWindows = new PresentationWindows({
@@ -587,7 +589,10 @@ async function openDocument(path: string): Promise<DocumentSession | undefined> 
       // A book that cannot be locked fails without flashing an empty editor.
       if (!previous) reveal();
       loadStarted = true;
-      const book = await loadProject(folder, cache);
+      // Opening a book waits for no previews: those this load wants are fetched once its session has started.
+      const wanted: WantedPreview[] = [];
+      const stopCollecting = backgroundPreviews(await realpath(folder), { wanted: (previews) => wanted.push(...previews), problem: () => undefined });
+      const book = await loadProject(folder, cache).finally(stopCollecting);
       if (editor.isDestroyed()) return;
       if (quitting || preparingQuit) throw new Error('ImageFlow is closing.');
       document = new DocumentSession(editor, book, cache, sessions, release, (next) => {
@@ -632,6 +637,7 @@ async function openDocument(path: string): Promise<DocumentSession | undefined> 
       if (quitting || preparingQuit) throw new Error('ImageFlow is closing.');
       // Start watchers only when the editor can receive and render a revision.
       document.start();
+      document.wantPreviews(wanted);
       const current = document;
       documents.set(webContentsId, document);
       openingEditors.delete(webContentsId);
@@ -1680,16 +1686,14 @@ async function publishLightroom() {
 /**
  * Adds Lightroom Classic photos to a book (ADR 0011): from Send to ImageFlow in Lightroom, or from Import from
  * Lightroom Classic… here. Both end in the same host step as a file import; photos the book holds already are
- * reported, not added again. The editor shows that it is busy while the previews are rendered.
+ * reported, not added again. The previews follow: Lightroom hands them over while the book is already in use.
  */
 async function importLightroomPhotos(document: DocumentSession, { catalog, photos }: SentPhotos) {
   const locators: LightroomLocator[] = photos.map(({ uuid, name }) => ({ provider: 'lightroom', catalog, uuid, ...(name ? { name } : {}) }));
   const count = (total: number) => total + ' photo' + (total === 1 ? '' : 's');
   const result = await document.run(async () => {
     document.notify({ building: true, stage: 'Importing ' + count(photos.length) + '…' });
-    const previews = (done: number, total: number) => document.notify({ building: true,
-      stage: total > 1 ? 'Lightroom previews' : 'Rendering Lightroom preview…', ...(total > 1 ? { done, total } : {}) });
-    try { return await document.importProvided(locators, 'Import from Lightroom Classic', previews); }
+    try { return await document.importProvided(locators, 'Import from Lightroom Classic'); }
     catch (error) { document.notify({ error: errorMessage(error) }); throw error; }
   });
   if ('error' in result) throw new Error(result.error);
@@ -1716,7 +1720,7 @@ async function importFromLightroom(document: DocumentSession) {
   const total = selection.photos.length;
   const answer = await dialog.showMessageBox(document.window, { type: 'question',
     message: 'Import ' + (total === 1 ? 'the photo' : total + ' photos') + ' selected in Lightroom Classic?',
-    detail: 'Lightroom renders a preview of each. Photos the book holds already are not added again.',
+    detail: 'Their previews come from Lightroom. Photos the book holds already are not added again.',
     buttons: ['Import', 'Cancel'], defaultId: 0, cancelId: 1 });
   if (answer.response !== 0 || document.closing) return;
   await importLightroomPhotos(document, selection);
@@ -2319,7 +2323,13 @@ void app.whenReady().then(async () => {
     }
     let next = document.book;
     let message: string | undefined;
-    if (request.action === 'retry') return { summary: activate(await document.reload()) };
+    if (request.action === 'retry') { document.retryPreviews(); return { summary: activate(await document.reload()) }; }
+    if (request.action === 'refresh') {
+      // Offered for photos without a file whose source is reachable now; the previews show as they come.
+      const count = document.refreshPreviews(chosen.filter(({ key }) => document.book.sources?.[key]?.state === 'available').map(({ id }) => id));
+      if (!count) throw new Error('Choose photos whose source is available now.');
+      return { summary: document.summary, message: count === 1 ? 'Refreshing the preview from its source…' : 'Refreshing ' + count + ' previews from their source…' };
+    }
     if (request.action === 'launch') {
       // Offered only where the photo's provider offers it (`SourceProvider.repairs`). Once the plugin connects, the
       // provider's watch reports the photos and the book observes them again: nothing waits here.

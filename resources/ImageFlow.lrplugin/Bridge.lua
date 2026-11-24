@@ -1,8 +1,11 @@
 -- The plugin's side of the loopback bridge to ImageFlow (ADR 0011, section 5). LrHttp can only make requests, so the
 -- plugin is the client: it reads ImageFlow's port and token from a file only this user can read, says hello with the
 -- open catalog, long-polls for jobs and posts their results. When ImageFlow is not running it tries again, waiting
--- longer each time up to 30 s. It also polls the photos ImageFlow watches and posts the ones whose revision moved.
+-- longer each time up to 30 s. It also polls the photos ImageFlow watches and posts the ones whose revision moved, and
+-- posts the ones Lightroom refused a thumbnail for again once the user is in Library, where Lightroom builds previews.
 local LrApplication = import 'LrApplication'
+local LrApplicationView = import 'LrApplicationView'
+local LrDate = import 'LrDate'
 local LrFileUtils = import 'LrFileUtils'
 local LrHttp = import 'LrHttp'
 local LrPathUtils = import 'LrPathUtils'
@@ -20,6 +23,9 @@ local state = {
   wake = false,
   rendering = false,
   watch = {}, watchVersion = 0,
+  -- Photos Lightroom refused a thumbnail for: uuid → how often it was reported since the user came to
+  -- Library, and when it was last refused or reported.
+  refused = {},
 }
 
 -- The version ImageFlow shows and compares; read from Info.lua so there is one place to change it.
@@ -81,6 +87,16 @@ local jobs = {}
 function jobs.metadata(job) return Catalog.metadata(job.photos) end
 function jobs.selection() return Catalog.selection() end
 function jobs.watch(job) Bridge.setWatch(job.uuids); return {} end
+function jobs.thumbnails(job)
+  local result = Catalog.thumbnails(job.photos, job.folder)
+  for _, made in ipairs(result.thumbnails) do state.refused[made.uuid] = nil end
+  for _, uuid in ipairs(result.missing) do state.refused[uuid] = nil end
+  for _, refusal in ipairs(result.refused) do
+    local previous = state.refused[refusal.uuid]
+    state.refused[refusal.uuid] = { tries = previous and previous.tries or 0, at = LrDate.currentTime() }
+  end
+  return result
+end
 function jobs.render(job)
   -- One export session at a time: Lightroom shares its export queue with the user's own exports.
   while state.rendering do LrTasks.sleep(0.2) end
@@ -112,7 +128,7 @@ local function connectOnce(generation)
   }, 10)
   if status ~= 200 or type(hello) ~= 'table' or type(hello.session) ~= 'string' then return false end
   local session = hello.session
-  state.session, state.catalog = session, identity
+  state.session, state.catalog, state.refused = session, identity, {}
   Bridge.setWatch(hello.watch)
   local hold = tonumber(hello.hold) or 25
   while state.generation == generation and state.session == session do
@@ -133,6 +149,37 @@ local function sleepUnlessWoken(seconds, generation)
     waited = waited + 0.5
   end
   state.wake = false
+end
+
+local function inLibrary()
+  local ok, name = LrTasks.pcall(LrApplicationView.getCurrentModuleName)
+  return ok and name == 'library'
+end
+
+-- A photo reported this often is left alone until the user comes back to Library again.
+local reports = 5
+-- Reports the photos Lightroom refused a thumbnail for, so ImageFlow asks for them again: in Library only (in Develop
+-- Lightroom has no preview of a photo being edited), at once on coming back to it and then ever less often.
+local wasLibrary = false
+local function reportRefused()
+  local library = inLibrary()
+  local arrived = library and not wasLibrary
+  wasLibrary = library
+  if not library then return end
+  local uuids, at = {}, LrDate.currentTime()
+  for _, uuid in ipairs(state.watch) do
+    local refusal = state.refused[uuid]
+    if refusal then
+      if arrived then refusal.tries = 0 end
+      -- Then 2, 4, 8 and 16 s later.
+      if arrived or (refusal.tries < reports and at - refusal.at >= 2 ^ refusal.tries) then
+        refusal.at = at
+        refusal.tries = refusal.tries + 1
+        uuids[#uuids + 1] = uuid
+      end
+    end
+  end
+  if #uuids > 0 then post('/lightroom/changes', { uuids = uuids }, 10) end
 end
 
 -- The change poll: every 1.5 s while ImageFlow watches photos, nothing otherwise. A photo is reported only once its
@@ -178,6 +225,7 @@ local function watchLoop(generation)
         -- on the next poll instead of failing on the stale one forever.
         cache = {}
       end
+      LrTasks.pcall(reportRefused)
     end
     -- While a render runs, other tasks wait their turn anyway; poll less often.
     LrTasks.sleep(state.rendering and 4 or 1.5)

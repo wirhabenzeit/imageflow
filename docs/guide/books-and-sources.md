@@ -37,20 +37,22 @@ Linked files refresh after external saves, so a photo you re-export from Lightro
 
 ## Photos from Lightroom Classic
 
-ImageFlow can lay out photos straight from a Lightroom Classic catalog without exporting them first. It shows a 1400-pixel preview that Lightroom renders, and lays the photo out at its full size after Lightroom's crop, so resolution checks stay right. When you edit a photo in Lightroom, its preview in ImageFlow refreshes within a few seconds; a change of title, caption or rating updates what the book shows without rendering again.
+ImageFlow can lay out photos straight from a Lightroom Classic catalog without exporting them first. It shows the preview Lightroom keeps of a photo, and lays the photo out at its full size after Lightroom's crop, so resolution checks stay right. A change of title, caption or rating in Lightroom shows in the book within a few seconds.
 
-**Install the plugin once.** In **Settings → Sources**, choose **Install Plugin** on the Lightroom Classic card. ImageFlow copies its plugin into Lightroom's Modules folder (`~/Library/Application Support/Adobe/Lightroom/Modules`). Quit and reopen Lightroom Classic if it is running. If **File → Plug-in Manager** in Lightroom lists ImageFlow as disabled, enable it there. Settings says when a newer plugin comes with an ImageFlow update; choose **Update Plugin** and reopen Lightroom.
+**When you edit a photo in Lightroom's Develop module,** the book keeps showing it as it was, marked **Out of date**, and updates once you are back in **Library**. PDF export prints the photo as it is now either way, when it can render it from Lightroom. To update the picture without leaving Develop, or whenever a preview does not look right, choose **Refresh from Lightroom Classic** in the asset's menu; Lightroom then renders it. **Assets → Manage Assets…** has a button that refreshes every photo out of date.
+
+**Install the plugin once.** In **Settings → Sources**, choose **Install Plugin** on the Lightroom Classic card. ImageFlow copies its plugin into Lightroom's Modules folder (`~/Library/Application Support/Adobe/Lightroom/Modules`). Quit and reopen Lightroom Classic if it is running. If **File → Plug-in Manager** in Lightroom lists ImageFlow as disabled, enable it there. Settings says when a newer plugin comes with an ImageFlow update; choose **Update Plugin** and reopen Lightroom. Plugin 1.1.0 is the first to hand over Lightroom's own previews; with an older one, Lightroom renders every preview, which takes much longer.
 
 **Add photos**, either way:
 
 - In Lightroom, select photos and choose **File → Plug-in Extras → Send to ImageFlow** (also in **Library → Plug-in Extras**). They go into the book in front in ImageFlow; if no book is open, ImageFlow asks for one.
-- In ImageFlow, choose **Assets → Import Selected from Lightroom Classic…**. It says how many photos are selected in Lightroom and adds them once you confirm. The status bar counts the previews while Lightroom renders them.
+- In ImageFlow, choose **Assets → Import Selected from Lightroom Classic…**. It says how many photos are selected in Lightroom and adds them once you confirm. The photos appear at once, and their previews follow while you work.
 
 Videos are left out. A photo the book holds already is not added again, and **Edit → Undo** removes what an import added. A Lightroom photo takes its title, caption and credit (Lightroom's copyright, else its creator) from Lightroom; whatever you type in the Inspector wins, and **Revert** goes back to Lightroom's. ImageFlow never writes into the catalog.
 
 **When Lightroom is not running**, or another catalog is open, the photos show as **Offline** and are drawn from their last preview. Choose **Open Lightroom Classic** in the asset's menu or at the bottom of **Assets → Manage Assets…**; the photos come back once the plugin connects. A photo removed from the catalog shows as missing.
 
-**Export.** In this version a PDF export uses the previews of Lightroom photos, marks those pages ORIGINAL UNAVAILABLE and asks you to confirm a proof. Full-resolution renders from Lightroom at export time, and **Copy into Book** for these photos, follow in a later version. Until then, export the photos from Lightroom to files and import those for print.
+**Export.** A PDF export has Lightroom render the photos you placed at full size first, and reuses those renders until a photo changes. While Lightroom is not running it uses their previews, marks those pages ORIGINAL UNAVAILABLE and asks you to confirm a proof. **Copy into Book** renders the photos you choose and makes them the book's own files.
 
 The plugin and ImageFlow talk only on this Mac: ImageFlow listens on the loopback address with a key that only your user account can read, and nothing else on the network reaches it.
 

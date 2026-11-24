@@ -72,6 +72,23 @@ export type Materialized =
   | { id: string; state: Unavailable; problem: string };
 export type MaterializeOptions = { staging: string; signal: AbortSignal };
 
+/**
+ * How a preview may be made by a provider that keeps previews of its own besides making them, as Lightroom does. One
+ * that has only one way ignores it.
+ * - `fallback` (the default): the one the provider keeps, made from the photo where it keeps none. For a photo without
+ *   any picture.
+ * - `never`: only the one the provider keeps; without one the photo is `deferred`. For a photo that has an older picture.
+ * - `always`: made from the photo, whatever the provider keeps.
+ */
+export type PreviewRendering = 'fallback' | 'never' | 'always';
+export type PreviewOptions = MaterializeOptions & { rendering?: PreviewRendering };
+/**
+ * A preview, as `Materialized`. `kept` marks one the provider kept rather than made, which the host checks a little
+ * more. A `deferred` photo has no preview now and may have one later: the host keeps the older picture, marked out of
+ * date, and asks again when the provider's `watch` reports the photo.
+ */
+export type Previewed = (Materialized & { kept?: true }) | { id: string; deferred: true };
+
 /** What can be offered to the user for a photo the provider cannot read. Retry is always offered and re-observes. */
 export type Repair = 'locate' | 'locate-folder' | 'launch' | 'sign-in';
 
@@ -85,9 +102,10 @@ export interface SourceProvider<L extends Locator> {
   /**
    * Screen previews (1400 px on the long edge, sRGB) written into `staging`, each with the revisions it was made from.
    * Several at once, like `materialize`, because an import or an edit of many photos asks for many. Left out by a
-   * provider whose photos are files read in place: the host derives the preview from the file.
+   * provider whose photos are files read in place: the host derives the preview from the file. `known` of each
+   * reference is the revisions just observed. Results come in any order, and the provider may work ahead of the host.
    */
-  preview?(book: string, refs: readonly SourceRef<L>[], options: MaterializeOptions): AsyncIterable<Materialized>;
+  preview?(book: string, refs: readonly SourceRef<L>[], options: PreviewOptions): AsyncIterable<Previewed>;
   /** Full-resolution originals written into `staging`. */
   materialize(book: string, refs: readonly SourceRef<L>[], options: MaterializeOptions): AsyncIterable<Materialized>;
   /**

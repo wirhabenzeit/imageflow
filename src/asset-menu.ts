@@ -1,6 +1,6 @@
 import type { BookMenuState, ContextMenuItem, ProjectSummary } from './desktop';
 import { emptyMenuState } from './commands';
-import { sourceEntries, sourceFile, sourceReach } from './source-locations';
+import { sourceEntries, sourceFile, sourceProvider, sourceReach } from './source-locations';
 import type { SourceRepair } from './source-locations';
 import { assetPageLabels, assetUsage, usageLabel } from './asset-usage';
 import type { SourceUsage } from './editing';
@@ -32,6 +32,8 @@ export function assetMenu(summary: ProjectSummary, keys: string[], place = false
     ...(chosen.length === 1 && chosen[0].kind === 'markdown' ? [{ command: 'asset-open' as const, enabled: !missing }] : []),
     // Locate Folder… finds every missing asset in the folder chosen, whatever is selected (F-045).
     // Retry reads them again; it is the one repair for a photo whose app or server is not reachable now.
+    // A Lightroom photo's preview is the one Lightroom keeps: this renders it anew, for one out of date or not quite right.
+    ...(chosen.some((entry) => sourceProvider(entry) === 'lightroom' && summary.sources?.[entry.key]?.state === 'available') ? [{ command: 'asset-refresh' as const }] : []),
     // An app that is not running is opened; its photos come back once it connects (Lightroom Classic, ADR 0011).
     ...(offers('launch') ? [{ command: 'asset-launch' as const }] : []),
     ...(missing && !offers('locate') && !offers('locate-folder') ? [{ command: 'asset-retry' as const }] : []),
@@ -45,4 +47,4 @@ export function assetMenuState(busy: boolean): BookMenuState {
   return { ...emptyMenuState, document: true, writable: true, busy };
 }
 export const assetActions = { 'asset-reveal': 'reveal', 'asset-copy': 'copy', 'asset-remove': 'remove', 'asset-locate': 'locate',
-  'asset-locate-folder': 'locate-folder', 'asset-open': 'open', 'asset-place': 'place', 'asset-retry': 'retry', 'asset-launch': 'launch' } as const;
+  'asset-locate-folder': 'locate-folder', 'asset-open': 'open', 'asset-place': 'place', 'asset-retry': 'retry', 'asset-refresh': 'refresh', 'asset-launch': 'launch' } as const;

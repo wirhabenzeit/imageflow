@@ -1,4 +1,4 @@
--- What the plugin reads from and renders out of the open catalog (ADR 0011, sections 1, 3 and 4). Everything here
+-- What the plugin reads from and renders out of the open catalog (ADR 0011, sections 1 to 4). Everything here
 -- yields (catalog calls, exports), so it runs inside a task and is guarded with LrTasks.pcall by its caller.
 local LrApplication = import 'LrApplication'
 local LrExportSession = import 'LrExportSession'
@@ -193,6 +193,66 @@ function Catalog.render(uuids, size, folder)
     end
   end
   return { renders = renders, missing = missing, failed = failed }
+end
+
+-- The long edge asked for, in pixels: Lightroom answers with the preview level of at least this size it keeps.
+local thumbnailEdge = 1400
+-- How long Lightroom may take for one job's thumbnails; it builds previews it does not have yet.
+local thumbnailTimeout = 60
+
+--- The thumbnails job: the previews Lightroom keeps itself, written into the folder ImageFlow named (ADR 0011, section
+--- 2). Lightroom keys them by the develop settings, so it never hands out one from before an edit: while a photo that
+--- was just edited has none (in Develop) it refuses, and the photo is listed in `refused`. Like renders, each comes with
+--- the photo's revision before it was asked for and after it came.
+function Catalog.thumbnails(items, folder)
+  if type(folder) ~= 'string' or folder:sub(1, 1) ~= '/' or LrFileUtils.exists(folder) ~= 'directory' then error('ImageFlow named no folder for thumbnails.') end
+  local catalog = LrApplication.activeCatalog()
+  local uuids, known = {}, {}
+  for _, item in ipairs(items or {}) do
+    if type(item) == 'table' and type(item.uuid) == 'string' then uuids[#uuids + 1] = item.uuid; known[item.uuid] = item.known end
+  end
+  local found, missing, uuidOf = photosFor(catalog, uuids)
+  local before = Catalog.revisions(found)
+  local data, problems, waiting, closed = {}, {}, 0, false
+  -- A request Lightroom's own collector takes back is never answered, so each is held until the job ends.
+  local requests = {}
+  for index, photo in ipairs(found) do
+    waiting = waiting + 1
+    local answered = false
+    local function answer(jpeg, problem)
+      -- Lightroom may call more than once; the first answer counts.
+      if answered or closed then return end
+      answered = true
+      waiting = waiting - 1
+      if type(jpeg) == 'string' and #jpeg > 0 then data[photo] = jpeg else problems[photo] = tostring(problem or 'Lightroom has no preview.') end
+    end
+    local ok, request = LrTasks.pcall(function() return photo:requestJpegThumbnail(thumbnailEdge, thumbnailEdge, answer) end)
+    if ok then requests[index] = request else answer(nil, request) end
+  end
+  local waited = 0
+  while waiting > 0 and waited < thumbnailTimeout do
+    LrTasks.sleep(0.02)
+    waited = waited + 0.02
+  end
+  closed = true
+  local after = Catalog.revisions(found)
+  local thumbnails, refused = {}, {}
+  for index, photo in ipairs(found) do
+    local uuid, jpeg = uuidOf[photo], data[photo]
+    if jpeg and before[photo] and after[photo] then
+      local path = LrPathUtils.child(folder, 'thumbnail-' .. index .. '.jpg')
+      local file, problem = io.open(path, 'wb')
+      if not file then error('Could not write a thumbnail: ' .. tostring(problem)) end
+      file:write(jpeg)
+      file:close()
+      -- ImageFlow knows the develop settings of the revision it named; they are read only for another one.
+      local hash = known[uuid] ~= after[photo] and Catalog.developHash(photo) or nil
+      thumbnails[#thumbnails + 1] = { uuid = uuid, file = path, before = { revision = before[photo] }, after = { revision = after[photo], developHash = hash } }
+    else
+      refused[#refused + 1] = { uuid = uuid, error = problems[photo] or 'Lightroom did not answer in time.' }
+    end
+  end
+  return { thumbnails = thumbnails, missing = missing, refused = refused }
 end
 
 --- The photos selected in Lightroom, without videos. With nothing selected, Lightroom's target photos are the whole

@@ -17,7 +17,7 @@ import { markdownToHtml } from './markdown';
 import { excerpt, fileName, photosMime, photoMime, sourceList, textMime, words } from './source-items';
 import type { SourceKind, SourceRef, SourcesTab } from './source-items';
 import { SourceManager } from './SourceManager';
-import { photoSourceName, sourceEntries, sourceFile } from './source-locations';
+import { outOfDateNote, photoSourceName, sourceEntries, sourceFile } from './source-locations';
 import { assetPageLabels, assetUsage } from './asset-usage';
 
 function pagesText(list: { pages: string; cover?: true }[] | undefined) {
@@ -142,13 +142,13 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
   function renderItem({ id, title }: typeof items[number]) {
     const placed = usage[tab][id];
     const sourceState = summary.sources?.[(tab === 'photo' ? 'photo:' : 'markdown:') + id];
-    const sourceLabel = sourceState?.state !== 'available' && sourceState?.problem ? (sourceState.cached ? sourceState.state === 'offline' ? 'Cached · Offline' : 'Cached · Missing' : sourceState.state === 'offline' ? 'Offline' : 'Unavailable')
+    const sourceLabel = sourceState?.pending ? 'Loading' : sourceState?.outOfDate ? 'Out of date' : sourceState?.state !== 'available' && sourceState?.problem ? (sourceState.cached ? sourceState.state === 'offline' ? 'Cached · Offline' : 'Cached · Missing' : sourceState.state === 'offline' ? 'Offline' : 'Unavailable')
       : sourceState && sourceFile(sourceState)?.linked && !view.value.showSource ? 'Linked' : undefined;
     const origin = view.value.showSource ? sourceOrigin(sourceState) : undefined;
     const common = {
       'data-id': id, role: 'option', 'aria-selected': selection.selected.includes(id),
       tabIndex: visibleCurrent === id || (!visibleCurrent && id === items[0]?.id) ? 0 : -1,
-      title: title + ' · ' + pagesText(placed) + (sourceLabel ? ' · ' + (sourceState?.problem ?? sourceLabel) : ''),
+      title: title + ' · ' + pagesText(placed) + (sourceLabel ? ' · ' + (sourceState?.outOfDate ? outOfDateNote : sourceState?.problem ?? sourceLabel) : ''),
       onClick: (event: React.MouseEvent) => { selection.choose(id, event); choose({ kind: tab, id }); },
       onContextMenu: (event: React.MouseEvent<HTMLElement>) => { const ids = selection.context(id, event); choose({ kind: tab, id }); void context(ids); },
       onDoubleClick: () => quickLook({ kind: tab, id }),
@@ -163,7 +163,7 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
     if (tab === 'photo') {
       const date = photoDate(summary, id);
       return <div key={id} className="source-item source-photo" style={{ aspectRatio: summary.photoSizes[id] ? summary.photoSizes[id].width / summary.photoSizes[id].height : 1.4 }} {...common}>
-        {summary.photos[id] ? <img src={summary.photos[id]} alt="" loading="lazy" draggable={false} /> : <span className="missing">Missing</span>}
+        {summary.photos[id] ? <img src={summary.photos[id]} alt="" loading="lazy" draggable={false} /> : <span className="missing">{sourceState?.pending ? 'Loading…' : 'Missing'}</span>}
         {origin && <SourceBadge origin={origin} className="source-origin-tile" />}
         {view.value.showTime && date?.captured && <small className="photo-capture-time" title={date.capturedEstimated ? 'Estimated from file modification time' : date.captured}>{captureLabel(date.captured, date.capturedEstimated)}{date.capturedEstimated ? ' ≈' : ''}</small>}
         <span className="source-title">{title}</span>
