@@ -69,6 +69,7 @@ export const commandRegistry = {
   'asset-locate': { label: 'Locate…', enabled: writable },
   'asset-locate-folder': { label: 'Locate Folder…', enabled: writable },
   'asset-retry': { label: 'Retry', enabled: book },
+  'asset-refresh': { label: 'Refresh from Lightroom Classic', enabled: book },
   'asset-launch': { label: 'Open Lightroom Classic', enabled: book },
   'box-replace-photo': { label: 'Replace Photo…', enabled: writable },
   'box-adjust-crop': { label: 'Adjust Crop…', enabled: writable },

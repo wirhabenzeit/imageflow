@@ -1,4 +1,4 @@
-import { photoName, photoSourceName, sourceFile, sourcePath } from './source-locations';
+import { outOfDateNote, photoName, photoSourceName, sourceFile, sourcePath } from './source-locations';
 import { SourceBadge, sourceOrigin } from './SourceBadge';
 import { usageLabel } from './asset-usage';
 import { Fragment, useMemo, useState } from 'react';
@@ -69,13 +69,14 @@ export function SourceInspector({ summary, source, template, render, usage, writ
         <p className="eyebrow">Photo</p>
         <h2>{photoName(summary, source.id)}</h2>
         <p className="muted si-source">{origin && <SourceBadge origin={origin} labelled />}<span title={file?.path}>{photoSourceName(summary, source.id)}</span></p>
-        {summary.sources?.['photo:' + source.id]?.problem && <p className="error-text">{summary.sources['photo:' + source.id].problem}{summary.sources['photo:' + source.id].cached ? ' · Showing cached preview' : ''}</p>}
+        {status?.outOfDate && <p className="muted">{outOfDateNote}</p>}
+        {status?.pending ? <p className="muted">{status.problem}</p> : summary.sources?.['photo:' + source.id]?.problem && <p className="error-text">{summary.sources['photo:' + source.id].problem}{summary.sources['photo:' + source.id].cached ? ' · Showing cached preview' : ''}</p>}
       </div>
       {summary.photos[source.id]
         ? <button type="button" className="si-preview" title="Quick Look (Space)" onClick={quickLook}>
             <img src={renderOrigin + '/render/' + summary.id + '/photo/' + source.id} alt={photo.altText || photo.title || ''} />
           </button>
-        : <p className="error-text">{file ? 'The photo file is missing from photos/.' : 'No preview of this photo is on this Mac.'}</p>}
+        : status?.pending ? null : <p className="error-text">{file ? 'The photo file is missing from photos/.' : 'No preview of this photo is on this Mac.'}</p>}
       {(date || size) && <dl className="si-facts">
         {date && <><dt className={photoDate(summary, source.id)?.capturedEstimated ? 'muted' : undefined}>{date.label}</dt><dd title={date.title} className={photoDate(summary, source.id)?.capturedEstimated ? 'muted' : undefined}>{date.value}</dd></>}
         {size && <><dt>Size</dt><dd>{size.width} × {size.height} px · {(size.width * size.height / 1e6).toFixed(1)} MP</dd></>}

@@ -41,6 +41,13 @@ export type SourceStatus = SourceEntry & { state: SourceState; problem?: string;
    * full-resolution original when the export asked for it, so the page is a proof. Set only in an export's load.
    */
   previewOnly?: boolean;
+  /**
+   * The photo changed in its source, which has no preview of it as it is now (ADR 0011, §2): it is drawn as it was
+   * before, until there is one. Print is not affected: an export prints the photo as it is now.
+   */
+  outOfDate?: boolean;
+  /** The photo has no preview yet, and one is being fetched: it is not a failure. */
+  pending?: boolean;
   /** The photo's aspect ratio changed in its source after it was placed: a crop may frame another part of it. */
   reshaped?: boolean };
 /**
@@ -49,6 +56,8 @@ export type SourceStatus = SourceEntry & { state: SourceState; problem?: string;
  */
 /** What a Book check error for an unavailable original adds after its cause; the export summary strips it again. */
 export const cachedPreviewNote = '. Showing a cached preview; the original is required for print.';
+/** What an out-of-date photo is marked with (`SourceStatus.outOfDate`). */
+export const outOfDateNote = 'Edited in Lightroom Classic since this preview. It updates when you are back in Lightroom’s Library; export prints the photo as it is now.';
 export function printProblem(status: SourceStatus | undefined): string | undefined {
   if (!status) return undefined;
   if (status.state !== 'available' && status.cached) return status.problem ?? 'Original unavailable';

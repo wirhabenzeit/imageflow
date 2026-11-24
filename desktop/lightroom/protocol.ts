@@ -9,7 +9,11 @@ import { isLightroomIdentifier } from '../../src/source-locator';
  * - `metadata { photos: [{ uuid, known? }] }`: one `batchGetRawMetadata` and `batchGetFormattedMetadata` for the photos.
  *   `known` is the revision ImageFlow stored; the plugin hashes `getDevelopSettings()` only for a photo whose revision
  *   differs from it, or that has none (ADR 0011, §3.2). Photos the catalog does not hold are listed in `missing`.
- * - `render { uuids, size: 'preview' | 'full', folder }`: one `LrExportSession` of up to five photos into `folder`,
+ * - `thumbnails { photos: [{ uuid, known? }], folder }` (plugin 1.1.0): the previews Lightroom keeps itself, at least
+ *   1400 px where it has them, as files in `folder`, with each photo's revision before and after. `known` is the revision
+ *   ImageFlow knows the develop settings of, as in `metadata`. A photo Lightroom has no preview of now, such as one being
+ *   edited in Develop, is listed in `refused`; once the user is in Library the plugin posts it as changed.
+ * - `render { uuids, size: 'preview' | 'full', folder }`: one `LrExportSession` of a few photos into `folder`,
  *   each with its revision (and develop hash) read before the session and after its own render (§4.3).
  * - `selection {}`: the photos selected in Lightroom, for Import from Lightroom Classic….
  * - `watch { uuids }`: the photos to poll for changes; the plugin posts `/lightroom/changes` when one moves.
@@ -50,6 +54,15 @@ export const renderResultSchema = z.object({
   failed: z.array(z.object({ uuid: z.string(), error: z.string().max(1000) })).max(100).optional(),
 });
 export type RenderResult = z.infer<typeof renderResultSchema>;
+
+export const thumbnailsResultSchema = z.object({
+  thumbnails: z.array(z.object({ uuid: identifier, file: z.string().min(1).max(4096), before: renderState, after: renderState })).max(1000),
+  missing: z.array(z.string()).max(1000).optional(),
+  refused: z.array(z.object({ uuid: z.string(), error: z.string().max(1000) })).max(1000).optional(),
+});
+export type ThumbnailsResult = z.infer<typeof thumbnailsResultSchema>;
+/** The first plugin version that answers the `thumbnails` job. An older one that is still installed renders instead. */
+export const thumbnailsSince = '1.1.0';
 
 export const selectionResultSchema = z.object({
   catalog: identifier,

@@ -7,7 +7,9 @@ import type { FileSourceEntry, PhotoSourceEntry, SourceEntry } from '../src/sour
 import { isFileLocator } from '../src/source-locator';
 import type { Locator, PhotoLocator } from '../src/source-locator';
 import { providerOf } from './providers';
-import { previewProgress, providedChanges } from './provided-photos';
+import { backgroundPreviews, providedChanges } from './provided-photos';
+import type { ProvidedChanges, WantedPreview } from './provided-photos';
+import { PreviewRequests } from './preview-requests';
 import type { Revisions, SourceProvider, SourceRef } from './source-provider';
 import { assetPageLabels, assetUsage } from '../src/asset-usage';
 import { watchLinkedFiles } from './providers/files';
@@ -17,7 +19,7 @@ import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
-import { mkdtemp, readdir, rm, stat, mkdir, rename, rmdir } from 'node:fs/promises';
+import { mkdtemp, realpath, readdir, rm, stat, mkdir, rename, rmdir } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
 import { channels, desktopScheme, issueText, renderOrigin, renderOrigins } from '../src/desktop';
 import type { AgentLeaseReply, BookMenuState, CanvasLayout, ImportRequest, Issue, ProjectChange, ProjectSummary, Result, TaskProgress } from '../src/desktop';
@@ -283,6 +285,7 @@ export class DocumentSession {
         return next;
       },
     });
+    this.previewSource(book.folder);
     this.guardNavigation(window);
     // Watch from the moment the book was read, so edits made while the editor is still loading are not missed.
     this.watchProject(book);
@@ -368,6 +371,7 @@ export class DocumentSession {
     await AssetFacts.release(this.book.folder).catch(() => {});
     this.projectSession.relocate(folder);
     this.projectSession.book = { ...this.book, folder };
+    this.previewSource(await realpath(folder));
     const next = await loadProject(folder, this.cache);
     this.notify({ value: this.activate(next, true) });
     this.watchProject(next);
@@ -388,6 +392,7 @@ export class DocumentSession {
       let release: ProjectLock | undefined;
       try {
         release = await acquireProjectLock(copied);
+        this.previewSource(await realpath(copied));
         const next = await loadProject(copied, this.cache, false);
         this.stopWatch();
         await shell.trashItem(original);
@@ -398,6 +403,7 @@ export class DocumentSession {
       } catch (error) {
         await AssetFacts.release(copied).catch(() => {});
         if (release) { await release(); await rm(copied, { recursive: true, force: true }); }
+        this.previewSource(this.book.folder);
         this.watchProject(this.book);
         throw error;
       }
@@ -1130,6 +1136,8 @@ export class DocumentSession {
     this.stopUploads?.();
     this.linkedWatch?.stop();
     this.linkedWatch = undefined;
+    this.stopPreviewSource?.();
+    this.previewJob.abort();
     this.exportJob?.abort();
     for (const job of this.checkJobs) job.abort();
     for (const reply of this.agentLeases.values()) reply(false);
@@ -1288,24 +1296,115 @@ export class DocumentSession {
       return [key, marked];
     })) };
   }
-  // A provider reported photos without a file as changed: their facts and previews are brought up to date, and the
-  // book reloads only for what it shows differently.
-  private async providedChanged(provider: SourceProvider<Locator>, refs: SourceRef<Locator>[], facts: AssetFacts) {
-    if (this.closing || !refs.length) return;
+  // --- Previews of photos without a file ---------------------------------------------------------------------------
+  // A load shows the photos that have no preview yet, or an older one, and leaves the previews to this session: they
+  // are fetched after it, and the book loads again as they come (ADR 0011, §2).
+  private readonly previewJob = new AbortController();
+  private stopPreviewSource?: () => void;
+  private readonly previewRequests = new PreviewRequests();
+  private fetchingPreviews = false;
+  /** `folder` is the book's real path, as a load names it. */
+  private previewSource(folder: string) {
+    this.stopPreviewSource?.();
+    this.stopPreviewSource = backgroundPreviews(folder, { wanted: (previews) => this.wantPreviews(previews), problem: (preview) => this.previewRequests.problem(preview) });
+  }
+  /** Previews a load of this book wants; those of the load that opened it are handed in once the session has it. */
+  wantPreviews(previews: readonly WantedPreview[]) {
+    // After the load that wanted them, so the book it loads is the one they are fetched for.
+    if (this.previewRequests.want(previews)) setImmediate(() => void this.fetchPreviews());
+  }
+  private async fetchPreviews() {
+    if (this.fetchingPreviews || this.closing) return;
+    this.fetchingPreviews = true;
     try {
-      const changes = await providedChanges(this.book.folder, provider, refs, facts, { staging: join(this.cache, 'provider-staging'),
-        available: (id) => this.book.sources?.['photo:' + id]?.state === 'available' });
-      if (this.closing) return;
-      if (changes.revised.length) this.projectSession.inputs.invalidate();
-      const usage = changes.reshaped.length ? assetUsage(this.book, assetPageLabels(this.summary)) : undefined;
-      const placed = changes.reshaped.filter((id) => usage?.photo[id]?.length);
-      if (placed.length) {
-        for (const id of placed) this.reshaped.add(id);
-        if (!this.window.isDestroyed()) this.window.webContents.send(channels.appNotice, (placed.length === 1 ? 'A placed photo changed its' : placed.length + ' placed photos changed their') +
-          ' aspect ratio in its source. Check how ' + (placed.length === 1 ? 'it is' : 'they are') + ' cropped.');
+      for (;;) {
+        // An import saves and loads the book before it becomes the open one.
+        while (this.busy && !this.closing) await new Promise((resolve) => setTimeout(resolve, 100));
+        const ids = this.closing ? [] : this.previewRequests.take();
+        if (!ids.length) return;
+        try {
+          const facts = await this.factsOf(this.book);
+          for (const [provider, refs] of this.providedRefs(ids)) await this.providedChanged(provider, refs, facts);
+        } catch (error) { this.previewsFailed(ids, error); }
+        // Those no longer in the book (an import undone meanwhile) are asked for again if they come back.
+        this.previewRequests.finish(ids);
       }
-      if (changes.reload.length) { this.linkedReloadPending = true; void this.reloadLinked(); }
-    } catch (error) { this.notify({ error: error instanceof Error ? error.message : String(error) }); }
+    } finally { this.fetchingPreviews = false; }
+  }
+  // A fetch that failed as a whole: its photos say so instead of loading for ever.
+  private previewsFailed(ids: readonly string[], error: unknown) {
+    const problem = 'Preview unavailable: ' + errorMessage(error);
+    this.previewRequests.finish(ids, () => ({ state: 'unreadable', problem }));
+    this.notify({ error: errorMessage(error) });
+    if (!this.closing && ids.some((id) => this.book.sources?.['photo:' + id]?.pending)) { this.linkedReloadPending = true; void this.reloadLinked(); }
+  }
+  // The photos without a file among `ids`, by their provider.
+  private providedRefs(ids: readonly string[]): Map<SourceProvider<Locator>, SourceRef<Locator>[]> {
+    const wanted = new Set(ids);
+    const groups = new Map<SourceProvider<Locator>, SourceRef<Locator>[]>();
+    for (const entry of sourceEntries(this.book)) {
+      if (entry.kind !== 'photo' || !wanted.has(entry.id) || isFileLocator(entry.locator)) continue;
+      const provider = providerOf(entry.locator);
+      groups.set(provider, [...groups.get(provider) ?? [], { id: entry.id, locator: entry.locator }]);
+    }
+    return groups;
+  }
+  /** Refresh from Lightroom: makes the previews of these photos again from the photos themselves. Runs in the background. */
+  refreshPreviews(ids: readonly string[]) {
+    const groups = this.providedRefs(ids);
+    void (async () => {
+      const facts = await this.factsOf(this.book);
+      for (const [provider, refs] of groups) await this.providedChanged(provider, refs, facts, true);
+    })().catch((error) => this.notify({ error: errorMessage(error) }));
+    return [...groups.values()].reduce((sum, refs) => sum + refs.length, 0);
+  }
+  /** Retry asks again for previews that failed before. */
+  retryPreviews() { this.previewRequests.clear(); }
+
+  // Reloads as previews come: soon for the first ones, then less often, since each reload renders the book again. Not
+  // while a text is being edited, which a reload would end.
+  private static previewReloadMs = [1500, 5000, 10_000];
+  // A provider reported photos without a file as changed, or a load wants their previews: their facts and previews are
+  // brought up to date, and the book reloads only for what it shows differently. `again` makes every preview anew.
+  private async providedChanged(provider: SourceProvider<Locator>, refs: SourceRef<Locator>[], facts: AssetFacts, again = false) {
+    if (this.closing || !refs.length) return;
+    const ids = refs.map(({ id }) => id);
+    const noticed = new Set<string>();
+    let reloads = 0, last = Date.now();
+    try {
+      const status = (id: string) => this.book.sources?.['photo:' + id];
+      const changes = await providedChanges(this.book.folder, provider, refs, facts, { staging: join(this.cache, 'provider-staging'), signal: this.previewJob.signal, again,
+        available: (id) => status(id)?.state === 'available',
+        shown: (id) => ({ available: status(id)?.state === 'available', outOfDate: !!status(id)?.outOfDate, pending: !!status(id)?.pending }),
+        progress: (id, changed, done, total) => {
+          this.previewRequests.settled(id, changed.problems?.get(id));
+          if (!changed.reload.length || done === total || this.closing || this.menuState?.textEditing || this.menuState?.activeEditor) return;
+          const steps = DocumentSession.previewReloadMs;
+          if (Date.now() - last < steps[Math.min(reloads, steps.length - 1)]) return;
+          reloads++; last = Date.now();
+          this.showProvided(changed, noticed);
+        } });
+      // Photos the provider answered for without a preview being asked for: offline now, say.
+      this.previewRequests.finish(ids, (id) => changes.problems?.get(id));
+      if (this.closing) return;
+      this.showProvided(changes, noticed);
+      if (again && changes.problems?.size && !this.window.isDestroyed()) {
+        const [{ problem }] = changes.problems.values();
+        this.window.webContents.send(channels.appNotice, (changes.problems.size === 1 ? 'One preview could not be refreshed. ' : changes.problems.size + ' previews could not be refreshed. ') + problem);
+      }
+    } catch (error) { this.previewsFailed(ids, error); }
+  }
+  // `noticed`: the photos a notice of this refresh named already, as it shows what has come so far.
+  private showProvided(changes: ProvidedChanges, noticed: Set<string>) {
+    if (changes.revised.length) this.projectSession.inputs.invalidate();
+    const usage = changes.reshaped.length ? assetUsage(this.book, assetPageLabels(this.summary)) : undefined;
+    const placed = changes.reshaped.filter((id) => usage?.photo[id]?.length && !noticed.has(id));
+    if (placed.length) {
+      for (const id of placed) { this.reshaped.add(id); noticed.add(id); }
+      if (!this.window.isDestroyed()) this.window.webContents.send(channels.appNotice, (placed.length === 1 ? 'A placed photo changed its' : placed.length + ' placed photos changed their') +
+        ' aspect ratio in its source. Check how ' + (placed.length === 1 ? 'it is' : 'they are') + ' cropped.');
+    }
+    if (changes.reload.length) { this.linkedReloadPending = true; void this.reloadLinked(); }
   }
   // A pending refresh is consumed after a save/export; it must not invent additional source changes.
   private async reloadLinked() {
@@ -1457,17 +1556,12 @@ export class DocumentSession {
 
   /**
    * Imports photos that are not files, by their locators (Lightroom Classic, ADR 0011), as one undoable step. Photos
-   * the book holds already are counted, not added again. The book's facts and previews of the new photos are read
-   * while it loads again.
+   * the book holds already are counted, not added again. The new photos show at once; their previews follow as their
+   * provider hands them over.
    */
-  async importProvided(locators: readonly PhotoLocator[], label: string, previews?: (done: number, total: number) => void) {
+  async importProvided(locators: readonly PhotoLocator[], label: string) {
     const book = this.book;
-    const run = () => importProvidedPhotos(book, locators, { checkpoint: { origin: 'app', label } });
-    // What the import starts while it loads (the provider's watch, later refreshes) inherits this context: the callback
-    // goes quiet once the import is done, so a later refresh never reports as this import.
-    let active = true;
-    const report = previews && ((done: number, total: number) => { if (active) previews(done, total); });
-    const { book: next, imported, counts } = await (report ? previewProgress.run(report, run) : run()).finally(() => { active = false; });
+    const { book: next, imported, counts } = await importProvidedPhotos(book, locators, { checkpoint: { origin: 'app', label } });
     if (next === book) return { summary: this.summary, imported, counts };
     this.projectSession.adoptExternal(book);
     this.projectSession.record(next, label, true, false);
