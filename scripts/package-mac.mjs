@@ -79,8 +79,9 @@ async function packageApp() {
           LSItemContentTypes: ['ch.wirhabenzeit.imageflow.template'], CFBundleTypeIconFile: 'ImageFlowTemplate.icns',
         }],
       },
-      // Agents run the MCP bridge with ImageFlow's executable in Node mode; keep it a plain file outside app.asar.
-      asar: { unpackDir: 'node_modules/@img', unpack: '**/{mcp-bridge.cjs,mac-header.node,cloudkit.node}' },
+      // Agents run the MCP bridge with ImageFlow's executable in Node mode; keep it a plain file outside app.asar. The
+      // skills it serves stay outside too: a bridge that outlives an update would read the new archive with its old index.
+      asar: { unpackDir: '{node_modules/@img,skills}', unpack: '**/{mcp-bridge.cjs,mac-header.node,cloudkit.node}' },
       // Document icons and the compiled Icon Composer app icon; the classic app icon comes from `icon` below.
       // Sources and generator: resources/brand/, npm run build:icons.
       // The Lightroom Classic plugin goes to Contents/Resources/ImageFlow.lrplugin, which Settings installs from (ADR 0011).
