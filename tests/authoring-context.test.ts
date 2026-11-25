@@ -937,6 +937,9 @@ test('check replies count the book-wide render lists and list only the addressed
   assert.deepEqual(previewed.anchors, [render.anchors[1]]);
   const drafted = compactRender(render, { draft: { affectedSpreads: ['one'] } }, { inspect: { spread: '$new' } });
   assert.deepEqual(drafted.units, [render.units[0]]);
+  const everywhere = compactRender(render, { draft: { affectedSpreads: ['one', 'two'] } }, {});
+  assert.equal('units' in everywhere || 'flow' in everywhere || 'anchors' in everywhere, false, 'a document setting lists no spreads');
+  assert.deepEqual(compactRender(render, { image: { spread: 'two' }, draft: { affectedSpreads: ['one', 'two'] } }, {}).units, [render.units[1]]);
   const included = compactRender(render, { image: { spread: 'two' } }, { include: ['anchors'] });
   assert.deepEqual(included.anchors, render.anchors);
   assert.deepEqual(included.units, [render.units[1]]);

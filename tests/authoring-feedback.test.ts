@@ -19,6 +19,16 @@ test('contact sheets stay bounded for all grid sizes, narrow pages and minimum r
   }
 });
 
+test('a single page on a contact sheet is drawn at the spreads\u2019 scale and leaves no row half empty (API-012)', () => {
+  const page = { widthMm: 290, heightMm: 381 }, spread = { widthMm: 580, heightMm: 381 };
+  const grid = contactSheetLayout([page, ...Array(11).fill(spread)], 1600, 3);
+  const [first, second] = grid.cells;
+  assert.ok(second.width > 500, 'spreads use the width of their column: ' + second.width);
+  assert.equal(first.height, second.height);
+  assert.ok(Math.abs(first.width * 2 - second.width) <= 1);
+  assert.ok(grid.cells.every((cell) => cell.label.y - cell.y - cell.height <= 1), 'every cell fills the height of its row');
+});
+
 test('feedback contracts bound targets and require drafts for aliases everywhere', () => {
   const project = 'handle', expectedRevision = 'a'.repeat(64);
   assert.throws(() => parsePreviewRequest({ target: { spreads: Array(13).fill('one') } }));

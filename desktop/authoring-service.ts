@@ -66,8 +66,11 @@ type RenderList = 'units' | 'flow' | 'anchors';
 export function compactRender(render: NonNullable<AuthoringCheckResult['render']>, report: { image?: unknown; draft?: { affectedSpreads?: string[] } | { applied: boolean } }, args: { include?: RenderList[]; inspect?: { spread?: string } }) {
   const { template: _template, errors: _errors, warnings: _warnings, units, flow, anchors, ...rest } = render;
   const image = report.image as { spread?: string; cells?: { spread: string }[] } | undefined;
+  // A document setting affects every spread: that addresses none of them (API-005).
+  const affected = report.draft && 'affectedSpreads' in report.draft ? report.draft.affectedSpreads : undefined;
+  const everywhere = !!affected && affected.length > 1 && units.every(({ spread }) => !spread || affected.includes(spread));
   const addressed = new Set([image?.spread, ...image?.cells?.map(({ spread }) => spread) ?? [], args.inspect?.spread,
-    ...(report.draft && 'affectedSpreads' in report.draft ? report.draft.affectedSpreads ?? [] : [])].filter((id): id is string => !!id && !id.startsWith('$')));
+    ...(affected && !everywhere ? affected : [])].filter((id): id is string => !!id && !id.startsWith('$')));
   const include = new Set(args.include ?? []);
   const listed = (list: RenderList) => include.has(list) || addressed.size > 0;
   const flowSpread = (key: string) => key.split(':', 1)[0];
