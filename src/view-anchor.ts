@@ -1,8 +1,11 @@
 import type { BookGeometry, Rect } from './desktop';
 
 type Sheet = BookGeometry['sheets'][number];
-export type ViewAnchor = { spread: string; page?: number; x: number; y: number; viewportX: number; viewportY: number };
-// The anchor is a position within a sheet, rather than a pixel scroll offset. It survives resizing and reflow.
+export type ViewAnchor = { spread: string; page?: number; x: number; y: number; viewportX: number; viewportY: number;
+  /** The pointer's place in the viewport, in pixels, for an anchor taken at one. */
+  pointer?: { x: number; y: number } };
+// The anchor is a position within a sheet, rather than a pixel scroll offset. It survives resizing and reflow. One taken at
+// the pointer stays under it: zooming in may add a scrollbar, and the viewport it then is a part of is smaller.
 export function captureViewAnchor(sheets: Sheet[], viewport: Rect, selected?: string, pages: Record<string, number> = {}, point?: { x: number; y: number }): ViewAnchor | undefined {
   const center = point ?? { x: viewport.x + viewport.width / 2, y: viewport.y + viewport.height / 2 };
   const containsCenter = (sheet: Sheet) => center.x >= sheet.x && center.x <= sheet.x + sheet.width && center.y >= sheet.y && center.y <= sheet.y + sheet.height;
@@ -14,12 +17,13 @@ export function captureViewAnchor(sheets: Sheet[], viewport: Rect, selected?: st
   const x = point?.x ?? Math.max(sheet.x, Math.min(sheet.x + sheet.width, center.x));
   const y = point?.y ?? Math.max(sheet.y, Math.min(sheet.y + sheet.height, center.y));
   return { spread: sheet.spread, page: pages[sheet.spread], x: (x - sheet.x) / sheet.width, y: (y - sheet.y) / sheet.height,
-    viewportX: (x - viewport.x) / viewport.width, viewportY: (y - viewport.y) / viewport.height };
+    viewportX: (x - viewport.x) / viewport.width, viewportY: (y - viewport.y) / viewport.height,
+    ...(point ? { pointer: { x: point.x - viewport.x, y: point.y - viewport.y } } : {}) };
 }
 export function restoreViewAnchor(anchor: ViewAnchor, sheets: Sheet[], size: { width: number; height: number }, pages: Record<string, number[]> = {}) {
   const sheet = sheets.find(({ spread }) => spread === anchor.spread) ?? sheets.find(({ spread }) => anchor.page !== undefined && pages[spread]?.includes(anchor.page));
-  return sheet && { left: sheet.x + sheet.width * anchor.x - size.width * anchor.viewportX,
-    top: sheet.y + sheet.height * anchor.y - size.height * anchor.viewportY };
+  return sheet && { left: sheet.x + sheet.width * anchor.x - (anchor.pointer?.x ?? size.width * anchor.viewportX),
+    top: sheet.y + sheet.height * anchor.y - (anchor.pointer?.y ?? size.height * anchor.viewportY) };
 }
 
 /** The renderer lays out at Fit. Scale its measured rectangles for canvas overlays and hit testing. */
