@@ -1,5 +1,6 @@
 import { createContext, Fragment, useContext, useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
+import { FittingChoice } from './choice';
 import { compactParameter } from './compact-controls';
 import { controlLayout } from './controls';
 import type { ControlItem, ControlNode } from './controls';
@@ -194,17 +195,16 @@ export function ParamControl({ param, value, draft, setDraft, apply, autoFocus =
       onChange={(event) => apply(event.target.checked)} /> {param.label}</label>;
   }
   if (param.type === 'enum') {
-    if (param.options.length > 4) {
-      return <select aria-label={param.label} value={String(shown)} data-autofocus={focusMark} onChange={(event) => apply(event.target.value)}>
+    const menu = <select aria-label={param.label} value={String(shown)} data-autofocus={focusMark} onChange={(event) => apply(event.target.value)}>
         {param.options.map((option) => <option key={option} value={option}>{param.labels?.[option] ?? option}</option>)}
-      </select>;
-    }
-    return <div className="pc-segmented" role="radiogroup" aria-label={param.label}>
+    </select>;
+    if (param.options.length > 4) return menu;
+    return <FittingChoice labels={param.options.map((option) => param.labels?.[option] ?? option).join('\n')} menu={menu} row={<div className="pc-segmented" role="radiogroup" aria-label={param.label}>
       {param.options.map((option, i) => <button key={option} type="button" role="radio" aria-checked={shown === option}
         data-autofocus={(autoFocus && (shown === option || (!param.options.includes(String(shown)) && i === 0))) || undefined}
         title={param.labels?.[option] ?? option} aria-label={param.labels?.[option] ?? option}
         onClick={() => apply(option)}>{compact && /^\d+$/.test(option) ? option : param.labels?.[option] ?? option}</button>)}
-    </div>;
+    </div>} />;
   }
   if (param.type === 'file') return <FileControl param={param} value={String(shown)} apply={apply} autoFocus={autoFocus} />;
   if (param.type === 'date') {

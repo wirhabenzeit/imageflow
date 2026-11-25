@@ -33,11 +33,11 @@ body { margin: 0; }
 .welcome { text-align: center; padding: 24px; }
 .welcome h2 { font: 400 36px/1.1 Georgia, serif; letter-spacing: -.04em; margin: 12px 0; }
 .welcome p { color: var(--muted); margin: 0 0 18px; }
-.inspector { min-height: 0; overflow: auto; border-left: 1px solid var(--edge); padding: 14px; }
+.inspector { min-height: 0; overflow: hidden auto; border-left: 1px solid var(--edge); padding: 14px; }
 .inspector fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .inspector details { padding: 9px 0; border-top: 1px solid var(--edge); }
 .inspector summary { cursor: default; font-weight: 500; overflow-wrap: anywhere; }
-:is(.inspector, .document-settings) .field { margin: 8px 0; display: grid; gap: 3px; font-size: 12px; }
+:is(.inspector, .document-settings) .field { margin: 8px 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; font-size: 12px; }
 :is(.inspector, .document-settings) .checkbox { display: flex; align-items: center; }
 
 .inspector p { font-size: 12px; margin: 6px 0; overflow-wrap: anywhere; }
@@ -378,6 +378,8 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .studio .pc-row input.pc-number { width: 64px; flex: none; }
 .pc-unit { font-size: 12px; color: var(--muted); }
 .pc-row input[type="color"] { width: 40px; height: 28px; padding: 0 2px; border: 1px solid var(--control-border); border-radius: 5px; background: var(--field-surface); }
+/* A row too wide for its place is measured and becomes a menu (FittingChoice); it never widens the panel. */
+.pc-choice { min-width: 0; }
 .pc-segmented { display: flex; padding: 2px; gap: 2px; border-radius: 6px; background: var(--segment-surface); }
 .studio .pc-segmented button { flex: 1; min-height: 24px; padding: 2px 6px; border: 0; border-radius: 4px; background: transparent;
   font-size: 12px; font-weight: 550; color: var(--text); white-space: nowrap; }
