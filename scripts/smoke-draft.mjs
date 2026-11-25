@@ -65,8 +65,16 @@ try {
     assert.ok(expected(await read()));
   }
   async function dropFile(file, selector) {
-    const bounds = await preview().locator('[data-spread="arriving"] ' + selector).boundingBox();
-    assert.ok(bounds);
+    // Choosing a spread scrolls the canvas to it for more than half a second: the drop goes where the box comes to rest.
+    const box = preview().locator('[data-spread="arriving"] ' + selector);
+    let bounds, still = 0;
+    for (const end = Date.now() + 10_000; still < 4;) {
+      assert.ok(Date.now() < end, 'The canvas stops scrolling');
+      const now = await box.boundingBox();
+      still = now && bounds && now.x === bounds.x && now.y === bounds.y ? still + 1 : 0;
+      bounds = now;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     await window.evaluate(() => {
       if (document.querySelector('#fixture-file')) return;
       const input = document.createElement('input');
