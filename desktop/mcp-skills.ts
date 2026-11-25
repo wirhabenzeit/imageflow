@@ -4,6 +4,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { existsSync } from 'node:fs';
 
 const report = (message: string) => console.error('ImageFlow skills: ' + message);
+const reason = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 /** The agent skills in `folder`, served with MCP's Skills extension. Clients verify each file against the hashes in
  * the skill's listing. An app update replaces the files while an older bridge keeps running, so call `reload` after a
@@ -15,15 +16,16 @@ export async function bridgeSkills(folder: string) {
   let reloading: Promise<void> | undefined;
   // A reload under way also covers the warnings it raises itself, so a lasting problem cannot repeat it forever.
   const reload = () => reloading ??= catalog!.reload()
-    .then(() => {}, (error: Error) => report(error.message))
+    .then(() => {}, (error: unknown) => report(reason(error)))
     .finally(() => { reloading = undefined; });
   try {
     catalog = await loadSkills(folder, { onWarning: ({ path, message }) => {
       report(path + ': ' + message);
-      if (catalog) void reload();
+      // A change notice that could not be sent says nothing about the files.
+      if (catalog && path !== 'resources/list_changed') void reload();
     } });
   } catch (error) {
-    report((error as Error).message);
+    report(reason(error));
     return undefined;
   }
   return { attach: (server: McpServer) => catalog.attach(server), reload };
