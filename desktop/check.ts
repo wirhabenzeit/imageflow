@@ -53,7 +53,7 @@ function loadingPreviews(book: OpenProject): AuthoringDiagnostic[] {
   return [{ code: 'photo-preview-loading', stage: 'render', severity: 'warning',
     message: photos.length === 1 ? 'The preview of a placed photo is still loading. It is drawn as an empty frame of its size.'
       : 'The previews of ' + photos.length + ' placed photos are still loading. They are drawn as empty frames of their size.',
-    details: { photos: photos.length }, suggestion: 'Layout and resolution are checked. To see the pictures, check again once ImageFlow has loaded them.' }];
+    details: { photos: photos.length }, suggestion: 'The layout is checked, the resolution of these photos is not. Check again once ImageFlow has loaded them.' }];
 }
 
 /** Read-only authoring check. The app supplies a private, temporary render session.

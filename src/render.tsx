@@ -48,6 +48,8 @@ import { textEditorOwner } from './inline-text';
 import { inlineTextFrame } from './inline-text-frame';
 import { readEdit } from './editing';
 import { artworkTarget, parsePreviewRequest, PreviewError } from './preview';
+import { countResolution, newResolution } from './photo-resolution';
+import type { PhotoResolution } from './photo-resolution';
 import { previewAspectMismatch, trimAspect } from './template-preview';
 import type { PreviewFileReport } from './template-preview';
 import type { CoverPreviewMetadata, PreviewMetadata, PagePreviewMetadata, PickerPreviewMetadata } from './preview';
@@ -126,7 +128,7 @@ function rectsOf(boxes: Map<string, HTMLElement>, key: string) {
 }
 
 function validateSpread(container: HTMLElement, spread: SpreadState, template: Template, format: ResolvedFormat, where: string,
-  warnings: Issue[], errors: Issue[]) {
+  warnings: Issue[], errors: Issue[], photos?: { pending: (id: string) => boolean; resolution: PhotoResolution }) {
   const sheet = container.firstElementChild;
   if (!(sheet instanceof HTMLElement) || !sheet.matches('.if-sheet') || container.childElementCount !== 1) {
     throw new Error('Spread ' + spread.id + ' must render one <Spread> at its root.');
@@ -242,7 +244,8 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
       if (!box.clientWidth || !box.clientHeight) throw new SpreadError(where + ' · ' + name + ' has no area.', spread.id, { page });
       boxes.set(page ? page + ':' + id : id, box);
       const assignment = scopeState(spread, page)?.boxes[id];
-      if (assignment?.photo && box.hasAttribute('data-empty')) {
+      // One whose preview is still loading is not missing: its picture comes.
+      if (assignment?.photo && box.hasAttribute('data-empty') && !photos?.pending(assignment.photo)) {
         errors.push(issue(layout.boxes[id].label + ' is missing photo ' + assignment.photo + '.', {
           code: 'photo-missing', box: id, ...at, source: assignment.photo, sourceKind: 'photo',
           suggestion: 'Restore the original file, import it again with import_sources, or assign another photo to box ' + id + '.',
@@ -250,6 +253,8 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
       }
       const finding = photoResolutionIssue(box, resolution?.minimum, mmPerPixel, layout.boxes[id].label, assignment?.photo);
       if (finding) errors.push(issue(finding.message, { ...finding, box: id, ...at }));
+      if (assignment?.photo && photos) countResolution(photos.resolution, box.dataset.ppi === undefined ? undefined : Number(box.dataset.ppi),
+        { spread: spread.id, ...at, box: id, source: assignment.photo });
     }
     const rect = box.getBoundingClientRect();
     const overshoot = {
@@ -2028,6 +2033,7 @@ async function renderPhysicalCover(root: HTMLElement, book: RenderProject, templ
   const sheet = root.firstElementChild as HTMLElement;
   const bounds = sheet.getBoundingClientRect();
   const mmPerPixel = geometry.sheet.width / bounds.width;
+  const photoResolution = newResolution(geometry.output.resolution?.minimum);
   const files = (parameters: Parameters, values: Values) => fileErrors(book, parameters, values, 'Cover')
     .map((found) => ({ ...found, cover: true as const, where: 'Cover' }));
   if (layout && state) {
@@ -2055,11 +2061,12 @@ async function renderPhysicalCover(root: HTMLElement, book: RenderProject, templ
         ...issue(cachedPreviewText(unavailable), 'source-unavailable', id), source: box.photo, sourceKind: 'photo', state: status?.state, problem: unavailable,
         ...(status?.away ? { away: status.away } : {}), suggestion: unavailableSuggestion(status),
       });
-      if (box?.photo && !photo) errors.push({ ...issue(declared.label + ' uses an unavailable photo.', 'photo-missing', id), source: box.photo, sourceKind: 'photo' });
+      if (box?.photo && !photo && !status?.pending) errors.push({ ...issue(declared.label + ' uses an unavailable photo.', 'photo-missing', id), source: box.photo, sourceKind: 'photo' });
       else if (!box?.photo) warnings.push(issue(declared.label + ' is empty.', 'cover-box-empty', id));
       if (node) {
         const finding = photoResolutionIssue(node, geometry.output.resolution?.minimum, mmPerPixel, declared.label, box?.photo);
         if (finding) errors.push({ ...finding, cover: true, where: 'Cover', box: id });
+        if (box?.photo) countResolution(photoResolution, node.dataset.ppi === undefined ? undefined : Number(node.dataset.ppi), { cover: true, box: id, source: box.photo });
       }
       errors.push(...files(declared.parameters, box?.params ?? {}).map((finding) => ({ ...finding, box: id })));
     }
@@ -2114,7 +2121,7 @@ async function renderPhysicalCover(root: HTMLElement, book: RenderProject, templ
       nextOffset: inspect.offset + items.length < nodes.length ? inspect.offset + items.length : null };
   }
   if (artwork) coverArtworkPreview(root, sheet, cover, artwork, query);
-  publish({ state: 'ready', template: info, pages: interiorPages, units: [], errors, warnings, flow: {}, anchors: [], cover,
+  publish({ state: 'ready', template: info, pages: interiorPages, units: [], errors, warnings, flow: {}, anchors: [], cover, photoResolution,
     ...(inspection ? { inspection } : {}) });
 }
 
@@ -2354,6 +2361,7 @@ export async function startRender(root: HTMLElement) {
     // The template's own preview image is checked where the whole book is: the editor's book view, Book check and export.
     if (declared.data.preview && (!edit || view === 'book')) warnings.push(...await templatePreviewWarnings(declared.data.preview, chooseFormat(declared.data).format));
     // A book without spreads is valid while it is being started, but there is nothing to print yet.
+    const photos = { pending: (id: string) => !!book.sources?.['photo:' + id]?.pending, resolution: newResolution(template.format.output.resolution?.minimum) };
     const errors: Issue[] = spreads.length ? sequence.issues.map((text) => ({ ...message(text), code: 'page-sequence',
       suggestion: 'Insert, remove or move spreads, or switch layouts, so the page sequence fits the format.' })) : [{
       ...message('The book has no spreads yet.'), code: 'book-empty', suggestion: 'Add a spread with insert_spread, or with Add Spread in the editor.' }];
@@ -2466,7 +2474,7 @@ export async function startRender(root: HTMLElement) {
     step('findings');
     const containers = root.querySelectorAll<HTMLElement>('.if-spread-container');
     const layouts = new Map(visible.map(({ spread, i }, n) => {
-      try { return [spread.id, validateSpread(containers[n], spread, template, format, where[i], warnings, errors)] as const; }
+      try { return [spread.id, validateSpread(containers[n], spread, template, format, where[i], warnings, errors, photos)] as const; }
       catch (error) {
         if (edit) throw error;
         layoutFailures.set(spread.id, failure(error));
@@ -2651,7 +2659,7 @@ export async function startRender(root: HTMLElement) {
     step('output');
     publish({
       state: 'ready', template: info, pages: sequence.count, units, errors, warnings: withoutReported(warnings, errors),
-      flow: Object.fromEntries(Object.entries(positions).map(([key, { meta: _meta, ...position }]) => [key, position])), anchors: index.anchors,
+      flow: Object.fromEntries(Object.entries(positions).map(([key, { meta: _meta, ...position }]) => [key, position])), anchors: index.anchors, photoResolution: photos.resolution,
       ...(inspection ? { inspection } : {}),
     });
     // Then the pictures of the other spreads, out of sight (activeSpreads above).

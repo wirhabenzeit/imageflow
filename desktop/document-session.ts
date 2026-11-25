@@ -12,6 +12,7 @@ import { providerOf } from './providers';
 import { backgroundPreviews, providedChanges } from './provided-photos';
 import type { ProvidedChanges, WantedPreview } from './provided-photos';
 import { leftoverFiles } from './leftover-files';
+import { mergeResolution } from '../src/photo-resolution';
 import { PreviewFetches, PreviewRequests } from './preview-requests';
 import type { Revisions, SourceProvider, SourceRef } from './source-provider';
 import { assetPageLabels, assetUsage } from '../src/asset-usage';
@@ -1845,7 +1846,8 @@ export class DocumentSession {
           const coverImage = coverPreview ? await captureBookPreview(url, coverPreview, signal, coverInspect, arm) : undefined;
           const checked = coverImage?.status ?? (coverInspect ? await checkBookRender(url, signal, coverInspect, arm) : await checkCoverRender(url, signal, arm));
           return { status: interior ? { ...interior, cover: checked.cover, errors: [...interior.errors, ...checked.errors],
-            warnings: withoutReported([...interior.warnings, ...checked.warnings], checked.errors), inspection: checked.inspection ?? interior.inspection } : checked,
+            warnings: withoutReported([...interior.warnings, ...checked.warnings], checked.errors), inspection: checked.inspection ?? interior.inspection,
+            photoResolution: mergeResolution(interior.photoResolution, checked.photoResolution) } : checked,
             preview: coverImage ?? interiorImage };
         } finally {
           this.renders.delete(id);
