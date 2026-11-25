@@ -40,3 +40,16 @@ test('pinch retains the point under the pointer instead of the viewport centre',
   assert.ok(Math.abs(restored.left - 100) < 1e-8);
   assert.ok(Math.abs(restored.top - 300) < 1e-8);
 });
+
+test('an anchor taken at the pointer stays under it when a scrollbar makes the viewport smaller', () => {
+  const sheet = (zoom: number) => [{ spread: 'a', x: 0, y: 100 * zoom, width: 400 * zoom, height: 200 * zoom }] as never;
+  const viewport = { x: 0, y: 50, width: 489, height: 394 };
+  const pointer = captureViewAnchor(sheet(1), viewport, undefined, {}, { x: 277, y: 174 })!;
+  const position = restoreViewAnchor(pointer, sheet(2), { width: 489, height: 379 })!;
+  // The point of the sheet that was under the pointer, 277 and 124 px into the viewport, still is.
+  assert.deepEqual([277 * 2 - position.left, 100 * 2 + 74 * 2 - position.top], [277, 124]);
+  // Without a pointer it keeps its share of the viewport, as when a panel is resized.
+  const centre = captureViewAnchor(sheet(1), viewport)!;
+  assert.equal(centre.pointer, undefined);
+  assert.equal(restoreViewAnchor(centre, sheet(1), { width: 489, height: 200 })!.top - restoreViewAnchor(centre, sheet(1), { width: 489, height: 394 })!.top, 97);
+});

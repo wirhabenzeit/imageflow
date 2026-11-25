@@ -97,7 +97,8 @@ export default defineTemplate({ id: 'page-smoke', version: '1', contract: 1,
   await inspector.getByRole('radio', { name: 'Text', exact: true }).waitFor();
   assert.equal(await inspector.getByRole('radio', { name: 'Text', exact: true }).getAttribute('aria-checked'), 'true');
   await inspector.getByRole('radiogroup', { name: 'Layout', exact: true }).waitFor();
-  assert.equal(await inspector.getByRole('radio').evaluateAll(nodes => nodes.some(node => node.hasAttribute('title'))), false);
+  // Names may be cut off in their tiles: each shows in full on hover (UI-001).
+  assert.ok(await inspector.getByRole('radio').evaluateAll(nodes => nodes.every(node => node.title && node.title.startsWith(node.getAttribute('aria-label') ?? node.querySelector('.layout-option-name').textContent))));
   assert.equal(await inspector.locator('.layout-option-variants svg').first().getAttribute('width'), '16');
   const previewSelector = 'iframe[title="Layout previews"][data-current][data-ready]';
   await inspector.locator(previewSelector).waitFor({ state: 'attached' });

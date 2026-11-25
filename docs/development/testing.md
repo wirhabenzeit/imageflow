@@ -2,7 +2,8 @@
 
 ```sh
 npm run test:unit       # unit tests
-npm run test:desktop    # build, unit tests and desktop suite
+npm run test:desktop    # build, full unit tests and desktop suite
+npm run test:desktop:suite # every smoke script, of an existing build
 npm run test:desktop -- --visible  # include native desktop checks (CI or VM)
 npm run test:packaged   # package and test the app
 ```
@@ -71,7 +72,7 @@ GitHub Actions runs:
 
 Keep these two lean: a new smoke script or a slow test suite goes into `npm run test:desktop`, not into the PR checks, unless it guards something a PR is likely to break.
 
-The **Full desktop suite** workflow runs the complete desktop suite nightly on `main` (02:30 UTC), with the full unit tests (`--full`) and every smoke script, among them `smoke-sync-auto`, `smoke-sync-settings` and `smoke-library`, so a breakage shows up the day after the merge that caused it; start it from Actions to check a branch or release candidate. Each smoke script has a time limit (`SMOKE_TIMEOUT_MINUTES`, default 6), and the run reports every failing script at the end. The release workflow runs packaged-app checks. Review UI appearance and animation manually.
+The **Full desktop suite** workflow runs the complete desktop suite nightly on `main` (02:30 UTC), in jobs that run side by side: the full unit tests (`--full --without-stores`), the sync scenarios against each other store (`--full --store=…`), and every smoke script in two halves (`SMOKE_SHARD`), among them `smoke-sync-auto`, `smoke-sync-settings` and `smoke-library`, so a breakage shows up the day after the merge that caused it; start it from Actions to check a branch or release candidate. Each smoke script has a time limit (`SMOKE_TIMEOUT_MINUTES`, default 6), and the run reports every failing script at the end. The release workflow runs packaged-app checks. Review UI appearance and animation manually.
 
 Use `npm run test:updates` for the focused updater and quit checks. `npm run test:upgrade:signed` exercises real signed upgrades; see [Automated signed upgrade test](../releasing.md#automated-signed-upgrade-test) for its requirements.
 
