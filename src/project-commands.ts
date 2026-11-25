@@ -11,6 +11,7 @@ import type { ListItem, Parameter, Parameters } from './parameters';
 import { boxBase, coverInstance, identifier, scopeState, storedBoxes } from './project';
 import { removeFromBook, storedLayouts } from './source-removal';
 import { assetUsage } from './asset-usage';
+import { closestIds } from './closest-ids';
 import { coverLayoutsFor } from './cover';
 import type { LayoutState, PageSide, ProjectFiles, SpreadState, Values } from './project';
 import { maxZoom, setPlacement } from './spread';
@@ -216,8 +217,13 @@ export function applyProjectCommands(
     const id = resolveReference(reference);
     return project.spreads.find((spread) => spread.id === id) ?? fail('SPREAD_NOT_FOUND', 'Spread ' + id + ' does not exist.');
   }
+  // The layouts most like one that does not exist, with their labels, which tell siblings such as two grids apart.
+  function didYouMean(definition: string, layouts: Record<string, { label: string }>) {
+    const close = closestIds(definition, Object.keys(layouts));
+    return close.length ? ' Did you mean ' + close.map((id) => id + ' (' + layouts[id].label + ')').join(', ') + '?' : ' Layouts are listed in the template declarations (get_authoring_context).';
+  }
   function findLayout(definition: string) {
-    return own(template.spreads, definition) ?? fail('LAYOUT_NOT_FOUND', 'The template has no layout ' + definition + '.');
+    return own(template.spreads, definition) ?? fail('LAYOUT_NOT_FOUND', 'The template has no layout ' + definition + '.' + didYouMean(definition, template.spreads));
   }
   function coverLayouts() {
     const layouts = coverLayoutsFor(template.coverLayouts, formatId);
@@ -227,7 +233,7 @@ export function applyProjectCommands(
     return layouts;
   }
   function coverLayout(definition: string) {
-    return own(coverLayouts(), definition) ?? fail('LAYOUT_NOT_FOUND', 'The active format has no cover layout ' + definition + '.');
+    return own(coverLayouts(), definition) ?? fail('LAYOUT_NOT_FOUND', 'The active format has no cover layout ' + definition + '.' + didYouMean(definition, coverLayouts()));
   }
   function findBox(spread: LayoutState, box: string) {
     const layout = spread === project.cover ? coverLayout(spread.definition ?? '') : findLayout(spread.definition ?? '');
@@ -316,14 +322,23 @@ export function applyProjectCommands(
     }
     if (ref) references[ref] = spread.id;
   }
+  function insertionAt(spread: SpreadState, position: number) {
+    const { span, sides } = layoutFootprint(spread, template.spreads);
+    return insertionProblem(project.spreads, position, span, { spreads: template.spreads, format }, sides);
+  }
+  // Without `after` a spread goes to the end: before the closing page, in a book that has to close on one (API-018).
+  function insertionPosition(spread: SpreadState, after: string | null | undefined) {
+    if (after === null) return 0;
+    if (after !== undefined) return project.spreads.indexOf(findSpread(after)) + 1;
+    const end = project.spreads.length;
+    return end && insertionAt(spread, end) && !insertionAt(spread, end - 1) ? end - 1 : end;
+  }
   function checkInsertion(spread: SpreadState, after: string | null | undefined) {
-    const position = after === undefined ? project.spreads.length : after === null ? 0 : project.spreads.indexOf(findSpread(after)) + 1;
-    const problem = insertionProblem(project.spreads, position, layoutFootprint(spread, template.spreads).span, { spreads: template.spreads, format }, layoutFootprint(spread, template.spreads).sides);
+    const problem = insertionAt(spread, insertionPosition(spread, after));
     if (problem) fail('INVALID_POSITION', problem);
   }
   function insertAfter(spread: SpreadState, after: string | null | undefined) {
-    const position = after === undefined ? project.spreads.length : after === null ? 0 : project.spreads.indexOf(findSpread(after)) + 1;
-    project.spreads.splice(position, 0, spread);
+    project.spreads.splice(insertionPosition(spread, after), 0, spread);
   }
   function commandState({ spread, page, cover }: LayoutAddress) {
     if (cover) {

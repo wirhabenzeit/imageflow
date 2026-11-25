@@ -501,6 +501,7 @@ export type RenderStatus = {
   anchors: { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' | 'page' }[];
   inspection?: import('./inspection').ElementInspection;
   cover?: Exclude<CoverResolution, { status: 'unavailable' }>;
+  photoResolution?: import('./photo-resolution').PhotoResolution;
 } | {
   state: 'error'; message: string; template?: TemplateInfo;
   // Spreads whose layout threw or rendered no single <Spread> root, with the stack where template code threw.

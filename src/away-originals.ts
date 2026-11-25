@@ -72,8 +72,9 @@ const suggestions: Record<SourceAway, string> = {
 export const awaySuggestion = (away: SourceAway) => suggestions[away];
 
 /**
- * An authoring check's finding for each reason: one, instead of one per photo and per box. It is an error while any
- * checked page prints without its original, so a check never reads as clear to print, and lists those places.
+ * An authoring check's finding for each reason: one, instead of one per photo and per box, with every place. A warning: it
+ * is how a book is edited away from its originals, and what it says of printing stays. Exports mark and ask about those
+ * pages by the render's own findings.
  */
 export function awayDiagnostics(notes: readonly AwayNote[]): AuthoringDiagnostic[] {
   return notes.map((note): AuthoringDiagnostic => {
@@ -81,7 +82,7 @@ export function awayDiagnostics(notes: readonly AwayNote[]): AuthoringDiagnostic
       ...(box ? { box } : {}), ...(source ? { source } : {}), ...(where ? { where } : {}) }));
     const placed = new Set(note.placed.map(({ source }) => source)).size;
     return {
-      code: occurrences.length ? 'source-unavailable' : 'project-input', stage: 'render', severity: occurrences.length ? 'error' : 'warning',
+      code: occurrences.length ? 'source-unavailable' : 'project-input', stage: 'render', severity: 'warning',
       message: awayText(note) + (occurrences.length ? ' Pages with ' + (placed === 1 ? '1 of these photos' : placed + ' of these photos') + ' are drawn from previews and can only be exported as marked proofs.'
         : ' None of them is in a photo box of the checked pages.'),
       details: { reason: note.away, originals: note.sources.length, placed },

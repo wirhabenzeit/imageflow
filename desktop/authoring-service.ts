@@ -21,6 +21,7 @@ import type { ProjectInputCapture, ProjectInputIndex } from './revisions';
 import { loadProject, readProjectDocument, withProjectFiles } from './project';
 import type { CheckDraft } from './check';
 import type { PreviewRequest } from '../src/preview';
+import { spreadByPrefix } from '../src/preview';
 import type { InspectionRequest } from '../src/inspection';
 import { photoExtensions } from './photos';
 import { captureFields } from '../src/photo-metadata';
@@ -63,15 +64,17 @@ const omitDefinition = <T extends { definition: string }>({ definition: _definit
 // counted, and listed for the spreads the request addressed: the previewed, inspected and drafted ones. `include`
 // lists them in full. render.errors and render.warnings repeat the reply's diagnostics, so they are left out.
 type RenderList = 'units' | 'flow' | 'anchors';
-export function compactRender(render: NonNullable<AuthoringCheckResult['render']>, report: { image?: unknown; draft?: { affectedSpreads?: string[] } | { applied: boolean } }, args: { include?: RenderList[]; inspect?: { spread?: string } }) {
+export function compactRender(render: NonNullable<AuthoringCheckResult['render']>, report: { image?: unknown; draft?: { affectedSpreads?: string[] } | { applied: boolean } }, args: { include?: string[] }) {
   const { template: _template, errors: _errors, warnings: _warnings, units, flow, anchors, ...rest } = render;
   const image = report.image as { spread?: string; cells?: { spread: string }[] } | undefined;
   // A document setting affects every spread: that addresses none of them (API-005).
   const affected = report.draft && 'affectedSpreads' in report.draft ? report.draft.affectedSpreads : undefined;
   const everywhere = !!affected && affected.length > 1 && units.every(({ spread }) => !spread || affected.includes(spread));
-  const addressed = new Set([image?.spread, ...image?.cells?.map(({ spread }) => spread) ?? [], args.inspect?.spread,
+  const addressed = new Set([image?.spread, ...image?.cells?.map(({ spread }) => spread) ?? [],
+    // The spread that was inspected, however the request named it: by the start of its ID, or as a draft's $ref.
+    render.inspection?.spread,
     ...(affected && !everywhere ? affected : [])].filter((id): id is string => !!id && !id.startsWith('$')));
-  const include = new Set(args.include ?? []);
+  const include = new Set<string>(args.include ?? []);
   const listed = (list: RenderList) => include.has(list) || addressed.size > 0;
   const flowSpread = (key: string) => key.split(':', 1)[0];
   return {
@@ -82,6 +85,16 @@ export function compactRender(render: NonNullable<AuthoringCheckResult['render']
     ...(listed('anchors') ? { anchors: include.has('anchors') ? anchors : anchors.filter(({ spread }) => addressed.has(spread)) } : {}),
   };
 }
+
+/**
+ * Findings as a reply: one that is the same problem in many places names the first few of them, and `details.places` how
+ * many there are (API-014). With Lightroom closed every placed photo is one. `include: ["occurrences"]` lists them all.
+ */
+export function compactDiagnostics(diagnostics: AuthoringDiagnostic[], all = false): AuthoringDiagnostic[] {
+  return all ? diagnostics : diagnostics.map((diagnostic) => !diagnostic.occurrences || diagnostic.occurrences.length <= shownOccurrences ? diagnostic
+    : { ...diagnostic, occurrences: diagnostic.occurrences.slice(0, shownOccurrences), details: { ...diagnostic.details, places: diagnostic.occurrences.length } });
+}
+const shownOccurrences = 3;
 
 /** A fixture report as a reply: one that passed is named by its layout, case and format alone (API-005). */
 export function compactFixtures(report: FixtureReport) {
@@ -710,9 +723,11 @@ export function createAuthoringService(hooks: Hooks) {
           ? await checked(session, signal, { expectedRevision: args.expectedRevision, preview: args.preview, ...(args.cover ? { cover: args.cover } : {}),
             ...(args.inspect ? { inspect: args.inspect } : {}), ...(args.typescript !== undefined ? { typescript: args.typescript } : {}) }, true)
           : await movedDraftCheck();
-      if (args.includeTemplate) return report;
+      const diagnostics = compactDiagnostics(report.diagnostics, args.include?.includes('occurrences'));
+      if (args.includeTemplate) return { ...report, diagnostics };
       // Keep full declarations in the internal check cache for planning and context, not in every agent reply.
-      const { template: _template, render, ...full } = report;
+      const { template: _template, render, ...rest } = report;
+      const full = { ...rest, diagnostics };
       const compact = full.fixtures ? { ...full, fixtures: compactFixtures(full.fixtures) } : full;
       if (!render) return compact;
       return { ...compact, render: compactRender(render, report, args) };
@@ -720,7 +735,7 @@ export function createAuthoringService(hooks: Hooks) {
     if (name === 'inspect_book' && args.view === 'elements') {
       const report = await checked(session, signal, { inspect: { spread: args.spread, cover: args.cover, page: args.page, box: args.box, element: args.element,
         offset: args.offset, limit: args.limit } });
-      return { project: session.handle, revision: report.revision, ...(report.superseded ? { superseded: report.superseded } : {}), state: report.state, diagnostics: report.diagnostics,
+      return { project: session.handle, revision: report.revision, ...(report.superseded ? { superseded: report.superseded } : {}), state: report.state, diagnostics: compactDiagnostics(report.diagnostics),
         checks: report.checks, ...report.render?.inspection };
     }
     if (name === 'get_authoring_context' || name === 'inspect_book') {
@@ -743,7 +758,7 @@ export function createAuthoringService(hooks: Hooks) {
       const documents = await readDocuments();
       const project = documents[0].status === 'fulfilled' ? documents[0].value.document : undefined;
       const photos = documents[1].status === 'fulfilled' ? documents[1].value.document : undefined;
-      const diagnostics: AuthoringDiagnostic[] = report.diagnostics.map((diagnostic) => ({ ...diagnostic,
+      const diagnostics: AuthoringDiagnostic[] = compactDiagnostics(report.diagnostics).map((diagnostic) => ({ ...diagnostic,
         ...(diagnostic.location ? { location: { ...diagnostic.location } } : {}) }));
       function unavailable(error: unknown, path: string) {
         if (error instanceof AuthoringError && error.code === 'SOURCE_CHANGED') throw error;
@@ -858,13 +873,15 @@ export function createAuthoringService(hooks: Hooks) {
         if (view === 'cover' && !availableCover && !savedCover) {
           throw new AuthoringError('COVER_UNAVAILABLE', 'The active format has no exterior cover.');
         }
+        // Named as in a preview target: an ID, or how only one starts. One that names none is an error, not an empty list.
+        const inspected = project && args.spread ? spreadByPrefix(project.spreads.map(({ id }) => id), args.spread) : undefined;
         let records: Record<string, unknown>[] = view === 'sources' ? [
           // Capture time, location and camera come from the loaded photo file, next to what photos.json records.
           ...Object.entries(photos ?? {}).map(([id, source]) => ({ kind: 'photo', id, ...source, ...captureOf(session.book.photos.get(id) ?? session.book.unavailablePhotos?.[id]), usage: sourcePlaces(usage.photo[id]) })),
           ...Object.entries(project?.texts ?? {}).map(([id, path]) => ({ kind: 'text', id, path: sourcePath(path), linked: sourceLinked(path), usage: sourcePlaces(usage.text[id]) })),
           ...Object.entries(project?.files ?? {}).map(([id, path]) => ({ kind: 'file', id, path: sourcePath(path), linked: sourceLinked(path) })),
         ] : view === 'cover' ? (project?.cover ? [project.cover] : [])
-          : project?.spreads.filter((spread) => !args.spread || spread.id === args.spread).map((spread) => ({ ...omitDefinition(spread),
+          : project?.spreads.filter((spread) => !inspected || spread.id === inspected).map((spread) => ({ ...omitDefinition(spread),
           // A sheet shown as pages displays pages.left/right.definition. Its own definition only names the spread-wide
           // layout a merge restores, so it is not reported as `definition`, which reads as what is shown (F-017).
           ...(spread.split ? { restoreDefinition: spread.definition } : { definition: spread.definition }),

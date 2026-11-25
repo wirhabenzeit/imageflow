@@ -245,7 +245,31 @@ test('a check sums up originals that are elsewhere, and keeps every other findin
     new AbortController().signal);
   assert.equal(result.state, 'ready', JSON.stringify(result.diagnostics));
   assert.deepEqual(result.diagnostics.map(({ code, severity, location, occurrences }) => [code, severity, location?.source, occurrences?.map(({ spread, source }) => spread + ':' + source)]),
-    [['source-unavailable', 'error', 'b', undefined], ['source-unavailable', 'error', undefined, ['one:a', 'two:c']]]);
+    [['source-unavailable', 'error', 'b', undefined], ['source-unavailable', 'warning', undefined, ['one:a', 'two:c']]]);
   assert.ok(result.diagnostics.every((diagnostic) => diagnosticSchema.safeParse(diagnostic).success));
   assert.equal(result.render!.errors.length, 3, 'the editor and the pages marked as proofs go by the render itself');
+});
+
+test('a preview target may be the start of a spread ID, and one that names no spread costs no render (API-023)', async (t) => {
+  const { book, cache } = await fixture(t);
+  const [first] = book.project.spreads;
+  const drafted = { ...book, project: { ...book.project, spreads: [{ ...first, id: '75c40095-aaaa-bbbb' }, { ...first, id: '75c4009f-other' }] } };
+  let rendered: unknown[] = [];
+  const check = (request: Record<string, unknown>) => checkProject(book, cache, request, async (_snapshot, preview, _signal, inspect) => {
+    rendered.push(preview?.target, inspect?.spread);
+    return { status };
+  }, new AbortController().signal, undefined, undefined, () => ({ book: drafted, preview: request.preview as never, inspect: request.inspect as never }));
+  assert.equal((await check({ preview: { target: { spread: '75c40095' } } })).state, 'ready');
+  assert.deepEqual(rendered[0], { spread: '75c40095-aaaa-bbbb' });
+  rendered = [];
+  await check({ preview: { target: { spreads: ['75c40095', '75c4009f-other'] } }, inspect: { spread: '75c40095' } });
+  assert.deepEqual([(rendered[0] as { spreads: string[] }).spreads, rendered[1]], [['75c40095-aaaa-bbbb', '75c4009f-other'], '75c40095-aaaa-bbbb']);
+  rendered = [];
+  for (const [spread, message] of [['75c400', /Several spreads start with 75c400: 75c40095-aaaa-bbbb, 75c4009f-other/], ['75c40', /does not exist/], ['nothing-like-it', /does not exist/]] as const) {
+    const result = await check({ preview: { target: { spread } } });
+    assert.equal(result.state, 'error');
+    assert.equal(result.diagnostics[0].code, 'preview-target-not-found');
+    assert.match(result.diagnostics[0].message, message);
+  }
+  assert.deepEqual(rendered, [], 'nothing was rendered');
 });

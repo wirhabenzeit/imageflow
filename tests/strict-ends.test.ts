@@ -92,7 +92,11 @@ test('MCP commands keep the ends and report the position', () => {
   const rejected = (operations: unknown[], pattern: RegExp) => assert.throws(() => applyProjectCommands(files(), template, operations),
     (error) => error instanceof ProjectCommandError && error.code === 'INVALID_POSITION' && pattern.test(error.message));
   rejected([{ op: 'insert_spread', definition: 'body', after: null }], /must open on a single right page/);
-  rejected([{ op: 'insert_spread', definition: 'body' }], /must close on a single left page/);
+  rejected([{ op: 'insert_spread', definition: 'body', after: 'c' }], /must close on a single left page/);
+  rejected([{ op: 'insert_spread', definition: 'closing' }], /single left page can only close the book/);
+  // Without `after` it goes to the end, before the closing page (API-018).
+  assert.deepEqual(applyProjectCommands(files(), template, [{ op: 'insert_spread', definition: 'body' }, { op: 'insert_spread', definition: 'other' }])
+    .files.project.spreads.map(({ definition }) => definition), ['title', 'body', 'body', 'body', 'other', 'closing']);
   rejected([{ op: 'duplicate_spread', spread: 't' }], /single right page can only open the book/);
   rejected([{ op: 'move_spread', spread: 'a', after: null }], /cannot move into or out of those ends/);
   rejected([{ op: 'move_spread', spread: 'c', after: 'a' }], /cannot move into or out of those ends/);

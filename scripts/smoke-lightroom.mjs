@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { closeApp, menuAction, testBook } from './ui-actions.mjs';
+import { closeApp, menuAction, retryBookRefresh, testBook } from './ui-actions.mjs';
 
 // Photos of a Lightroom Classic catalog in the real app (ADR 0011, section 2), against the tests' stand-in for the
 // plugin: an import that waits for no previews, a photo edited in Develop that keeps its picture marked out of date,
@@ -63,10 +63,22 @@ try {
     return window.imageflow.saveProject(value.id, { project: value.project, photoIndex: value.photoIndex });
   }, photo);
   assert.ok(saved.value, JSON.stringify(saved));
+  // A check meanwhile says that the placed photo's preview is loading, not that the photo is missing, and that its
+  // resolution is not measured yet.
+  const check = async () => (await retryBookRefresh(() => page.evaluate(async () => window.imageflow.checkBook((await window.imageflow.currentProject()).value.id, {})),
+    () => new Promise((resolve) => setTimeout(resolve, 300)), { attempts: 30 })).value;
+  const during = await check();
+  assert.deepEqual(during.diagnostics.map(({ code }) => code), ['photo-preview-loading'], JSON.stringify(during.diagnostics));
+  assert.deepEqual([during.render.photoResolution.measured, during.render.photoResolution.notMeasured], [0, 1]);
   open();
   await until(async () => (await statuses()).every(({ state }) => state === 'available'), 'every preview came');
   assert.equal(plugin.jobs.filter(({ type }) => type === 'render').length, 0, 'and nothing was rendered');
   await loading.waitFor({ state: 'detached' });
+  const shown = await check();
+  assert.deepEqual(shown.diagnostics, []);
+  // By the size of the original, which only Lightroom has: 6000 px over a 103 × 126 mm bleed.
+  assert.equal(shown.render.photoResolution.measured, 1);
+  assert.ok(shown.render.photoResolution.lowest.ppi > 700, JSON.stringify(shown.render.photoResolution));
   const texts = await page.evaluate(() => window.statusTexts);
   assert.deepEqual(texts.filter((text) => text.includes('files changed')), []);
   await page.locator('.source-photo img').first().waitFor();

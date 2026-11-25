@@ -61,6 +61,17 @@ test('output schemas keep the frozen result fields strict and allow later additi
 // Page addressing and page-pair/blank/swap commands add schemas shared by drafts and saves; the template library tools
 // add their entries and save results. The book history tool adds its entry and write results their checkpoint.
 // inspect_book's cover view and its sources filter by kind add their options. rename_source adds its entry and result.
+test('every tool names its parameters at the top level of its schema (API-016)', () => {
+  for (const { name } of mcpTools) {
+    const { input } = advertisedSchemas(name) as { input: { properties?: object; required?: string[]; anyOf?: unknown } };
+    assert.ok(input.properties && !input.anyOf, name);
+  }
+  const imports = (args: object) => parseMcpArguments('import_sources', { project: 'book', expectedRevision: 'a'.repeat(64), idempotencyKey: 'k', paths: ['inbox/a.gpx'], ...args });
+  assert.throws(() => imports({ kind: 'file' }), /accept: Name the extensions/);
+  assert.throws(() => imports({ kind: 'photo', accept: ['.jpg'] }), /only for kind file/);
+  assert.equal(imports({ kind: 'file', accept: ['.gpx'] }).args.kind, 'file');
+});
+
 test('the advertised tool list stays within its size budget', () => {
   const bytes = (part: 'input' | 'output') => mcpTools.reduce((sum, { name }) => sum + JSON.stringify(advertisedSchemas(name)[part]).length, 0);
   const descriptions = mcpTools.reduce((sum, { title, description }) => sum + title.length + description.length, 0);

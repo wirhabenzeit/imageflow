@@ -79,7 +79,7 @@ Every result carries the input `revision`. Pass it as `expectedRevision` to comm
 
 Pass these operations to `apply_project_changes` with `project`, `expectedRevision`, a unique `idempotencyKey`, and an Undo `label`. The same operations work in `check_book.draft.operations` with `project` and `expectedRevision`. A batch holds 1–100 operations in execution order. Use `dryRun: true` to validate without saving.
 
-Use layout, format and parameter IDs from `get_authoring_context`; use spread and source IDs from `inspect_book`. A command that creates a spread can name it with `"ref":"chapter"`. Later commands and draft preview targets refer to it with the string `"$chapter"`. Use an earlier spread ID or reference in `after`, or use `null` to insert at the start. With no `after`, inserts append and duplicates follow the original.
+Use layout, format and parameter IDs from `get_authoring_context`; use spread and source IDs from `inspect_book`. A command that creates a spread can name it with `"ref":"chapter"`. Later commands and draft preview targets refer to it with the string `"$chapter"`. Use an earlier spread ID or reference in `after`, or use `null` to insert at the start. With no `after`, inserts append, before the closing page of a book that has to close on one, and duplicates follow the original.
 
 ### Exterior covers
 

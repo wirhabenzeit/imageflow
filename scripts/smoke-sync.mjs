@@ -307,7 +307,7 @@ try {
   const checkedHere = await laptop.evaluate(async () => window.imageflow.checkBook((await window.imageflow.currentProject()).value.id, {}));
   const findings = checkedHere.value.diagnostics.filter(({ occurrences }) => occurrences);
   assert.deepEqual(findings.map(({ code, severity, occurrences }) => [code, severity, occurrences.map(({ spread, page, box, source }) => [spread, page, box, source])]),
-    [['source-unavailable', 'error', [['arriving', 'left', 'hero', linked]]]], JSON.stringify(checkedHere.value.diagnostics));
+    [['source-unavailable', 'warning', [['arriving', 'left', 'hero', linked]]]], JSON.stringify(checkedHere.value.diagnostics));
   await answer('Export PDF with cached previews?', 'cancel');
   await choosePaths({ save: join(work, 'Laptop.pdf') });
   const exported = await laptop.evaluate(async () => window.imageflow.exportBook((await window.imageflow.currentProject()).value.id));

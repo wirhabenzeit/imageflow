@@ -25,6 +25,17 @@ from Lightroom Classic.
   Trash when asked.
 - **UI-011, UI-012.** The panel for small text is only its field. A book setting's Undo entry names the setting.
 
+## Second session of 25 November
+
+- **API-014.** Originals that are elsewhere, such as those of a closed Lightroom catalog, are a warning with the first three
+  places and their number. `include: ["occurrences"]` of `check_book` lists all.
+- **API-022.** `render.photoResolution` says how many photos were measured, how many not, and which prints at the fewest ppi.
+  Photos drawn from previews were always measured by their originals' size. A placed photo whose preview is loading was
+  reported as missing and is not any more.
+- **API-016, API-017, API-018, API-023.** `import_sources` has top-level parameters; `LAYOUT_NOT_FOUND` names likely layouts;
+  an insert without `after` goes before a closing page; a target may be the start of a spread ID and is looked up first.
+- **UI-013.** A conflict copy is named by this Mac's time. Telling the user and comparing the two is #321.
+
 ## To retest
 
 - With Lightroom Classic and about 1,000 photos: `check_book` and `get_authoring_context` during the import, and
@@ -40,3 +51,5 @@ from Lightroom Classic.
 - API-013 (#316), which needs a design.
 - Every preview that comes moves the book's revision, so a commit during an import can still meet `REVISION_CONFLICT`.
 - A book opened read-only still waits for missing previews.
+- API-015 (a contact sheet of photos that are not placed) and API-021 (parameter values in fixtures), next.
+- API-019 (#319), API-020 (#320) and UI-013 (#321), which need decisions.

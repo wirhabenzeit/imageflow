@@ -505,3 +505,12 @@ test('replace_source sees captions cleared earlier in its batch', () => {
     { op: 'replace_source', source: 'p1', with: 'p2' }], { photo: () => size(6000, 4000) });
   assert.equal(result.files.photoIndex.p2.caption, 'Old caption');
 });
+
+test('a layout that does not exist is answered with the likely ones and their labels (API-017)', () => {
+  const message = (definition: string) => {
+    try { applyProjectCommands(files(), template, [{ op: 'insert_spread', definition }]); } catch (error) { return (error as Error).message; }
+    assert.fail('expected an error');
+  };
+  assert.equal(message('minimla'), 'The template has no layout minimla. Did you mean minimal (Minimal)?');
+  assert.equal(message('somethingElse'), 'The template has no layout somethingElse. Layouts are listed in the template declarations (get_authoring_context).');
+});

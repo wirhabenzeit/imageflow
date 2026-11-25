@@ -479,8 +479,15 @@ coreEach('an AirDropped book edited before its first sync keeps both versions', 
   await sync(a, remote);
   await copyBook(a, b);
   await edit(b, caption('shore', 'Laptop, never synced'));
+  // Far from UTC, so the time in the copy's name is told from it on any machine.
+  const zone = process.env.TZ;
+  process.env.TZ = 'Pacific/Auckland';
+  t.after(async () => { if (zone === undefined) delete process.env.TZ; else process.env.TZ = zone; });
   const outcome = await sync(b, remote);
   assert.equal(outcome.action, 'diverged');
+  // In this Mac's time, as the Finder shows when it was made (UI-013).
+  const made = /Conflict (\d+)-(\d+)-(\d+) (\d+)\.(\d+)\.(\d+)/.exec(outcome.conflictCopy!)!.slice(1).map(Number);
+  assert.ok(Math.abs(new Date(made[0], made[1] - 1, made[2], made[3], made[4], made[5]).getTime() - Date.now()) < 60_000);
   assert.ok(outcome.conflictCopy && /Book \(Conflict \d{4}-\d\d-\d\d \d\d\.\d\d\.\d\d\)\.imageflow$/.test(outcome.conflictCopy));
   const copy = JSON.parse(await readFile(join(outcome.conflictCopy, 'photos.json'), 'utf8'));
   const copyProject = JSON.parse(await readFile(join(outcome.conflictCopy, 'project.json'), 'utf8'));
