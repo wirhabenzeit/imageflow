@@ -97,10 +97,15 @@ export class AssetFacts {
     })());
     return registry.get(folder)!;
   }
-  /** The facts of a book that is only read (read-only, pinned or temporary loads): never registered, never written. */
+  /**
+   * The facts of a book that is only read (read-only, pinned or temporary loads): never registered, never written. Of a
+   * book that is open here they are the ones its session holds now, which are newer than the file it writes a moment
+   * later: a preview stored meanwhile is not looked for again.
+   */
   static async readOnly(folder: string): Promise<AssetFacts> {
     const facts = new AssetFacts(folder, false);
-    facts.facts = await readAssetFacts(folder);
+    const open = registry.get(folder);
+    facts.facts = open ? { ...(await open).all() } : await readAssetFacts(folder);
     return facts;
   }
   /** Writes what is pending and forgets the book's facts. */

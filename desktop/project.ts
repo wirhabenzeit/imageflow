@@ -250,11 +250,18 @@ export const maximumFileSize = 20 * 1024 * 1024;
 const fileName = (path: string) => basename(path).replace(/^fl-[0-9a-f-]{12}-/, '');
 
 /**
+ * `previews: 'none'` is an authoring check's load: photos without a file are drawn from the previews there are, and one
+ * that has none yet is `pending`, so the check waits neither for the previews being fetched nor for ones of its own.
+ * Its `signal` ends the load, which then throws.
+ */
+export type LoadOptions = MaterializeOptions & { previews?: 'none' };
+
+/**
  * Loads a book. `pinSources` is an export's load: every photo is read from a private copy in `fallback`'s
  * `pinned-sources`, and the placed photos without a file are materialized first (`options` reports progress and
  * cancels that; a cancelled load still returns, drawing those photos from their previews).
  */
-export async function loadProject(path: string, fallback: string, readOnly = false, pinSources = false, options: MaterializeOptions = {}): Promise<OpenProject> {
+export async function loadProject(path: string, fallback: string, readOnly = false, pinSources = false, options: LoadOptions = {}): Promise<OpenProject> {
   const folder = await realpath(path);
   await recoverProjectSave(folder, { readOnly });
   // A sync pull interrupted after it began changing the book is finished from what it staged (ADR 0010).
@@ -269,7 +276,7 @@ export async function loadProject(path: string, fallback: string, readOnly = fal
   return readContent({ folder, viewKey: createHash('sha256').update(await sourceBookKey(folder)).digest('hex'), assets, cache, readOnly, project: withBookFormat(project, photoIndex), photoIndex, ...(hash ? { templateHash: hash } : {}), manifests: { 'project.json': projectFile, 'photos.json': photoFile } }, pinSources, options);
 }
 
-async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files'>, pinSources = false, options: MaterializeOptions = {}): Promise<OpenProject> {
+async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files'>, pinSources = false, options: LoadOptions = {}): Promise<OpenProject> {
   const photos = new Map<string, ProjectPhoto>();
   const texts: Record<string, string> = {};
   const files: Record<string, ProjectFile> = {};
@@ -292,8 +299,11 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files'>
   const kept = await keptOriginals(book.folder);
   // Each provider is asked about all its photos at once (ADR 0011), and photos it reports facts for get their facts
   // and previews brought up to date before they load.
-  const observed = await observePhotos(book.folder, entries, store, facts);
-  const provided = await refreshPhotos(book, observed, facts, writable ? 'background' : 'held');
+  const signal = options.previews === 'none' ? options.signal : undefined;
+  const observed = await observePhotos(book.folder, entries, store, facts, signal);
+  signal?.throwIfAborted();
+  const provided = await refreshPhotos(book, observed, facts, options.previews ?? (writable ? 'background' : 'held'));
+  signal?.throwIfAborted();
   // An export prints the placed photos without a file from their full-resolution originals, where their provider can
   // produce them now; the others stay drawn from their previews, as proofs.
   const originals = pinSources ? await pinnedOriginals(book, entries, provided, store, options) : new Map<string, PinnedOriginal>();
@@ -355,7 +365,8 @@ type ObservedPhoto = { ref: SourceRef<Locator>; observed: Observed };
  * revisions last stored for it: a file's last read stamp, or the revisions recorded with the fact of a photo that is not
  * a file. A provider that fails as a whole leaves its photos unreadable.
  */
-export async function observePhotos(folder: string, entries: readonly SourceEntry[], store: Pick<SourceStore, 'observed'>, facts: Pick<AssetFacts, 'get'>): Promise<Map<string, ObservedPhoto>> {
+export async function observePhotos(folder: string, entries: readonly SourceEntry[], store: Pick<SourceStore, 'observed'>, facts: Pick<AssetFacts, 'get'>,
+  signal?: AbortSignal): Promise<Map<string, ObservedPhoto>> {
   const photos = entries.filter((entry): entry is PhotoSourceEntry => entry.kind === 'photo');
   const result = new Map<string, ObservedPhoto>();
   await Promise.all([...new Set(photos.map(({ locator }) => locator.provider))].map(async (name) => {
@@ -366,7 +377,7 @@ export async function observePhotos(folder: string, entries: readonly SourceEntr
     });
     let answers: Observed[];
     try {
-      answers = await providerOf(refs[0].locator).observe(folder, refs);
+      answers = await providerOf(refs[0].locator).observe(folder, refs, { signal });
       if (answers.length !== refs.length) throw new Error('The source answered for ' + answers.length + ' of ' + refs.length + ' photos.');
     } catch (error) {
       const problem = 'Original unavailable: ' + (error instanceof Error ? error.message : String(error));
@@ -379,9 +390,10 @@ export async function observePhotos(folder: string, entries: readonly SourceEntr
 
 /**
  * Brings the facts of the photos whose provider reported facts up to date, one provider at a time, and their previews:
- * an open book's session fetches those after the load (`backgroundPreviews`), any other load waits for them.
+ * an open book's session fetches those after the load (`backgroundPreviews`), an authoring check does without them, and
+ * any other load waits for them.
  */
-async function refreshPhotos(book: Pick<OpenProject, 'folder' | 'cache'>, observed: Map<string, ObservedPhoto>, facts: AssetFacts, previews: 'background' | 'held') {
+async function refreshPhotos(book: Pick<OpenProject, 'folder' | 'cache'>, observed: Map<string, ObservedPhoto>, facts: AssetFacts, previews: 'background' | 'held' | 'none') {
   const reported = [...observed.values()].filter(({ observed }) => observed.state === 'available' && observed.facts);
   const outcomes = new Map<string, ProvidedOutcome>();
   for (const name of new Set(reported.map(({ ref }) => ref.locator.provider))) {

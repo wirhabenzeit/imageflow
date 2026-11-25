@@ -207,7 +207,7 @@ export function lightroomProvider(bridge: LightroomPort): SourceProvider<Lightro
   const catalogKey = () => JSON.stringify(bridge.connection?.catalog.id ?? null);
   return {
     provider: 'lightroom',
-    async observe(book, refs) {
+    async observe(book, refs, { signal } = {}) {
       const connection = bridge.connection;
       observedWith.set(book, catalogKey());
       const results: (Observed | undefined)[] = refs.map(({ locator }) => unreachable(locator, connection));
@@ -222,7 +222,7 @@ export function lightroomProvider(bridge: LightroomPort): SourceProvider<Lightro
           const answer = parseResult(metadataResultSchema, await bridge.request('metadata', { photos: chunk.map(({ ref }) => {
             const revision = known(ref)?.revision;
             return { uuid: ref.locator.uuid, ...(revision ? { known: revision } : {}) };
-          }) }, { timeout: 60_000 }), 'metadata');
+          }) }, { timeout: 60_000, signal }), 'metadata');
           const rows = new Map(answer.photos.map((row) => [uuidKey(row.uuid), row]));
           for (const { ref, index } of chunk) {
             const row = rows.get(uuidKey(ref.locator.uuid));

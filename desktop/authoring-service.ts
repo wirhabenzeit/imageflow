@@ -242,6 +242,13 @@ async function referenceTopics(docs: string, requested: string[]) {
   return { topics, docs: Object.fromEntries(requested.map((id, index) => [id, texts[index]])) };
 }
 
+/**
+ * Whether a call asks only for what ImageFlow ships, reference topics and example templates: it needs nothing of the
+ * book, so it is answered at once, also while the book is busy or other calls wait (API-009).
+ */
+export const isReferenceCall = (name: string, args: Record<string, any>) => name === 'get_authoring_context' &&
+  !args.includeTemplate && !args.includeSource?.length && !!(args.docs?.length || args.includeExamples);
+
 const contextGuide = 'Start with docs: ["authoring-workflow"]. Use docs for topics, includeExamples for examples and includeSource for files; ' +
   'such calls return just those, without declarations, unless includeTemplate is true. ' +
   'Edit template/ in the workspace. Save book edits with apply_project_changes and verify with check_book.';
@@ -625,6 +632,13 @@ export function createAuthoringService(hooks: Hooks) {
         writable: !session.book.readOnly, revision: current, history: session.history }], scope: 'The currently open, authorized book. Handles expire when closed or reopened.' };
     }
     const session = get(args.project);
+    if (isReferenceCall(name, args)) {
+      const reference = await referenceTopics(hooks.docs, [...new Set<string>(args.docs ?? [])]);
+      const examples = await templateExamples(hooks.docs, args.includeExamples);
+      signal.throwIfAborted();
+      return { project: session.handle, root: session.book.folder, guide: contextGuide,
+        ...(args.docs?.length ? { docs: reference.docs } : {}), examples: examples.filter((example) => 'source' in example) };
+    }
     if (name === 'list_book_checkpoints') {
       const ledger = await readSaveLedger(session.book.folder);
       signal.throwIfAborted();
@@ -748,7 +762,8 @@ export function createAuthoringService(hooks: Hooks) {
         const examples = await templateExamples(hooks.docs, args.includeExamples);
         // A call for topics, examples or sources returns just those (API-001): the declarations, file list, topic list
         // and capabilities it would repeat are tens of kilobytes the agent already has from its first call.
-        const requestedOnly = !args.includeTemplate && !!(args.docs?.length || args.includeExamples || args.includeSource?.length);
+        // One for topics or examples alone never comes here (isReferenceCall).
+        const requestedOnly = !args.includeTemplate && !!args.includeSource?.length;
         if (requestedOnly) {
           result = { project: session.handle, revision: report.revision, root: session.book.folder, guide: contextGuide,
             templateIdentity, diagnostics, checks: report.checks, sources,

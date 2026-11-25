@@ -44,7 +44,7 @@ import { checkTemplateTypes } from './typecheck';
 import type { CheckDraft } from './check';
 import { captureBookPreview, checkBookRender, checkCoverRender } from './preview';
 import { ProjectSession } from './project-session';
-import { createAuthoringService, AuthoringError } from './authoring-service';
+import { createAuthoringService, AuthoringError, isReferenceCall } from './authoring-service';
 import type { McpClientSession } from './mcp-connection';
 import { AuthoringQueue } from './authoring-queue';
 import { authoringErrorResult } from './authoring-errors';
@@ -1077,6 +1077,7 @@ export class DocumentSession {
   async agentCall(name: McpToolName, args: Record<string, unknown>, signal: AbortSignal, client?: McpClientSession) {
     let requestSignal = signal;
     try {
+      if (isReferenceCall(name, args) && !this.closing) return await this.service(name, args, signal, client);
       return await this.queue.run(async (queuedSignal) => {
         requestSignal = queuedSignal;
         const mutation = (name === 'apply_project_changes' && args.dryRun !== true) || name === 'import_sources' || name === 'rename_source';

@@ -10,6 +10,7 @@ import { PreviewError } from '../src/preview';
 import { captureProjectInputs, ProjectRevisionError } from './revisions';
 import type { ProjectInputIndex } from './revisions';
 import type { CheckRenditionCache } from './check-cache';
+import { placedPhotos } from './materialized-photos';
 import { loadProject, TemplateCompileError } from './project';
 import type { OpenProject } from './project';
 import type { BookPreview } from './preview';
@@ -40,6 +41,16 @@ function diagnostic(issue: Issue, severity: 'error' | 'warning'): AuthoringDiagn
     ...(details && Object.keys(details).length ? { details } : {}),
     ...(suggestion ? { suggestion } : {}),
   };
+}
+
+/** Placed photos drawn as empty frames because their previews are still being fetched: one finding for all of them. */
+function loadingPreviews(book: OpenProject): AuthoringDiagnostic[] {
+  const photos = [...placedPhotos(book)].filter((id) => book.sources?.['photo:' + id]?.pending);
+  if (!photos.length) return [];
+  return [{ code: 'photo-preview-loading', stage: 'render', severity: 'warning',
+    message: photos.length === 1 ? 'The preview of a placed photo is still loading. It is drawn as an empty frame of its size.'
+      : 'The previews of ' + photos.length + ' placed photos are still loading. They are drawn as empty frames of their size.',
+    details: { photos: photos.length }, suggestion: 'Layout and resolution are checked. To see the pictures, check again once ImageFlow has loaded them.' }];
 }
 
 /** Read-only authoring check. The app supplies a private, temporary render session.
@@ -96,7 +107,8 @@ export async function checkProject(
     // Photos are read where they are, as in the editor: copying, hashing and decoding every photo cost each check about
     // 8 s for a book of 163 linked photos (F-037). Their renditions are keyed by the original's stamp and made only
     // while it is unchanged, and the inputs, photo stamps included, are compared again after rendering.
-    const book = await loadProject(source.folder, privateCache, true);
+    // Nor does it wait for previews of photos without a file: an import of a thousand takes minutes (API-009).
+    const book = await loadProject(source.folder, privateCache, true, false, { previews: 'none', signal });
     loaded = book;
     if (!await inputsMatch()) {
       throw new ProjectRevisionError('source-changed');
@@ -136,6 +148,7 @@ export async function checkProject(
       ...found.errors.map((issue) => diagnostic(issue, 'error')),
       ...found.warnings.map((issue) => diagnostic(issue, 'warning')),
       ...awayDiagnostics(found.notes),
+      ...loadingPreviews(rendered),
     ];
     if (checked.preview) {
       const { bytes, mimeType, status: _status, ...metadata } = checked.preview;

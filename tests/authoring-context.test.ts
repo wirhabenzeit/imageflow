@@ -8,7 +8,7 @@ import { checkedOutput } from './mcp-output-check';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import sharp from 'sharp';
-import { AuthoringError, compactRender, createAuthoringService } from '../desktop/authoring-service';
+import { AuthoringError, compactRender, createAuthoringService, isReferenceCall } from '../desktop/authoring-service';
 import { checkProject } from '../desktop/check';
 import { importIntoProject, loadProject } from '../desktop/project';
 import { ProjectSession } from '../desktop/project-session';
@@ -768,7 +768,7 @@ test('a call for topics, examples or sources returns just those unless includeTe
   const { call, hooks } = await fixture(t);
   hooks.docs = resolve('docs');
   const full = await call('get_authoring_context');
-  const requested = await call('get_authoring_context', { docs: ['authoring-workflow'] });
+  const requested = await call('get_authoring_context', { docs: ['authoring-workflow'], includeSource: ['template/index.tsx'] });
   for (const field of ['template', 'templateFiles', 'topics', 'capabilities']) {
     assert.ok(field in full, field + ' is in the full context');
     assert.equal(field in requested, false, field + ' is left out of a call for topics');
@@ -776,11 +776,29 @@ test('a call for topics, examples or sources returns just those unless includeTe
   assert.deepEqual(requested.examples, []);
   assert.equal(requested.revision, full.revision);
   assert.deepEqual(requested.templateIdentity, full.templateIdentity);
+  assert.equal((requested.sources as Record<string, { text: string }>)['template/index.tsx'].text, source);
   const docs = JSON.stringify(requested.docs).length;
   assert.ok(JSON.stringify(requested).length < docs + 2_000, 'a call for one topic adds little beyond the topic');
   const both = await call('get_authoring_context', { docs: ['authoring-workflow'], includeTemplate: true });
   assert.deepEqual(both.template, full.template);
   assert.deepEqual(both.topics, full.topics);
+});
+
+test('a call for topics or examples alone does not look at the book (API-009)', async (t) => {
+  const { call, hooks, session } = await fixture(t);
+  hooks.docs = resolve('docs');
+  hooks.check = async () => assert.fail('A call for topics must not check the book.');
+  session.inputs.capture = async () => assert.fail('A call for topics must not read the book.');
+  const requested = await call('get_authoring_context', { docs: ['authoring-workflow'], includeExamples: ['minimal'] });
+  assert.deepEqual(Object.keys(requested).sort(), ['docs', 'examples', 'guide', 'project', 'root']);
+  assert.deepEqual((requested.examples as { name: string }[]).map(({ name }) => name), ['minimal']);
+  await assert.rejects(call('get_authoring_context', { docs: ['authoring-workflow'], project: 'closed' }),
+    (error) => error instanceof AuthoringError && error.code === 'PROJECT_CLOSED');
+  assert.equal(isReferenceCall('get_authoring_context', {}), false);
+  assert.equal(isReferenceCall('get_authoring_context', { docs: [] }), false);
+  assert.equal(isReferenceCall('get_authoring_context', { docs: ['authoring-workflow'], includeSource: ['template/index.tsx'] }), false);
+  assert.equal(isReferenceCall('get_authoring_context', { docs: ['authoring-workflow'], includeTemplate: true }), false);
+  assert.equal(isReferenceCall('inspect_book', { docs: ['authoring-workflow'] }), false);
 });
 
 test('context lists reference topics and returns only the requested ones', async (t) => {

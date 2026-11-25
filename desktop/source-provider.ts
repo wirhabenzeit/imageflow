@@ -96,9 +96,10 @@ export interface SourceProvider<L extends Locator> {
   provider: L['provider'];
   /**
    * The current state of each photo, in the order given, without reading pixels: cheap enough to run for every photo
-   * of a book when it opens and again before an export. Never throws for one photo's failure.
+   * of a book when it opens and again before an export. Never throws for one photo's failure. `signal` ends the wait of a
+   * caller that has given up; what is then answered is of no use.
    */
-  observe(book: string, refs: readonly SourceRef<L>[]): Promise<Observed[]>;
+  observe(book: string, refs: readonly SourceRef<L>[], options?: { signal?: AbortSignal }): Promise<Observed[]>;
   /**
    * Screen previews (1400 px on the long edge, sRGB) written into `staging`, each with the revisions it was made from.
    * Several at once, like `materialize`, because an import or an edit of many photos asks for many. Left out by a

@@ -192,9 +192,10 @@ export type RefreshOptions = {
   staging: string; signal?: AbortSignal;
   /**
    * How a load treats the previews it lacks: `background` leaves them to the book's `backgroundPreviews` where there are
-   * any, and `held` asks for none for a photo that has an older one (an export, which prints originals). Without it, they are fetched here.
+   * any, `held` asks for none for a photo that has an older one (an export, which prints originals), and `none` asks for
+   * none at all (an authoring check). Without it, they are fetched here.
    */
-  previews?: 'background' | 'held';
+  previews?: 'background' | 'held' | 'none';
   /** Makes every preview again from its photo (Refresh from Lightroom), also where the stored one is of its content. */
   again?: boolean;
   /** Called as each photo's preview is stored or given up on. */
@@ -209,17 +210,19 @@ export type RefreshOptions = {
  */
 export async function refreshProvided(folder: string, provider: SourceProvider<Locator>, refs: readonly SourceRef<Locator>[], observed: readonly Observed[],
   facts: AssetFacts, options: RefreshOptions): Promise<Map<string, ProvidedOutcome>> {
-  const later = options.previews === 'background' ? background.get(folder) : undefined;
+  const later = options.previews === 'background' || options.previews === 'none' ? background.get(folder) : undefined;
   // A load that leaves the previews to the background waits for none: not even for those being fetched.
-  if (later || options.previews === 'held') {
+  if (later || options.previews === 'held' || options.previews === 'none') {
     const outcomes = new Map<string, ProvidedOutcome>();
     const missing = await recordReported(refs, observed, facts, outcomes, await proxyStore(), options.again, options.previews);
-    if (later) {
+    if (later || options.previews === 'none') {
       for (const { reported } of missing) {
-        const problem = later.problem({ id: reported.ref.id, key: contentKey(reported.revisions) });
+        const problem = later?.problem({ id: reported.ref.id, key: contentKey(reported.revisions) });
         const fact = provisionalFact(reported);
         outcomes.set(reported.ref.id, problem !== undefined || !fact ? { state: 'unreadable', problem: problem ?? invalidFacts } : { state: 'pending', fact });
       }
+      // A check only looks: the open book's own loads want the previews it lacks.
+      if (!later || options.previews === 'none') return outcomes;
       const wanted = [...missing.map(({ reported }) => reported), ...refs.flatMap((ref, index) => {
         const result = observed[index], outcome = outcomes.get(ref.id);
         return outcome?.state === 'available' && outcome.outOfDate && result.state === 'available' ? [{ ref, revisions: result.revisions }] : [];
