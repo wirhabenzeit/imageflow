@@ -176,7 +176,7 @@ function settingsOnPage(targets: readonly Pick<InspectorTarget, 'owner' | 'edits
 }
 
 export function Inspector({ summary, spread, source, template, render, usage, edit, highlight,
-  select, quickLook, focus, targets = [], open, openTarget, place, familyPicker, writable, page, chooseLayout, holdPreviews, targetsStale, showSource }: {
+  select, quickLook, focus, targets = [], open, openTarget, place, familyPicker, writable, page, chooseLayout, holdPreviews, targetsStale, showSource, editCaption }: {
   summary: ProjectSummary; writable: boolean; spread: SpreadState; page?: PageSide; source?: SourceRef; template?: TemplateInfo; render?: RenderStatus; usage: SourceUsage;
   edit: (change: Edit, notice?: string | (() => string)) => void;
   highlight: (id?: string) => void; select: (spread: string) => void;
@@ -193,6 +193,8 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
   targetsStale?: boolean;
   // Shows a placed photo or text in Quick Look, or selects it in Assets, where its caption and other details are edited.
   showSource?: (source: SourceRef, action: 'preview' | 'assets') => void;
+  // Opens the caption of a box's photo, where the box is edited (UI-014).
+  editCaption?: (box: string) => void;
 }) {
   const items = useRef(new Map<string, HTMLElement>());
   const heldSettings = useRef<{ key: string; section: ReactNode }>(undefined);
@@ -338,8 +340,9 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
                     : kind === 'markdown' && box?.text ? { kind: 'text', id: box.text } : undefined;
                   if (!placed || !showSource) return;
                   event.preventDefault();
-                  const result = await window.imageflow?.showContextMenu(['asset-preview', 'box-show-assets'], assetMenuState(false));
-                  if (result?.command === 'asset-preview') showSource(placed, 'preview');
+                  const result = await window.imageflow?.showContextMenu([...(placed.kind === 'photo' && editCaption && writable ? ['box-edit-caption' as const] : []), 'asset-preview', 'box-show-assets'], assetMenuState(false));
+                  if (result?.command === 'box-edit-caption') editCaption?.(id);
+                  else if (result?.command === 'asset-preview') showSource(placed, 'preview');
                   else if (result?.command === 'box-show-assets') showSource(placed, 'assets');
                 }}>
                 {photo && summary.photos[photo]

@@ -122,19 +122,22 @@ export type ActiveBookEditor = { label: string; spread?: string; page?: PageSide
 // What the editor answers an agent's request to save: yes, the editor the user has open, or what the app is busy with
 // (an import, a reload after files changed, a drag), which ends by itself.
 export type AgentLeaseReply = boolean | ActiveBookEditor | { busy: string };
+export type LayoutBoxIds = Record<string, { boxes: Record<string, { type: 'photo' | 'markdown' }> }>;
 export type BookMenuState = { document: boolean; enabled: Record<SpreadCommand, boolean>; editing: boolean; textEditing: boolean;
   writable: boolean; busy: boolean; history?: HistoryState; canExport: boolean;
   // The design proof leaves the cover out: it needs only a rendered book with spreads, in either view.
   canProof?: boolean; canSwapPages?: boolean; activeEditor?: ActiveBookEditor;
   sidebar?: boolean; inspector?: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout; zoom?: number; photoView?: PhotoView;
   selectionCount?: number; selectedSpread?: string; saving?: boolean; importMode?: ImportMode; pageLabels?: Record<string, string>;
-  view?: 'content' | 'cover'; coverBoxIds?: string[] };
+  view?: 'content' | 'cover'; coverBoxIds?: string[]; layoutBoxes?: LayoutBoxIds };
 export type Command = PhotoViewCommand | SpreadCommand | 'swap-pages' | 'book-check' | OpenAction | 'toggle-project' | 'toggle-inspector' | 'toggle-sources' | 'toggle-guides' | LayoutCommand | 'export' | 'export-proof' | 'import' | 'copy-assets' | 'presentation' | 'presentation-start' | 'manage-sources' | 'save-copy' | 'undo' | 'redo' | 'zoom-in' | 'zoom-out' | 'zoom-actual' | 'zoom-fit' | 'revert-opened';
 export type ProjectSummary = ProjectFiles & {
   id: string; folder: string;
   handle?: string; history?: HistoryState; viewKey?: string;
   pageLabels?: Record<string, string>;
   coverBoxIds?: string[];
+  // The boxes of each layout, from the editor's last render: what is stored for another box is set aside, not placed.
+  layoutBoxes?: LayoutBoxIds;
   photoDates?: Record<string, { captured: string; capturedEstimated?: boolean }>;
   // The template's hash as loaded; network approvals hold for one hash (ADR 0006).
   templateHash?: string;
@@ -151,7 +154,8 @@ export type ProjectSummary = ProjectFiles & {
   sources?: Record<string, SourceStatus>;
 };
 // `existing`: files the book already holds, linked or copied, found by path or by content; they are not added again.
-export type ImportCounts = { photos: number; texts: number; files: number; skipped: number; failed: number; existing?: number };
+// `heic`: how many of the skipped files are HEIC photos, which the notice names.
+export type ImportCounts = { photos: number; texts: number; files: number; skipped: number; failed: number; existing?: number; heic?: number };
 export type Result<T> = { value: T } | { error: string; code?: 'BOOK_BUSY' };
 /**
  * Settings → Sync (#281; `available` is always true since #283). The renderer sends an access key to the main

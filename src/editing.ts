@@ -5,7 +5,7 @@ import type { Parameter, Parameters } from './parameters';
 import { shownBoxes } from './layouts';
 import { hasFacingPages, spanAllowedAt, spanRequiredAt } from './format';
 import type { PrintFormat } from './format';
-import type { Layouts } from './layouts';
+import type { LayoutBoxes, Layouts } from './layouts';
 
 export function newSpread(definition: string): SpreadState {
   return { id: crypto.randomUUID(), definition, params: {}, boxes: {}, elements: {} };
@@ -96,7 +96,7 @@ export function continuedSpread(previous: SpreadState, layouts: Layouts, format:
 
 // The boxes a spread shows: its own layout's, or its pages' when it is shown as pages. Without the template (still
 // loading), every box the spread stores counts, on its pages and among replaced content too.
-function shown(spread: SpreadState, layouts?: Layouts) {
+function shown(spread: SpreadState, layouts?: Record<string, LayoutBoxes>) {
   if (!layouts) return storedBoxes(spread).map(({ state }) => state);
   const layout = (definition: string | undefined) => definition !== undefined && Object.hasOwn(layouts, definition) ? layouts[definition] : undefined;
   const states = spread.split ? Object.values(spread.pages ?? {}) : [spread];
@@ -104,11 +104,13 @@ function shown(spread: SpreadState, layouts?: Layouts) {
 }
 
 export type SourcePlace = { spread: string; pages: string; cover?: true };
-export type SourceUsage = Record<'photo' | 'text', Record<string, SourcePlace[]>>;
+export type SourcePlaces = Record<'photo' | 'text', Record<string, SourcePlace[]>>;
+// `aside`: the places that store a source without showing it, such as content a layout change set aside (UI-016).
+export type SourceUsage = SourcePlaces & { aside?: SourcePlaces };
 
 // Lists the spreads that show each photo and Markdown source. `pages` holds a readable page range per spread.
-export function sourceUsage(project: Project, pages: string[], layouts?: Layouts, coverBoxIds?: readonly string[]) {
-  const usage: SourceUsage = { photo: {}, text: {} };
+export function sourceUsage(project: Project, pages: string[], layouts?: Record<string, LayoutBoxes>, coverBoxIds?: readonly string[]) {
+  const usage: SourcePlaces = { photo: {}, text: {} };
   function record(boxes: ReturnType<typeof shown>, place: SourcePlace) {
     for (const box of boxes) {
       for (const [kind, id] of [['photo', box.photo], ['text', box.text]] as const) {

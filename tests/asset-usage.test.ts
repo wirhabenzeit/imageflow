@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { assetPageLabels, assetUsage, clearFileAssignments, fileAssigned, fileExtensions, usageLabel } from '../src/asset-usage';
+import { asideText, assetPageLabels, assetUsage, clearFileAssignments, fileAssigned, fileExtensions, shownAssetUsage, usageLabel } from '../src/asset-usage';
 import { assetMenu } from '../src/asset-menu';
 import type { ProjectSummary } from '../src/desktop';
+import type { SourceUsage } from '../src/editing';
 import { coverInstance, projectSchema } from '../src/project';
 test('Assets and placement menus use the same page labels as the book canvas', () => {
   const summary: ProjectSummary = { id: 'book', folder: 'Book', photos: {}, photoSizes: {}, texts: {},
@@ -49,6 +50,31 @@ test('cover placements include layout, element and active box parameters', () =>
   assert.deepEqual(boxless.text, { blurb: cover });
   assert.deepEqual(assetUsage(summary, [], null), { photo: {}, text: {}, file: {} });
   assert.deepEqual(assetUsage(summary, []).text, { blurb: cover, retained: cover });
+});
+
+test('content a layout change set aside is not used, and says where it is (UI-016)', () => {
+  const files = { photoIndex: Object.fromEntries(['shown', 'aside', 'both', 'cover'].map((id) => [id, { path: 'photos/' + id + '.jpg' }])),
+    project: projectSchema.parse({ schemaVersion: 3, title: 'Book', template: { id: 't', version: '1' }, texts: { kept: 'texts/kept.md' },
+      cover: { definition: 'jacket', params: {}, elements: {}, boxes: { old: { photo: 'cover' } } }, spreads: [
+        { id: 'one', definition: 'two', boxes: { first: { photo: 'shown' }, second: { photo: 'both' }, third: { photo: 'aside' }, story: { text: 'kept' } } },
+        { id: 'two', definition: 'two', boxes: { third: { photo: 'both' } } },
+      ] }) };
+  const layouts = { two: { boxes: { first: { type: 'photo' as const }, second: { type: 'photo' as const } } } };
+  const usage: SourceUsage = assetUsage(files, ['38', '39'], [], layouts);
+  assert.deepEqual(usage.photo, { shown: [{ spread: 'one', pages: '38' }], both: [{ spread: 'one', pages: '38' }] });
+  assert.deepEqual(usage.text, {});
+  assert.deepEqual(usage.aside, { photo: { aside: [{ spread: 'one', pages: '38' }], both: [{ spread: 'two', pages: '39' }], cover: [{ spread: coverInstance, pages: 'Cover', cover: true as const }] },
+    text: { kept: [{ spread: 'one', pages: '38' }] } });
+  assert.equal(asideText(usage.aside?.photo.aside), 'set aside on page 38');
+  assert.equal(asideText(usage.aside?.photo.cover), 'set aside on the cover');
+  assert.equal(asideText(undefined), undefined);
+  // Without the layouts every stored reference counts, as removal needs it to.
+  assert.equal(assetUsage(files, ['38', '39']).photo.aside.length, 1);
+
+  const summary: ProjectSummary = { id: 'book', folder: 'Book', photos: {}, photoSizes: {}, texts: {}, pageLabels: { one: '38', two: '39' }, coverBoxIds: [], layoutBoxes: layouts, ...files };
+  const jump = (key: string) => assetMenu(summary, [key]).find((item) => typeof item === 'object' && 'command' in item && item.command === 'asset-placements');
+  assert.deepEqual(jump('photo:aside'), { command: 'asset-placements', items: [{ command: 'asset-jump', label: 'Page 38 (Set Aside)', value: 'one' }] });
+  assert.deepEqual(shownAssetUsage({ ...summary, layoutBoxes: undefined }).photo.aside.length, 1, 'until the template has rendered, nothing is called unused');
 });
 
 test('a file held in a list item counts as used, and clearing takes it out of every scope', () => {

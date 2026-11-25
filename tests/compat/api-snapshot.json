@@ -1464,7 +1464,7 @@
         "ResolvedFormat": "export type ResolvedFormat = Millimeters & { facingPages: true; bleed: { top: number; bottom: number; outside: number; binding: number; }; safe: { top: number; bottom: number; outside: number; binding: number; }; } | Millimeters & { facingPages: false; bleed: { top: number; bottom: number; left: number; right: number; }; safe: { top: number; bottom: number; left: number; right: number; }; };",
         "Common": "type Common = { label: string; description?: string; };",
         "Numeric": "type Numeric = { min?: number; max?: number; step?: number; unit?: string; };",
-        "BooleanParameter": "export type BooleanParameter = Common & { type: 'boolean'; default: boolean; };",
+        "BooleanParameter": "export type BooleanParameter = Common & { type: 'boolean'; default: boolean; shows?: 'caption'; };",
         "StringParameter": "export type StringParameter = Common & { type: 'string'; default: string; multiline?: boolean; maxLength?: number; placeholder?: string; markdown?: 'inline'; };",
         "IntegerParameter": "export type IntegerParameter = Common & Numeric & { type: 'integer'; default: number; };",
         "NumberParameter": "export type NumberParameter = Common & Numeric & { type: 'number'; default: number; };",
@@ -1745,6 +1745,9 @@
             }
           },
           "scope": {
+            "type": "string"
+          },
+          "notice": {
             "type": "string"
           }
         },
@@ -2139,6 +2142,9 @@
               "matchesSavedHash"
             ],
             "additionalProperties": {}
+          },
+          "notice": {
+            "type": "string"
           },
           "sources": {
             "type": "object",
@@ -6213,6 +6219,16 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 100
+          },
+          "include": {
+            "maxItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "changes"
+              ]
+            }
           }
         },
         "required": [
