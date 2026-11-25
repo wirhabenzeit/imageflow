@@ -21,8 +21,10 @@ const folder = join(work, 'Sync Folder');
 const profile = join(work, 'profile');
 for (const path of [join(work, 'Desktop'), folder, profile]) await mkdir(path);
 await writeFile(join(profile, 'settings.json'), JSON.stringify({ agentAccess: true, syncAutomatically: false, sync: { kind: 'folder', path: folder } }));
+// Long enough for the agent's calls on a slow CI runner, which takes more than 12 s for them.
+const sendingMs = 30_000;
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + profile],
-  env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1', IMAGEFLOW_SYNC_FOLDER: '1', IMAGEFLOW_SYNC_TEST_SENDING_MS: '12000', IMAGEFLOW_SYNC_TEST_SLOW_MS: '3000' } });
+  env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1', IMAGEFLOW_SYNC_FOLDER: '1', IMAGEFLOW_SYNC_TEST_SENDING_MS: String(sendingMs), IMAGEFLOW_SYNC_TEST_SLOW_MS: '3000' } });
 const stderr = [];
 app.process().stderr.on('data', (bytes) => stderr.push(String(bytes)));
 const client = new Client({ name: 'ImageFlow sync test', version: '1.0.0' });
@@ -66,7 +68,7 @@ try {
   const agent = await call('apply_project_changes', { project, expectedRevision: context.revision, idempotencyKey: 'during-sync', label: 'Title', operations: [{ op: 'set_title', title: 'Saved by an agent' }] });
   assert.equal(await page.evaluate(() => document.querySelector('.sync-status')?.getAttribute('data-state')), 'syncing', 'the sync still sends');
   assert.equal((await commits()).length, 0, 'nothing is committed yet');
-  assert.ok(Date.now() - started < 12000);
+  assert.ok(Date.now() - started < sendingMs);
   console.log('While the sync sent: list_projects ' + listed.took + ' ms, get_authoring_context ' + context.took + ' ms, apply_project_changes ' + agent.took + ' ms');
   const edited = await page.evaluate(async () => {
     const { value } = await window.imageflow.currentProject();
@@ -78,7 +80,7 @@ try {
 
   // Sent: while the sync holds the book, no progress is shown and Stop Syncing is not offered.
   assert.equal(await menuItem('sync-stop'), true, 'Stop Syncing is offered while it sends');
-  await waitForPage(page, () => document.querySelector('.sync-status')?.textContent === 'Syncing…', undefined, { timeout: 20000 });
+  await waitForPage(page, () => document.querySelector('.sync-status')?.textContent === 'Syncing…', undefined, { timeout: sendingMs + 10_000 });
   assert.equal(await menuItem('sync-stop'), false, 'and not while the book is held');
   await syncing(page, 'in-sync');
   const [commit] = await commits();

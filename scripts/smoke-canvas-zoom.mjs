@@ -43,14 +43,20 @@ try {
   await paper.waitFor();
   const paperSelector = await paper.evaluate(node => '[data-spread=' + JSON.stringify(node.closest('[data-spread]').dataset.spread) + '] .if-sheet');
   const paperOnScreen = () => canvasArtworkBounds(page, paperSelector);
-  const before = await paperOnScreen();
+  let before = await paperOnScreen();
   const bounds = await canvas.boundingBox();
   const point = { x: bounds.x + bounds.width * .55, y: Math.max(bounds.y + 80, Math.min(bounds.y + bounds.height - 80, before.y + before.height * .3)) };
-  const fraction = { x: (point.x - before.x) / before.width, y: (point.y - before.y) / before.height };
   // Gentle pinches must leave Fit too; a snap threshold must not swallow small deltas.
   await stage.dispatchEvent('wheel', { ctrlKey: true, deltaY: -.5, clientX: point.x, clientY: point.y, bubbles: true, cancelable: true });
   await page.waitForFunction(() => document.querySelector('.canvas-zoom-value').textContent !== 'Fit');
   await fit();
+  // Measured where Fit left the page, which may be a few pixels from where it was.
+  const fitted = await paperOnScreen();
+  const moved = Math.hypot(fitted.x - before.x, fitted.y - before.y);
+  if (moved >= 1) console.log('Returning to Fit moved the page by ' + moved.toFixed(1) + ' px.');
+  assert.ok(moved < 8, 'Returning to Fit brings the page back; off by ' + moved + ' px');
+  before = fitted;
+  const fraction = { x: (point.x - before.x) / before.width, y: (point.y - before.y) / before.height };
   const frameWidth = () => canvas.locator('iframe[data-current]').evaluate(node => node.clientWidth);
   const fittedWidth = await frameWidth();
   // Send several wheel events in each frame to model a real trackpad pinch, including closely spaced events.
