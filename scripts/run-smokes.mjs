@@ -1,6 +1,7 @@
 // Runs desktop smoke scripts one after another, each with a time limit, and reports every failure at the end.
 //
-//   node scripts/run-smokes.mjs [--visible] smoke-desktop smoke-files …
+//   node scripts/run-smokes.mjs [--visible] [--shard=1/2] smoke-desktop smoke-files …
+// --shard runs one part of the scripts named, for CI jobs that run beside each other (or SMOKE_SHARD=1/2).
 // Hidden by default. --visible also runs compositor/native-focus checks which need an isolated desktop.
 //
 // A script that hangs (for example a Playwright call that never returns) is killed after SMOKE_TIMEOUT_MINUTES
@@ -14,10 +15,13 @@
 import { spawn, execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { shardOf } from './test-parts.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const visible = process.argv.includes('--visible');
-const names = process.argv.slice(2).filter((arg) => arg !== '--visible');
+const shard = process.argv.find((arg) => arg.startsWith('--shard='))?.slice('--shard='.length) ?? process.env.SMOKE_SHARD;
+const named = process.argv.slice(2).filter((arg) => arg !== '--visible' && !arg.startsWith('--shard='));
+const names = shard ? shardOf(named, shard) : named;
 const needsDesktop = new Set(['smoke-inline-editors', 'smoke-mcp-context']);
 const acceptsVisible = new Set([...needsDesktop, 'smoke-presentation-startup', 'smoke-presentation-window']);
 if (!names.length) {

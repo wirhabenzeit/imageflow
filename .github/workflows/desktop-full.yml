@@ -14,10 +14,51 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Jobs of their own, side by side: one after the other the unit tests alone nearly filled the time limit, and the smoke
+# scripts were cut off. Together they are `npm run test:desktop` (tests/ci-workflow.test.ts checks that nothing is left out).
 jobs:
-  desktop-full:
+  unit:
+    # The app is a Mac app: the full unit tests, with every sync scenario against the memory store, run on one.
     runs-on: macos-latest
     timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.x'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:unit:full -- --without-stores
+
+  sync-stores:
+    # The sync scenarios again, against each other store.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        store: [sync-folder-store, sync-s3-store, sync-cloudkit-engine]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.x'
+          cache: npm
+      - run: npm ci
+      - run: npm run test:unit:full -- --store=${{ matrix.store }}
+
+  smokes:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ['1/2', '2/2']
     env:
       IMAGEFLOW_HIDE_WINDOW: '1'
       HOMEBREW_NO_AUTO_UPDATE: '1'
@@ -42,4 +83,7 @@ jobs:
       - run: npm ci
       - name: Install PDF test tools
         run: brew install poppler
-      - run: npm run test:desktop -- --visible
+      - run: npm run build
+      - run: npm run test:desktop:suite -- --visible
+        env:
+          SMOKE_SHARD: ${{ matrix.shard }}
