@@ -16,7 +16,7 @@ How an agent edits an ImageFlow book through the MCP server. The template API to
 - While an editor is active, dry runs and draft checks still validate against saved inputs. Saves that change only other spreads go through; a blocked save (one touching the editor's spread or page, or anything book-wide) reports `EDIT_IN_PROGRESS` with the active editor when available. `inspect_book` with `view: "summary"` also shows it.
 - Copy new content into `inbox/` and call `import_sources`. Then assign the returned IDs with a command batch.
 - Parameter commands use saved scopes: `document`, `spread`, `box` or `element`. An element editor can also own spread parameters; use `scope: 'spread'` for those fields, not `scope: 'element'`.
-- Mark a single user-written string the page prints with `<ctx.Text presentation="inline">`, so it is typed where it prints ([inline-text](inline-text.md)). Small text at whole-spread zoom opens the panel, which offers to zoom in.
+- Mark a single user-written string the page prints with `<ctx.Text presentation="inline">`, so it is typed where it prints ([inline-text](inline-text.md)). Small text at whole-spread zoom opens the panel instead.
 - To find the parameter a request means, read each parameter's description with its unit, range and options. Give new parameters a description when their meaning or direction is not obvious from the label.
 - To start or extend a template, read the [package](package.md) topic's example table, fetch the closest example with `includeExamples` and copy its layout.
 - For an empty book, inspect `template.openingSpreads` and insert suitable layouts with `insert_spread` or facing page pairs with `insert_page_pair`. `openingSpreads` describes new-book defaults and is not applied again automatically.
