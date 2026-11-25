@@ -462,12 +462,12 @@ export function createAuthoringService(hooks: Hooks) {
     if (parsed.data.cover) {
       const { cover, cases = [...fixtureCases] } = parsed.data;
       let plan;
-      try { plan = coverFixturePlan(template, cover, cases); }
+      try { plan = coverFixturePlan(template, cover, cases, parsed.data); }
       catch (error) {
         if (error instanceof FixtureError) throw new AuthoringError(error.code, error.message);
         throw error;
       }
-      const { format, cells, skipped } = plan;
+      const { format, cells, skipped, values } = plan;
       const assets = await fixtureAssets(hooks.cache);
       const results: FixtureCellReport[] = [], diagnostics: FixtureReport['diagnostics'] = [];
       let failed = 0, notIsolated = 0;
@@ -478,7 +478,7 @@ export function createAuthoringService(hooks: Hooks) {
           continue;
         }
         const result = await checked(session, signal, { expectedRevision: base.revision }, true,
-          fixtureDraft(template, format, [cell], assets, undefined, cover.pages));
+          fixtureDraft(template, format, [cell], assets, undefined, cover.pages, values));
         if (result.revision !== base.revision || result.diagnostics.some(({ code }) => code === 'source-changed' || code === 'revision-conflict')) {
           throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while rendering fixtures. Check again.');
         }
@@ -496,7 +496,7 @@ export function createAuthoringService(hooks: Hooks) {
       return { ...base, checks: { ...base.checks, fixtures: !cells.length ? 'not-run' : notIsolated ? 'failed' : 'completed' },
         fixtures: {
           cover: { interiorPages: cover.pages }, synthetic: true, committed: false, revision: base.revision,
-          matrix: { layouts: [cover.layout], formats: [format], cases },
+          matrix: { layouts: [cover.layout], formats: [format], cases, ...values },
           coverage: { planned: cells.length, rendered: cells.length - failed - notIsolated, failed, notIsolated, skipped },
           cells: results, diagnostics: diagnostics.slice(0, fixtureLimits.diagnostics),
           diagnosticsTruncated: diagnostics.length > fixtureLimits.diagnostics,
@@ -545,7 +545,7 @@ export function createAuthoringService(hooks: Hooks) {
           renders++;
         }
         const result = await checked(session, signal, { expectedRevision: base.revision! }, true,
-          fixtureDraft(template, format, cells, assets, previewRequest(shown ?? [])));
+          fixtureDraft(template, format, cells, assets, previewRequest(shown ?? []), undefined, plan.values));
         if (result.revision !== base.revision || result.diagnostics.some(({ code }) => code === 'revision-conflict' || code === 'source-changed')) {
           throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while rendering fixtures. Check again.');
         }
@@ -586,7 +586,7 @@ export function createAuthoringService(hooks: Hooks) {
       const shown = preview?.cells.filter(({ spread }) => ['passed', 'warnings', 'errors'].includes(outcome.get(spread)?.state ?? ''));
       if (preview && !image && shown?.length && Date.now() - started < fixtureBudgetMs) {
         const result = await checked(session, signal, { expectedRevision: base.revision }, true,
-          fixtureDraft(template, format, shown, assets, previewRequest(shown)));
+          fixtureDraft(template, format, shown, assets, previewRequest(shown), undefined, plan.values));
         if (result.revision !== base.revision) throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while rendering fixtures. Check again.');
         if (result.state === 'ready' && result.image) image = result.image;
       }
@@ -596,7 +596,7 @@ export function createAuthoringService(hooks: Hooks) {
     const listed = mergeFormatFindings(findings);
     const report: FixtureReport = {
       synthetic: true, committed: false, revision: base.revision,
-      matrix: { layouts: plan.layouts, formats, cases: plan.cases },
+      matrix: { layouts: plan.layouts, formats, cases: plan.cases, ...plan.values },
       coverage: { planned: reports.length, rendered: reports.length - count('failed') - count('not-isolated'),
         failed: count('failed'), notIsolated: count('not-isolated'), skipped },
       cells: reports, diagnostics: listed.slice(0, fixtureLimits.diagnostics),

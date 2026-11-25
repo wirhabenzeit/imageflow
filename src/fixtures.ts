@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import type { SpreadDefinition, TemplateInfo } from './desktop';
-import type { Parameter, Parameters } from './parameters';
+import { isParameterValue } from './parameters';
+import type { Parameter, Parameters, Scalar } from './parameters';
+import { closestIds } from './closest-ids';
 import { bookFormatOf, identifier, pageSides } from './project';
 import type { Project, SpreadState, Values } from './project';
 import { spanFits } from './format';
@@ -23,6 +25,7 @@ export const fixtureLimits = {
 
 const id = identifier.refine((value) => value.length <= 128, 'Identifiers must be at most 128 characters.');
 const fixtureCase = z.enum(fixtureCases);
+const values = z.record(id, z.union([z.string().max(1000), z.number(), z.boolean()]));
 export const fixtureRequestSchema = z.strictObject({
   layouts: z.array(id).min(1).max(fixtureLimits.layouts).optional()
     .describe('Layout IDs to test, including layouts the book does not use yet. Defaults to every declared layout (at most 24).'),
@@ -30,6 +33,9 @@ export const fixtureRequestSchema = z.strictObject({
     .describe('Print format IDs to test (at most four per check), or "all" for the first four declared formats. Defaults to the book\'s current format.'),
   cases: z.array(fixtureCase).min(1).max(fixtureCases.length).optional()
     .describe('Synthetic content cases. Defaults to every case that applies to each layout.'),
+  params: values.optional()
+    .describe('Values of layout, box and element settings by name, such as { "photoEdge": "bleed" }. Without layouts, tests the layouts that have one.'),
+  document: values.optional().describe('Document settings to use instead of the saved ones.'),
   cover: z.strictObject({
     layout: id.describe('Cover layout ID.'),
     pages: z.int().min(0).describe('Interior page count to size the cover against.'),
@@ -51,10 +57,68 @@ export const fixtureRequestSchema = z.strictObject({
 export type FixtureRequest = z.output<typeof fixtureRequestSchema>;
 
 export class FixtureError extends Error {
-  constructor(readonly code: 'LAYOUT_NOT_FOUND' | 'FORMAT_NOT_FOUND' | 'FIXTURE_NOT_FOUND', message: string) {
+  constructor(readonly code: 'LAYOUT_NOT_FOUND' | 'FORMAT_NOT_FOUND' | 'FIXTURE_NOT_FOUND' | 'PARAMETER_NOT_FOUND' | 'INVALID_PARAMETER_VALUE', message: string) {
     super(message);
     this.name = 'FixtureError';
   }
+}
+
+// Settings a fixture check tests at other values than their defaults (API-021): `params` of layouts, their boxes and
+// elements, by name, and the book's `document` settings.
+export type FixtureValues = { params?: Record<string, Scalar>; document?: Record<string, Scalar> };
+type Settings = Pick<SpreadDefinition, 'parameters' | 'boxes' | 'elements'>;
+const settingsOf = (definition: Settings) => [definition.parameters, ...Object.values(definition.boxes).map((box) => box.parameters),
+  ...Object.values(definition.elements).map((element) => element.parameters)];
+const describeValue = (param: Parameter) => param.type === 'enum' ? 'one of ' + param.options.join(', ')
+  : param.type === 'boolean' ? 'true or false' : param.type === 'integer' || param.type === 'number'
+    ? (param.type === 'integer' ? 'a whole number' : 'a number') + (param.min !== undefined ? ' from ' + param.min : '') + (param.max !== undefined ? ' up to ' + param.max : '')
+    : 'a ' + param.type;
+
+/** The values of a request, checked against the settings of the layouts it tests and the template's document settings. */
+export function fixtureValues(template: Pick<TemplateInfo, 'parameters'>, layouts: Record<string, Settings>, request: Pick<FixtureRequest, 'params' | 'document'>): FixtureValues | undefined {
+  const check = (name: string, value: Scalar, param: Parameter, owner: string) => {
+    if (param.type === 'string' || param.type === 'file' || param.type === 'list') {
+      throw new FixtureError('INVALID_PARAMETER_VALUE', owner + ' · ' + name + ' is a ' + param.type + ': the fixture cases fill it, typical, long and empty.');
+    }
+    if (!isParameterValue(param, value)) {
+      throw new FixtureError('INVALID_PARAMETER_VALUE', owner + ' · ' + name + ' cannot be ' + JSON.stringify(value) + '; it takes ' + describeValue(param) + '.');
+    }
+  };
+  for (const [name, value] of Object.entries(request.params ?? {})) {
+    const found = Object.entries(layouts).flatMap(([layout, definition]) => settingsOf(definition).flatMap((group) =>
+      Object.hasOwn(group, name) ? [[layout, group[name]] as const] : []));
+    if (!found.length) {
+      const known = [...new Set(Object.values(layouts).flatMap((definition) => settingsOf(definition).flatMap((group) => Object.keys(group))))];
+      const likely = closestIds(name, known, 3);
+      throw new FixtureError('PARAMETER_NOT_FOUND', 'No tested layout has a setting ' + name + '.' + (likely.length ? ' Did you mean ' + likely.join(', ') + '?' : '') +
+        (Object.hasOwn(template.parameters, name) ? ' It is a document setting: pass it in document.' : ''));
+    }
+    for (const [layout, param] of found) check(name, value, param, layout);
+  }
+  for (const [name, value] of Object.entries(request.document ?? {})) {
+    if (!Object.hasOwn(template.parameters, name)) {
+      const likely = closestIds(name, Object.keys(template.parameters), 3);
+      throw new FixtureError('PARAMETER_NOT_FOUND', 'The template has no document setting ' + name + '.' + (likely.length ? ' Did you mean ' + likely.join(', ') + '?' : ''));
+    }
+    const param = template.parameters[name];
+    if (param.type !== 'file' && param.type !== 'list' && !isParameterValue(param, value)) {
+      throw new FixtureError('INVALID_PARAMETER_VALUE', 'Document · ' + name + ' cannot be ' + JSON.stringify(value) + '; it takes ' + describeValue(param) + '.');
+    }
+    if (param.type === 'file' || param.type === 'list') throw new FixtureError('INVALID_PARAMETER_VALUE', 'Document · ' + name + ' is a ' + param.type + ', which fixtures cannot set.');
+  }
+  const given = { ...(request.params && Object.keys(request.params).length ? { params: request.params } : {}),
+    ...(request.document && Object.keys(request.document).length ? { document: request.document } : {}) };
+  return Object.keys(given).length ? given : undefined;
+}
+
+/** Whether a layout has any of the settings of `params`. */
+const hasAny = (definition: Settings, params: Record<string, Scalar>) =>
+  settingsOf(definition).some((group) => Object.keys(params).some((name) => Object.hasOwn(group, name)));
+
+/** The values of a fixture check as the banner of its sheet shows them. */
+export function valuesLabel(values: FixtureValues | undefined) {
+  const pairs = Object.entries({ ...values?.document, ...values?.params });
+  return pairs.length ? pairs.map(([name, value]) => name + ' ' + String(value)).join(', ') : '';
 }
 
 export type FixtureCell = { layout: string; case: FixtureCase; spread: string; label: string };
@@ -65,6 +129,7 @@ export type FixturePlan = {
   cells: FixtureCell[];
   skipped: FixtureSkip[];
   preview?: Omit<NonNullable<FixtureRequest['preview']>, 'printFormat' | 'cells'> & { printFormat: string; cells: FixtureCell[] };
+  values?: FixtureValues;
 };
 
 type Inputs = { photos: number; markdown: number; strings: number; files: number; sampleFiles: number };
@@ -81,7 +146,7 @@ function layoutInputs(definition: Pick<SpreadDefinition, 'parameters' | 'boxes' 
   };
 }
 
-export function coverFixturePlan(template: TemplateInfo, request: NonNullable<FixtureRequest['cover']>, cases: FixtureCase[]) {
+export function coverFixturePlan(template: TemplateInfo, request: NonNullable<FixtureRequest['cover']>, cases: FixtureCase[], cover: Pick<FixtureRequest, 'params' | 'document'> = {}) {
   const format = request.format ?? template.formatId;
   const layout = template.coverLayouts && Object.hasOwn(template.coverLayouts, request.layout) ? template.coverLayouts[request.layout] : undefined;
   if (!template.coverFormats || !Object.hasOwn(template.coverFormats, format)) {
@@ -90,6 +155,7 @@ export function coverFixturePlan(template: TemplateInfo, request: NonNullable<Fi
   if (!layout || (layout.formats && !layout.formats.includes(format))) {
     throw new FixtureError('LAYOUT_NOT_FOUND', 'Cover layout ' + request.layout + ' is unavailable for ' + format + '.');
   }
+  const values = fixtureValues(template, { [request.layout]: layout }, cover);
   const inputs = layoutInputs(layout);
   const cells: FixtureCell[] = [], skipped: FixtureSkip[] = [];
   for (const item of new Set(cases)) {
@@ -97,7 +163,7 @@ export function coverFixturePlan(template: TemplateInfo, request: NonNullable<Fi
     if (reason) skipped.push({ layout: request.layout, format, case: item, reason });
     else cells.push({ layout: request.layout, case: item, spread: 'fixture-cover-' + item, label: layout.label + ' · ' + fixtureCaseLabels[item] });
   }
-  return { format, cells, skipped };
+  return { format, cells, skipped, values };
 }
 
 /** Why a case says nothing new about a layout, or undefined when it applies. */
@@ -145,7 +211,18 @@ export function planFixtures(template: TemplateInfo, request: FixtureRequest): F
   for (const layout of request.layouts ?? []) {
     if (!template.spreads[layout]) throw new FixtureError('LAYOUT_NOT_FOUND', 'The template declares no layout ' + layout + '. Declared layouts: ' + declaredLayouts.join(', ') + '.');
   }
-  let layouts = [...new Set(request.layouts ?? declaredLayouts)];
+  // Settings to test choose the layouts that have them, unless layouts are named.
+  const params = request.params && Object.keys(request.params).length ? request.params : undefined;
+  let layouts = [...new Set(request.layouts ?? (params ? declaredLayouts.filter((layout) => hasAny(template.spreads[layout], params)) : declaredLayouts))];
+  // None has them: the error names settings of every layout.
+  const values = fixtureValues(template, layouts.length ? Object.fromEntries(layouts.map((layout) => [layout, template.spreads[layout]])) : template.spreads, request);
+  if (params && !request.document) {
+    // A named layout without any of them would only repeat a check at its defaults.
+    for (const layout of layouts.filter((layout) => !hasAny(template.spreads[layout], params))) {
+      skipped.push({ layout, reason: 'It has none of the settings in params.' });
+    }
+    layouts = layouts.filter((layout) => hasAny(template.spreads[layout], params));
+  }
   if (layouts.length > fixtureLimits.layouts) {
     skipped.push(...layouts.slice(fixtureLimits.layouts).map((layout) => ({ layout, reason: 'Only ' + fixtureLimits.layouts + ' layouts are tested per check; request the remaining layouts explicitly.' })));
     layouts = layouts.slice(0, fixtureLimits.layouts);
@@ -200,7 +277,7 @@ export function planFixtures(template: TemplateInfo, request: FixtureRequest): F
       cells.push({ layout, case: fixture, spread: fixtureSpreadId(layout, fixture), label: definition.label + ' · ' + fixtureCaseLabels[fixture] });
     }
   }
-  const plan: FixturePlan = { layouts, formats, cases, cells, skipped };
+  const plan: FixturePlan = { layouts, formats, cases, cells, skipped, ...(values ? { values } : {}) };
   if (request.preview) {
     const { printFormat = formats[0], cells: requested, ...options } = request.preview;
     if (!formats.includes(printFormat)) throw new FixtureError('FIXTURE_NOT_FOUND', 'Preview format ' + printFormat + ' is not among the tested formats: ' + formats.join(', ') + '.');
@@ -328,18 +405,22 @@ function sampleValues(parameters: Parameters, fixture: FixtureCase, ids: Fixture
 
 /** One spread of a layout with the content of a fixture case. `text` is this spread's own Markdown source, so
  * synthetic text never continues on another spread. */
-export function fixtureSpread(cell: FixtureCell, definition: Pick<SpreadDefinition, 'parameters' | 'boxes' | 'elements'>, ids: FixtureSourceIds, text: string): SpreadState {
+export function fixtureSpread(cell: FixtureCell, definition: Pick<SpreadDefinition, 'parameters' | 'boxes' | 'elements'>, ids: FixtureSourceIds, text: string,
+  values: Record<string, Scalar> = {}): SpreadState {
   const photo = cell.case === 'portrait-photos' ? ids.photo.portrait : ids.photo.landscape;
   const filled = cell.case !== 'empty';
+  // The values of a request for the settings it names, where they are declared (fixtureValues checked them).
+  const filledIn = (parameters: Parameters) => ({ ...sampleValues(parameters, cell.case, ids),
+    ...Object.fromEntries(Object.entries(values).filter(([name]) => Object.hasOwn(parameters, name))) });
   return {
     id: cell.spread, definition: cell.layout,
-    params: sampleValues(definition.parameters, cell.case, ids),
+    params: filledIn(definition.parameters),
     boxes: Object.fromEntries(Object.entries(definition.boxes).map(([box, declared]) => [box, {
-      params: sampleValues(declared.parameters, cell.case, ids),
+      params: filledIn(declared.parameters),
       ...(filled ? declared.type === 'photo' ? { photo } : { text } : {}),
     }])),
     elements: Object.fromEntries(Object.entries(definition.elements).map(([element, declared]) => [element, {
-      params: sampleValues(declared.parameters, cell.case, ids),
+      params: filledIn(declared.parameters),
     }])),
   };
 }
@@ -349,8 +430,8 @@ export function fixtureTextId(cell: FixtureCell) {
 }
 
 /** The saved project with its spreads replaced by fixture spreads in one format. Document parameters stay as saved,
- * so book-wide styling matches the user's book. */
-export function fixtureProject(project: Project, template: TemplateInfo, format: string, cells: FixtureCell[], ids: FixtureSourceIds) {
+ * so book-wide styling matches the user's book, except those `values` sets. */
+export function fixtureProject(project: Project, template: TemplateInfo, format: string, cells: FixtureCell[], ids: FixtureSourceIds, values?: FixtureValues) {
   const texts: Record<string, string> = {};
   const markdown: Record<string, string> = {};
   const spreads = cells.map((cell): SpreadState => {
@@ -361,7 +442,7 @@ export function fixtureProject(project: Project, template: TemplateInfo, format:
         texts[text] = 'synthetic/' + cell.case + (side ? '-' + side : '') + '.md';
         markdown[text] = cell.case === 'long-text' ? fixtureMarkdown.long : fixtureMarkdown.typical;
       }
-      return fixtureSpread(cell, definition, ids, text);
+      return fixtureSpread(cell, definition, ids, text, values?.params);
     };
     if (definition.span !== 'page' || fixtureStructure(template, format).facingPages === false) return create();
     // Both allowed sides render independently on one sheet. Distinct sources keep synthetic text from flowing
@@ -374,7 +455,7 @@ export function fixtureProject(project: Project, template: TemplateInfo, format:
   });
   return {
     project: {
-      ...project, cover: undefined, schemaVersion: bookFormatOf({ spreads }), ...(Object.keys(template.formats).length ? { format } : {}),
+      ...project, cover: undefined, schemaVersion: bookFormatOf({ spreads }), params: { ...project.params, ...values?.document }, ...(Object.keys(template.formats).length ? { format } : {}),
       texts: { ...project.texts, ...texts }, spreads,
     } satisfies Project,
     markdown,
