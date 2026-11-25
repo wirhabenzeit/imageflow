@@ -58,7 +58,7 @@ import { insideBook, pendingUploadsText, SyncService, UntrustedBookError } from 
 import { cloudKitPush } from './sync-auto';
 import { settleSyncSetup, syncExcludedBook as excludedFrom } from './sync-start';
 import { syncSetupPatch } from './sync-settings';
-import { cleanUp, cleanUpQuestion, cleanUpSummary, planCleanUp } from './sync-sweep';
+import { cleanUp, cleanUpQuestion, cleanUpSummary, planCleanUp, unusedStorage } from './sync-sweep';
 import type { CleanUpPlan } from './sync-sweep';
 import { configureMacHeader, setToolbarDragRegions } from './mac-header';
 import type { RenderSessions } from './document-session';
@@ -2466,9 +2466,14 @@ void app.whenReady().then(async () => {
       return standing.sync === 'unavailable' ? unavailableStatus(standing.error ?? 'The remote cannot be read.', standing.access) : null;
     });
   }));
-  ipcMain.handle(channels.syncBookSize, (event, bookId: unknown, refresh?: unknown) => forSync(event, async () => {
+  const chosenBook = (bookId: unknown) => {
     if (typeof bookId !== 'string' || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(bookId)) throw new Error('Choose a book.');
-    return librarySize(bookId, refresh === true);
+    return bookId;
+  };
+  ipcMain.handle(channels.syncBookSize, (event, bookId: unknown, refresh?: unknown) => forSync(event, async () => librarySize(chosenBook(bookId), refresh === true)));
+  ipcMain.handle(channels.syncBookUnused, (event, bookId: unknown) => forSync(event, async () => {
+    const id = chosenBook(bookId);
+    return sizeReads(async () => await unusedStorage((await syncService.connect()).remote, id) ?? null);
   }));
   ipcMain.handle(channels.manageSyncStorage, (event) => forSync(event, async () => { await shell.openExternal(manageICloudStorage); }));
   ipcMain.handle(channels.libraryAction, async (event, request: unknown) => {

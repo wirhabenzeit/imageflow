@@ -15,7 +15,7 @@ import { acquireProjectLock, bookStateFolder, readSaveLedger } from '../desktop/
 import { importIntoProject, loadProject, updateProject } from '../desktop/project';
 import type { OpenProject } from '../desktop/project';
 import { collectSources, relinkFolder, relocateSource, removeSources, saveDocumentCopy } from '../desktop/source-actions';
-import { cleanUp, cleanUpQuestion, planCleanUp } from '../desktop/sync-sweep';
+import { cleanUp, cleanUpQuestion, planCleanUp, unusedStorage } from '../desktop/sync-sweep';
 import { captureBookStateRevision } from '../desktop/revisions';
 import { BookDownloads } from '../desktop/downloads';
 import { cloneFromRemote, describeLocalChange, describeSync, downloadName, downloadOriginals, newBookHistory, originalsAway, originalsNotHere, pendingOriginals, pendingUploads, placeOriginals, RemoteSyncingError, stageOriginals, stageSyncPull, syncBook, ensureBookId, uploadAhead, uploadOriginals } from '../desktop/sync-engine';
@@ -3915,7 +3915,9 @@ test('storage figures: what a book takes up, with the part that is originals, an
   const originals = listed.filter(({ key }) => key.includes('/originals/')).reduce((sum, { size }) => sum + size, 0);
   const total = listed.reduce((sum, { size }) => sum + size, 0);
   assert.ok(originals > 0 && originals < total);
-  assert.deepEqual(await remote.usage(book), { bytes: total, originals });
+  const under = (folder: string) => listed.filter(({ key }) => key.includes('/' + folder + '/')).reduce((sum, { size }) => sum + size, 0);
+  assert.ok(under('proxies') > 0);
+  assert.deepEqual(await remote.usage(book), { bytes: total, originals, previews: under('proxies'), covers: under('covers') });
   const other = randomUUID();
   await remote.store.putIfAbsent(proxyBlobKey(other, 'f'.repeat(64), '.jpg'), new Uint8Array(10));
   await remote.deleteBook(other);
@@ -4019,6 +4021,35 @@ test('Clean Up over iCloud lists each book in the store itself, never from the k
   await cleanUp(remote, plan, later(8));
   assert.equal((await keyIndex.read(remoteId, book))!.entries[stray], undefined, 'the kept index no longer has it');
   assert.equal(await remote.hasBlob(stray), false);
+});
+
+coreEach('what a book no longer uses is what Clean Up frees, now or from when it can (UI-009)', async (t) => {
+  const { a, remote } = await world(t);
+  await sync(a, remote);
+  const book = await bookId(a);
+  assert.deepEqual(await unusedStorage(remote, book), { now: 0, later: 0 });
+  const photo = await importPhoto(a, 'harbour.jpg', '#225588');
+  await sync(a, remote);
+  await on(a, (opened) => removeSources(opened, ['photo:' + photo.id]));
+  const removedAt = later(7.5);
+  await sync(a, remote, { now: () => removedAt });
+  // Uploaded long ago and just removed: it can go a week after the removal, as Clean Up counts.
+  const soon = (await unusedStorage(remote, book, later(8)))!;
+  assert.ok(soon.later > 0);
+  assert.equal(soon.now, 0);
+  const free = removedAt.getTime() + 7 * 24 * 60 * 60 * 1000;
+  assert.deepEqual([soon.from, soon.until], [free, free]);
+  for (const now of [new Date(free - 1000), new Date(free)]) {
+    const [unused, plan] = [(await unusedStorage(remote, book, now))!, await planCleanUp(remote, now)];
+    assert.equal(unused.now, plan.bytes, now.toISOString());
+    assert.equal(unused.now + unused.later, soon.later);
+  }
+  await cleanUp(remote, await planCleanUp(remote, later(15)), later(15));
+  assert.deepEqual(await unusedStorage(remote, book, later(15)), { now: 0, later: 0 });
+  // A snapshot that cannot be read: nothing is said, as Clean Up does nothing.
+  const [tip] = await tips(remote, a);
+  await remove(remote, contentBlobKey(book, tip.stateDigest));
+  assert.equal(await unusedStorage(remote, book), undefined);
 });
 
 each('Clean Up counts the week from the commit that removed a photo, not from the upload', async (t) => {

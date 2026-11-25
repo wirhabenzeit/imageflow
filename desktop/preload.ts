@@ -79,6 +79,7 @@ const api: DesktopApi = {
   onSyncBooksChanged: (listener) => listen(channels.syncBooksChanged, listener),
   syncBookStatus: (id) => ipcRenderer.invoke(channels.syncBookStatus, id),
   syncBookSize: (bookId, refresh) => ipcRenderer.invoke(channels.syncBookSize, bookId, refresh),
+  syncBookUnused: (bookId) => ipcRenderer.invoke(channels.syncBookUnused, bookId),
   manageSyncStorage: () => ipcRenderer.invoke(channels.manageSyncStorage),
   syncCleanUpPlan: () => ipcRenderer.invoke(channels.syncCleanUpPlan),
   syncCleanUp: () => ipcRenderer.invoke(channels.syncCleanUp),

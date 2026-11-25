@@ -91,7 +91,7 @@ A book that syncs on this Mac stays in the list, however many books you open; to
 
 ## Storage and Clean Up
 
-The Sync window shows what each book takes up in your sync, and the total below. The figures fill in while it is open; over a bucket that takes a moment for each book.
+The Sync window shows what each book takes up in your sync, and the total below. The figures fill in while it is open; over a bucket that takes a moment for each book. Click a book's size to see what it is: previews, originals, covers, and its texts, files and history. Below that it says how much of it the book no longer uses, and from when Clean Up can free it.
 
 Your sync keeps every version of every book, but not every photo. When you remove a photo, or a book gets a new cover, the old original, preview and cover stay in your sync until you choose **Clean Up…** in the Sync window:
 

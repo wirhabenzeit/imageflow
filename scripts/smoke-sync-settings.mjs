@@ -210,6 +210,13 @@ try {
   await row.locator('.sync-state', { hasText: 'Up to date' }).waitFor();
   assert.equal(await row.getByRole('switch').getAttribute('aria-checked'), 'true');
   await row.locator('.sync-size', { hasText: /^[0-9.]+ (KB|MB)$/ }).waitFor();
+  // Its size opens what it is, and what of it is no longer used (UI-009).
+  await row.locator('.sync-size-button').click();
+  const storage = sync.locator('.sync-details[data-details="' + bookId + '"]');
+  await storage.getByText('Texts, files and history').waitFor();
+  await storage.getByText(/All of it is in use|no longer used\. Clean Up can free/).waitFor();
+  await row.locator('.sync-size-button').click();
+  await storage.waitFor({ state: 'detached' });
   // A wrong key saved in Settings: the book's status says sign-in needed at once, and a corrected key clears it,
   // with no restart.
   await editBucket();

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { contentBlobKey, coverBlobKey, deriveTips, NewerSyncFormatError, originalBlobKey, proxyBlobKey, stateBlobSchema, tombstoneKey } from '../src/sync-snapshot';
 import type { CommitHeader } from '../src/sync-snapshot';
-import type { SyncCleanUpPlan } from '../src/desktop';
+import type { SyncCleanUpPlan, UnusedStorage } from '../src/desktop';
 import { cleanUpText } from '../src/sync-storage-text';
 import { remoteCommits, sweepableKey } from './sync-remote';
 import type { SyncRemote } from './sync-remote';
@@ -60,20 +60,69 @@ export async function keptBlobs(remote: SyncRemote, bookId: string, now = new Da
   const keys = new Set<string>();
   const originals = new Set<string>();
   for (const commit of named.values()) {
-    if (commit.coverDigest) keys.add(coverBlobKey(bookId, commit.coverDigest));
-    const bytes = await remote.getBlob(contentBlobKey(bookId, commit.stateDigest));
-    if (!bytes || sha(bytes) !== commit.stateDigest) return undefined;
-    let parsed;
-    try { parsed = stateBlobSchema.safeParse(JSON.parse(Buffer.from(bytes).toString('utf8'))); } catch { return undefined; }
-    if (!parsed.success) return undefined;
-    for (const original of Object.values(parsed.data.originals)) {
-      const key = originalBlobKey(bookId, original.digest, original.ext);
-      keys.add(key);
-      originals.add(key);
-    }
-    for (const [digest, proxy] of Object.entries(parsed.data.proxies)) keys.add(proxyBlobKey(bookId, digest, proxy.ext));
+    const blobs = await blobsOf(remote, bookId, commit);
+    if (!blobs) return undefined;
+    for (const key of blobs.keys) keys.add(key);
+    for (const key of blobs.originals) originals.add(key);
   }
   return { keys, originals };
+}
+
+/** The originals, previews and cover a commit names; undefined when its snapshot cannot be read. */
+async function blobsOf(remote: SyncRemote, bookId: string, commit: CommitHeader): Promise<{ keys: string[]; originals: string[] } | undefined> {
+  const bytes = await remote.getBlob(contentBlobKey(bookId, commit.stateDigest));
+  if (!bytes || sha(bytes) !== commit.stateDigest) return undefined;
+  let parsed;
+  try { parsed = stateBlobSchema.safeParse(JSON.parse(Buffer.from(bytes).toString('utf8'))); } catch { return undefined; }
+  if (!parsed.success) return undefined;
+  const originals = Object.values(parsed.data.originals).map(({ digest, ext }) => originalBlobKey(bookId, digest, ext));
+  return { originals, keys: [...commit.coverDigest ? [coverBlobKey(bookId, commit.coverDigest)] : [], ...originals,
+    ...Object.entries(parsed.data.proxies).map(([digest, { ext }]) => proxyBlobKey(bookId, digest, ext))] };
+}
+
+/**
+ * What a book stores that it no longer uses, for the Sync window (UI-009): what Clean Up can free now, and what it can
+ * free later, once a week has passed since the upload and since the commit that removed it, as `keptBlobs` counts. For
+ * one book alone, so without what another book still copies from it (`planCleanUp`), which Clean Up then keeps.
+ * Undefined when it cannot be told.
+ */
+export async function unusedStorage(remote: SyncRemote, bookId: string, now = new Date()): Promise<UnusedStorage | undefined> {
+  let commits: CommitHeader[];
+  try { commits = await remoteCommits(remote, bookId); }
+  catch (error) { if (error instanceof NewerSyncFormatError) return undefined; throw error; }
+  const tips = deriveTips(commits);
+  if (!tips.length) return undefined;
+  const used = new Set<string>();
+  for (const tip of tips) {
+    const blobs = await blobsOf(remote, bookId, tip);
+    if (!blobs) return undefined;
+    for (const key of blobs.keys) used.add(key);
+  }
+  // A commit keeps what its parents named for a week: the last such commit counts.
+  const keptUntil = new Map<string, number>();
+  const byId = new Map(commits.map((commit) => [commit.commitId, commit]));
+  const until = new Map<string, number>();
+  for (const { createdAt, parents } of commits) {
+    const at = Date.parse(createdAt) + cleanUpGraceMs;
+    if (at > now.getTime()) for (const parent of parents) until.set(parent, Math.max(until.get(parent) ?? 0, at));
+  }
+  for (const [id, at] of until) {
+    const commit = byId.get(id);
+    const blobs = commit && await blobsOf(remote, bookId, commit);
+    if (!commit) continue;
+    if (!blobs) return undefined;
+    for (const key of blobs.keys) keptUntil.set(key, Math.max(keptUntil.get(key) ?? 0, at));
+  }
+  const result: UnusedStorage = { now: 0, later: 0 };
+  for (const { key, size, lastModified } of await remote.listBook(bookId)) {
+    if (!sweepableKey.test(key) || used.has(key)) continue;
+    const at = Math.max(lastModified.getTime() + cleanUpGraceMs, keptUntil.get(key) ?? 0);
+    if (at <= now.getTime()) { result.now += size; continue; }
+    result.later += size;
+    result.from = Math.min(result.from ?? at, at);
+    result.until = Math.max(result.until ?? at, at);
+  }
+  return result;
 }
 
 /** The blobs of a listing that Clean Up may delete: sweepable, not kept, not wanted by another book, and older than the grace period. */

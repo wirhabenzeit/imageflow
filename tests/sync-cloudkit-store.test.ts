@@ -330,11 +330,11 @@ test('usage: what each book stores, from the key indexes', async () => {
   const { native, store } = make();
   const remote = new StoreRemote(store, { keyIndex: new MemoryKeyIndexCache() });
   await remote.remoteId();
-  assert.deepEqual(await remote.usage(book), { bytes: 0, originals: 0 });
+  assert.deepEqual(await remote.usage(book), { bytes: 0, originals: 0, previews: 0, covers: 0 });
   await remote.putBlob(contentBlobKey(book, 'c'.repeat(64)), bytes('x'.repeat(1000)));
   await remote.putBlob(contentBlobKey(other, 'c'.repeat(64)), bytes('y'.repeat(300_000)));
-  assert.deepEqual(await remote.usage(book), { bytes: 1000, originals: 0 });
-  assert.deepEqual(await remote.usage(other), { bytes: 300_000, originals: 0 });
+  assert.deepEqual(await remote.usage(book), { bytes: 1000, originals: 0, previews: 0, covers: 0 });
+  assert.deepEqual(await remote.usage(other), { bytes: 300_000, originals: 0, previews: 0, covers: 0 });
   // Counted again from the index: one change-feed request, no listing.
   native.calls.length = 0;
   assert.equal((await remote.usage(other)).bytes, 300_000);
