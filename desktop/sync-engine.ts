@@ -313,7 +313,7 @@ async function currentBook(context: Context) {
   // Only originals are rendered from the open book; a photo without a file is pushed from its stored preview.
   const stale = context.stale || Object.entries(context.here).some(([id, { path }]) => path !== undefined && (context.book.photos.get(id)?.original !== path ||
     context.book.sources?.['photo:' + id]?.state !== 'available' || context.book.sources?.['photo:' + id]?.cached));
-  if (stale) { context.book = await loadProject(context.root, context.book.cache, true); context.stale = false; }
+  if (stale) { context.book = await loadProject(context.root, context.book.cache, true, false, { previews: 'none' }); context.stale = false; }
   return context.book;
 }
 

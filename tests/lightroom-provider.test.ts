@@ -13,6 +13,7 @@ import { configureProxyStore } from '../desktop/proxy-store';
 import { AssetFacts, readAssetFacts } from '../desktop/asset-facts';
 import { acquireProjectLock } from '../desktop/persistence';
 import { checkProject } from '../desktop/check';
+import { saveDocumentCopy } from '../desktop/source-actions';
 import { loadProject, projectSummary, updateProject } from '../desktop/project';
 import { backgroundPreviews, providedChanges } from '../desktop/provided-photos';
 import { copySample } from '../desktop/sample-book.mjs';
@@ -657,4 +658,15 @@ test('an observation that is given up ends its request to the plugin', async (t)
   const [result] = await provider.observe('/book', [ref('a', uuid(1))], { signal: job.signal });
   assert.equal(result.state, 'unreadable');
   assert.equal(plugin.jobs.filter(({ type }) => type === 'metadata').length, 0);
+});
+
+test('Save a Copy waits for no previews, and previews that come meanwhile do not fail it', async (t) => {
+  const f = await bookFetchingPreviews(t, 20);
+  const asked = f.asked();
+  // Held until the copy is done: one that waited for the previews would never end.
+  await saveDocumentCopy(f.book, join(f.root, 'Copy.imageflow'), false);
+  assert.equal(f.asked(), asked, 'and asks for none');
+  f.open();
+  await f.fetching;
+  assert.deepEqual(Object.keys(JSON.parse(await readFile(join(f.root, 'Copy.imageflow/photos.json'), 'utf8'))), Object.keys(f.book.photoIndex));
 });
