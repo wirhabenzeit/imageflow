@@ -11,6 +11,7 @@ import type { Locator, PhotoLocator } from '../src/source-locator';
 import { providerOf } from './providers';
 import { backgroundPreviews, providedChanges } from './provided-photos';
 import type { ProvidedChanges, WantedPreview } from './provided-photos';
+import { leftoverFiles } from './leftover-files';
 import { PreviewFetches, PreviewRequests } from './preview-requests';
 import type { Revisions, SourceProvider, SourceRef } from './source-provider';
 import { assetPageLabels, assetUsage } from '../src/asset-usage';
@@ -1418,6 +1419,21 @@ export class DocumentSession {
       } catch (error) { if (!reported) this.notify({ error: String(error) }); }
     } catch (error) { this.notify({ error: String(error) }); }
     finally { this.linkedReloading = false; }
+  }
+
+  /** The files of the package that neither the book nor anything this session can bring back uses (UI-010). */
+  leftovers(open: readonly string[] = []) {
+    return this.book.readOnly ? Promise.resolve([]) : leftoverFiles(this.book.folder, this.projectSession.states, open);
+  }
+  /** Moves leftover files to the Trash, with the book held: each is looked up again, so one that is used by now stays. */
+  async trashLeftovers(paths: readonly string[], open: readonly string[]) {
+    const gone = (await this.leftovers(open)).filter(({ path }) => paths.includes(path));
+    // Nothing of the book changes, so the watcher need not load it again.
+    this.stopWatch();
+    let trashed = 0;
+    try { for (const { path } of gone) { await shell.trashItem(join(this.book.folder, path)); trashed++; } }
+    finally { this.watchProject(this.book); }
+    return trashed;
   }
 
   stopWatch() {

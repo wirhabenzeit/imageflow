@@ -58,7 +58,7 @@ import { insideBook, pendingUploadsText, SyncService, UntrustedBookError } from 
 import { cloudKitPush } from './sync-auto';
 import { settleSyncSetup, syncExcludedBook as excludedFrom } from './sync-start';
 import { syncSetupPatch } from './sync-settings';
-import { cleanUp, cleanUpQuestion, cleanUpSummary, planCleanUp } from './sync-sweep';
+import { cleanUp, cleanUpQuestion, cleanUpSummary, planCleanUp, unusedStorage } from './sync-sweep';
 import type { CleanUpPlan } from './sync-sweep';
 import { configureMacHeader, setToolbarDragRegions } from './mac-header';
 import type { RenderSessions } from './document-session';
@@ -2466,9 +2466,14 @@ void app.whenReady().then(async () => {
       return standing.sync === 'unavailable' ? unavailableStatus(standing.error ?? 'The remote cannot be read.', standing.access) : null;
     });
   }));
-  ipcMain.handle(channels.syncBookSize, (event, bookId: unknown, refresh?: unknown) => forSync(event, async () => {
+  const chosenBook = (bookId: unknown) => {
     if (typeof bookId !== 'string' || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(bookId)) throw new Error('Choose a book.');
-    return librarySize(bookId, refresh === true);
+    return bookId;
+  };
+  ipcMain.handle(channels.syncBookSize, (event, bookId: unknown, refresh?: unknown) => forSync(event, async () => librarySize(chosenBook(bookId), refresh === true)));
+  ipcMain.handle(channels.syncBookUnused, (event, bookId: unknown) => forSync(event, async () => {
+    const id = chosenBook(bookId);
+    return sizeReads(async () => await unusedStorage((await syncService.connect()).remote, id) ?? null);
   }));
   ipcMain.handle(channels.manageSyncStorage, (event) => forSync(event, async () => { await shell.openExternal(manageICloudStorage); }));
   ipcMain.handle(channels.libraryAction, async (event, request: unknown) => {
@@ -2570,6 +2575,23 @@ void app.whenReady().then(async () => {
       document.window.webContents.send(channels.sourceCommand, { action: 'place', keys: chosen.map(({ key }) => key) }); focus(document.window);
       return { summary: document.summary };
     }
+    if (request.action === 'reveal-leftovers' || request.action === 'trash-leftovers') {
+      if (!Array.isArray(request.paths) || !request.paths.length || request.paths.length > 10_000 || !request.paths.every((path) => typeof path === 'string')) throw new Error('Choose files.');
+      const { paths } = request;
+      const open = markdownWindows.paths(document);
+      // Only what is listed now can be named.
+      const chosenFiles = (await document.leftovers(open)).filter(({ path }) => paths.includes(path));
+      if (!chosenFiles.length) throw new Error('The book uses these files again, or they are gone.');
+      if (request.action === 'reveal-leftovers') { for (const { path } of chosenFiles.slice(0, 20)) shell.showItemInFolder(join(document.book.folder, path)); return { summary: document.summary }; }
+      const count = chosenFiles.length, names = chosenFiles.slice(0, 5).map(({ path }) => '• ' + path);
+      const { response } = await dialog.showMessageBox(owner, { type: 'question', buttons: ['Move to Trash', 'Cancel'], defaultId: 1, cancelId: 1,
+        message: count === 1 ? 'Move the file to the Trash?' : 'Move ' + count + ' files to the Trash?',
+        detail: names.join('\n') + (count > 5 ? '\n• and ' + (count - 5) + ' more' : '') + '\n\nThe book does not use ' + (count === 1 ? 'it' : 'them') + ', and nothing you can undo does.' +
+          (document.syncView ? ' Another Mac that has not synced yet may still use ' + (count === 1 ? 'it' : 'them') + '.' : '') });
+      if (response !== 0) return { summary: document.summary };
+      const trashed = await document.trashLeftovers(chosenFiles.map(({ path }) => path), open);
+      return { summary: document.summary, message: trashed === 1 ? 'Moved 1 file to the Trash.' : 'Moved ' + trashed + ' files to the Trash.' };
+    }
     if (request.action === 'reveal' || request.action === 'open' || request.action === 'preview') {
       if (!source) throw new Error('Choose a registered source.');
       const path = await sourceOriginal(document.book.folder, source);
@@ -2666,6 +2688,12 @@ void app.whenReady().then(async () => {
     if (action !== 'sync' && action !== 'download' && action !== 'cancel-download' && action !== 'start' && action !== 'stop' && action !== 'manage-storage') return { error: 'Unknown sync action.' };
     try { await syncCommand(document, action); return { value: undefined }; }
     catch (error) { return { error: errorMessage(error) }; }
+  });
+  // Not held: it only looks, and what it lists is looked up again before anything is done with it.
+  ipcMain.handle(channels.leftoverFiles, async (event) => {
+    const document = editorOwner(event) ?? assetsOwner(event);
+    if (!document || quitting) return { error: 'Request is only available to an open book.' };
+    try { return { value: await document.leftovers(markdownWindows.paths(document)) }; } catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.handle(channels.saveCopy, (event, includeAssets?: boolean) => fromEditor(event, async (document) => {
     if (includeAssets === undefined) {

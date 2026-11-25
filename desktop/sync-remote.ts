@@ -12,7 +12,8 @@ import type { PutOptions, StoreEntry, StoreSource, SyncStore, TransferOptions } 
 /** The parts of a book's prefix (ADR 0012, section 4). */
 export type BookFolder = 'snapshots' | 'content' | 'originals' | 'proxies' | 'covers';
 /** What a book takes up on a remote (`SyncRemote.usage`): in bytes, and the part of it that is originals. */
-export type BookUsage = { bytes: number; originals: number };
+/** What a book takes up, in all and by kind; the rest is its versions: texts, files, template and history. */
+export type BookUsage = { bytes: number; originals: number; previews: number; covers: number };
 /** The keys Clean Up may delete: originals, previews and covers of a book (ADR 0012, section 4). */
 export const sweepableKey = /^books\/[^/]+\/(originals|proxies|covers)\//;
 /** A book on a remote: there, or deleted from sync (its tombstone), or marked by a newer ImageFlow in a way this one cannot read. */
@@ -443,8 +444,8 @@ export class StoreRemote<Store extends SyncStore = SyncStore> implements SyncRem
   }
   async usage(bookId: string): Promise<BookUsage> {
     const entries = await this.listBook(bookId);
-    const originals = bookPrefix(bookId) + 'originals/';
-    return { bytes: entries.reduce((sum, { size }) => sum + size, 0), originals: entries.reduce((sum, { key, size }) => sum + (key.startsWith(originals) ? size : 0), 0) };
+    const under = (folder: string) => entries.reduce((sum, { key, size }) => sum + (key.startsWith(bookPrefix(bookId) + folder) ? size : 0), 0);
+    return { bytes: under(''), originals: under('originals/'), previews: under('proxies/'), covers: under('covers/') };
   }
   async deleteRemains(bookId: string) {
     if (!await this.bookTombstone(bookId, { fresh: true })) throw new Error('Only what is left of a book deleted from sync is removed whole.');

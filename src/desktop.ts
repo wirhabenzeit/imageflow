@@ -34,7 +34,7 @@ export const channels = {
   showMarkdown: 'markdown:open', markdownAction: 'markdown:action', markdownChanged: 'markdown:changed', markdownPrepareClose: 'markdown:prepare-close',
   presentationState: 'presentation:state', presentationSpread: 'presentation:spread', presentationClose: 'presentation:close', presentationClosed: 'presentation:closed',
   showAssets: 'document:show-assets', showTemplates: 'library:show', templatePreview: 'library:preview',
-  current: 'document:current', appError: 'app:error', appNotice: 'app:notice', previewProgress: 'project:preview-progress',
+  current: 'document:current', appError: 'app:error', appNotice: 'app:notice', previewProgress: 'project:preview-progress', leftoverFiles: 'project:leftover-files',
   recents: 'app:recents', recentsChanged: 'app:recents-changed', recentAction: 'app:recent-action',
   libraryRemote: 'books:remote', libraryBook: 'books:book', libraryAction: 'books:action', downloads: 'books:downloads', downloadsChanged: 'books:downloads-changed',
   sourceCommand: 'document:source-command', templateAction: 'library:action', sourceAction: 'document:source-action', saveCopy: 'document:save-copy',
@@ -53,7 +53,7 @@ export const channels = {
   syncState: 'project:sync-state', syncChanged: 'project:sync-changed', syncAction: 'project:sync-action',
   chooseSyncFolder: 'app:choose-sync-folder',
   lightroom: 'lightroom:state', lightroomChanged: 'lightroom:changed', lightroomInstall: 'lightroom:install', lightroomLaunch: 'lightroom:launch',
-  syncBackend: 'sync:backend', saveSyncBackend: 'sync:save-backend', testSyncConnection: 'sync:test-connection', showSync: 'sync:show', syncBooks: 'sync:books', syncBooksChanged: 'sync:books-changed', syncBookStatus: 'sync:book-status', syncBookSize: 'sync:book-size', manageSyncStorage: 'sync:manage-storage', syncCleanUpPlan: 'sync:clean-up-plan', syncCleanUp: 'sync:clean-up',
+  syncBackend: 'sync:backend', saveSyncBackend: 'sync:save-backend', testSyncConnection: 'sync:test-connection', showSync: 'sync:show', syncBooks: 'sync:books', syncBooksChanged: 'sync:books-changed', syncBookStatus: 'sync:book-status', syncBookSize: 'sync:book-size', syncBookUnused: 'sync:book-unused', manageSyncStorage: 'sync:manage-storage', syncCleanUpPlan: 'sync:clean-up-plan', syncCleanUp: 'sync:clean-up',
 } as const;
 
 export type OpenAction = 'open' | 'new' | 'reload';
@@ -170,6 +170,10 @@ export type SyncCredentialsInput = { accessKeyId: string; secretAccessKey: strin
 export type SyncBackendRequest = { backend: S3SyncBackend; credentials?: SyncCredentialsInput } | { backend: ICloudSyncBackend };
 /** What Test Connection found: see `ConnectionReport` in desktop/sync-store-s3.ts. */
 /** What Clean Up would free (#285): unused originals, previews and covers past the grace period, and what is left of deleted books. */
+/** What a book takes up on the remote, in all and by kind; the rest is its versions. */
+export type BookStorage = { bytes: number; originals: number; previews: number; covers: number };
+/** Bytes Clean Up can free `now` and `later`, the latter between two times (ms). */
+export type UnusedStorage = { now: number; later: number; from?: number; until?: number };
 export type SyncCleanUpPlan = { bytes: number; objects: number; books: number; deletedBooks: number; skipped: number };
 export type SyncConnectionReport = { conditionalWrites: 'enforced' | 'ignored' | 'unsupported'; checksums: 'verified' | 'not-verified'; addressing: 'path' | 'virtual' };
 export type HistoryState = { undo?: string; redo?: string };
@@ -248,8 +252,10 @@ export type SyncBook = { id: string; open?: true; view: SyncView | null };
  */
 export type LibraryAction = { action: 'download' | 'cancel-download' | 'delete' | 'update'; bookId: string } | { action: 'start' | 'stop' | 'keep-here' | 'sync-again' | 'delete'; id: string };
 
-export type SourceAction = { action: 'retry' | 'refresh' | 'launch' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump' | 'import' | 'rename'; spread?: string; key?: string; keys?: string[]; accept?: string[]; paths?: string[]; name?: string };
+export type SourceAction = { action: 'retry' | 'refresh' | 'launch' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump' | 'import' | 'rename' | 'reveal-leftovers' | 'trash-leftovers'; spread?: string; key?: string; keys?: string[]; accept?: string[]; paths?: string[]; name?: string };
 
+/** A file in the package that the book no longer uses: its path in the package. */
+export type LeftoverFile = { path: string; size: number; modified: number };
 export type ContextMenuItem = import('./commands').RegisteredCommand | { command: import('./commands').RegisteredCommand; value?: string; label?: string; enabled?: boolean; checked?: boolean; items?: ContextMenuItem[] } | { type: 'separator' };
 export type ContextMenuResult = { command: import('./commands').RegisteredCommand; value?: string };
 export type SourceCommand = { action: 'place'; keys: string[] } | { action: 'jump'; spread: string };
@@ -290,6 +296,8 @@ export type DesktopApi = {
   showTemplates(): Promise<void>;
   templatePreview(id: string, hash: string): Promise<Result<string | null>>;
   sourceAction(request: SourceAction): Promise<Result<{ summary: ProjectSummary; message?: string }>>;
+  /** The files of the package the book no longer uses (UI-010); none of a book that is only read. */
+  leftoverFiles(): Promise<Result<LeftoverFile[]>>;
   saveCopy(includeAssets?: boolean): Promise<Result<null>>;
   currentProject(): Promise<Result<ProjectSummary>>;
   onAppError(listener: (message: string) => void): () => void;
@@ -350,7 +358,9 @@ export type DesktopApi = {
   /** How a closed book that syncs stands with the remote, read for its row; null for one that does not sync here. */
   syncBookStatus(id: string): Promise<Result<SyncStatus | null>>;
   /** What a book takes up on the remote: kept until it changes, or read again with `refresh`. */
-  syncBookSize(bookId: string, refresh?: boolean): Promise<Result<{ bytes: number; originals: number }>>;
+  syncBookSize(bookId: string, refresh?: boolean): Promise<Result<BookStorage>>;
+  /** What a book stores that it no longer uses; null when it cannot be told. Reads its history, so it is asked for when shown. */
+  syncBookUnused(bookId: string): Promise<Result<UnusedStorage | null>>;
   /** Opens System Settings where iCloud storage is managed. */
   manageSyncStorage(): Promise<Result<void>>;
   /** Finds what Clean Up would delete, and deletes nothing. */

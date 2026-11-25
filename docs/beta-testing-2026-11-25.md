@@ -19,6 +19,10 @@ from Lightroom Classic.
 - **API-010, API-011.** `replace_source` swaps a photo in every box, shown or set aside. `remove_sources` takes sources out
   of the book as Remove from Book does.
 - Save a Copy and a sync's reload wait for no previews.
+- **UI-009.** The tooltip of a book's size in the Sync window says what it is by kind, how much is no longer used, and from
+  when Clean Up can free it.
+- **UI-010.** The Assets window lists copied files that neither the book nor this session's Undo needs, and moves them to the
+  Trash when asked.
 - **UI-011, UI-012.** The panel for small text is only its field. A book setting's Undo entry names the setting.
 
 ## To retest
@@ -33,8 +37,6 @@ from Lightroom Classic.
 ## Open
 
 - UI-007 (Show in Lightroom) and the rest of UI-008, with Lightroom.
-- UI-009 (what takes up sync storage) and UI-010 (files an undone import leaves), next: a breakdown per book, and a list of
-  unused files in Assets to move to the Trash.
-- API-013, which needs a design.
+- API-013 (#316), which needs a design.
 - Every preview that comes moves the book's revision, so a commit during an import can still meet `REVISION_CONFLICT`.
 - A book opened read-only still waits for missing previews.

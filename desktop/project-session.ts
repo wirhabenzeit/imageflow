@@ -45,6 +45,11 @@ export class ProjectSession {
     if (JSON.stringify(this.book.photoIndex) !== JSON.stringify(book.photoIndex)) this.inputs.invalidate('photos.json');
   }
 
+  /** Every state this session can bring back: the book's own, and those of Undo, Redo and Revert to Last Opened. */
+  get states(): ProjectFiles[] {
+    return [filesOf(this.book), this.opened, ...this.past.map(({ files }) => files), ...this.future.map(({ files }) => files)];
+  }
+
   get history(): HistoryState {
     return { undo: this.past.at(-1)?.label, redo: this.future.at(-1)?.label };
   }

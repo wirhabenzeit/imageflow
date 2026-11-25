@@ -1145,6 +1145,18 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .asset-toolbar input[type="search"] { flex: 1; min-width: 100px; }
 .asset-filter-tokens { display: flex; flex-wrap: wrap; gap: 6px; }
 .asset-filter-tokens button { border-radius: 14px; padding: 2px 9px; font-size: 11px; }
+.asset-leftovers { flex: none; display: grid; justify-items: start; gap: 6px; max-height: 45%; padding-top: 8px; border-top: 1px solid var(--subtle-border); font-size: 12px; }
+.studio .asset-leftovers-title { display: inline-flex; align-items: center; gap: 4px; min-height: 0; padding: 2px 4px; margin-left: -4px; border: 0; border-radius: 4px; background: transparent; box-shadow: none; color: var(--muted); font-size: 12px; font-weight: 400; }
+.studio .asset-leftovers-title:hover { background: var(--selection-surface); }
+.asset-leftovers-title svg { transform: rotate(-90deg); }
+.asset-leftovers-title[aria-expanded="true"] svg { transform: none; }
+.asset-leftovers p { margin: 0; }
+.asset-leftovers ul { width: 100%; min-height: 0; max-height: 160px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.asset-leftovers li { display: flex; align-items: center; gap: 12px; min-height: 28px; }
+.asset-leftovers li > label { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.asset-leftovers li > label > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asset-leftovers li > .muted { font-variant-numeric: tabular-nums; }
+.studio .asset-leftovers li > button, .studio .asset-leftovers > button:last-child { min-height: 0; padding: 2px 9px; font-size: 12px; }
 .asset-status-bar { display: flex; align-items: center; gap: 8px; font-size: 11px; }
 .asset-status-bar > span { margin-right: auto; }
 .source-manager .asset-row { min-height: 30px; padding-top: 3px; padding-bottom: 3px; }

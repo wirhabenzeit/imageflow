@@ -2,7 +2,8 @@ import { awayBadge } from './away-originals';
 import { EditMarkdown, NewMarkdown } from './MarkdownActions';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { DesktopApi, ProjectSummary, SourceAction } from './desktop';
+import type { DesktopApi, LeftoverFile, ProjectSummary, SourceAction } from './desktop';
+import { formatStorage } from './sync-storage-text';
 import { PhotoViewMenu } from './PhotoViewMenu';
 import type { PhotoViewControl } from './PhotoViewMenu';
 import { photoGroups, photoDate, captureLabel } from './photo-view';
@@ -83,6 +84,20 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
     } catch (error) { setError({ message: error instanceof Error ? error.message : 'Could not update assets.' }); }
     finally { setBusy(false); busyRef.current = false; setProgress(undefined); }
   }
+  // Files of the package the book no longer uses (UI-010), looked for again with each revision and when the window comes back.
+  const [leftovers, setLeftovers] = useState<LeftoverFile[]>([]);
+  const [leftoversOpen, setLeftoversOpen] = useState(false);
+  const [kept, setKept] = useState<readonly string[]>([]);
+  useEffect(() => {
+    if (embedded || busy) return;
+    let current = true;
+    const look = () => void api.leftoverFiles().then((result) => { if (current && 'value' in result) setLeftovers(result.value); }).catch(() => {});
+    look();
+    window.addEventListener('focus', look);
+    return () => { current = false; window.removeEventListener('focus', look); };
+  }, [api, embedded, busy, summary.id]);
+  const leaving = leftovers.filter(({ path }) => !kept.includes(path));
+  const bytes = (files: LeftoverFile[]) => formatStorage(files.reduce((sum, { size }) => sum + size, 0));
   const bring = (files?: File[]) => {
     if (importFiles) importFiles(files);
     else void act({ action: 'import', paths: files && api.pathsForFiles(files) });
@@ -205,6 +220,21 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
 
       {!shown.length && <p className="asset-empty muted">{entries.length ? 'No matching assets' : 'No assets'}</p>}
     </div>
+    {leftovers.length > 0 && <section className="asset-leftovers" aria-label="Files the book no longer uses">
+      <button type="button" className="asset-leftovers-title" aria-expanded={leftoversOpen} onClick={() => setLeftoversOpen(!leftoversOpen)}>
+        <Icon name="chevron" size={14} />{leftovers.length === 1 ? '1 file' : leftovers.length + ' files'} the book no longer uses · {bytes(leftovers)}</button>
+      {leftoversOpen && <>
+        <p className="muted">Left in the book by removed assets or undone imports. Nothing you can undo needs them.</p>
+        <ul>{leftovers.map((file) => <li key={file.path} data-leftover={file.path}>
+          <label><input type="checkbox" checked={!kept.includes(file.path)} disabled={locked} onChange={(event) => setKept(event.target.checked ? kept.filter((path) => path !== file.path) : [...kept, file.path])} />
+            <span title={file.path}>{leftoverName(file.path)}</span></label>
+          <span className="muted">{formatStorage(file.size)}</span>
+          <button type="button" disabled={locked} onClick={() => void act({ action: 'reveal-leftovers', paths: [file.path] })}>Show in Finder</button>
+        </li>)}</ul>
+        <button type="button" disabled={locked || !leaving.length} onClick={() => void act({ action: 'trash-leftovers', paths: leaving.map(({ path }) => path) })}>
+          Move {leaving.length === 1 ? '1 File' : leaving.length + ' Files'} to Trash…</button>
+      </>}
+    </section>}
     <footer className="asset-status-bar">
       {progress ? <span className="asset-progress" role="status"><TaskStatus progress={progress} cancel={progress.cancel ? () => void api.cancelExport() : undefined} /></span>
         : <span className="muted">{shown.length} of {entries.length}{chosen.length ? ' · ' + chosen.length + ' selected' : ''}{loading ? ' · ' + loading + (loading === 1 ? ' preview' : ' previews') + ' loading' : ''}</span>}
@@ -218,6 +248,9 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
     {error && <p role="alert" data-error-code={error.code} className="error-text">{error.message}</p>}{notice && <p role="status">{notice}</p>}
   </section>;
 }
+
+// The name a file was imported by, without the folder and the ID ImageFlow puts before it.
+const leftoverName = (path: string) => path.slice(path.indexOf('/') + 1).replace(/^(?:ph|tx|fl)-[0-9a-f-]{12}-/, '');
 
 // Edits an asset's name in its row, as in Finder: the name without its extension is selected; Return or leaving the
 // field renames, Escape keeps the name. Keys stay in the field, so Space or arrows do not act on the list.
