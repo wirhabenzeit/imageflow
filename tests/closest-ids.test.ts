@@ -8,5 +8,8 @@ test('a wrong ID is answered with the ones most like it, siblings and the family
   assert.deepEqual(closestIds('Quotes', layouts), ['quote']);
   assert.deepEqual(closestIds('storyPhoto', ['photo']), []);
   assert.deepEqual(closestIds('completelyOther', layouts), []);
+  // Short IDs are like each other only by a third of their length.
+  assert.deepEqual(closestIds('ab', ['xy', 'a', 'abc']), []);
+  assert.deepEqual(closestIds('map', ['mapp', 'mop', 'tip', 'm']), ['mapp', 'mop']);
   assert.equal(closestIds('gridPage9x9', Array.from({ length: 30 }, (_, n) => 'gridPage' + n + 'x9')).length, 5);
 });

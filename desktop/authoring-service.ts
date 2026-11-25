@@ -21,6 +21,7 @@ import type { ProjectInputCapture, ProjectInputIndex } from './revisions';
 import { loadProject, readProjectDocument, withProjectFiles } from './project';
 import type { CheckDraft } from './check';
 import type { PreviewRequest } from '../src/preview';
+import { spreadByPrefix } from '../src/preview';
 import type { InspectionRequest } from '../src/inspection';
 import { photoExtensions } from './photos';
 import { captureFields } from '../src/photo-metadata';
@@ -63,15 +64,15 @@ const omitDefinition = <T extends { definition: string }>({ definition: _definit
 // counted, and listed for the spreads the request addressed: the previewed, inspected and drafted ones. `include`
 // lists them in full. render.errors and render.warnings repeat the reply's diagnostics, so they are left out.
 type RenderList = 'units' | 'flow' | 'anchors';
-export function compactRender(render: NonNullable<AuthoringCheckResult['render']>, report: { image?: unknown; draft?: { affectedSpreads?: string[] } | { applied: boolean } }, args: { include?: string[]; inspect?: { spread?: string } }) {
+export function compactRender(render: NonNullable<AuthoringCheckResult['render']>, report: { image?: unknown; draft?: { affectedSpreads?: string[] } | { applied: boolean } }, args: { include?: string[] }) {
   const { template: _template, errors: _errors, warnings: _warnings, units, flow, anchors, ...rest } = render;
   const image = report.image as { spread?: string; cells?: { spread: string }[] } | undefined;
   // A document setting affects every spread: that addresses none of them (API-005).
   const affected = report.draft && 'affectedSpreads' in report.draft ? report.draft.affectedSpreads : undefined;
   const everywhere = !!affected && affected.length > 1 && units.every(({ spread }) => !spread || affected.includes(spread));
-  // An inspected spread may be named by how its ID starts (spreadByPrefix).
-  const inspected = args.inspect?.spread && (units.find(({ spread }) => spread === args.inspect!.spread) ?? units.find(({ spread }) => spread.startsWith(args.inspect!.spread!)))?.spread;
-  const addressed = new Set([image?.spread, ...image?.cells?.map(({ spread }) => spread) ?? [], inspected,
+  const addressed = new Set([image?.spread, ...image?.cells?.map(({ spread }) => spread) ?? [],
+    // The spread that was inspected, however the request named it: by the start of its ID, or as a draft's $ref.
+    render.inspection?.spread,
     ...(affected && !everywhere ? affected : [])].filter((id): id is string => !!id && !id.startsWith('$')));
   const include = new Set<string>(args.include ?? []);
   const listed = (list: RenderList) => include.has(list) || addressed.size > 0;
@@ -872,13 +873,15 @@ export function createAuthoringService(hooks: Hooks) {
         if (view === 'cover' && !availableCover && !savedCover) {
           throw new AuthoringError('COVER_UNAVAILABLE', 'The active format has no exterior cover.');
         }
+        // Named as in a preview target: an ID, or how only one starts. One that names none is an error, not an empty list.
+        const inspected = project && args.spread ? spreadByPrefix(project.spreads.map(({ id }) => id), args.spread) : undefined;
         let records: Record<string, unknown>[] = view === 'sources' ? [
           // Capture time, location and camera come from the loaded photo file, next to what photos.json records.
           ...Object.entries(photos ?? {}).map(([id, source]) => ({ kind: 'photo', id, ...source, ...captureOf(session.book.photos.get(id) ?? session.book.unavailablePhotos?.[id]), usage: sourcePlaces(usage.photo[id]) })),
           ...Object.entries(project?.texts ?? {}).map(([id, path]) => ({ kind: 'text', id, path: sourcePath(path), linked: sourceLinked(path), usage: sourcePlaces(usage.text[id]) })),
           ...Object.entries(project?.files ?? {}).map(([id, path]) => ({ kind: 'file', id, path: sourcePath(path), linked: sourceLinked(path) })),
         ] : view === 'cover' ? (project?.cover ? [project.cover] : [])
-          : project?.spreads.filter((spread) => !args.spread || spread.id === args.spread).map((spread) => ({ ...omitDefinition(spread),
+          : project?.spreads.filter((spread) => !inspected || spread.id === inspected).map((spread) => ({ ...omitDefinition(spread),
           // A sheet shown as pages displays pages.left/right.definition. Its own definition only names the spread-wide
           // layout a merge restores, so it is not reported as `definition`, which reads as what is shown (F-017).
           ...(spread.split ? { restoreDefinition: spread.definition } : { definition: spread.definition }),

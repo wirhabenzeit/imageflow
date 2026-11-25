@@ -957,8 +957,11 @@ test('check replies count the book-wide render lists and list only the addressed
   assert.deepEqual(previewed.units, [render.units[1]]);
   assert.deepEqual(previewed.flow, { 'two:body': render.flow['two:body'], 'two:left:body': render.flow['two:left:body'] });
   assert.deepEqual(previewed.anchors, [render.anchors[1]]);
-  const drafted = compactRender(render, { draft: { affectedSpreads: ['one'] } }, { inspect: { spread: '$new' } });
+  const drafted = compactRender(render, { draft: { affectedSpreads: ['one'] } }, {});
   assert.deepEqual(drafted.units, [render.units[0]]);
+  // The inspected spread is addressed, also in a draft that affects every spread.
+  const inspected = compactRender({ ...render, inspection: { spread: 'two', coordinateSpace: 'sheet-bleed-mm', items: [], total: 0, nextOffset: null } }, { draft: { affectedSpreads: ['one', 'two'] } }, {});
+  assert.deepEqual(inspected.units, [render.units[1]]);
   const everywhere = compactRender(render, { draft: { affectedSpreads: ['one', 'two'] } }, {});
   assert.equal('units' in everywhere || 'flow' in everywhere || 'anchors' in everywhere, false, 'a document setting lists no spreads');
   assert.deepEqual(compactRender(render, { image: { spread: 'two' }, draft: { affectedSpreads: ['one', 'two'] } }, {}).units, [render.units[1]]);
@@ -982,6 +985,18 @@ test('a finding in many places names the first few and counts them, unless all a
   const [all] = (await call('check_book', { include: ['occurrences'] })).diagnostics as AuthoringDiagnostic[];
   assert.equal(all.occurrences!.length, 32);
   assert.deepEqual(compactDiagnostics([{ ...all, occurrences: all.occurrences!.slice(0, 3) }])[0].details, all.details, 'three places are all of them');
+});
+
+test('inspect_book names a spread by the start of its ID in every view, and refuses one that names none (API-023)', async (t) => {
+  const { folder, call } = await fixture(t);
+  await writeFile(join(folder, 'project.json'), JSON.stringify({ ...project, spreads: [{ id: '75c40095-a', definition: 'main' }, { id: '75c4009f-b', definition: 'main' }] }));
+  for (const view of ['spreads', 'parameters']) {
+    const found = await call('inspect_book', { view, spread: '75c40095' });
+    assert.deepEqual([(found.items as { id: string }[]).map(({ id }) => id), found.total], [['75c40095-a'], 1]);
+    for (const [spread, message] of [['75c400', /Several spreads start with/], ['nothing', /does not exist/]] as const) {
+      await assert.rejects(call('inspect_book', { view, spread }), (error) => error instanceof PreviewError && error.code === 'preview-target-not-found' && message.test(error.message));
+    }
+  }
 });
 
 test('inspection reports a split sheet\'s merge layout as restoreDefinition and lists sources by kind (F-017)', async (t) => {

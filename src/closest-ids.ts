@@ -14,8 +14,9 @@ export function closestIds(id: string, known: readonly string[], limit = 5): str
   const wanted = id.toLowerCase();
   return known.map((candidate) => {
     const other = candidate.toLowerCase();
-    const within = wanted.startsWith(other) || other.startsWith(wanted);
+    // One that starts with the other, of three characters or more: a family's own ID, or one cut short.
+    const within = Math.min(wanted.length, other.length) >= 3 && (wanted.startsWith(other) || other.startsWith(wanted));
     return { candidate, within, edits: distance(wanted, other) };
-  }).filter(({ candidate, within, edits }) => within || edits <= Math.max(2, Math.floor(Math.min(candidate.length, id.length) / 3)))
+  }).filter(({ candidate, within, edits }) => within || edits <= Math.floor(Math.min(candidate.length, id.length) / 3))
     .sort((a, b) => a.edits - b.edits || (a.candidate < b.candidate ? -1 : 1)).slice(0, limit).map(({ candidate }) => candidate);
 }
