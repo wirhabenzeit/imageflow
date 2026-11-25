@@ -38,6 +38,15 @@ from Lightroom Classic.
   an insert without `after` goes before a closing page; a target may be the start of a spread ID and is looked up first.
 - **UI-013.** A conflict copy is named by this Mac's time. Telling the user and comparing the two is #321.
 
+## After both sessions
+
+- **API-015.** `inspect_book`'s sources view lists photos that are not placed (`unplaced`), taken in a time range
+  (`captured`) or named (`photos`), in capture-time order, and `sheet` returns an image of up to 48 of them, uncropped, with
+  their IDs and capture times. The evening session's register uses API-015 for another finding, about Sync pull
+  checkpoints; that one is not addressed here.
+- **API-021.** Fixtures take values for settings: `params` for layouts, boxes and elements by name, `document` for the
+  book's. Without `layouts` they test the layouts that have the settings. The book's own anchors are still not tested.
+
 ## To retest
 
 - **UI-007**, the rarer cases with Lightroom: a filter or a collapsed stack that hides the photo, and several photos.
@@ -54,5 +63,4 @@ from Lightroom Classic.
 - API-013 (#316), which needs a design.
 - Every preview that comes moves the book's revision, so a commit during an import can still meet `REVISION_CONFLICT`.
 - A book opened read-only still waits for missing previews.
-- API-015 (a contact sheet of photos that are not placed) and API-021 (parameter values in fixtures), next.
 - API-019 (#319), API-020 (#320) and UI-013 (#321), which need decisions.
