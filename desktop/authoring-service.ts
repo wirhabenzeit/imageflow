@@ -252,6 +252,9 @@ async function referenceTopics(docs: string, requested: string[]) {
 export const isReferenceCall = (name: string, args: Record<string, any>) => name === 'get_authoring_context' &&
   !args.includeTemplate && !args.includeSource?.length && !!(args.docs?.length || args.includeExamples);
 
+// What commands need to know of a photo beyond its registry entry: its size, and the caption it is shown with.
+const loadedPhoto = (book: OpenProject) => (id: string) => book.photos.get(id) ?? book.unavailablePhotos?.[id];
+
 const contextGuide = 'Start with docs: ["authoring-workflow"]. Use docs for topics, includeExamples for examples and includeSource for files; ' +
   'such calls return just those, without declarations, unless includeTemplate is true. ' +
   'Edit template/ in the workspace. Save book edits with apply_project_changes and verify with check_book.';
@@ -356,7 +359,7 @@ export function createAuthoringService(hooks: Hooks) {
     if (!template) return { ...base, draft: { applied: false, committed: false } };
     const draft: CheckDraft = (book) => {
       let planned;
-      try { planned = applyProjectCommands(book, template, operations); }
+      try { planned = applyProjectCommands(book, template, operations, { photo: loadedPhoto(book) }); }
       catch (error) {
         if (error instanceof ProjectCommandError) throw new AuthoringError(error.code, error.message, { operationIndex: error.operationIndex });
         throw error;
@@ -944,7 +947,7 @@ export function createAuthoringService(hooks: Hooks) {
     let result: Record<string, unknown>;
     if (name === 'apply_project_changes') {
       let planned;
-      try { planned = applyProjectCommands(fresh, template, args.operations); }
+      try { planned = applyProjectCommands(fresh, template, args.operations, { photo: loadedPhoto(fresh) }); }
       catch (error) {
         if (error instanceof ProjectCommandError) throw new AuthoringError(error.code, error.message, { operationIndex: error.operationIndex });
         throw error;
@@ -956,7 +959,7 @@ export function createAuthoringService(hooks: Hooks) {
       if (args.dryRun) return moved ? { ...result, ...moved.reply } : result;
       Object.assign(checkpoint.mcp!, { changes: planned.changes, affectedSpreads: planned.affectedSpreads, references: planned.references,
         ...(planned.affectedCover ? { affectedCover: true } : {}) });
-      const saved = await commit(() => session.save(planned.files, args.label, fresh, checkpoint));
+      const saved = await commit(() => session.save(planned.files, args.label, fresh, checkpoint, planned.removedSources));
       if (saved.recovery) return saved.recovery;
     } else if (name === 'rename_source') {
       const entry = sourceEntries(fresh).find((source) => source.id === args.source);

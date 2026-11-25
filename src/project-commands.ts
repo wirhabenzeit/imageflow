@@ -4,11 +4,13 @@ import type { TemplateInfo } from './desktop';
 import type { PrintFormat } from './format';
 import { newSpread, resolveEditPath, writeEdit } from './editing';
 import type { EditTarget } from './editing';
-import { describeLayoutChange, discardContent, editorLayoutChoices, editorLayoutTarget, layoutChoices, layoutFootprint, swapContent, swapPages, switchLayout } from './layouts';
+import { describeLayoutChange, discardContent, editorLayoutChoices, editorLayoutTarget, keptOutside, layoutChoices, layoutFootprint, swapContent, swapPages, switchLayout } from './layouts';
 import { hasFacingPages, spanAllowedAt, spanFits, spanRequiredAt } from './format';
 import { isParameterValue, listProblems, newItemId, resolveValue, sameValue } from './parameters';
 import type { ListItem, Parameter, Parameters } from './parameters';
 import { boxBase, coverInstance, identifier, scopeState, storedBoxes } from './project';
+import { removeFromBook, storedLayouts } from './source-removal';
+import { assetUsage } from './asset-usage';
 import { coverLayoutsFor } from './cover';
 import type { LayoutState, PageSide, ProjectFiles, SpreadState, Values } from './project';
 import { maxZoom, setPlacement } from './spread';
@@ -127,6 +129,10 @@ export const projectOperationSchema = z.discriminatedUnion('op', [
     kind: z.enum(['photo', 'text']).describe('photo for photo boxes, text for Markdown boxes.'),
     source: id.describe('Source ID from inspect_book sources or import_sources.') })
     .refine(validAddress, addressMessage).describe('Put a photo or Markdown text into a box.'),
+  z.strictObject({ op: z.literal('replace_source'), source: id.describe('Photo to replace.'), with: id.describe('Photo that takes its place.') })
+    .describe('Swap a photo for another in every box, set aside or not. Crops stay if the shapes match.'),
+  z.strictObject({ op: z.literal('remove_sources'), kind: z.enum(['photo', 'text', 'file']).describe('Kind of all of them.'), sources: z.array(id).min(1).max(1000).describe('Source IDs.') })
+    .describe('Remove sources from the book and clear every use. Their files stay; dryRun counts the uses.'),
   z.strictObject({ op: z.literal('clear_box'), ...boxTarget.shape }).refine(validAddress, addressMessage).describe('Remove the content of a box.'),
   z.strictObject({ op: z.literal('swap_content'), from: boxTarget.describe('First box.'), to: boxTarget.describe('Second box.') })
     .describe('Exchange the contents of two boxes, on the same or different spreads.'),
@@ -148,6 +154,8 @@ export type ProjectOperation = z.input<typeof projectOperationSchema>;
 export type ProjectOperations = z.input<typeof projectOperationsSchema>;
 export type ProjectCommandResult = {
   files: ProjectFiles; changes: string[]; affectedSpreads: string[]; affectedCover?: true; references: Record<string, string>; reflow: boolean;
+  /** The batch takes sources out of the book. */
+  removedSources?: true;
 };
 export type ProjectCommandErrorCode = 'INVALID_OPERATION' | 'SPREAD_SHOWN_AS_PAGES' | 'SPREAD_NOT_FOUND' | 'LAYOUT_NOT_FOUND' | 'BOX_NOT_FOUND' |
   'ELEMENT_NOT_FOUND' | 'PARAMETER_NOT_FOUND' | 'INVALID_PARAMETER_VALUE' | 'SOURCE_NOT_FOUND' | 'BOX_TYPE_MISMATCH' | 'INCOMPATIBLE_LAYOUT' |
@@ -162,7 +170,10 @@ export class ProjectCommandError extends Error {
 }
 
 export function applyProjectCommands(
-  files: ProjectFiles, template: TemplateInfo, operations: unknown, options: { generateId?: () => string } = {},
+  files: ProjectFiles, template: TemplateInfo, operations: unknown,
+  options: { generateId?: () => string;
+    /** What is known of a registered photo's original: its size, and the caption it is shown with. */
+    photo?: (id: string) => { width: number; height: number; caption?: string } | undefined } = {},
 ): ProjectCommandResult {
   const parsed = projectOperationsSchema.safeParse(operations);
   if (!parsed.success) {
@@ -175,13 +186,14 @@ export function applyProjectCommands(
   const references: Record<string, string> = {};
   const changes: string[] = [];
   const affected = new Set<string>();
-  let affectedCover = false;
+  let affectedCover = false, removedSources = false;
   let reflow = false;
   let operationIndex = 0;
   const own = <T,>(record: Record<string, T>, key: string) => Object.hasOwn(record, key) ? record[key] : undefined;
   function fail(code: ProjectCommandErrorCode, message: string): never {
     throw new ProjectCommandError(code, message, operationIndex);
   }
+  const usersOf = (photo: string) => project.spreads.filter((spread) => storedBoxes(spread).some(({ state }) => state.photo === photo)).map(({ id }) => id);
   const allSpreads = () => project.spreads.map(({ id }) => id);
   // The book's format as the batch has changed it so far: a select_format earlier in the batch applies to the
   // commands after it.
@@ -225,6 +237,22 @@ export function applyProjectCommands(
     const registry = kind === 'photo' ? photoIndex : project.texts;
     if (!Object.hasOwn(registry, source)) fail('SOURCE_NOT_FOUND', 'Unknown ' + kind + ' source ' + source + '.');
   }
+  // Where a source is stored: the layouts, with how many of their boxes show it and how many keep it set aside.
+  function placesOf(kind: 'photo' | 'text', sources: ReadonlySet<string>) {
+    return storedLayouts(project).flatMap((layout) => {
+      const boxes = storedBoxes(layout).filter(({ state }) => sources.has(state[kind] ?? ''));
+      if (!boxes.length) return [];
+      const cover = layout.id === coverInstance;
+      const shown = cover ? own(coverLayoutsFor(template.coverLayouts, formatId), layout.definition ?? '') : undefined;
+      const aside = cover ? boxes.filter(({ box }) => !shown || !own(shown.boxes, box)).length
+        : keptOutside(layout, template.spreads).filter((item) => item.kind === (kind === 'photo' ? 'photo' : 'markdown') && sources.has(item.source)).length;
+      return [{ id: layout.id, boxes, shown: boxes.length - aside, aside }];
+    });
+  }
+  const counted = (places: ReturnType<typeof placesOf>) => {
+    const shown = places.reduce((sum, place) => sum + place.shown, 0), aside = places.reduce((sum, place) => sum + place.aside, 0);
+    return shown + (shown === 1 ? ' box' : ' boxes') + ' shown and ' + aside + ' set aside';
+  };
   function validateValue(parameter: Parameter, value: Values[string], key: string) {
     if (parameter.type === 'list') {
       const problems = listProblems(parameter, value);
@@ -572,6 +600,51 @@ export function applyProjectCommands(
         changed('Assigned ' + operation.kind + ' ' + operation.source + ' to ' + operation.box, [spread.id], operation.kind === 'text');
         break;
       }
+      case 'replace_source': {
+        requireSource('photo', operation.source);
+        requireSource('photo', operation.with);
+        if (operation.source === operation.with) break;
+        const places = placesOf('photo', new Set([operation.source]));
+        const before = options.photo?.(operation.source), after = options.photo?.(operation.with);
+        // A crop frames the same part of a photo of the same shape; of another one, or an unknown one, it is dropped.
+        const sameShape = !!before && !!after && Math.abs(before.width / before.height - after.width / after.height) <= 0.01 * (before.width / before.height);
+        let dropped = 0;
+        for (const { boxes } of places) for (const { state } of boxes) {
+          state.photo = operation.with;
+          if (sameShape || (!state.crops && !state.focus)) continue;
+          delete state.crops; delete state.focus;
+          dropped++;
+        }
+        const caption = own(photoIndex, operation.source)!.caption, replacement = own(photoIndex, operation.with)!;
+        const captioned = !!caption && replacement.caption === undefined && !after?.caption;
+        if (captioned) replacement.caption = caption;
+        if (!places.length && !captioned) break;
+        changed('Replaced photo ' + operation.source + ' with ' + operation.with + ' in ' + counted(places) +
+          (dropped ? '; crops of ' + dropped + (dropped === 1 ? ' box' : ' boxes') + ' dropped, as the shapes ' + (before && after ? 'differ' : 'are not known') : '') +
+          (captioned ? '; caption copied' : ''), [...places.map((place) => place.id), ...(captioned ? usersOf(operation.with) : [])]);
+        break;
+      }
+      case 'remove_sources': {
+        const ids = [...new Set(operation.sources)];
+        const registry = operation.kind === 'photo' ? photoIndex : operation.kind === 'text' ? project.texts : project.files;
+        const unknown = ids.find((source) => !Object.hasOwn(registry, source));
+        if (unknown !== undefined) fail('SOURCE_NOT_FOUND', 'Unknown ' + operation.kind + ' source ' + unknown + '.');
+        const what = ids.length === 1 ? operation.kind + ' ' + ids[0] : ids.length + ' ' + operation.kind + 's';
+        if (operation.kind === 'file') {
+          const usage = assetUsage({ project, photoIndex }, project.spreads.map(({ id }) => id)).file;
+          const used = ids.flatMap((source) => usage[source] ?? []);
+          const everywhere = used.some(({ spread }) => !spread);
+          removeFromBook(next, ids.map((source) => ({ kind: 'file', id: source })));
+          changed('Removed ' + what + ' from the book' + (used.length ? '; cleared from ' + [...new Set(used.map(({ spread, cover }) => cover ? 'the cover' : spread || 'book settings'))].join(', ') : '; unused'),
+            everywhere ? allSpreads() : [...new Set(used.map(({ spread }) => spread))], used.length > 0);
+        } else {
+          const places = placesOf(operation.kind, new Set(ids));
+          removeFromBook(next, ids.map((source) => ({ kind: operation.kind === 'photo' ? 'photo' : 'markdown', id: source })));
+          changed('Removed ' + what + ' from the book; cleared ' + (places.length ? counted(places) : 'no boxes'), places.map((place) => place.id), operation.kind === 'text' && places.length > 0);
+        }
+        removedSources = true;
+        break;
+      }
       case 'clear_box': {
         const { sheet: spread, state } = commandState(operation);
         const before = own(state.boxes, operation.box);
@@ -628,11 +701,12 @@ export function applyProjectCommands(
           else if (value !== null && value !== undefined && photo[field] !== value) { photo[field] = value; updated = true; }
         }
         if (updated) changed('Updated photo metadata for ' + operation.photo,
-          project.spreads.filter((spread) => storedBoxes(spread).some(({ state }) => state.photo === operation.photo)).map(({ id }) => id));
+          usersOf(operation.photo));
         break;
       }
     }
     operationIndex++;
   }
-  return { files: next, changes, affectedSpreads: [...affected], ...(affectedCover ? { affectedCover: true as const } : {}), references, reflow };
+  return { files: next, changes, affectedSpreads: [...affected], ...(affectedCover ? { affectedCover: true as const } : {}),
+    ...(removedSources ? { removedSources: true as const } : {}), references, reflow };
 }

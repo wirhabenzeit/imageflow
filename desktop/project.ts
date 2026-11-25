@@ -587,7 +587,12 @@ export function withProjectFiles(book: OpenProject, files: ProjectFiles): OpenPr
     const { title: _title, caption: _caption, credit: _credit, altText: _altText, ...rest } = photo;
     return [[id, { ...rest, ...photoMetadata(photoIndex[id], photo.provided) }] as const];
   }));
-  return { ...book, project, photoIndex, photos };
+  // A command may remove sources: what was loaded of them goes too.
+  const kept = new Set<string>(sourceEntries({ project, photoIndex }).map(({ key }) => key));
+  const among = <T>(records: Record<string, T>, registry: Record<string, unknown>) => Object.fromEntries(Object.entries(records).filter(([id]) => Object.hasOwn(registry, id)));
+  return { ...book, project, photoIndex, photos, texts: among(book.texts, project.texts), files: among(book.files, project.files),
+    ...(book.sources ? { sources: Object.fromEntries(Object.entries(book.sources).filter(([key]) => kept.has(key))) } : {}),
+    ...(book.unavailablePhotos ? { unavailablePhotos: among(book.unavailablePhotos, photoIndex) } : {}) };
 }
 
 /** Progress of an import: files checked so far out of all those chosen, then `saving` while the book is updated. */

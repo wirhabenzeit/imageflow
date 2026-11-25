@@ -54,9 +54,15 @@ See [Parameters](parameters.md) and [List parameters](list-parameters.md) for va
 | --- | --- |
 | Assign a photo or Markdown source | `{"op":"assign_source","spread":"$pair","page":"right","box":"hero","kind":"photo","source":"photo-1"}` |
 | Clear a box | `{"op":"clear_box","spread":"$pair","page":"right","box":"hero"}` |
+| Replace a photo everywhere | `{"op":"replace_source","source":"photo-1","with":"photo-2"}` |
+| Remove sources from the book | `{"op":"remove_sources","kind":"photo","sources":["photo-1","photo-3"]}` |
 | Exchange content between boxes | `{"op":"swap_content","from":{"spread":"arrival","box":"hero"},"to":{"spread":"$pair","page":"right","box":"hero"}}` |
 | Set a photo crop | `{"op":"set_crop","spread":"arrival","box":"hero","centerX":0.5,"centerY":0.5,"zoom":1.25}` |
 | Update or clear photo metadata | `{"op":"set_photo_metadata","photo":"photo-1","values":{"caption":"First morning","credit":null}}` |
+
+`replace_source` changes every box that holds the photo, on spreads, pages and the cover, also content set aside by a layout change, which `assign_source` cannot reach. Crops and focus stay when the two photos have the same shape (within 1%), and are dropped otherwise. A saved caption is copied to a photo that has none; nothing else of the registry entry moves.
+
+`remove_sources` takes sources out of the book as **Remove from Book** does: their boxes are cleared, shown or set aside, and files are cleared from the parameters they are assigned to. The change line of a dry run says how many boxes that is. Files in the package and linked originals are not deleted, and one Undo brings everything back.
 
 ## Preview targets
 
