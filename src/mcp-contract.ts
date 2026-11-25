@@ -48,7 +48,7 @@ export const mcpToolSchemas = {
     view: z.enum(['summary', 'spreads', 'cover', 'sources', 'parameters', 'elements'])
       .describe('summary: book details and the spread count, without the spreads. spreads and cover: saved layout state; split sheets give restoreDefinition, not definition. sources: registry, usage and counts per kind. parameters: saved values and declarations. elements: bounds, typography and edit paths.'),
     offset: z.int().min(0).default(0).describe('Index of the first item to return, for paging.'),
-    limit: z.int().min(1).max(100).default(30).describe('Number of items to return. Continue from nextOffset.'),
+    limit: z.int().min(1).max(100).optional().describe('Number of items to return, by default 30, or every named photo. Continue from nextOffset.'),
     spread: z.string().min(1).max(256).optional().describe('Spread ID for element measurements or to filter spreads and parameters.'),
     cover: z.literal(true).optional().describe('Elements view only: measure the exterior cover.'),
     page: z.enum(['left', 'right']).optional().describe('Elements view only: facing page of a split sheet.'),
@@ -66,7 +66,7 @@ export const mcpToolSchemas = {
       if (request.view !== 'sources') context.addIssue({ code: 'custom', path: [option], message: option + ' requires the sources view.' });
       else if (request.kind && request.kind !== 'photo') context.addIssue({ code: 'custom', path: [option], message: option + ' is about photos; use kind photo or omit it.' });
     }
-    if (request.sheet && request.limit > maxSheetPhotos) context.addIssue({ code: 'custom', path: ['limit'], message: 'A sheet shows at most ' + maxSheetPhotos + ' photos.' });
+    if (request.sheet && request.limit !== undefined && request.limit > maxSheetPhotos) context.addIssue({ code: 'custom', path: ['limit'], message: 'A sheet shows at most ' + maxSheetPhotos + ' photos.' });
     if (request.page && request.view !== 'elements') context.addIssue({ code: 'custom', message: 'Page filtering requires the elements view.' });
     if (request.view === 'elements' && (request.cover ? !!request.spread || !!request.page : !request.spread)) {
       context.addIssue({ code: 'custom', message: 'Element inspection requires one spread or cover: true.' });

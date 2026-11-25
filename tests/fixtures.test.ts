@@ -413,6 +413,8 @@ test('fixtures test settings at the values a request gives, and choose the layou
   assert.ok(named.skipped.some(({ layout, reason }) => layout === 'main' && /none of the settings/.test(reason)));
   assert.deepEqual(planned({ params: { cells: 'fill' }, document: { paper: 'cream' }, layouts: ['grid', 'main'] }).layouts, ['grid', 'main'],
     'a document setting is tested in every named layout');
+  assert.deepEqual(planned({ params: { cells: 'fill' }, document: {}, layouts: ['grid', 'main'] }).layouts, ['grid'],
+    'an empty document sets nothing, so a layout without the settings is still skipped');
 
   const error = (request: unknown) => {
     try { planned(request); } catch (caught) { return caught as FixtureError; }
@@ -436,6 +438,7 @@ test('fixtures test settings at the values a request gives, and choose the layou
   assert.equal(spread.boxes.one.photo, 'land', 'the case still fills the content');
   assert.deepEqual(project.params, { dayHeads: false, paper: 'white' });
   assert.equal(valuesLabel({ params: { cells: 'fill' }, document: { dayHeads: false } }), 'dayHeads false, cells fill');
+  assert.equal(valuesLabel({ params: { theme: 'dark' }, document: { theme: 'light' } }), 'theme light, theme dark', 'one name in both is named twice');
 });
 
 test('fixture checks report the values they tested and mark the sheet with them (API-021)', async (t) => {

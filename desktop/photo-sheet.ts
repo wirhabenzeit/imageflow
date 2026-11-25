@@ -8,8 +8,9 @@ type SheetPhoto = { id: string; captured?: string };
 const escape = (text: string) => text.replace(/[&<>"]/g, (character) => '&#' + character.charCodeAt(0) + ';')
   // Control characters have no place in XML, however they are written.
   .replace(/[\u0000-\u001f\u007f]/g, ' ');
-// About half a letter's height is its width; an ID that does not fit keeps its start and end, which tell IDs apart.
-function fitted(text: string, width: number, size: number) {
+// About half a letter's height is its width; text that does not fit keeps its start and end, which tell IDs apart.
+// Every label is fitted to its cell, so none runs into the next.
+export function fitted(text: string, width: number, size: number) {
   const room = Math.max(3, Math.floor(width / (size * 0.58)));
   if (text.length <= room) return text;
   const kept = room - 1, start = Math.ceil(kept / 2);
@@ -48,9 +49,9 @@ export async function photoSheet(book: Pick<OpenProject, 'photos' | 'sources' | 
     const { id, captured } = photos[index], middle = label.x + label.width / 2;
     const reason = missing.get(index);
     return (reason === undefined ? '' : '<rect x="' + x + '" y="' + y + '" width="' + width + '" height="' + height + '" fill="#d0d0d0"/>' +
-      text(fitted(reason, width, label.size) === reason ? reason : 'Not available', x + width / 2, y + height / 2, '#555555', label.size)) +
+      text(fitted(fitted(reason, width, label.size) === reason ? reason : 'Not available', width, label.size), x + width / 2, y + height / 2, '#555555', label.size)) +
       text(fitted(id, label.width, label.size), middle, label.y + label.line * 0.85, '#111111', label.size, 'bold') +
-      text(captured?.replace('T', ' ') ?? 'No capture time', middle, label.y + label.line * 1.85, '#444444', label.size);
+      text(fitted(captured?.replace('T', ' ') ?? 'No capture time', label.width, label.size), middle, label.y + label.line * 1.85, '#444444', label.size);
   }).join('');
   const sheet = sharp({ create: { width: grid.width, height: grid.height, channels: 3, background: '#e9e9e9' } }).composite([
     ...pictures.filter((picture) => picture !== undefined),

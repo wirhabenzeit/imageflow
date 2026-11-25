@@ -876,7 +876,8 @@ export function createAuthoringService(hooks: Hooks) {
             idempotency: 'Replay up to 1000 successful requests per open handle. After reopening, the same request returns its retained checkpoint. Find keys with list_book_checkpoints.' },
         };
       } else {
-        const offset = args.offset ?? 0, limit = args.limit ?? 30;
+        // Named photos are listed together, up to the 48 a sheet shows; other lists in pages of 30.
+        const offset = args.offset ?? 0, limit = args.limit ?? args.photos?.length ?? 30;
         const sequence = template && project && pageSequence(project.spreads.map((spread) => layoutFootprint(spread, template.spreads)), template.format);
         const labels = project?.spreads.map((_, i) => pageLabel(sequence?.spreads[i].page ?? {})) ?? [];
         const sourcePlaces = (places: import('../src/editing').SourcePlace[] = []) => places.map(({ cover, spread, pages }) =>

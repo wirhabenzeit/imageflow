@@ -1043,6 +1043,9 @@ test('photos that are not placed can be listed by capture time and seen uncroppe
   assert.deepEqual(ids(await call('inspect_book', { view: 'sources', captured: { from: '2024-06-01', to: '2024-06-01' } })), ['placed', 'red']);
   assert.deepEqual(ids(await call('inspect_book', { view: 'sources', captured: { from: '2024-06-01T12' }, unplaced: true })), ['red', 'blue']);
   assert.deepEqual(ids(await call('inspect_book', { view: 'sources', photos: ['undated', 'placed'] })), ['undated', 'placed'], 'named photos keep their order');
+  assert.equal(parseMcpArguments('inspect_book', { project: 'p', view: 'sources', photos: ['a'] }).args.limit, undefined,
+    'named photos are all listed: the default of 30 is applied only to other lists');
+  assert.equal((await call('inspect_book', { view: 'sources', photos: ['undated', 'placed', 'red'], limit: 2 })).nextOffset, 2);
   await assert.rejects(call('inspect_book', { view: 'sources', photos: ['blu'] }),
     (error) => error instanceof AuthoringError && error.code === 'SOURCE_NOT_FOUND' && /Did you mean blue/.test(error.message));
 

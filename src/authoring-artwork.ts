@@ -41,12 +41,16 @@ export function photoSheetLayout(sizes: ({ width: number; height: number } | und
     Math.max(...shapes.slice(row * columns, (row + 1) * columns).map(({ height }) => height)));
   const high = rows.reduce((sum, height) => sum + height, 0);
   // The columns use the width, unless the rows would then be higher than the sheet may be.
-  const cell = Math.max(16, Math.floor(Math.min((maxEdge - gap * (columns + 1)) / columns, (maxEdge - gap * (rows.length + 1) - labelHeight * rows.length) / high)));
+  // Each row is rounded up to whole pixels, so the height leaves a pixel per row for that.
+  let cell = Math.max(16, Math.floor(Math.min((maxEdge - gap * (columns + 1)) / columns,
+    (maxEdge - gap * (rows.length + 1) - (labelHeight + 1) * rows.length) / high)));
+  const height = (size: number) => rows.reduce((sum, row) => sum + Math.ceil(row * size) + labelHeight + gap, gap);
+  while (cell > 16 && height(cell) > maxEdge) cell--;
   const tops: number[] = [];
   let top = gap;
-  for (const height of rows) {
+  for (const row of rows) {
     tops.push(top);
-    top += Math.ceil(height * cell) + labelHeight + gap;
+    top += Math.ceil(row * cell) + labelHeight + gap;
   }
   return { columns, width: columns * cell + gap * (columns + 1), height: top,
     cells: shapes.map((shape, index) => {

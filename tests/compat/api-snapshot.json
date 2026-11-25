@@ -2270,7 +2270,6 @@
             "maximum": 9007199254740991
           },
           "limit": {
-            "default": 30,
             "type": "integer",
             "minimum": 1,
             "maximum": 100

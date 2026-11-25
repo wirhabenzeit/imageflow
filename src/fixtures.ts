@@ -117,7 +117,8 @@ const hasAny = (definition: Settings, params: Record<string, Scalar>) =>
 
 /** The values of a fixture check as the banner of its sheet shows them. */
 export function valuesLabel(values: FixtureValues | undefined) {
-  const pairs = Object.entries({ ...values?.document, ...values?.params });
+  // Both, when a document setting and a layout's have one name.
+  const pairs = [...Object.entries(values?.document ?? {}), ...Object.entries(values?.params ?? {})];
   return pairs.length ? pairs.map(([name, value]) => name + ' ' + String(value)).join(', ') : '';
 }
 
@@ -216,7 +217,7 @@ export function planFixtures(template: TemplateInfo, request: FixtureRequest): F
   let layouts = [...new Set(request.layouts ?? (params ? declaredLayouts.filter((layout) => hasAny(template.spreads[layout], params)) : declaredLayouts))];
   // None has them: the error names settings of every layout.
   const values = fixtureValues(template, layouts.length ? Object.fromEntries(layouts.map((layout) => [layout, template.spreads[layout]])) : template.spreads, request);
-  if (params && !request.document) {
+  if (params && !values?.document) {
     // A named layout without any of them would only repeat a check at its defaults.
     for (const layout of layouts.filter((layout) => !hasAny(template.spreads[layout], params))) {
       skipped.push({ layout, reason: 'It has none of the settings in params.' });
