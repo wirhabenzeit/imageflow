@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { contactSheetLayout } from '../src/authoring-artwork';
+import { contactSheetLayout, photoSheetLayout } from '../src/authoring-artwork';
 import { parseMcpArguments } from '../src/mcp-contract';
 import { artworkTarget, parsePreviewRequest, PreviewError } from '../src/preview';
 import { mm, pageSequence, printFormat } from '../src/format';
@@ -75,6 +75,19 @@ test('detail previews and element inspection accept explicit facing pages withou
       const format = printFormat({ label: 'Facing', trim: { width: mm(100), height: mm(100) }, bleed: mm(0), safe: mm(5),
         ends: 'inside-covers', pageCount: { min: 2, max: 20, step: 2 } });
       assert.equal(artworkTarget([{ id: 'one' }], pageSequence(['spread'], format), parsePreviewRequest(preview).target as typeof preview.target).side, page);
+    }
+  }
+});
+
+test('a photo sheet stays within its edge, with more columns when the rows would not fit (API-015)', () => {
+  for (const [count, maxEdge, columns] of [[48, 400, 1], [48, 1600, 8], [7, 1600, 6], [1, 400, 6]] as const) {
+    const sizes = Array.from({ length: count }, (_, index) => index % 3 ? { width: 3000, height: 2000 } : { width: 2000, height: 3000 });
+    const grid = photoSheetLayout(sizes, maxEdge, columns);
+    assert.ok(grid.width <= maxEdge && grid.height <= maxEdge, count + ' photos in ' + grid.width + ' × ' + grid.height);
+    for (const [index, cell] of grid.cells.entries()) {
+      const { width, height } = sizes[index];
+      assert.ok(Math.abs(cell.width / cell.height - width / height) < 0.1, 'uncropped');
+      assert.ok(cell.label.y + cell.label.line * 2 <= grid.height);
     }
   }
 });

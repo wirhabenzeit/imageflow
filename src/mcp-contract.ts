@@ -3,6 +3,7 @@ import { makePreviewRequestSchema, previewTargets } from './preview';
 import { projectOperationNames, projectOperationsSchema, spreadReference } from './project-commands';
 import { makeInspectionSchema } from './inspection';
 import { fixtureRequestSchema } from './fixtures';
+import { capturedSchema, maxSheetPhotos, photoSheetSchema } from './photo-sheet';
 import { docTopicIds } from './doc-topics';
 import { mcpOutputSchemas } from './mcp-results';
 export { mcpOutputSchemas };
@@ -54,8 +55,18 @@ export const mcpToolSchemas = {
     box: z.string().min(1).max(256).optional().describe('Elements view only: measure just this box.'),
     element: z.string().min(1).max(256).optional().describe('Elements view only: measure just this element.'),
     kind: z.enum(['photo', 'text', 'file']).optional().describe('Sources view only: list just photos, texts or files. The counts per kind are always returned.'),
+    photos: z.array(z.string().min(1).max(256)).min(1).max(maxSheetPhotos).optional().describe('Sources view: just these photos, in order.'),
+    unplaced: z.literal(true).optional().describe('Sources view: just photos no page or cover shows, by capture time.'),
+    captured: capturedSchema.optional().describe('Sources view: just photos taken in this camera-local time range, by capture time.'),
+    sheet: photoSheetSchema.optional().describe('Sources view: also an image of the listed photos, uncropped, with ID and capture time. At most ' + maxSheetPhotos + '.'),
   }).superRefine((request, context) => {
     if (request.kind && request.view !== 'sources') context.addIssue({ code: 'custom', path: ['kind'], message: 'Kind filtering requires the sources view.' });
+    for (const option of ['photos', 'unplaced', 'captured', 'sheet'] as const) {
+      if (request[option] === undefined) continue;
+      if (request.view !== 'sources') context.addIssue({ code: 'custom', path: [option], message: option + ' requires the sources view.' });
+      else if (request.kind && request.kind !== 'photo') context.addIssue({ code: 'custom', path: [option], message: option + ' is about photos; use kind photo or omit it.' });
+    }
+    if (request.sheet && request.limit > maxSheetPhotos) context.addIssue({ code: 'custom', path: ['limit'], message: 'A sheet shows at most ' + maxSheetPhotos + ' photos.' });
     if (request.page && request.view !== 'elements') context.addIssue({ code: 'custom', message: 'Page filtering requires the elements view.' });
     if (request.view === 'elements' && (request.cover ? !!request.spread || !!request.page : !request.spread)) {
       context.addIssue({ code: 'custom', message: 'Element inspection requires one spread or cover: true.' });
@@ -149,7 +160,7 @@ export const mcpTools: { name: McpToolName; title: string; description: string; 
   { name: 'get_authoring_context', title: 'Get authoring context', readOnly: true,
     description: 'Read parsed declarations, template identity and files. Before editing a template, request reference topics, examples and source files: those calls return just what they request.' },
   { name: 'inspect_book', title: 'Inspect book', readOnly: true,
-    description: 'Read saved spreads, cover, sources or parameters, or measure layout elements. Returns the revision for checks and commands.' },
+    description: 'Read saved spreads, cover, sources or parameters, see photos that are not placed, or measure layout elements. Returns the revision for checks and commands.' },
   { name: 'check_book', title: 'Check book', readOnly: true,
     description: 'Check content or the exterior cover without saving. Supports previews, type checks, drafts and synthetic fixtures.' },
   { name: 'apply_project_changes', title: 'Apply changes', readOnly: false,
