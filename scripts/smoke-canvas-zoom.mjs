@@ -71,8 +71,9 @@ try {
   const samples = await sendPinch(-Math.log(2) / .01, 22);
   assert.ok(samples.every(sample => sample.frameWidth === fittedWidth), 'Pinching does not resize the book frame');
   assert.ok(samples.every((sample, i) => i === 0 || sample.width >= samples[i - 1].width), 'Zoom progresses without reversing');
-  assert.ok(samples.every(sample => Math.abs(sample.sheetY + before.height * (sample.width / original.stage) * fraction.y - point.y) < 3),
-    'The same position stays under the pointer throughout the pinch');
+  const strayed = samples.map(sample => sample.sheetY + before.height * (sample.width / original.stage) * fraction.y - point.y);
+  assert.ok(strayed.every(pixels => Math.abs(pixels) < 3), 'The same position stays under the pointer throughout the pinch; off by ' +
+    JSON.stringify(strayed.map(pixels => Math.round(pixels * 10) / 10)) + ' px, ' + JSON.stringify({ point, before, canvas: bounds, scroll: samples.map(({ scrollTop }) => Math.round(scrollTop)) }));
   await page.waitForFunction(width => Math.abs(document.querySelector('.canvas .stage').getBoundingClientRect().width / width - 2) < .01, original.stage);
   await settled();
   const after = await paperOnScreen();

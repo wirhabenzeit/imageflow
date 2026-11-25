@@ -155,11 +155,11 @@ try {
   assert.deepEqual((await settlements()).boxes.hero.crops, { grid: { centerX: 0.3, centerY: 0.5, zoom: 2 } });
   assert.deepEqual((await settlements()).boxes.hero.focus, { centerX: 0.3, centerY: 0.5 });
 
-  // Hovering shows no tooltip; neither hover nor focus changes the spread.
+  // The tooltip is the layout's name, which its tile may cut off (UI-001); neither hover nor focus changes the spread.
   const before = await read();
   await layout('Two photos').hover();
   assert.equal(await w.locator('#layout-consequence').count(), 0);
-  assert.equal(await layout('Two photos').getAttribute('title'), null);
+  assert.equal(await layout('Two photos').getAttribute('title'), 'Two photos');
   await layout('Text spread').focus();
   assert.deepEqual(await read(), before);
 
