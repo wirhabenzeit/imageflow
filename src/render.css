@@ -180,7 +180,7 @@ html:has(.if-inline-text-frame), html:has(.if-inline-text-frame) body { overflow
   border-radius: 5px; padding: 3px 7px; min-height: 24px; }
 .if-editor .if-control :is(input, select, textarea, button):focus-visible { outline: 2px solid var(--if-editor-focus); outline-offset: 1px; }
 .if-editor .if-control .pc-segmented { display: flex; gap: 2px; padding: 2px; border-radius: 6px; background: var(--if-editor-border); }
-.if-editor .if-control .pc-segmented button { flex: 1; border: 0; background: transparent; }
+.if-editor .if-control .pc-segmented button { flex: 1; border: 0; background: transparent; white-space: nowrap; }
 .if-editor .if-control .pc-segmented button[aria-checked="true"] { background: var(--if-editor-control); box-shadow: 0 1px 2px #0002; }
 .if-editor .if-control .pc-file select { flex: 1; min-width: 0; }
 .if-editor .if-control .pc-list-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }

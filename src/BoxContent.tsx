@@ -28,7 +28,7 @@ export function PhotoContent({ summary, spread, box, label, change, inspect, adj
   assigned?: () => void;
   inspect?: (source: SourceRef) => void; adjustCrop?: () => void;
   // The caption of the box's photo, edited below it (UI-014); the crop toolbar has a button of its own.
-  caption?: { usage: SourceUsage; save: (photo: string, caption: string) => void; autoFocus?: boolean };
+  caption?: { usage: SourceUsage; save: (photo: string, caption: string) => void; autoFocus?: boolean; done?: () => void };
   // In the crop toolbar, where the photo itself is on screen: no thumbnail, name or crop summary.
   compact?: boolean;
   // The crop as numbers, for frames the template rotates, where dragging the photo is not available.
@@ -99,7 +99,7 @@ export function PhotoContent({ summary, spread, box, label, change, inspect, adj
       {cropValues}
     </div>}
     {assigned && caption && summary.photoIndex[assigned] && <CaptionField key={assigned} summary={summary} photo={assigned} usage={caption.usage}
-      autoFocus={caption.autoFocus} save={(text) => caption.save(assigned, text)} />}
+      autoFocus={caption.autoFocus} done={caption.done} save={(text) => caption.save(assigned, text)} />}
   </div>;
 }
 

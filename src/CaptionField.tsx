@@ -67,10 +67,14 @@ export function CaptionField({ summary, photo, label = 'Caption', usage, save, a
       onChange={(event) => type(event.target.value)} onBlur={commit}
       onKeyDown={(event) => {
         if (event.key === 'Escape') type(undefined);
-        else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.stopPropagation(); commit(); done?.(); }
+        // ⌘Return saves; it closes the caption's own panel, or is left to the editor around the field, which closes then.
+        else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+          commit();
+          if (done) { event.preventDefault(); event.stopPropagation(); done(); }
+        }
         else if (event.key === 'Enter') event.stopPropagation();
       }} />
-    <small className="field-description">{places > 1 ? 'Belongs to the photo, also where else it is placed (' + places + ' spreads).' : 'Belongs to the photo, wherever it is placed.'}</small>
+    <small className="field-description">{places > 1 ? 'Belongs to the photo, also in the ' + (places - 1) + (places === 2 ? ' other place' : ' other places') + ' it is placed.' : 'Belongs to the photo, wherever it is placed.'}</small>
   </div>;
 }
 

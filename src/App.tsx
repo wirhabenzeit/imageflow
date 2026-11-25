@@ -1657,7 +1657,12 @@ export function App() {
   const [captionRequest, setCaptionRequest] = useState<{ spread: string; box: string; page?: PageSide; at: number }>();
   const captionAsked = (spread: string, box: string, page?: PageSide) =>
     captionRequest && captionRequest.spread === spread && captionRequest.box === box && captionRequest.page === page ? captionRequest.at : undefined;
-  useEffect(() => { if (!cropping && !editing) setCaptionRequest(undefined); }, [!cropping && !editing]);
+  // A request belongs to the editor it opened: once another box or nothing is edited, a later return to the box opens
+  // its caption only when asked again.
+  const editedBox = cropping ? [cropping.spread, cropping.box, cropping.page] : editing?.owner?.type === 'photo' ? [editing.spread, editing.owner.id, editing.page] : undefined;
+  useEffect(() => {
+    if (captionRequest && (!editedBox || captionAsked(editedBox[0]!, editedBox[1]!, editedBox[2] as PageSide | undefined) === undefined)) setCaptionRequest(undefined);
+  }, [JSON.stringify(editedBox), captionRequest]);
   function openCaption(spread: string, box: string, page?: PageSide) {
     const ready = readyId.current === summary?.id;
     openOwner(spread, { type: 'photo', id: box, page });
@@ -2494,7 +2499,7 @@ export function App() {
 
                 {editing.owner?.type === 'photo' && <PhotoContent summary={summary} spread={scopeSpread(inline.spread, inline.target.page)!} box={editing.owner.id}
                   label={ownerLabel(inline.spread, editing.owner)} change={changeSpreadInline} inspect={choose} values={!!boxSource(editing.spread, editing.owner.id, inline.target.page)}
-                  caption={{ usage, autoFocus: captionAsked(editing.spread, editing.owner.id, inline.target.page) !== undefined,
+                  caption={{ usage, done: closeEditor, autoFocus: captionAsked(editing.spread, editing.owner.id, inline.target.page) !== undefined,
                     save: (photo, text) => saveCaption({ spread: inline.spread.id, box: editing.owner!.id, page: inline.target.page,
                       layout: scopeSpread(inline.spread, inline.target.page)?.definition ?? '' }, photo, text) }}
                   adjustCrop={cropBlocked(editing.spread, editing.owner.id, inline.target.page) ? undefined : () => startCrop(editing.spread, editing.owner!.id, inline.target.page)} />}

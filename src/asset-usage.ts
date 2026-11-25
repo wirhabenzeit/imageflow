@@ -12,7 +12,9 @@ export const assetPageLabels = (summary: ProjectSummary) => summary.project.spre
 export const usageLabel = (pages: string) => /^\d/.test(pages) ? (pages.includes('–') ? 'Pages ' : 'Page ') + pages : pages;
 // Where a source that no page shows is set aside: "set aside on page 39".
 export const asideText = (places: readonly SourcePlace[] | undefined) => places?.length
-  ? 'set aside on ' + places.map(({ pages }) => pages === 'Cover' ? 'the cover' : usageLabel(pages).replace(/^P/, 'p')).join(', ') : undefined;
+  ? 'set aside on ' + places.map(({ pages }) => asidePlace(pages)).join(', ') : undefined;
+/** A place in running text: "page 39", "the cover". */
+export const asidePlace = (pages: string) => pages === 'Cover' ? 'the cover' : usageLabel(pages).replace(/^P/, 'p');
 
 // Every set of saved parameter values in the book: document settings, then, for each spread, the parameters of each
 // state it stores (its own and its pages'), of their elements, and of every box it stores, replaced content included.

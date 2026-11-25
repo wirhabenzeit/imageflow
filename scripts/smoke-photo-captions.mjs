@@ -77,10 +77,17 @@ try {
   assert.ok(items.some(({ label }) => label === 'Edit Caption…'));
   const field = page.getByRole('textbox', { name: 'Caption of shown' });
   await until(async () => await field.count() === 1 && await field.evaluate((node) => node === document.activeElement), 'the caption field opens in focus');
+  assert.equal(await field.evaluate((node) => getComputedStyle(node).resize), 'vertical', 'the field has the app’s field styles');
   await field.fill('Discarded');
   await page.keyboard.press('Escape');
   await until(async () => await field.count() === 0, 'Escape closes the caption');
   assert.equal((await current(page)).photoIndex.shown.caption, 'At the pass');
+  // A request is used up: selecting the photo again later opens its toolbar without the caption.
+  await toolbar.getByRole('button', { name: 'Done', exact: true }).click();
+  await toolbar.waitFor({ state: 'detached' });
+  await page.getByRole('button', { name: 'Edit Photo', exact: true }).click();
+  await toolbar.getByRole('button', { name: 'Caption…' }).waitFor();
+  assert.equal(await field.count(), 0, 'the caption stays closed');
   assert.deepEqual(errors, []);
   await page.screenshot({ path: join(work, 'captions.png') });
   console.log('Set-aside photos, overflowing choices and captions passed:', work);

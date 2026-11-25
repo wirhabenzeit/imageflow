@@ -1,6 +1,6 @@
 import { outOfDateNote, photoName, photoSourceName, sourceFile, sourcePath } from './source-locations';
 import { SourceBadge, sourceOrigin } from './SourceBadge';
-import { usageLabel } from './asset-usage';
+import { asidePlace, usageLabel } from './asset-usage';
 import { Fragment, useMemo, useState } from 'react';
 import { renderOrigin } from './desktop';
 import type { ProjectSummary, RenderStatus, TemplateInfo } from './desktop';
@@ -25,7 +25,7 @@ function Placements({ summary, template, usage, render, source, select }: {
   const aside = usage.aside?.[source.kind][source.id] ?? [];
   // Set aside is not placed, but the spread that keeps it can be gone to (UI-016).
   const kept = aside.length > 0 && <ul className="si-placements">{aside.map(({ spread, pages }) => <li key={spread}>
-    <span className="muted">Set aside on </span><button type="button" className="link" onClick={() => select(spread)}>{usageLabel(pages)}</button></li>)}</ul>;
+    <span className="muted">Set aside on </span><button type="button" className="link" onClick={() => select(spread)}>{asidePlace(pages)}</button></li>)}</ul>;
   if (!placed.length) return <><p className="muted">Not placed</p>{kept}</>;
   return <><ul className="si-placements">
     {placed.map(({ spread: id, pages, cover }) => {
