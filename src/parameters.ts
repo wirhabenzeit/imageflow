@@ -16,7 +16,9 @@ const common = { label, description };
 const numeric = { min: z.number().optional(), max: z.number().optional(), step: z.number().positive().optional(), unit: z.string().optional() };
 
 const scalarParameterOptions = [
-  z.object({ ...common, type: z.literal('boolean'), default: z.boolean() }),
+  // `shows`: on a photo box, this says whether the box prints that field of its photo, so the app can offer the field beside
+  // it and switch it on for the first caption (UI-014). Elsewhere it has no meaning.
+  z.object({ ...common, type: z.literal('boolean'), default: z.boolean(), shows: z.literal('caption').optional() }),
   // `markdown: 'inline'` lets the value carry **bold** and *italic* (src/formatted-text.ts). Opt-in, so plain strings
   // never change meaning; `maxLength` then counts the visible characters, not the markers.
   z.object({ ...common, type: z.literal('string'), default: z.string(), multiline: z.boolean().optional(), maxLength: z.int().nonnegative().optional(), placeholder: z.string().optional(),

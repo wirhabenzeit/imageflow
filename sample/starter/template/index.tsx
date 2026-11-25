@@ -103,7 +103,7 @@ const sourceTitle = (text: FlowPosition | null) => typeof text?.meta.title === '
 // For layouts that draw the photo's caption. Declare the toggle only where it has an effect: the editor shows a
 // control for every declared parameter. The value is shared by every layout with this box, so it returns when the
 // spread switches back to a layout that draws captions.
-const caption = p.boolean({ label: 'Show caption', default: false, description: 'Prints the caption saved with the photo. To edit it, right-click the photo on the page or in the Inspector’s list and choose Show in Assets.' });
+const caption = p.boolean({ label: 'Show caption', default: false, shows: 'caption', description: 'Prints the caption saved with the photo. To edit it, select the photo and choose Caption…, or right-click it and choose Edit Caption….' });
 const captioned = (label: string) => box.photo(label, { caption });
 const columns = p.enum({ label: 'Columns', default: '1', options: ['1', '2', '3'], labels: { 1: 'Full width', 2: '2 columns', 3: '3 columns' } });
 const body = (label: string, flowOrder = 1) => box.markdown(label, { flowOrder, parameters: { columns } });
@@ -306,7 +306,7 @@ const compass = <svg viewBox="0 0 100 100" aria-hidden="true">
 
 export default defineTemplate({
   id: 'imageflow-starter',
-  version: '0.13.2',
+  version: '0.13.3',
   label: 'Photobook',
   description: 'A travel journal with full-bleed photographs, stories, grids, maps and a picture list, in a light or a dark theme.',
   preview: './preview.jpg',

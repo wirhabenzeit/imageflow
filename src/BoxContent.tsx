@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
+import { CaptionField } from './CaptionField';
 import type { ReactNode } from 'react';
 import { Icon } from './Icon';
 import { ActionMenu, Submenu } from './ActionMenu';
 import { Field } from './Fields';
 import type { ProjectSummary } from './desktop';
+import type { SourceUsage } from './editing';
 import { boxBase } from './project';
 import type { SpreadState } from './project';
 import { textChoices, textMenuChoices } from './source-items';
@@ -20,11 +22,13 @@ type Change<T = SpreadState> = (update: (spread: T) => void, notice?: string) =>
 type PhotoLayout = Pick<SpreadState, 'definition' | 'boxes'>;
 
 // Choose, replace or remove the photo of a box from the keyboard; the canvas and photo strip are drag-only.
-export function PhotoContent({ summary, spread, box, label, change, inspect, adjustCrop, values = false, compact = false, assigned: reassigned }: {
+export function PhotoContent({ summary, spread, box, label, change, inspect, adjustCrop, values = false, compact = false, assigned: reassigned, caption }: {
   summary: ProjectSummary; spread: PhotoLayout; box: string; label: string; change: Change<PhotoLayout>;
   // Called after the photo is replaced or removed, such as to end a selection that showed the old photo.
   assigned?: () => void;
   inspect?: (source: SourceRef) => void; adjustCrop?: () => void;
+  // The caption of the box's photo, edited below it (UI-014); the crop toolbar has a button of its own.
+  caption?: { usage: SourceUsage; save: (photo: string, caption: string) => void; autoFocus?: boolean };
   // In the crop toolbar, where the photo itself is on screen: no thumbnail, name or crop summary.
   compact?: boolean;
   // The crop as numbers, for frames the template rotates, where dragging the photo is not available.
@@ -63,7 +67,7 @@ export function PhotoContent({ summary, spread, box, label, change, inspect, adj
         change={(value) => change((item) => {
           const state = item.boxes[box];
           if (state?.photo) setPlacement(state, item.definition, { ...placementIn(state, item.definition), [key]: value });
-        })} />,
+        }, 'Crop updated')} />,
     )}
   </div>;
   const cropValues = values && assigned && <details className="crop-values"><summary>Crop values</summary>{fields}</details>;
@@ -94,6 +98,8 @@ export function PhotoContent({ summary, spread, box, label, change, inspect, adj
       </div>
       {cropValues}
     </div>}
+    {assigned && caption && summary.photoIndex[assigned] && <CaptionField key={assigned} summary={summary} photo={assigned} usage={caption.usage}
+      autoFocus={caption.autoFocus} save={(text) => caption.save(assigned, text)} />}
   </div>;
 }
 
