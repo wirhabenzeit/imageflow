@@ -83,6 +83,15 @@ export function compactRender(render: NonNullable<AuthoringCheckResult['render']
   };
 }
 
+/** A fixture report as a reply: one that passed is named by its layout, case and format alone (API-005). */
+export function compactFixtures(report: FixtureReport) {
+  return { ...report, cells: report.cells.map((cell) => {
+    if (cell.state !== 'passed') return cell;
+    const { layout, case: fixture, format, state } = cell;
+    return { layout, case: fixture, format, state };
+  }) };
+}
+
 export class AuthoringError extends Error {
   constructor(readonly code: string, message: string, readonly details?: Record<string, unknown>) { super(message); }
 }
@@ -697,7 +706,8 @@ export function createAuthoringService(hooks: Hooks) {
           : await movedDraftCheck();
       if (args.includeTemplate) return report;
       // Keep full declarations in the internal check cache for planning and context, not in every agent reply.
-      const { template: _template, render, ...compact } = report;
+      const { template: _template, render, ...full } = report;
+      const compact = full.fixtures ? { ...full, fixtures: compactFixtures(full.fixtures) } : full;
       if (!render) return compact;
       return { ...compact, render: compactRender(render, report, args) };
     }

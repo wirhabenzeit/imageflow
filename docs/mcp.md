@@ -215,7 +215,7 @@ The result keeps the saved book's `diagnostics`, `checks.layout` and `render` as
 
 - `checks.fixtures`: `completed` when every planned fixture has an outcome, `failed` when some could not be isolated, `not-run` when no fixture rendered (for example after a compile error or a revision conflict).
 - `fixtures.matrix` and `fixtures.coverage`: tested layouts, formats and cases, counts of `planned`, `rendered`, `failed` and `notIsolated` fixtures, and every `skipped` layout, format or layout/case pair with its reason.
-- `fixtures.cells`: one entry per layout, case and format, with `state` (`passed`, `warnings`, `errors`, `failed` or `not-isolated`), error and warning counts and the finding codes.
+- `fixtures.cells`: one entry per layout, case and format, with `state` (`passed`, `warnings`, `errors`, `failed` or `not-isolated`), error and warning counts and the finding codes. One that passed has just its layout, case, format and state.
 - `fixtures.diagnostics`: at most 100 findings in the common envelope, each with `fixture: { layout, case, format }` instead of a saved spread. A finding that is the same in several formats is listed once, with every format it was found in under `fixture.formats`. `fixtures.diagnosticsTruncated` reports whether more exist; cell counts always cover all of them.
 - `fixtures.notEvaluated`: what a synthetic book cannot answer. Photo resolution, page count and sequence, anchors on other spreads, book-level findings and print preflight belong to the saved-book check.
 

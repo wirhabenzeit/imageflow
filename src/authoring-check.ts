@@ -42,7 +42,9 @@ export type AuthoringCheckResult = AuthoringReport & {
   fixtures?: FixtureReport;
 };
 export type FixtureCellReport = {
-  layout: string; case: FixtureCase; format: string; label: string;
+  layout: string; case: FixtureCase; format: string;
+  // Replies leave out `label`, the counts and `codes` of a fixture that passed (`compactFixtures`).
+  label: string;
   // `failed`: the layout threw or the fixture book could not render; `not-isolated`: a render with other fixtures failed
   // and the isolation budget ran out before this fixture rendered on its own.
   state: 'passed' | 'warnings' | 'errors' | 'failed' | 'not-isolated';
