@@ -36,3 +36,9 @@ export function unusedText(unused: UnusedStorage | null) {
   if (now) return total + formatStorage(now) + ' now and the rest ' + (first === last ? 'from ' + last : 'by ' + last) + '.';
   return total + (first === last ? 'it from ' + first : 'it between ' + first + ' and ' + last) + '.';
 }
+
+/** The tooltip of a book's size: what it is by kind, and what of it is no longer used (undefined while that is read). */
+export function storageText(storage: BookStorage, unused: UnusedStorage | null | { error: string } | undefined) {
+  return [formatStorage(storage.bytes), ...storageParts(storage).map(({ label, bytes }) => label + ': ' + formatStorage(bytes)), '',
+    unused === undefined ? 'Looking for what is no longer used…' : unused && 'error' in unused ? unused.error : unusedText(unused)].join('\n');
+}

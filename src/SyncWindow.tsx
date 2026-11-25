@@ -5,11 +5,10 @@ import { libraryRows } from './book-library';
 import type { LibraryRow } from './book-library';
 import { DownloadProgress } from './DownloadProgress';
 import type { BookDownload, BookStorage, DesktopApi, LibraryAction, LibraryBook, LibraryRemote, PopupItem, RecentDocument, SyncBook, SyncCleanUpPlan, SyncStatus, UnusedStorage } from './desktop';
-import { Icon } from './Icon';
 import type { AppSettings } from './settings';
 import { syncPlace, syncRows, syncRowState, syncSwitch } from './sync-rows';
 import type { SyncRowState } from './sync-rows';
-import { cleanUpText, formatStorage, storageParts, unusedText } from './sync-storage-text';
+import { cleanUpText, formatStorage, storageText } from './sync-storage-text';
 import bookIcon from '../resources/brand/book.svg';
 
 type Remote = LibraryRemote | { error: string } | null | undefined;
@@ -34,8 +33,7 @@ export function SyncWindow({ api }: { api?: DesktopApi }) {
   const [statuses, setStatuses] = useState<Record<string, SyncStatus | null>>({});
   const [details, setDetails] = useState<Record<string, LibraryBook | { error: string }>>({});
   const [sizes, setSizes] = useState<Record<string, BookStorage | 'unknown'>>({});
-  // The books whose storage is shown in detail, and what each no longer uses, read when it is shown.
-  const [opened, setOpened] = useState<Record<string, boolean>>({});
+  // What each book no longer uses, for its size's tooltip: read once the pointer or the focus is on its row.
   const [unused, setUnused] = useState<Record<string, UnusedStorage | null | { error: string }>>({});
   const [switching, setSwitching] = useState<Record<string, boolean>>({});
   const [error, setError] = useState('');
@@ -110,13 +108,17 @@ export function SyncWindow({ api }: { api?: DesktopApi }) {
   const look = (bookId: string) => void api?.syncBookUnused(bookId).catch(() => failed).then((result) => {
     if (shown.current === backend) setUnused((all) => ({ ...all, [bookId]: 'value' in result ? result.value : { error: result.error } }));
   });
-  function open(bookId: string) {
-    if (!opened[bookId]) look(bookId);
-    setOpened((all) => ({ ...all, [bookId]: !all[bookId] }));
+  const looked = useRef(new Set<string>());
+  // `again`: the pointer or the focus came to the row, which tries once more what could not be read.
+  function lookOnce(bookId: string, again: boolean) {
+    const known = unused[bookId];
+    if (looked.current.has(bookId) && !(again && known && 'error' in known)) return;
+    looked.current.add(bookId);
+    look(bookId);
   }
-  // Counted again: what it no longer uses is another too.
-  const recount = (bookId: string) => { size(bookId, true); if (opened[bookId]) look(bookId); };
-  useEffect(() => { shown.current = backend; counted.current.clear(); setSizes({}); setOpened({}); setUnused({}); setDetails({}); setStatuses({}); }, [backend]);
+  // Counted again: what it no longer uses is another too, and is read when it is next asked for.
+  const recount = (bookId: string) => { size(bookId, true); looked.current.delete(bookId); setUnused(({ [bookId]: _old, ...rest }) => rest); };
+  useEffect(() => { shown.current = backend; counted.current.clear(); looked.current.clear(); setSizes({}); setUnused({}); setDetails({}); setStatuses({}); }, [backend]);
   useEffect(() => { for (const bookId of onRemote) if (!counted.current.has(bookId)) { counted.current.add(bookId); size(bookId); } }, [onRemote.join(), backend]);
   useEffect(() => {
     for (const row of rows) {
@@ -189,7 +191,7 @@ export function SyncWindow({ api }: { api?: DesktopApi }) {
       <div className="sync-rows" role="rowgroup">
         {rows.map((row) => <Row key={keyOf(row)} row={row} place={syncPlace(row, name, !!downloading(row))} details={row.kind === 'remote' ? details[row.bookId] : undefined}
           size={onRemote.includes(bookIdOf(row) ?? '') ? sizes[bookIdOf(row)!] ?? 'counting' : undefined}
-          opened={!!opened[bookIdOf(row) ?? '']} unused={unused[bookIdOf(row) ?? '']} open={() => open(bookIdOf(row)!)} download={downloading(row)}
+          unused={unused[bookIdOf(row) ?? '']} look={(again) => lookOnce(bookIdOf(row)!, again)} download={downloading(row)}
           state={syncRowState(row, { download: downloading(row), view: busyWith(row)?.view, status: row.kind === 'local' ? statuses[row.book.id] : undefined,
             details: offered(row) ? details[bookIdOf(row) ?? ''] : undefined, switching: row.kind === 'local' && switching[row.book.id] })}
           disabled={!settings || (row.kind === 'local' && (switching[row.book.id] || row.state === 'checking'))} turn={() => { if (row.kind === 'local') void turn(row); }}
@@ -204,8 +206,8 @@ export function SyncWindow({ api }: { api?: DesktopApi }) {
   </main>;
 }
 
-function Row({ row, place, details, size, opened, unused, open, download, state, disabled, turn, act, cancel, menu }: { row: LibraryRow; place: string; details?: LibraryBook | { error: string };
-  size?: BookStorage | 'unknown' | 'counting'; opened: boolean; unused?: UnusedStorage | null | { error: string }; open: () => void; download?: BookDownload; state: SyncRowState; disabled: boolean; turn: () => void; act: (action: NonNullable<SyncRowState['action']>) => void; cancel: () => void;
+function Row({ row, place, details, size, unused, look, download, state, disabled, turn, act, cancel, menu }: { row: LibraryRow; place: string; details?: LibraryBook | { error: string };
+  size?: BookStorage | 'unknown' | 'counting'; unused?: UnusedStorage | null | { error: string }; look: (again: boolean) => void; download?: BookDownload; state: SyncRowState; disabled: boolean; turn: () => void; act: (action: NonNullable<SyncRowState['action']>) => void; cancel: () => void;
   menu: (point?: { x: number; y: number }) => void }) {
   const loaded = details && 'title' in details ? details : undefined;
   const title = row.kind === 'local' ? bookName(row.book.path) : loaded ? (loaded.newer ? 'A book from a newer ImageFlow' : loaded.title || 'Untitled') : details ? 'Cannot be read now' : 'Loading…';
@@ -216,11 +218,13 @@ function Row({ row, place, details, size, opened, unused, open, download, state,
   const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); menu(); } };
   const labels = { download: 'Download…', update: 'Update…', 'manage-storage': 'Manage Storage…', settings: 'Settings…' };
   const storage = typeof size === 'object' ? size : undefined;
-  return <><div className="sync-row" role="row" tabIndex={0} aria-label={title} data-book={bookIdOf(row)} data-state={row.state} onContextMenu={onContextMenu} onKeyDown={onKeyDown}>
+  const about = storage && storageText(storage, unused);
+  // Moves too: the size may come, or be counted again, while the pointer rests on the row.
+  const ask = (again: boolean) => storage ? () => look(again) : undefined;
+  return <div className="sync-row" role="row" onPointerEnter={ask(true)} onPointerMove={ask(false)} onFocus={ask(true)} tabIndex={0} aria-label={title} data-book={bookIdOf(row)} data-state={row.state} onContextMenu={onContextMenu} onKeyDown={onKeyDown}>
     <span className="sync-cover" role="cell">{cover ? <img src={cover} alt="" /> : <img className="sync-cover-icon" src={bookIcon} alt="" />}</span>
     <span className="sync-book" role="cell"><strong title={row.kind === 'local' ? row.book.path : undefined}>{title}</strong><span>{place}</span></span>
-    <span className="sync-size" role="cell">{storage ? <button type="button" className="sync-size-button" aria-expanded={opened} aria-label={formatStorage(storage.bytes) + ', what it is'} onClick={open}>
-      {formatStorage(storage.bytes)}<Icon name="chevron" size={14} /></button> : size === 'counting' ? '' : '–'}</span>
+    <span className="sync-size" role="cell" title={about} aria-label={about}>{storage ? formatStorage(storage.bytes) : size === 'counting' ? '' : '–'}</span>
     <span className={'sync-state' + (state.tone ? ' sync-state-' + state.tone : '')} role="cell" title={state.detail}>
       {download ? <DownloadProgress download={download} title={title} cancel={cancel} /> : <>
         {state.bar && <progress className="task-status-bar" max={state.bar.total || 1} value={Math.min(state.bar.done, state.bar.total)} aria-label={state.text} />}
@@ -228,11 +232,7 @@ function Row({ row, place, details, size, opened, unused, open, download, state,
         {state.action && <button onClick={() => act(state.action!)}>{labels[state.action]}</button>}</>}
     </span>
     <span className="sync-switch-cell" role="cell">{on !== undefined && <button className="sync-switch" role="switch" aria-checked={on} aria-label={'Sync ' + title} disabled={disabled || !!download} onClick={turn} />}</span>
-  </div>
-  {storage && opened && <div className="sync-details" role="row" data-details={bookIdOf(row)}><div role="cell">
-    <dl>{storageParts(storage).map(({ label, bytes }) => <div key={label}><dt>{label}</dt><dd>{formatStorage(bytes)}</dd></div>)}</dl>
-    <p role="status">{unused === undefined ? 'Looking for what is no longer used…' : unused && 'error' in unused ? unused.error : unusedText(unused)}</p>
-  </div></div>}</>;
+  </div>;
 }
 
 /** The footer: what the books take up, and Clean Up (#285), which says what it would free and asks before it deletes. */
