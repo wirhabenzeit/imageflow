@@ -53,6 +53,13 @@ try {
       document.querySelector('.status-error'), { frame, url: before });
     return ready();
   }
+  // Not `waitForFunction`, which does not wait for an async predicate: its promise is truthy at once.
+  async function saved(expected, message) {
+    for (const end = Date.now() + 10_000; !expected(await read());) {
+      assert.ok(Date.now() < end, message);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
   async function saveState(action, expected) {
     await changed(action);
     assert.ok(expected(await read()));
@@ -118,7 +125,7 @@ try {
   await writeFile(markdown, 'A small story imported through the canvas.\n');
   await changed(() => dropFile(photo, '[data-box="hero"]'));
   // Importing adds a library source before the separate placement save completes.
-  await window.waitForFunction(async () => /^ph-/.test((await window.imageflow.currentProject()).value.project.spreads[3].boxes.hero.photo ?? ''));
+  await saved((data) => /^ph-/.test(data.spreads[3].boxes.hero.photo ?? ''), 'The dropped photo is placed');
   await ready();
   const photoId = (await read()).spreads[3].boxes.hero.photo;
   assert.match(photoId, /^ph-/);
@@ -133,7 +140,7 @@ try {
   await changed(() => button('Undo').click());
   assert.equal((await read('photos.json'))[photoId].caption, undefined);
   await changed(() => dropFile(markdown, '[data-box="body"]'));
-  await window.waitForFunction(async () => /^tx-/.test((await window.imageflow.currentProject()).value.project.spreads[3].boxes.body.text ?? ''));
+  await saved((data) => /^tx-/.test(data.spreads[3].boxes.body.text ?? ''), 'The dropped text is placed');
   await ready();
   const textId = (await read()).spreads[3].boxes.body.text;
   assert.match(textId, /^tx-/);
