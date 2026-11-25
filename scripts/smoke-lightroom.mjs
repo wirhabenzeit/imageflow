@@ -117,6 +117,11 @@ try {
   await until(async () => !(await status()).outOfDate, 'refreshed');
   assert.deepEqual(plugin.jobs.filter(({ type }) => type === 'render').map(({ uuids }) => uuids), [[edited]]);
 
+  // Show in Lightroom Classic reaches the plugin's version. A success would bring this Mac's Lightroom to the front, so
+  // the unit tests cover it.
+  const show = await page.evaluate((key) => window.imageflow.sourceAction({ action: 'show-lightroom', keys: [key] }), 'photo:' + photo);
+  assert.match(show.error ?? '', /too old to show photos \(1\.1\.0\)/, JSON.stringify(show));
+
   // A photo with no picture at all that Lightroom refuses is rendered.
   plugin.selection = [plugin.add(count + 1, { color: '#8040c0' })];
   plugin.refused.add(uuid(count + 1));

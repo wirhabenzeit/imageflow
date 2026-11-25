@@ -18,7 +18,8 @@ function summary({ plugin, app, connection }: LightroomState): { tone: Tone; tex
     return { tone: 'ok', text: connection.catalog ? 'Connected · ' + connection.catalog : 'Connected' };
   }
   if (!app.running) return { tone: 'off', text: 'Not running', ...(app.installed ? { action: 'launch' as const } : {}) };
-  return { tone: 'attention', text: 'Restart Lightroom Classic to load the plugin' };
+  // It may still be starting, run from before the plugin was installed, or be connected to another copy of ImageFlow.
+  return { tone: 'attention', text: 'Not connected. If it stays so, restart Lightroom Classic or quit other copies of ImageFlow' };
 }
 
 const actionLabels: Record<Action, string> = { install: 'Install Plugin', update: 'Update Plugin', launch: 'Open Lightroom Classic' };

@@ -1,9 +1,15 @@
 import type { BookMenuState, ContextMenuItem, ProjectSummary } from './desktop';
 import { emptyMenuState } from './commands';
 import { sourceEntries, sourceFile, sourceProvider, sourceReach } from './source-locations';
-import type { SourceRepair } from './source-locations';
+import type { SourceEntry, SourceRepair } from './source-locations';
 import { assetPageLabels, assetUsage, usageLabel } from './asset-usage';
 import type { SourceUsage } from './editing';
+
+/** Whether Lightroom Classic can show this source now: one of its photos that is neither offline nor gone from the catalog. */
+export function showsInLightroom(summary: ProjectSummary, entry: SourceEntry) {
+  const state = summary.sources?.[entry.key]?.state;
+  return sourceProvider(entry) === 'lightroom' && !!state && state !== 'offline' && state !== 'missing';
+}
 
 export function assetMenu(summary: ProjectSummary, keys: string[], place = false, knownUsage?: SourceUsage): ContextMenuItem[] {
   const chosen = sourceEntries(summary).filter(({ key }) => keys.includes(key));
@@ -29,6 +35,9 @@ export function assetMenu(summary: ProjectSummary, keys: string[], place = false
       label: chosen[0].linked ? 'Rename… (Copy into Book First)' : undefined }] : []),
     // Show in Finder needs a file: a photo of another provider has none.
     { type: 'separator' }, { command: 'asset-reveal', enabled: !missing && chosen.every((entry) => !!sourceFile(entry)) },
+    // A photo of Lightroom Classic is shown there instead, while its catalog can be reached and still holds it.
+    ...(chosen.some((entry) => sourceProvider(entry) === 'lightroom') ? [{ command: 'asset-show-lightroom' as const,
+      enabled: chosen.some((entry) => showsInLightroom(summary, entry)) }] : []),
     ...(chosen.length === 1 && chosen[0].kind === 'markdown' ? [{ command: 'asset-open' as const, enabled: !missing }] : []),
     // Locate Folder… finds every missing asset in the folder chosen, whatever is selected (F-045).
     // Retry reads them again; it is the one repair for a photo whose app or server is not reachable now.
@@ -47,4 +56,4 @@ export function assetMenuState(busy: boolean): BookMenuState {
   return { ...emptyMenuState, document: true, writable: true, busy };
 }
 export const assetActions = { 'asset-reveal': 'reveal', 'asset-copy': 'copy', 'asset-remove': 'remove', 'asset-locate': 'locate',
-  'asset-locate-folder': 'locate-folder', 'asset-open': 'open', 'asset-place': 'place', 'asset-retry': 'retry', 'asset-refresh': 'refresh', 'asset-launch': 'launch' } as const;
+  'asset-locate-folder': 'locate-folder', 'asset-open': 'open', 'asset-place': 'place', 'asset-retry': 'retry', 'asset-refresh': 'refresh', 'asset-show-lightroom': 'show-lightroom', 'asset-launch': 'launch' } as const;

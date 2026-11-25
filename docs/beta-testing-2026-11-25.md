@@ -19,6 +19,8 @@ from Lightroom Classic.
 - **API-010, API-011.** `replace_source` swaps a photo in every box, shown or set aside. `remove_sources` takes sources out
   of the book as Remove from Book does.
 - Save a Copy and a sync's reload wait for no previews.
+- **UI-007.** Show in Lightroom Classic, in the menu of an asset and of a placed photo, selects the photos in Lightroom. It
+  stays in Develop when Lightroom is there. It needs plugin 1.2.0, and was tried with Lightroom by hand.
 - **UI-009.** The tooltip of a book's size in the Sync window says what it is by kind, how much is no longer used, and from
   when Clean Up can free it.
 - **UI-010.** The Assets window lists copied files that neither the book nor this session's Undo needs, and moves them to the
@@ -38,6 +40,7 @@ from Lightroom Classic.
 
 ## To retest
 
+- **UI-007**, the rarer cases with Lightroom: a filter or a collapsed stack that hides the photo, and several photos.
 - With Lightroom Classic and about 1,000 photos: `check_book` and `get_authoring_context` during the import, and
   Lightroom's CPU once the previews have come. The fixes were tested with the tests' stand-in for the plugin only.
 - **API-009 in beta.22** (`list_projects`) is probably another cause: that version held the book during the whole upload
@@ -47,7 +50,7 @@ from Lightroom Classic.
 
 ## Open
 
-- UI-007 (Show in Lightroom) and the rest of UI-008, with Lightroom.
+- The rest of UI-008, with Lightroom.
 - API-013 (#316), which needs a design.
 - Every preview that comes moves the book's revision, so a commit during an import can still meet `REVISION_CONFLICT`.
 - A book opened read-only still waits for missing previews.

@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { LightroomBridge } from '../desktop/lightroom/bridge';
 import { captureTime, lightroomProvider } from '../desktop/providers/lightroom';
 import { launchLightroom } from '../desktop/lightroom/launch';
+import { showInLightroom } from '../desktop/lightroom/show';
 import { registerProvider } from '../desktop/providers';
 import { configureSourceStore, SourceStore } from '../desktop/source-store';
 import { configureSourceAccess } from '../desktop/source-access';
@@ -362,6 +363,9 @@ test('a book with Lightroom photos loads through the provider and the plugin, sh
   assert.ok(commands.includes('asset-launch'), 'Launch Lightroom Classic is offered');
   assert.ok(commands.includes('asset-retry'));
   assert.equal(commands.includes('asset-locate'), false);
+  const showItem = (summary: ReturnType<typeof projectSummary>) => assetMenu(summary, ['photo:lr1']).find((item) => (item as { command?: string }).command === 'asset-show-lightroom') as { enabled?: boolean } | undefined;
+  assert.equal(showItem(projectSummary(loaded, 'view'))?.enabled, true);
+  assert.equal(showItem(projectSummary(reopened, 'view'))?.enabled, false, 'an offline photo cannot be shown');
 });
 
 async function bookWithLightroom(t: Parameters<typeof setup>[0]) {
@@ -461,6 +465,34 @@ test('a thumbnail that still shows the photo before its edit is not taken for th
   const fact = f.facts.get('lr1')!;
   assert.notEqual(fact.digest, before.digest);
   assert.equal(fact.revisions?.contentRevision, f.plugin.developHash(uuid(1)));
+});
+
+test('Show in Lightroom Classic selects the photos there and says what could not be shown (UI-007)', async (t) => {
+  const { bridge, fake } = await setup(t);
+  const locator = (n: number, catalog = catalogId): LightroomLocator => ({ provider: 'lightroom', catalog, uuid: uuid(n) });
+  let fronted = 0;
+  const show = (...locators: LightroomLocator[]) => showInLightroom(bridge, locators, async () => { fronted++; });
+  await assert.rejects(show(locator(1)), /not running, or its ImageFlow plugin is not connected/);
+  const older = fake('1.1.0');
+  await older.connect();
+  await assert.rejects(show(locator(1)), /too old to show photos \(1\.1\.0\).*Update Plugin/);
+  assert.equal(older.jobs.filter(({ type }) => type === 'show').length, 0, 'it is not asked');
+  await older.quit();
+  const plugin = fake('1.2.0');
+  for (const n of [1, 2, 3]) plugin.add(n);
+  await plugin.connect();
+  assert.equal(await show(locator(2), locator(1)), undefined);
+  assert.deepEqual(plugin.selection, [uuid(2), uuid(1)]);
+  assert.equal(fronted, 1);
+  plugin.hidden.add(uuid(3));
+  await assert.rejects(show(locator(3)), /could not select the photo\. A filter or a collapsed stack in Lightroom may hide it\./);
+  await assert.rejects(show(locator(9)), /The photo is no longer in the Lightroom catalog/);
+  await assert.rejects(show(locator(1, otherCatalogId)), /Another Lightroom catalog is open \(Photos\.lrcat\)/);
+  await assert.rejects(show(), /Choose photos/);
+  assert.equal(fronted, 1, 'Lightroom comes to the front only when it shows something');
+  assert.equal(await show(locator(1), locator(3), locator(9), locator(2, otherCatalogId)),
+    'Showing 1 of 4 photos in Lightroom Classic. A filter or a collapsed stack in Lightroom may hide the other one. 1 is no longer in the catalog. 1 is in another catalog.');
+  assert.equal(fronted, 2);
 });
 
 test('Refresh from Lightroom renders anew, and a failed one keeps the picture and says why', async (t) => {

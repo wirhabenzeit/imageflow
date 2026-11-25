@@ -1,6 +1,7 @@
 -- What the plugin reads from and renders out of the open catalog (ADR 0011, sections 1 to 4). Everything here
 -- yields (catalog calls, exports), so it runs inside a task and is guarded with LrTasks.pcall by its caller.
 local LrApplication = import 'LrApplication'
+local LrApplicationView = import 'LrApplicationView'
 local LrExportSession = import 'LrExportSession'
 local LrFileUtils = import 'LrFileUtils'
 local LrMD5 = import 'LrMD5'
@@ -273,6 +274,66 @@ function Catalog.selection()
     end
   end
   return { catalog = identity.id, photos = photos }
+end
+
+-- How many of `photos` are selected. Without a selection Lightroom's target photos are the whole filmstrip, which is none.
+local function selectedOf(catalog, photos)
+  if not catalog:getTargetPhoto() then return 0 end
+  local wanted, count = {}, 0
+  for _, photo in ipairs(photos) do wanted[photo.localIdentifier] = true end
+  for _, photo in ipairs(catalog:getTargetPhotos()) do
+    if wanted[photo.localIdentifier] then count = count + 1 end
+  end
+  return count
+end
+
+-- Selects `photos`, the first one active, and waits until they are. Lightroom selects only photos it shows, and sometimes
+-- ignores the call just after its source changed, so it is made again until it took or `seconds` passed.
+local function selectPhotos(catalog, photos, seconds)
+  local others = {}
+  for index = 2, #photos do others[#others + 1] = photos[index] end
+  local waited, count = 0, 0
+  repeat
+    catalog:setSelectedPhotos(photos[1], others)
+    LrTasks.sleep(0.1)
+    waited = waited + 0.1
+    count = selectedOf(catalog, photos)
+  until count == #photos or waited >= seconds
+  return count
+end
+
+--- Show in Lightroom Classic: selects the photos, the first one active. In Develop it stays there, so the photo opens in
+--- it and the others are selected in the filmstrip; from anywhere else it goes to the Library grid. The folder or
+--- collection shown now is kept when it has them all; otherwise All Photographs is shown. Filters and collapsed stacks
+--- are the user's and stay as they are: a photo they hide is not selected. Nothing is written into the catalog.
+function Catalog.show(uuids)
+  local catalog = LrApplication.activeCatalog()
+  local wanted, seen = {}, {}
+  for _, uuid in ipairs(type(uuids) == 'table' and uuids or {}) do
+    if not seen[uuid] then seen[uuid] = true; wanted[#wanted + 1] = uuid end
+  end
+  local found, missing = photosFor(catalog, wanted)
+  if #found == 0 then return { shown = 0, missing = missing } end
+  local module = LrApplicationView.getCurrentModuleName()
+  if module ~= 'develop' then
+    if module ~= 'library' then
+      LrApplicationView.switchToModule('library')
+      -- The module switch is not done when the call returns.
+      local waited = 0
+      while LrApplicationView.getCurrentModuleName() ~= 'library' and waited < 5 do
+        LrTasks.sleep(0.1)
+        waited = waited + 0.1
+      end
+    end
+    LrApplicationView.showView('grid')
+  end
+  local shown = selectPhotos(catalog, found, 0.5)
+  if shown < #found then
+    catalog:setActiveSources({ catalog.kAllPhotos })
+    LrTasks.sleep(0.2)
+    shown = selectPhotos(catalog, found, 3)
+  end
+  return { shown = shown, missing = missing }
 end
 
 --- The revisions of the photos ImageFlow watches, for the change poll (§3.6): uuid → revision, or nil when gone.
