@@ -739,10 +739,11 @@ async function stagePull(context: Context, tip: CommitHeader) {
   return { blob, marker };
 }
 
-/** `<Book> (Conflict 2026-11-21 14.33.05).imageflow` beside the book, numbered when that name is taken. */
+/** `<Book> (Conflict 2026-11-21 14.33.05).imageflow` beside the book, in this Mac's time, numbered when that name is taken. */
 async function conflictDestination(root: string, now: Date) {
   const name = basename(root).replace(/\.imageflow$/i, '');
-  const stamp = now.toISOString().slice(0, 19).replace('T', ' ').replaceAll(':', '.');
+  const two = (value: number) => String(value).padStart(2, '0');
+  const stamp = now.getFullYear() + '-' + two(now.getMonth() + 1) + '-' + two(now.getDate()) + ' ' + [now.getHours(), now.getMinutes(), now.getSeconds()].map(two).join('.');
   for (let index = 1; ; index++) {
     const candidate = join(dirname(root), name + ' (Conflict ' + stamp + (index > 1 ? ' ' + index : '') + ').imageflow');
     if (!await lstat(candidate).catch(() => undefined)) return candidate;
