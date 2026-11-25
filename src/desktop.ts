@@ -34,7 +34,7 @@ export const channels = {
   showMarkdown: 'markdown:open', markdownAction: 'markdown:action', markdownChanged: 'markdown:changed', markdownPrepareClose: 'markdown:prepare-close',
   presentationState: 'presentation:state', presentationSpread: 'presentation:spread', presentationClose: 'presentation:close', presentationClosed: 'presentation:closed',
   showAssets: 'document:show-assets', showTemplates: 'library:show', templatePreview: 'library:preview',
-  current: 'document:current', appError: 'app:error', appNotice: 'app:notice',
+  current: 'document:current', appError: 'app:error', appNotice: 'app:notice', previewProgress: 'project:preview-progress',
   recents: 'app:recents', recentsChanged: 'app:recents-changed', recentAction: 'app:recent-action',
   libraryRemote: 'books:remote', libraryBook: 'books:book', libraryAction: 'books:action', downloads: 'books:downloads', downloadsChanged: 'books:downloads-changed',
   sourceCommand: 'document:source-command', templateAction: 'library:action', sourceAction: 'document:source-action', saveCopy: 'document:save-copy',
@@ -185,7 +185,11 @@ export type McpClientTarget = 'claude' | 'codex' | 'skill';
  */
 export type TaskProgress = { text: string; done?: number; total?: number; cancel?: boolean };
 // `stage` says what a reload the app started is doing, such as rendering previews of imported photos, with its count.
-export type ProjectChange = Result<ProjectSummary> | { building: true; stage?: string; done?: number; total?: number };
+export type ProjectChange = Result<ProjectSummary> | { building: true; stage?: string; done?: number; total?: number;
+  /** Photos changed in their source or their previews came: no file of the book changed. */
+  photos?: true };
+/** How many of the previews a book asked its sources for have come, over all that are being fetched now. */
+export type PreviewProgress = { done: number; total: number };
 /**
  * The ImageFlow plugin in Lightroom's Modules folder against the one this app bundles (ADR 0011): not there, the same,
  * older, newer, a link to a development copy, or a version that cannot be read.
@@ -290,6 +294,8 @@ export type DesktopApi = {
   currentProject(): Promise<Result<ProjectSummary>>;
   onAppError(listener: (message: string) => void): () => void;
   onAppNotice(listener: (message: string) => void): () => void;
+  /** Previews of photos from Lightroom being fetched in the background; null once none are. */
+  onPreviewProgress(listener: (progress: PreviewProgress | null) => void): () => void;
   /** The book's sync status (#251), null when it does not sync on this Mac. */
   syncState(): Promise<Result<SyncView | null>>;
   onSyncChanged(listener: (view: SyncView | null) => void): () => void;

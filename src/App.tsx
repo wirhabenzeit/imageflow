@@ -32,7 +32,7 @@ import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
 import { bookLayout, gridColumns, isRenderOrigin, renderOrigin, spreadCommands, thumbsOrigin } from './desktop';
 import { resolveTarget, targetAnchor, targetKey } from './edit-targets';
 import type { TargetAnchor } from './edit-targets';
-import type { BookGeometry, CanvasLayout, Command, ImportRequest, Issue, ProjectChange, ProjectSummary, Rect, RenderStatus, SourceAction, TemplateInfo } from './desktop';
+import type { BookGeometry, CanvasLayout, Command, ImportRequest, Issue, PreviewProgress, ProjectChange, ProjectSummary, Rect, RenderStatus, SourceAction, TemplateInfo } from './desktop';
 import { PanelDivider, useCanvasLayout, usePanels, useSectionOpen } from './panels';
 import { PanelSection } from './PanelSection';
 import { Icon } from './Icon';
@@ -173,6 +173,10 @@ export function App() {
   // What a reload the app started says it is doing (`ProjectChange.stage`), shown while the book loads again.
   const [reloadStage, setReloadStage] = useState<TaskProgress>();
   useEffect(() => { if (reload !== 'loading') setReloadStage(undefined); }, [reload]);
+  // A reload for photos that changed in Lightroom or whose previews came, and the previews being fetched.
+  const [photoReload, setPhotoReload] = useState(false);
+  const [previewProgress, setPreviewProgress] = useState<PreviewProgress | null>(null);
+  const loadingPreviews = useDelayed(!!previewProgress, 500);
   const reloading = useRef(false);
   // A reload that finished with an error is settled: the agent may commit a repair, while human edits stay disabled.
   const reloadFailed = useRef(false);
@@ -453,7 +457,8 @@ export function App() {
   const agentRendering = !!summary && agentRevision === summary.id && render?.state !== 'ready' && render?.state !== 'error' && !reload;
   const agentActive = !!agentWorking || agentRendering;
   // The agent's revision renders behind the book on show, which stays usable: no progress cursor over it.
-  const showingChange = saving || reloadingFiles || (!!summary && !render && !!lastReady && !reload && !agentRendering);
+  // While previews load, their count says what is going on: the book reloading for some of them every few seconds does not.
+  const showingChange = saving || (reloadingFiles && !(photoReload && previewProgress)) || (!!summary && !render && !!lastReady && !reload && !agentRendering);
   const updating = useDelayed(showingChange, 250);
   // A shorter wait for the cursor, which says that something is happening without asking for attention: the book
   // changing, or a task of this window reporting progress, such as Copy into Book while Lightroom renders originals.
@@ -463,7 +468,7 @@ export function App() {
   // a second after the book view if its thumbnails are late.
   const thumbnailsLate = useDelayed(!!lastReady && !thumbs, 1000);
   const opening = !!summary && render?.state !== 'error' && (!lastReady || (!thumbs && !thumbnailsLate));
-  const updatingText = reloadStage?.text ?? (reloadingFiles ? 'Updating the book after its files changed…' : 'Updating the book…');
+  const updatingText = reloadStage?.text ?? (reloadingFiles ? photoReload ? 'Updating photos from Lightroom…' : 'Updating the book after its files changed…' : 'Updating the book…');
   const agentText = 'Agent is updating the book…';
   const canvasReady = render?.state === 'ready' && !reload;
   const holdPreview = reload === 'loading' || typeof reload === 'object';
@@ -848,6 +853,7 @@ export function App() {
     if ('building' in change) {
       // Later stages of the same reload only say what it is doing now.
       if (!(change.stage && reloading.current && reload === 'loading')) beginReload();
+      setPhotoReload(!!change.photos);
       setReloadStage(change.stage ? { text: change.stage, ...(change.total ? { done: change.done, total: change.total } : {}) } : undefined);
     }
     else if ('error' in change) {
@@ -864,7 +870,7 @@ export function App() {
       setAgentRevision(change.value.id);
       setError('');
     } else {
-      if (!reloading.current) beginReload();
+      if (!reloading.current) { beginReload(); setPhotoReload(false); }
       adoptReload(change.value);
       setError('');
     }
@@ -976,13 +982,14 @@ export function App() {
     const progress = api.onProgress((value) => { if (!pendingTasks.current) return; const task = taskProgress(value); setBusy(task.text); setBusyTask(task.text ? task : undefined); });
     const appError = api.onAppError(setError);
     const appNotice = api.onAppNotice(setNotice);
+    const previews = api.onPreviewProgress(setPreviewProgress);
     let mounted = true;
     void api.currentProject().then((result) => {
       if (!mounted || current.current) return;
       if ('error' in result) setError(result.error);
       else adopt(result.value, true);
     });
-    return () => { mounted = false; prepare(); cancelQuit(); sourceCommand(); presentationClosed(); command(); changed(); progress(); lease(); release(); appError(); appNotice(); };
+    return () => { mounted = false; prepare(); cancelQuit(); sourceCommand(); presentationClosed(); command(); changed(); progress(); lease(); release(); appError(); appNotice(); previews(); };
   }, [api]);
 
   // Network origins the template declares (ADR 0006): checked once per book and template version (its hash) when it
@@ -2535,6 +2542,7 @@ export function App() {
       <span title={issue || busy || notice || undefined} className={issue ? 'status status-error' : busy || updating || agentActive ? 'status status-busy' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
         {!issue && busy ? <TaskStatus progress={busyTask ?? { text: busy }} cancel={exporting || copying || busyTask?.cancel ? () => void api?.cancelExport() : undefined} />
           : !issue && !agentActive && !notice && updating && reloadStage ? <TaskStatus progress={reloadStage} />
+          : !issue && !agentActive && !notice && !updating && loadingPreviews && previewProgress ? <TaskStatus progress={{ text: 'Loading previews from Lightroom', ...previewProgress }} />
           : <>{!issue && (updating || agentActive) && <span className="status-spinner" aria-hidden="true" />}{issue || (agentActive ? agentText : notice || (updating ? updatingText : ''))}</>}
       </span>
       {summary && <SyncStatus api={api} notice={setNotice} />}

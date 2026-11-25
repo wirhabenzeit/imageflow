@@ -4,6 +4,30 @@ import type { SourceState } from '../src/source-locations';
 /** Why a preview could not be had, with the state its photo was left in (`available`: its older preview stands). */
 export type PreviewFailure = { state: SourceState; problem: string };
 
+/** The progress of the previews being fetched, over all fetches of a book that run at once: what its status bar shows. */
+export class PreviewFetches {
+  private running = new Set<{ done: number; total: number }>();
+  private published = 0;
+  constructor(private readonly publish: (progress: { done: number; total: number } | null) => void, private readonly everyMs = 250) {}
+
+  /** Starts a fetch. `total` is 0 until it is known how many previews it asks for. */
+  start(total = 0) {
+    const fetch = { done: 0, total };
+    this.running.add(fetch);
+    if (total) this.report(true);
+    return {
+      progress: (done: number, total: number) => { fetch.done = done; fetch.total = total; this.report(false); },
+      end: () => { if (this.running.delete(fetch) && fetch.total) this.report(true); },
+    };
+  }
+  private report(now: boolean) {
+    if (!now && Date.now() - this.published < this.everyMs) return;
+    this.published = Date.now();
+    const all = [...this.running].reduce((sum, { done, total }) => ({ done: sum.done + done, total: sum.total + total }), { done: 0, total: 0 });
+    this.publish(all.total ? all : null);
+  }
+}
+
 /**
  * The previews the loads of an open book want, and what became of each (ADR 0011, §2). A load wants a preview again
  * until it is stored, so what was asked for is remembered by its content: it is asked for once, and one that could not
