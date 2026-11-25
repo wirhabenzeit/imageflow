@@ -394,4 +394,8 @@ test('a fixture finding found in several formats is listed once with its formats
   assert.equal(merged.length, 2);
   assert.deepEqual(merged[0].fixture, { layout: 'story', case: 'long-text', format: 'a4', formats: ['a4', 'square', 'letter'] });
   assert.deepEqual(merged[1].fixture, { layout: 'story', case: 'long-text', format: 'a4' }, 'a finding of one format keeps its shape');
+  const measured = (format: string, characters: number) => ({ ...finding(format, characters + ' characters overflow.'), details: { overflowCharacters: characters, box: 'body' } });
+  const overflow = mergeFormatFindings([measured('a4', 1200), measured('square', 310), { ...measured('letter', 5), details: { overflowCharacters: 5, box: 'note' } }]);
+  assert.deepEqual(overflow.map(({ message, fixture }) => [message, fixture.formats ?? fixture.format]), [['1200 characters overflow.', ['a4', 'square']], ['5 characters overflow.', 'letter']],
+    'what was measured differs per format; another box is another finding');
 });

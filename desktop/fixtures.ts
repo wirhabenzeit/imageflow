@@ -171,7 +171,11 @@ export function mergeFormatFindings(findings: FixtureReport['diagnostics']): Fix
   const merged = new Map<string, FixtureReport['diagnostics'][number]>();
   for (const finding of findings) {
     const { fixture: { format, formats: _formats, ...fixture }, ...rest } = finding;
-    const key = JSON.stringify([fixture, rest]);
+    // What was measured, such as how many characters overflow, differs from format to format (API-005 of 25 November,
+    // evening): such findings are one, with the first format's values.
+    const { details, message, ...same } = rest;
+    const measured = Object.fromEntries(Object.entries(details ?? {}).map(([name, value]) => [name, typeof value === 'number' ? 0 : value]));
+    const key = JSON.stringify([fixture, same, message.replace(/\d+(\.\d+)?/g, '#'), measured]);
     const known = merged.get(key);
     if (!known) { merged.set(key, { ...finding, fixture: { ...finding.fixture } }); continue; }
     const list = known.fixture.formats ?? [known.fixture.format];

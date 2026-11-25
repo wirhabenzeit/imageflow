@@ -1989,7 +1989,7 @@ async function disableMcp() {
 async function enableMcp() {
   if (quitting || preparingQuit) throw new Error('ImageFlow is closing.');
   const connection = await createMcpConnection({
-    descriptorPath: mcpDescriptorPath(),
+    descriptorPath: mcpDescriptorPath(), version: app.getVersion(),
     onClientsChanged: (clients) => { mcpClients = clients; publishMcpSettings(); },
     onCall: async (name, args, signal, client) => {
       try {

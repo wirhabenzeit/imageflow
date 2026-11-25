@@ -143,6 +143,7 @@ export const mcpOutputSchemas = {
       title: z.string(), folder: z.string(), writable: z.boolean(), revision, history,
     })),
     scope: z.string().optional(),
+    notice: z.string().optional(),
   }),
   get_authoring_context: z.looseObject({
     project: z.string(), root: z.string().describe('The book folder.'), guide: z.string(),
@@ -187,7 +188,8 @@ export const mcpOutputSchemas = {
   list_book_checkpoints: z.looseObject({
     project: z.string(),
     checkpoints: z.array(z.looseObject({
-      checkpointId: z.string(), time: z.string(), origin: z.enum(['app', 'mcp']), label: z.string(), changed: z.array(z.string()),
+      checkpointId: z.string(), time: z.string(), origin: z.enum(['app', 'mcp']), label: z.string(),
+      changed: z.array(z.string()).describe('Manifests, and files a sync pull wrote or removed.'),
       changedOutsideBefore: z.array(z.string()).optional().describe('Manifests changed outside ImageFlow since the previous checkpoint.'),
       mcp: z.looseObject({ tool: z.string(), idempotencyKey: z.string(), requestFingerprint: z.string(), session: z.string() }).optional(),
     })).describe('Newest first.'),
