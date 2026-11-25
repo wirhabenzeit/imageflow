@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { PreviewRequests } from '../desktop/preview-requests';
+import { PreviewFetches, PreviewRequests } from '../desktop/preview-requests';
 
 const a = { id: 'a', key: 'k1' }, b = { id: 'b', key: 'k1' };
 
@@ -46,4 +46,47 @@ test('what comes for earlier content does not settle the request for newer conte
   requests.settled('a', { state: 'available', problem: 'Edited.' });
   assert.deepEqual(requests.take(), ['a']);
   assert.equal(requests.problem({ id: 'a', key: 'k2' }), undefined);
+});
+
+test('the previews being fetched are counted over all fetches, and the count goes once none are', () => {
+  const seen: ({ done: number; total: number } | null)[] = [];
+  const fetches = new PreviewFetches((progress) => seen.push(progress), 0);
+  const first = fetches.start(10);
+  first.progress(4, 10);
+  // A report of changes does not know yet whether it asks for any preview.
+  const second = fetches.start();
+  second.progress(1, 2);
+  first.end();
+  second.end();
+  assert.deepEqual(seen, [{ done: 0, total: 10 }, { done: 4, total: 10 }, { done: 5, total: 12 }, { done: 1, total: 2 }, null]);
+  seen.length = 0;
+  const quiet = fetches.start();
+  quiet.end();
+  assert.deepEqual(seen, [], 'one that asked for none says nothing');
+});
+
+test('a fetch reports now and then, but always its start and its end', () => {
+  const seen: ({ done: number; total: number } | null)[] = [];
+  const fetches = new PreviewFetches((progress) => seen.push(progress), 60_000);
+  const fetch = fetches.start(3);
+  for (const done of [1, 2, 3]) fetch.progress(done, 3);
+  fetch.end();
+  fetch.end();
+  assert.deepEqual(seen, [{ done: 0, total: 3 }, null]);
+});
+
+test('the last progress of a burst shows soon, also when no further preview comes', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const seen: ({ done: number; total: number } | null)[] = [];
+  const fetches = new PreviewFetches((progress) => seen.push(progress), 250);
+  const fetch = fetches.start(10);
+  fetch.progress(1, 10);
+  fetch.progress(2, 10);
+  assert.deepEqual(seen, [{ done: 0, total: 10 }]);
+  t.mock.timers.tick(250);
+  assert.deepEqual(seen.at(-1), { done: 2, total: 10 });
+  fetch.progress(3, 10);
+  fetch.end();
+  t.mock.timers.tick(1000);
+  assert.deepEqual(seen, [{ done: 0, total: 10 }, { done: 2, total: 10 }, null], 'nothing follows the end');
 });

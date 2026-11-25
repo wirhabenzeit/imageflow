@@ -66,8 +66,11 @@ type RenderList = 'units' | 'flow' | 'anchors';
 export function compactRender(render: NonNullable<AuthoringCheckResult['render']>, report: { image?: unknown; draft?: { affectedSpreads?: string[] } | { applied: boolean } }, args: { include?: RenderList[]; inspect?: { spread?: string } }) {
   const { template: _template, errors: _errors, warnings: _warnings, units, flow, anchors, ...rest } = render;
   const image = report.image as { spread?: string; cells?: { spread: string }[] } | undefined;
+  // A document setting affects every spread: that addresses none of them (API-005).
+  const affected = report.draft && 'affectedSpreads' in report.draft ? report.draft.affectedSpreads : undefined;
+  const everywhere = !!affected && affected.length > 1 && units.every(({ spread }) => !spread || affected.includes(spread));
   const addressed = new Set([image?.spread, ...image?.cells?.map(({ spread }) => spread) ?? [], args.inspect?.spread,
-    ...(report.draft && 'affectedSpreads' in report.draft ? report.draft.affectedSpreads ?? [] : [])].filter((id): id is string => !!id && !id.startsWith('$')));
+    ...(affected && !everywhere ? affected : [])].filter((id): id is string => !!id && !id.startsWith('$')));
   const include = new Set(args.include ?? []);
   const listed = (list: RenderList) => include.has(list) || addressed.size > 0;
   const flowSpread = (key: string) => key.split(':', 1)[0];
@@ -78,6 +81,15 @@ export function compactRender(render: NonNullable<AuthoringCheckResult['render']
     ...(listed('flow') ? { flow: include.has('flow') ? flow : Object.fromEntries(Object.entries(flow).filter(([key]) => addressed.has(flowSpread(key)))) } : {}),
     ...(listed('anchors') ? { anchors: include.has('anchors') ? anchors : anchors.filter(({ spread }) => addressed.has(spread)) } : {}),
   };
+}
+
+/** A fixture report as a reply: one that passed is named by its layout, case and format alone (API-005). */
+export function compactFixtures(report: FixtureReport) {
+  return { ...report, cells: report.cells.map((cell) => {
+    if (cell.state !== 'passed') return cell;
+    const { layout, case: fixture, format, state } = cell;
+    return { layout, case: fixture, format, state };
+  }) };
 }
 
 export class AuthoringError extends Error {
@@ -242,6 +254,22 @@ async function referenceTopics(docs: string, requested: string[]) {
   return { topics, docs: Object.fromEntries(requested.map((id, index) => [id, texts[index]])) };
 }
 
+/**
+ * Whether a call asks only for what ImageFlow ships, reference topics and example templates: it needs nothing of the
+ * book, so it is answered at once, also while the book is busy or other calls wait (API-009).
+ */
+export const isReferenceCall = (name: string, args: Record<string, any>) => name === 'get_authoring_context' &&
+  !args.includeTemplate && !args.includeSource?.length && !!(args.docs?.length || args.includeExamples);
+
+/**
+ * What commands need to know of a photo beyond its registry entry: its size, and the caption its source gives it. One
+ * saved in the book is left out: the batch may have changed it.
+ */
+export const loadedPhoto = (book: OpenProject) => (id: string) => {
+  const photo = book.photos.get(id) ?? book.unavailablePhotos?.[id];
+  return photo && { width: photo.width, height: photo.height, caption: photo.provided?.caption };
+};
+
 const contextGuide = 'Start with docs: ["authoring-workflow"]. Use docs for topics, includeExamples for examples and includeSource for files; ' +
   'such calls return just those, without declarations, unless includeTemplate is true. ' +
   'Edit template/ in the workspace. Save book edits with apply_project_changes and verify with check_book.';
@@ -256,6 +284,8 @@ export function createAuthoringService(hooks: Hooks) {
     if (!session || session.handle !== handle) throw new AuthoringError('PROJECT_CLOSED', 'This project is no longer open. Call list_projects for current handles.');
     return session;
   };
+  // The files each report was checked against (`ProjectInputCapture.files`), for calls that combine it with what they read.
+  const checkedFiles = new WeakMap<AuthoringCheckResult, string>();
   const checkOnce = async (session: ProjectSession, signal: AbortSignal, request: AuthoringCheckRequest, fresh: boolean, draft?: CheckDraft,
     cacheMode: 'complete' | 'draft-base' = 'complete') => {
     signal.throwIfAborted();
@@ -269,7 +299,9 @@ export function createAuthoringService(hooks: Hooks) {
     // A draft can use cached declarations and defer its requested type check to the subsequent draft render.
     if (!fresh && !draft && !coverCheck && !request.preview && !request.inspect && (!request.typescript || cacheMode === 'draft-base') && expectedMatches && cachedCheck) {
       get(session.handle);
-      return { result: structuredClone(cachedCheck.result), watcherInvalidated: false };
+      const result = structuredClone(cachedCheck.result);
+      checkedFiles.set(result, cachedCheck.inputs.files);
+      return { result, watcherInvalidated: false };
     }
     if (fresh && !draft && !coverCheck) cachedCheck = undefined;
     const result = await hooks.check(session.book, request, signal, session.inputs, draft);
@@ -277,6 +309,14 @@ export function createAuthoringService(hooks: Hooks) {
     const after = await contextInputs(session.inputs, signal);
     if (before.failure !== after.failure || before.inputs?.revision !== after.inputs?.revision ||
         before.inputs?.observation !== after.inputs?.observation || result.revision !== (after.inputs?.revision ?? null)) {
+      // Saved again meanwhile, with every file as it was: the report stands for the revision it names.
+      if (before.inputs && after.inputs && before.inputs.files === after.inputs.files && result.revision &&
+          !result.diagnostics.some(({ code }) => code === 'source-changed')) {
+        checkedFiles.set(result, after.inputs.files);
+        if (after.inputs.revision === result.revision) delete result.superseded;
+        else result.superseded = { revision: after.inputs.revision };
+        return { result, watcherInvalidated: false };
+      }
       if (before.inputs && after.inputs && before.inputs.revision === after.inputs.revision &&
           before.inputs.metadataObservation === after.inputs.metadataObservation && before.inputs.observation !== after.inputs.observation) {
         return { result, watcherInvalidated: true };
@@ -288,6 +328,7 @@ export function createAuthoringService(hooks: Hooks) {
       const { image: _image, ...baseline } = result;
       cachedCheck = { session, inputs: after.inputs, result: structuredClone(baseline) };
     }
+    if (after.inputs) checkedFiles.set(result, after.inputs.files);
     return { result, watcherInvalidated: false };
   };
   const checked = async (session: ProjectSession, signal: AbortSignal, request: AuthoringCheckRequest = {}, fresh = false, draft?: CheckDraft,
@@ -333,7 +374,7 @@ export function createAuthoringService(hooks: Hooks) {
     if (!template) return { ...base, draft: { applied: false, committed: false } };
     const draft: CheckDraft = (book) => {
       let planned;
-      try { planned = applyProjectCommands(book, template, operations); }
+      try { planned = applyProjectCommands(book, template, operations, { photo: loadedPhoto(book) }); }
       catch (error) {
         if (error instanceof ProjectCommandError) throw new AuthoringError(error.code, error.message, { operationIndex: error.operationIndex });
         throw error;
@@ -625,6 +666,13 @@ export function createAuthoringService(hooks: Hooks) {
         writable: !session.book.readOnly, revision: current, history: session.history }], scope: 'The currently open, authorized book. Handles expire when closed or reopened.' };
     }
     const session = get(args.project);
+    if (isReferenceCall(name, args)) {
+      const reference = await referenceTopics(hooks.docs, [...new Set<string>(args.docs ?? [])]);
+      const examples = await templateExamples(hooks.docs, args.includeExamples);
+      signal.throwIfAborted();
+      return { project: session.handle, root: session.book.folder, guide: contextGuide,
+        ...(args.docs?.length ? { docs: reference.docs } : {}), examples: examples.filter((example) => 'source' in example) };
+    }
     if (name === 'list_book_checkpoints') {
       const ledger = await readSaveLedger(session.book.folder);
       signal.throwIfAborted();
@@ -648,9 +696,13 @@ export function createAuthoringService(hooks: Hooks) {
       // Drafts follow the book like dry runs, except a page-number preview, whose page may now show another spread.
       const movedDraftCheck = async () => {
         const pageTarget = typeof args.preview?.target?.page === 'number' && !args.preview?.target?.spread;
-        const moved = pageTarget ? undefined : await movedRevision(session, args.expectedRevision, signal);
-        const result = await draftCheck(session, signal, moved?.current ?? args.expectedRevision, args.draft.operations, args.preview, args.inspect, args.typescript, args.cover);
-        return moved && result.revision === moved.current ? { ...result, ...moved.reply } : result;
+        for (let attempt = 1; ; attempt++) {
+          const moved = pageTarget ? undefined : await movedRevision(session, args.expectedRevision, signal);
+          const result = await draftCheck(session, signal, moved?.current ?? args.expectedRevision, args.draft.operations, args.preview, args.inspect, args.typescript, args.cover);
+          // Saved again between the look and the check: planned at the revision it has now.
+          if (!pageTarget && attempt < 3 && result.diagnostics.some(({ code }) => code === 'revision-conflict')) continue;
+          return moved && result.revision === moved.current ? { ...result, ...moved.reply } : result;
+        }
       };
       const report = args.fixtures
         ? await fixtureCheck(session, signal, args.fixtures, args.expectedRevision, args.typescript)
@@ -660,21 +712,27 @@ export function createAuthoringService(hooks: Hooks) {
           : await movedDraftCheck();
       if (args.includeTemplate) return report;
       // Keep full declarations in the internal check cache for planning and context, not in every agent reply.
-      const { template: _template, render, ...compact } = report;
+      const { template: _template, render, ...full } = report;
+      const compact = full.fixtures ? { ...full, fixtures: compactFixtures(full.fixtures) } : full;
       if (!render) return compact;
       return { ...compact, render: compactRender(render, report, args) };
     }
     if (name === 'inspect_book' && args.view === 'elements') {
       const report = await checked(session, signal, { inspect: { spread: args.spread, cover: args.cover, page: args.page, box: args.box, element: args.element,
         offset: args.offset, limit: args.limit } });
-      return { project: session.handle, revision: report.revision, state: report.state, diagnostics: report.diagnostics,
+      return { project: session.handle, revision: report.revision, ...(report.superseded ? { superseded: report.superseded } : {}), state: report.state, diagnostics: report.diagnostics,
         checks: report.checks, ...report.render?.inspection };
     }
     if (name === 'get_authoring_context' || name === 'inspect_book') {
       const report = await checked(session, signal);
       const folder = session.book.folder;
       const before = await contextInputs(session.inputs, signal);
-      if (report.revision !== (before.inputs?.revision ?? null)) throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while preparing context. Check again.');
+      // Saved again since the check, with every file as it was: the declarations are the template's still, and the rest is read now.
+      const savedSince = report.revision !== (before.inputs?.revision ?? null);
+      if (savedSince && !(report.revision && before.inputs && checkedFiles.get(report) === before.inputs.files)) {
+        throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while preparing context. Check again.');
+      }
+      const revisions = { revision: before.inputs?.revision ?? null, ...(savedSince ? { checkedRevision: report.revision } : {}) };
       const reportedFailure = report.diagnostics.find(({ code }) => ['source-missing', 'source-outside-project', 'source-unreadable'].includes(code));
       if (before.failure && reportedFailure && before.failure !== JSON.stringify([reportedFailure.code, reportedFailure.location?.path])) {
         throw new AuthoringError('SOURCE_CHANGED', 'Unavailable inputs changed after checking. Check again.');
@@ -698,6 +756,13 @@ export function createAuthoringService(hooks: Hooks) {
         if (document.status === 'rejected') unavailable(document.reason, index === 0 ? 'project.json' : 'photos.json');
       }
       const template = report.render?.template ?? report.template;
+      // The declarations are those of the format that was checked: in another one, the book is checked again.
+      // A book without a saved format, or with one the template no longer has, is in the template's own, usually the first.
+      const formats = Object.keys(template?.formats ?? {});
+      const savedFormat = project?.format && formats.includes(project.format) ? project.format : formats[0];
+      if (savedSince && template && formats.length && savedFormat !== template.formatId) {
+        throw new AuthoringError('SOURCE_CHANGED', 'The format changed while preparing context. Check again.');
+      }
       // This is the library's authored-file hash, not the saved provenance or a source-file/revision digest.
       // Reconcile the library's complete file set: revision capture skips e.g. *.tmp files that the library hashes.
       const observed = await Promise.allSettled([templateObservation(folder, signal)]);
@@ -748,14 +813,15 @@ export function createAuthoringService(hooks: Hooks) {
         const examples = await templateExamples(hooks.docs, args.includeExamples);
         // A call for topics, examples or sources returns just those (API-001): the declarations, file list, topic list
         // and capabilities it would repeat are tens of kilobytes the agent already has from its first call.
-        const requestedOnly = !args.includeTemplate && !!(args.docs?.length || args.includeExamples || args.includeSource?.length);
+        // One for topics or examples alone never comes here (isReferenceCall).
+        const requestedOnly = !args.includeTemplate && !!args.includeSource?.length;
         if (requestedOnly) {
-          result = { project: session.handle, revision: report.revision, root: session.book.folder, guide: contextGuide,
+          result = { project: session.handle, ...revisions, root: session.book.folder, guide: contextGuide,
             templateIdentity, diagnostics, checks: report.checks, sources,
             ...(args.docs?.length ? { docs: reference.docs } : {}),
             examples: examples.filter((example) => 'source' in example) };
         } else result = {
-          project: session.handle, revision: report.revision, root: session.book.folder, guide: contextGuide,
+          project: session.handle, ...revisions, root: session.book.folder, guide: contextGuide,
           template, templateIdentity, diagnostics, checks: report.checks, sources,
           templateFiles: files[0].status === 'fulfilled' ? files[0].value : [],
           topics: reference.topics,
@@ -816,8 +882,8 @@ export function createAuthoringService(hooks: Hooks) {
         if (view === 'sources' && args.kind) records = records.filter((record) => (record as { kind?: string }).kind === args.kind);
         const listed = view === 'summary' ? {} : { offset, items: records.slice(offset, offset + limit), nextOffset: offset + limit < records.length ? offset + limit : null,
           ...(counts ? { counts } : {}) };
-        result = { project: session.handle, revision: report.revision, title: project?.title, format: project?.format, templateIdentity,
-          pages: report.render?.pages, total: records.length, ...listed,
+        result = { project: session.handle, ...revisions, title: project?.title, format: project?.format, templateIdentity,
+          pages: savedSince ? sequence?.count : report.render?.pages, total: records.length, ...listed,
           ...((view === 'summary' || view === 'cover') && (availableCover || savedCover) ? {
             cover: { ...(availableCover ?? { status: 'unavailable', reason: 'The active format has no exterior cover.' }),
               layout: savedCover?.definition ?? null, ...(view === 'cover' ? { artwork: savedCover ?? null } : {}) },
@@ -837,7 +903,7 @@ export function createAuthoringService(hooks: Hooks) {
       const documentsAfter = await readDocuments();
       const after = await contextInputs(session.inputs, signal);
       if (!sameDocuments(documents, documentsAfter) || before.failure !== after.failure ||
-          before.inputs?.revision !== after.inputs?.revision || before.inputs?.observation !== after.inputs?.observation) {
+          before.inputs?.content !== after.inputs?.content) {
         throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while inspecting. Retry for current context.');
       }
       get(session.handle);
@@ -904,7 +970,7 @@ export function createAuthoringService(hooks: Hooks) {
     let result: Record<string, unknown>;
     if (name === 'apply_project_changes') {
       let planned;
-      try { planned = applyProjectCommands(fresh, template, args.operations); }
+      try { planned = applyProjectCommands(fresh, template, args.operations, { photo: loadedPhoto(fresh) }); }
       catch (error) {
         if (error instanceof ProjectCommandError) throw new AuthoringError(error.code, error.message, { operationIndex: error.operationIndex });
         throw error;
@@ -916,7 +982,7 @@ export function createAuthoringService(hooks: Hooks) {
       if (args.dryRun) return moved ? { ...result, ...moved.reply } : result;
       Object.assign(checkpoint.mcp!, { changes: planned.changes, affectedSpreads: planned.affectedSpreads, references: planned.references,
         ...(planned.affectedCover ? { affectedCover: true } : {}) });
-      const saved = await commit(() => session.save(planned.files, args.label, fresh, checkpoint));
+      const saved = await commit(() => session.save(planned.files, args.label, fresh, checkpoint, planned.removedSources));
       if (saved.recovery) return saved.recovery;
     } else if (name === 'rename_source') {
       const entry = sourceEntries(fresh).find((source) => source.id === args.source);

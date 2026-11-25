@@ -95,6 +95,9 @@ export const imageSchema = z.union([
 ]).describe('Metadata of the returned image.');
 
 const state = z.enum(['ready', 'error']);
+const superseded = z.looseObject({ revision: z.string() }).optional()
+  .describe('Saved again during the check; this is the revision now.');
+const checkedRevision = z.string().optional().describe('The revision of diagnostics and checks, when it is an earlier one.');
 const reportFields = { revision, diagnostics: z.array(diagnosticSchema), checks: checksSchema };
 const commandFields = {
   changes: z.array(z.string()).optional().describe('One line per change, as shown in Undo.'),
@@ -143,10 +146,11 @@ export const mcpOutputSchemas = {
   }),
   get_authoring_context: z.looseObject({
     project: z.string(), root: z.string().describe('The book folder.'), guide: z.string(),
-    ...reportFields,
+    revision: reportFields.revision.optional(),
+    diagnostics: reportFields.diagnostics.optional(), checks: reportFields.checks.optional(), checkedRevision,
     template: z.looseObject({}).optional().describe('Parsed template declarations: the active format, every format in full (printFormats), parameters, layouts with their boxes and elements, layout families and opening spreads.'),
-    templateIdentity: templateIdentitySchema,
-    sources: z.record(z.string(), z.looseObject({ text: z.string(), sha256: z.string(), truncated: z.boolean() })).describe('Requested includeSource files.'),
+    templateIdentity: templateIdentitySchema.optional(),
+    sources: z.record(z.string(), z.looseObject({ text: z.string(), sha256: z.string(), truncated: z.boolean() })).optional().describe('Requested includeSource files.'),
     templateFiles: z.array(z.string()).optional().describe('Files under template/. Generated folders are listed once, ending in /. Like template, topics and capabilities, left out when only docs, examples or sources were requested.'),
     topics: z.array(z.looseObject({ id: z.string(), title: z.string(), summary: z.string(), bytes: z.number() })).optional()
       .describe('Table of contents of the template API reference. Request topics with docs.'),
@@ -156,14 +160,14 @@ export const mcpOutputSchemas = {
     capabilities: z.looseObject({}).optional(),
   }),
   inspect_book: z.looseObject({
-    project: z.string(), ...reportFields,
+    project: z.string(), ...reportFields, superseded, checkedRevision,
     activeEditor: activeBookEditorSchema.optional().describe('Editor open in ImageFlow at the time of summary inspection, with its saved field address when available.'),
     templateIdentity: templateIdentitySchema.optional(),
     cover: z.looseObject({}).optional().describe('Cover availability, saved artwork and resolved geometry for the active format.'),
     items: z.array(z.looseObject({})).optional(), total: z.number().optional(), nextOffset: z.number().nullable().optional(),
   }),
   check_book: z.looseObject({
-    state, ...reportFields,
+    state, ...reportFields, superseded,
     image: imageSchema.optional(),
     typecheck: z.looseObject({ files: z.array(z.string()), totalDiagnostics: z.number(), truncated: z.boolean(), elapsedMs: z.number() }).optional(),
     draft: z.looseObject({ applied: z.boolean(), committed: z.literal(false), ...commandFields }).optional()

@@ -19,6 +19,8 @@ export function checksCover({ cover, preview, inspect }: AuthoringCheckRequest) 
 }
 export type AuthoringCheckResult = AuthoringReport & {
   state: 'ready' | 'error';
+  // The book was saved again while it was checked: the result is of `revision`, as it was loaded, and this is the revision now.
+  superseded?: { revision: string };
   checks: {
     bundle: 'passed' | 'failed' | 'not-run';
     // The template's default export satisfies the template contract, and its ID matches project.json.
@@ -40,7 +42,9 @@ export type AuthoringCheckResult = AuthoringReport & {
   fixtures?: FixtureReport;
 };
 export type FixtureCellReport = {
-  layout: string; case: FixtureCase; format: string; label: string;
+  layout: string; case: FixtureCase; format: string;
+  // Replies leave out `label`, the counts and `codes` of a fixture that passed (`compactFixtures`).
+  label: string;
   // `failed`: the layout threw or the fixture book could not render; `not-isolated`: a render with other fixtures failed
   // and the isolation budget ran out before this fixture rendered on its own.
   state: 'passed' | 'warnings' | 'errors' | 'failed' | 'not-isolated';

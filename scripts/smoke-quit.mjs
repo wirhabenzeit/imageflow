@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { testBook } from './ui-actions.mjs';
+import { testBook, waitForProject } from './ui-actions.mjs';
 import { bookStateFile } from './book-state.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -91,7 +91,7 @@ try {
     // Saving a different field cannot silently discard the draft whose write failed.
     const count = page.getByRole('spinbutton', { name: 'Count', exact: true });
     await count.fill('4'); await count.blur();
-    await page.waitForFunction(async () => (await window.imageflow.currentProject()).value.project.spreads[0].params.count === 4);
+    await waitForProject(page, ({ project }) => project.spreads[0].params.count === 4);
     await instance.evaluate(({ app }) => { app.quit(); });
     await page.waitForFunction(() => globalThis.quitMessages.length === 2);
     await page.locator('.field[data-pending="true"]').waitFor();

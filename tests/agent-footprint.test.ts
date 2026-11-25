@@ -27,6 +27,7 @@ test('book-wide, structural, unknown and malformed changes take the whole book',
     { op: 'set_title', title: 'T' }, { op: 'select_format', format: 'f' }, { op: 'set_parameter', scope: 'document', key: 'color', value: '#000' },
     { op: 'insert_spread', definition: 'x' }, { op: 'move_spread', spread: 'a', after: 'b' }, { op: 'remove_spread', spread: 'a' },
     { op: 'duplicate_spread', spread: 'a' }, { op: 'set_photo_metadata', photo: 'p', values: {} },
+    { op: 'replace_source', source: 'p', with: 'q' }, { op: 'remove_sources', kind: 'photo', sources: ['p'] },
     { op: 'assign_source', spread: '$new', box: 'hero', photo: 'p' }, { op: 'clear_box', spread: 'a', page: 'middle', box: 'x' },
     { op: 'future_operation', spread: 'a' }, null, 'set_title',
   ]) assert.deepEqual(batch({ op: 'set_parameter', scope: 'spread', spread: 'z', key: 'k', value: 1 }, operation), { book: true }, JSON.stringify(operation));

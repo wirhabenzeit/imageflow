@@ -46,7 +46,7 @@ ImageFlow can lay out photos straight from a Lightroom Classic catalog without e
 **Add photos**, either way:
 
 - In Lightroom, select photos and choose **File → Plug-in Extras → Send to ImageFlow** (also in **Library → Plug-in Extras**). They go into the book in front in ImageFlow; if no book is open, ImageFlow asks for one.
-- In ImageFlow, choose **Assets → Import Selected from Lightroom Classic…**. It says how many photos are selected in Lightroom and adds them once you confirm. The photos appear at once, and their previews follow while you work.
+- In ImageFlow, choose **Assets → Import Selected from Lightroom Classic…**. It says how many photos are selected in Lightroom and adds them once you confirm. The photos appear at once, and their previews follow while you work; the status bar counts them.
 
 Videos are left out. A photo the book holds already is not added again, and **Edit → Undo** removes what an import added. A Lightroom photo takes its title, caption and credit (Lightroom's copyright, else its creator) from Lightroom; whatever you type in the Inspector wins, and **Revert** goes back to Lightroom's. ImageFlow never writes into the catalog.
 

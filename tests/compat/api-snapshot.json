@@ -1,6 +1,6 @@
 {
   "bookFormat": {
-    "schemaVersion": 3,
+    "schemaVersion": 4,
     "project.json": {
       "type": "object",
       "properties": {
@@ -9,7 +9,8 @@
           "enum": [
             1,
             2,
-            3
+            3,
+            4
           ]
         },
         "title": {
@@ -1329,9 +1330,6 @@
           "location": {},
           "camera": {}
         },
-        "required": [
-          "path"
-        ],
         "additionalProperties": {}
       }
     }
@@ -2027,6 +2025,9 @@
             ],
             "additionalProperties": {}
           },
+          "checkedRevision": {
+            "type": "string"
+          },
           "template": {
             "type": "object",
             "properties": {},
@@ -2236,11 +2237,6 @@
           "project",
           "root",
           "guide",
-          "revision",
-          "diagnostics",
-          "checks",
-          "templateIdentity",
-          "sources",
           "examples"
         ],
         "additionalProperties": {}
@@ -2499,6 +2495,21 @@
               "print"
             ],
             "additionalProperties": {}
+          },
+          "superseded": {
+            "type": "object",
+            "properties": {
+              "revision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "revision"
+            ],
+            "additionalProperties": {}
+          },
+          "checkedRevision": {
+            "type": "string"
           },
           "activeEditor": {
             "type": "object",
@@ -3486,6 +3497,58 @@
                       "properties": {
                         "op": {
                           "type": "string",
+                          "const": "replace_source"
+                        },
+                        "source": {
+                          "$ref": "#/$defs/__schema2"
+                        },
+                        "with": {
+                          "$ref": "#/$defs/__schema2"
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "source",
+                        "with"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "const": "remove_sources"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "photo",
+                            "text",
+                            "file"
+                          ]
+                        },
+                        "sources": {
+                          "minItems": 1,
+                          "maxItems": 1000,
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/$defs/__schema2"
+                          }
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "kind",
+                        "sources"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
                           "const": "clear_box"
                         },
                         "spread": {
@@ -4243,6 +4306,18 @@
               "typescript",
               "fixtures",
               "print"
+            ],
+            "additionalProperties": {}
+          },
+          "superseded": {
+            "type": "object",
+            "properties": {
+              "revision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "revision"
             ],
             "additionalProperties": {}
           },
@@ -5349,6 +5424,58 @@
                     "box",
                     "kind",
                     "source"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "replace_source"
+                    },
+                    "source": {
+                      "$ref": "#/$defs/__schema0"
+                    },
+                    "with": {
+                      "$ref": "#/$defs/__schema0"
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "source",
+                    "with"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "remove_sources"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "photo",
+                        "text",
+                        "file"
+                      ]
+                    },
+                    "sources": {
+                      "minItems": 1,
+                      "maxItems": 1000,
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/__schema0"
+                      }
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "kind",
+                    "sources"
                   ],
                   "additionalProperties": false
                 },

@@ -46,6 +46,15 @@ try {
   assert.equal(Object.values((await summary()).photoSizes).filter(({ width }) => width === 6000).length, count, 'laid out at their size');
   await until(() => plugin.jobs.some(({ type }) => type === 'thumbnails'), 'and are asked for');
   await page.locator('.source-photo .missing', { hasText: 'Loading…' }).first().waitFor();
+  // The status bar counts them, and never says that files changed while they come (UI-005, UI-006).
+  const loading = page.locator('.status-bar .task-status', { hasText: 'Loading previews from Lightroom' });
+  await loading.waitFor();
+  assert.equal(await loading.locator('.task-status-count').textContent(), '0/' + count);
+  await page.evaluate(() => {
+    window.statusTexts = [];
+    new MutationObserver(() => window.statusTexts.push(document.querySelector('.status-bar .status').textContent))
+      .observe(document.querySelector('.status-bar'), { subtree: true, childList: true, characterData: true });
+  });
   // The book stays editable meanwhile.
   const photo = (await summary()).sources && Object.keys((await summary()).photoIndex)[0];
   const saved = await page.evaluate(async (photo) => {
@@ -57,6 +66,9 @@ try {
   open();
   await until(async () => (await statuses()).every(({ state }) => state === 'available'), 'every preview came');
   assert.equal(plugin.jobs.filter(({ type }) => type === 'render').length, 0, 'and nothing was rendered');
+  await loading.waitFor({ state: 'detached' });
+  const texts = await page.evaluate(() => window.statusTexts);
+  assert.deepEqual(texts.filter((text) => text.includes('files changed')), []);
   await page.locator('.source-photo img').first().waitFor();
   assert.equal(await page.locator('.source-photo .missing').count(), 0);
 

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
 import { copySample } from '../desktop/sample-book.mjs';
-import { closeApp, nextPresentation, testBook } from './ui-actions.mjs';
+import { closeApp, nextPresentation, testBook, waitForProject } from './ui-actions.mjs';
 
 // A presentation covers its editor, and macOS reports a covered window as hidden: Chromium then neither lays out a
 // new frame in it ("has no area") nor runs its timers at speed, so the editor's reload after a file change stalled
@@ -122,7 +122,7 @@ try {
   await cover.locator('.book-frame-book[data-current][data-ready]').waitFor({ timeout: 180_000 });
   await cover.getByRole('radio', { name: 'Cover', exact: true }).click();
   await cover.getByLabel('Cover layout', { exact: true }).selectOption('wrapPhoto');
-  await cover.waitForFunction(async () => !!(await window.imageflow.currentProject()).value.project.cover);
+  await waitForProject(cover, ({ project }) => !!project.cover);
   await cover.locator('.cover-preview-sheet[data-ready]').waitFor({ timeout: 60_000 });
   // The sheet is also ready while the cover is empty. The editor presents the cover only once it has the chosen layout
   // itself (the saved project reaches it after the main process has it), so wait for the prompt to go.

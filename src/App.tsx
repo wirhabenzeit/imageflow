@@ -32,7 +32,7 @@ import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
 import { bookLayout, gridColumns, isRenderOrigin, renderOrigin, spreadCommands, thumbsOrigin } from './desktop';
 import { resolveTarget, targetAnchor, targetKey } from './edit-targets';
 import type { TargetAnchor } from './edit-targets';
-import type { BookGeometry, CanvasLayout, Command, ImportRequest, Issue, ProjectChange, ProjectSummary, Rect, RenderStatus, SourceAction, TemplateInfo } from './desktop';
+import type { BookGeometry, CanvasLayout, Command, ImportRequest, Issue, PreviewProgress, ProjectChange, ProjectSummary, Rect, RenderStatus, SourceAction, TemplateInfo } from './desktop';
 import { PanelDivider, useCanvasLayout, usePanels, useSectionOpen } from './panels';
 import { PanelSection } from './PanelSection';
 import { Icon } from './Icon';
@@ -50,7 +50,7 @@ import { anchoredTarget, clickWithin, elementRect, hiddenOccurrence, inlinePlace
 import type { OpenEditor } from './inline-editors';
 import { FamilyChoice, HeldPicker, LayoutFamilyPicker } from './LayoutFamilyPicker';
 import { InlineTextEditor } from './InlineTextEditor';
-import { minimumText, textEditorOwner, textExtent, textFits } from './inline-text';
+import { textEditorOwner, textFits } from './inline-text';
 import { PhotoContent, TextContent } from './BoxContent';
 import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
@@ -173,6 +173,10 @@ export function App() {
   // What a reload the app started says it is doing (`ProjectChange.stage`), shown while the book loads again.
   const [reloadStage, setReloadStage] = useState<TaskProgress>();
   useEffect(() => { if (reload !== 'loading') setReloadStage(undefined); }, [reload]);
+  // A reload for photos that changed in Lightroom or whose previews came, and the previews being fetched.
+  const [photoReload, setPhotoReload] = useState(false);
+  const [previewProgress, setPreviewProgress] = useState<PreviewProgress | null>(null);
+  const loadingPreviews = useDelayed(!!previewProgress, 500);
   const reloading = useRef(false);
   // A reload that finished with an error is settled: the agent may commit a repair, while human edits stay disabled.
   const reloadFailed = useRef(false);
@@ -453,7 +457,8 @@ export function App() {
   const agentRendering = !!summary && agentRevision === summary.id && render?.state !== 'ready' && render?.state !== 'error' && !reload;
   const agentActive = !!agentWorking || agentRendering;
   // The agent's revision renders behind the book on show, which stays usable: no progress cursor over it.
-  const showingChange = saving || reloadingFiles || (!!summary && !render && !!lastReady && !reload && !agentRendering);
+  // While previews load, their count says what is going on: the book reloading for some of them every few seconds does not.
+  const showingChange = saving || (reloadingFiles && !(photoReload && previewProgress)) || (!!summary && !render && !!lastReady && !reload && !agentRendering);
   const updating = useDelayed(showingChange, 250);
   // A shorter wait for the cursor, which says that something is happening without asking for attention: the book
   // changing, or a task of this window reporting progress, such as Copy into Book while Lightroom renders originals.
@@ -463,7 +468,7 @@ export function App() {
   // a second after the book view if its thumbnails are late.
   const thumbnailsLate = useDelayed(!!lastReady && !thumbs, 1000);
   const opening = !!summary && render?.state !== 'error' && (!lastReady || (!thumbs && !thumbnailsLate));
-  const updatingText = reloadStage?.text ?? (reloadingFiles ? 'Updating the book after its files changed…' : 'Updating the book…');
+  const updatingText = reloadStage?.text ?? (reloadingFiles ? photoReload ? 'Updating photos from Lightroom…' : 'Updating the book after its files changed…' : 'Updating the book…');
   const agentText = 'Agent is updating the book…';
   const canvasReady = render?.state === 'ready' && !reload;
   const holdPreview = reload === 'loading' || typeof reload === 'object';
@@ -848,6 +853,7 @@ export function App() {
     if ('building' in change) {
       // Later stages of the same reload only say what it is doing now.
       if (!(change.stage && reloading.current && reload === 'loading')) beginReload();
+      setPhotoReload(!!change.photos);
       setReloadStage(change.stage ? { text: change.stage, ...(change.total ? { done: change.done, total: change.total } : {}) } : undefined);
     }
     else if ('error' in change) {
@@ -864,7 +870,7 @@ export function App() {
       setAgentRevision(change.value.id);
       setError('');
     } else {
-      if (!reloading.current) beginReload();
+      if (!reloading.current) { beginReload(); setPhotoReload(false); }
       adoptReload(change.value);
       setError('');
     }
@@ -976,13 +982,14 @@ export function App() {
     const progress = api.onProgress((value) => { if (!pendingTasks.current) return; const task = taskProgress(value); setBusy(task.text); setBusyTask(task.text ? task : undefined); });
     const appError = api.onAppError(setError);
     const appNotice = api.onAppNotice(setNotice);
+    const previews = api.onPreviewProgress(setPreviewProgress);
     let mounted = true;
     void api.currentProject().then((result) => {
       if (!mounted || current.current) return;
       if ('error' in result) setError(result.error);
       else adopt(result.value, true);
     });
-    return () => { mounted = false; prepare(); cancelQuit(); sourceCommand(); presentationClosed(); command(); changed(); progress(); lease(); release(); appError(); appNotice(); };
+    return () => { mounted = false; prepare(); cancelQuit(); sourceCommand(); presentationClosed(); command(); changed(); progress(); lease(); release(); appError(); appNotice(); previews(); };
   }, [api]);
 
   // Network origins the template declares (ADR 0006): checked once per book and template version (its hash) when it
@@ -1558,24 +1565,6 @@ export function App() {
   const keepInline = heldCurrent && !reload && render?.state !== 'error';
   const inline = resumeInline ? liveInline : editing?.held ?? liveInline;
   const textInline = !!(editing?.text && !editing.panel && inline);
-  // Text the template edits on the page, opened in the panel only because it is too small on screen at this zoom
-  // (inline-text: textFits). The panel says so, and offers the zoom at which it can be edited where it is.
-  const smallText = editing && !editing.owner && !editing.panel && !textInline && inline?.target.inlineText &&
-    inline.target.upright !== false && !textFits(inline.target) ? inline.target : undefined;
-  const textZoom = smallText && (() => {
-    const { along, across } = textExtent(smallText);
-    const needed = zoom * Math.max(minimumText.along / Math.max(along, 1), minimumText.across / Math.max(across, 1)) * 1.1;
-    return needed <= 3 ? Math.max(needed, zoom * 1.2) : undefined;
-  })();
-  // After zooming for it, the text opens on the page once the book shows it at the new size.
-  const reopenText = useRef<{ spread: string; key: string; page?: PageSide }>(undefined);
-  useEffect(() => {
-    const wanted = reopenText.current;
-    const target = wanted && geometry?.targets.find((item) => targetKey(item) === wanted.key);
-    if (!wanted || !target || !textFits(target)) return;
-    reopenText.current = undefined;
-    openEditing({ spread: wanted.spread, key: wanted.key, page: wanted.page });
-  }, [geometry]);
   const [textShown, setTextShown] = useState(false);
   function holdInlineEditor() {
     if (editing && !editing.held && liveInline) setEditing({ ...editing, held: liveInline });
@@ -2251,7 +2240,7 @@ export function App() {
                 {Object.entries(template.formats).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
               </select></label>}
             <Fields schema={template.parameters} values={summary.project.params} controls={template.controls} exclude={editorOwnedDocument(template)}
-              update={(id, value) => edit(({ project }) => { project.params[id] = value; })} />
+              update={(id, value) => edit(({ project }) => { project.params[id] = value; }, template.parameters[id].label + ' updated')} />
           </fieldset>
         </PanelSection>}
         {summary && template && bookSettings[0] && <PanelDivider side="settings" size={settingsHeight} maximum={settingsMaximum} resize={resizeSettings} onResizing={setResizing} />}
@@ -2461,14 +2450,6 @@ export function App() {
                   return stageRect && host ? { x: stageRect.left - host.left + inline.target.x, y: stageRect.top - host.top + inline.target.y, width: inline.target.width, height: inline.target.height } : undefined;
                 }} project={inline.project} spread={inline.spread} page={inline.target.page} template={inline.template} edits={inline.target.edits} host={canvasWrap.current}
                 textFallback={inline.target.textFallback}
-                note={smallText ? <>
-                  <span>{textZoom ? 'This text is too small to edit on the page at this zoom.' : 'This text is too small to edit on the page.'}</span>
-                  {textZoom && <button type="button" onClick={() => {
-                    reopenText.current = { spread: editing.spread, key: editing.key, page: inline.target.page };
-                    closeEditor();
-                    setZoom(textZoom);
-                  }}>Zoom In to Edit on Page</button>}
-                </> : undefined}
                 blocked={blockedInline || undefined}
                 edit={editInline} close={closeEditor} step={stepEditor} title={editing.owner && ownerLabel(inline.spread, editing.owner)}
                 actions={!editing.owner && editPhotoBox && !cropBlocked(editing.spread, editPhotoBox)
@@ -2535,6 +2516,7 @@ export function App() {
       <span title={issue || busy || notice || undefined} className={issue ? 'status status-error' : busy || updating || agentActive ? 'status status-busy' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
         {!issue && busy ? <TaskStatus progress={busyTask ?? { text: busy }} cancel={exporting || copying || busyTask?.cancel ? () => void api?.cancelExport() : undefined} />
           : !issue && !agentActive && !notice && updating && reloadStage ? <TaskStatus progress={reloadStage} />
+          : !issue && !agentActive && !notice && !updating && loadingPreviews && previewProgress ? <TaskStatus progress={{ text: 'Loading previews from Lightroom', ...previewProgress }} />
           : <>{!issue && (updating || agentActive) && <span className="status-spinner" aria-hidden="true" />}{issue || (agentActive ? agentText : notice || (updating ? updatingText : ''))}</>}
       </span>
       {summary && <SyncStatus api={api} notice={setNotice} />}

@@ -43,6 +43,7 @@ const api: DesktopApi = {
   currentProject: () => ipcRenderer.invoke(channels.current),
   onAppError: (listener) => listen(channels.appError, listener),
   onAppNotice: (listener) => listen(channels.appNotice, listener),
+  onPreviewProgress: (listener) => listen(channels.previewProgress, listener),
   syncState: () => ipcRenderer.invoke(channels.syncState),
   onSyncChanged: (listener) => listen(channels.syncChanged, listener),
   syncAction: (action) => ipcRenderer.invoke(channels.syncAction, action),

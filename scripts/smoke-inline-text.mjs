@@ -426,7 +426,7 @@ try {
   assert.equal(await saved(), 'Keep lowercase');
   console.log('display-only capitalization passed');
 
-  // Text too small on screen to edit where it prints opens the panel, which says why and offers the zoom that fixes it.
+  // Text too small on screen to edit where it prints opens the panel, with nothing but its field (UI-011).
   await writeFile(templateFile, source.replace(heading, heading.replace('as="h1"', 'as="h1" style={{ fontSize: "6pt", lineHeight: 1 }}')
     .replace('page - 2 * margin, 110)', 'page - 2 * margin, 6)')));
   for (let n = 0; n < 200; n++) {
@@ -437,16 +437,14 @@ try {
   const small = await occurrence().boundingBox();
   assert.ok(small.height < 12, 'The heading is too small for on-page editing: ' + small.height);
   await clickPage(w, small.x + small.width * .5, small.y + small.height * .5);
-  const note = w.locator('.edit-popover .ep-note');
-  await note.waitFor();
-  assert.match(await note.innerText(), /too small to edit on the page at this zoom/);
+  const panel = w.locator('.edit-popover');
+  await panel.waitFor();
+  assert.doesNotMatch(await panel.innerText(), /too small/);
+  assert.equal(await panel.getByRole('button', { name: 'Zoom In to Edit on Page' }).count(), 0);
   assert.equal(await w.locator('.inline-text-editor').count(), 0);
-  await note.getByRole('button', { name: 'Zoom In to Edit on Page' }).click();
-  await w.locator('.inline-text-editor.showing').waitFor();
-  assert.equal(await w.locator('.edit-popover').count(), 0, 'The panel gives way to on-page editing');
-  await frameKey('Escape');
-  await w.locator('.inline-text-editor').waitFor({ state: 'detached' });
-  console.log('small text explains the panel and zooms in to edit on the page');
+  await w.keyboard.press('Escape');
+  await panel.waitFor({ state: 'detached' });
+  console.log('small text opens the plain panel');
 
   // Ownership is tested through both the page and the Inspector, and includes an editor's layout fields.
   const ownedBook = join(work, 'Owned.imageflow');

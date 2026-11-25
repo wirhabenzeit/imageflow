@@ -73,10 +73,11 @@ export class ProjectSession {
     this.book = book;
   }
 
-  async save(files: ProjectFiles, label: string, base = this.book, checkpoint: SaveCheckpoint = { origin: 'app', label }) {
-    const next = await updateProject(base, files, false, checkpoint);
+  /** `removes`: the save takes sources out of the book, which Undo brings back and Redo takes out again. */
+  async save(files: ProjectFiles, label: string, base = this.book, checkpoint: SaveCheckpoint = { origin: 'app', label }, removes = false) {
+    const next = await updateProject(base, files, removes, checkpoint);
     this.adoptExternal(base);
-    this.record(next, label);
+    this.record(next, label, true, !removes);
     return next;
   }
 

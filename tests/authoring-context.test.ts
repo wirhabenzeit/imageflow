@@ -8,7 +8,7 @@ import { checkedOutput } from './mcp-output-check';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import sharp from 'sharp';
-import { AuthoringError, compactRender, createAuthoringService } from '../desktop/authoring-service';
+import { AuthoringError, compactRender, createAuthoringService, isReferenceCall } from '../desktop/authoring-service';
 import { checkProject } from '../desktop/check';
 import { importIntoProject, loadProject } from '../desktop/project';
 import { ProjectSession } from '../desktop/project-session';
@@ -562,19 +562,88 @@ test('continued watcher churn is rejected after four calls of two full attempts,
   assert.equal(attempts, 8);
 });
 
-test('a check that saw the book change while the user edits is repeated once the book is quiet', async (t) => {
+test('a check that saw a text change while the user edits is repeated once the book is quiet', async (t) => {
   const { hooks, call, session } = await fixture(t);
   const check = hooks.check;
   let attempts = 0;
   hooks.check = async (...args) => {
     const result = await check(...args);
-    // The app saves project.json a few times in a row, as while the user drags photos (API-007).
-    if (++attempts <= 3) session.inputs.invalidate('project.json');
+    if (++attempts <= 3) session.inputs.invalidate('texts/one.md');
     return result;
   };
   const result = await call('check_book');
   assert.equal(result.state, 'ready');
   assert.equal(attempts, 4);
+});
+
+test('calls stand while the user saves the book during every check, and say which revision they are of (API-007)', async (t) => {
+  const { folder, hooks, call, session } = await fixture(t);
+  const check = hooks.check;
+  let saves = 0, checks = 0;
+  // The app saves project.json during the render, as while the user drags photos.
+  hooks.check = (book, request, signal, index, draft) => {
+    checks++;
+    return checkProject(book, hooks.cache, request, async () => {
+      await writeFile(join(folder, 'project.json'), JSON.stringify({ ...project, title: 'Saved ' + ++saves }));
+      session.inputs.invalidate('project.json');
+      return { status };
+    }, signal, index, undefined, draft);
+  };
+  const before = (await session.inputs.capture()).revision;
+  const checked = await call('check_book');
+  assert.equal(checks, 1, 'nothing is checked again');
+  assert.equal(checked.revision, before);
+  assert.deepEqual(checked.superseded, { revision: (await session.inputs.capture()).revision });
+  // Reads are of the book as it is now, with the report of the revision that was checked.
+  for (const name of ['inspect_book', 'get_authoring_context']) {
+    const was = (await session.inputs.capture()).revision;
+    const read = await call(name);
+    const now = (await session.inputs.capture()).revision;
+    assert.notEqual(now, was);
+    assert.equal(read.revision, now);
+    assert.equal(read.checkedRevision, was);
+    if (name === 'inspect_book') { assert.equal(read.title, 'Saved ' + saves); assert.equal(read.pages, 2); }
+  }
+  assert.equal(checks, 3);
+  // A superseded check answers no later one, and a commit still needs the revision of now.
+  hooks.check = check;
+  assert.equal((await call('check_book')).superseded, undefined);
+  session.book.readOnly = false;
+  await assert.rejects(call('apply_project_changes', { label: 'Old', operations: [{ op: 'set_title', title: 'Must not save' }], expectedRevision: before, idempotencyKey: 'old' }),
+    (error) => error instanceof AuthoringError && error.code === 'REVISION_CONFLICT');
+});
+
+test('a read of a book whose format was changed during its check is checked again in that format (API-007)', async (t) => {
+  const { folder, hooks, call, session } = await fixture(t);
+  const save = (format?: string) => writeFile(join(folder, 'project.json'), JSON.stringify({ ...project, format }));
+  // The second is the Undo of a first choice: the book is back in the template's own format.
+  for (const [from, to] of [['small', 'large'], ['large', undefined]]) for (const name of ['inspect_book', 'get_authoring_context']) {
+    await save(from);
+    session.inputs.invalidate('project.json');
+    let checks = 0;
+    hooks.check = (book, request, signal, index, draft) => checkProject(book, hooks.cache, request, async (snapshot) => {
+      const formatId = snapshot.project.format ?? 'small';
+      if (!checks++) { await save(to); session.inputs.invalidate('project.json'); }
+      return { status: { ...status, template: { ...status.template, formatId, formats: { small: 'Small', large: 'Large' } } } };
+    }, signal, index, undefined, draft);
+    const read = await call(name);
+    assert.equal(checks, 2);
+    assert.equal(read.checkedRevision, undefined);
+    assert.equal(read.revision, (await session.inputs.capture()).revision);
+    if (name === 'inspect_book') assert.equal(read.format, to);
+    else assert.equal((read.template as { formatId: string }).formatId, to ?? 'small');
+  }
+});
+
+test('a template edit while the book is saved still rejects the check', async (t) => {
+  const { folder, hooks, call } = await fixture(t);
+  let edits = 0;
+  hooks.check = (book, request, signal, index, draft) => checkProject(book, hooks.cache, request, async () => {
+    await writeFile(join(folder, 'project.json'), JSON.stringify({ ...project, title: 'Saved ' + ++edits }));
+    await writeFile(join(folder, 'template/index.tsx'), source + '\n// ' + edits);
+    return { status };
+  }, signal, index, undefined, draft);
+  await assert.rejects(call('check_book'), (error) => error instanceof AuthoringError && error.code === 'SOURCE_CHANGED');
 });
 
 test('a watcher retry preserves the requested revision and preview target', async (t) => {
@@ -768,7 +837,7 @@ test('a call for topics, examples or sources returns just those unless includeTe
   const { call, hooks } = await fixture(t);
   hooks.docs = resolve('docs');
   const full = await call('get_authoring_context');
-  const requested = await call('get_authoring_context', { docs: ['authoring-workflow'] });
+  const requested = await call('get_authoring_context', { docs: ['authoring-workflow'], includeSource: ['template/index.tsx'] });
   for (const field of ['template', 'templateFiles', 'topics', 'capabilities']) {
     assert.ok(field in full, field + ' is in the full context');
     assert.equal(field in requested, false, field + ' is left out of a call for topics');
@@ -776,11 +845,29 @@ test('a call for topics, examples or sources returns just those unless includeTe
   assert.deepEqual(requested.examples, []);
   assert.equal(requested.revision, full.revision);
   assert.deepEqual(requested.templateIdentity, full.templateIdentity);
+  assert.equal((requested.sources as Record<string, { text: string }>)['template/index.tsx'].text, source);
   const docs = JSON.stringify(requested.docs).length;
   assert.ok(JSON.stringify(requested).length < docs + 2_000, 'a call for one topic adds little beyond the topic');
   const both = await call('get_authoring_context', { docs: ['authoring-workflow'], includeTemplate: true });
   assert.deepEqual(both.template, full.template);
   assert.deepEqual(both.topics, full.topics);
+});
+
+test('a call for topics or examples alone does not look at the book (API-009)', async (t) => {
+  const { call, hooks, session } = await fixture(t);
+  hooks.docs = resolve('docs');
+  hooks.check = async () => assert.fail('A call for topics must not check the book.');
+  session.inputs.capture = async () => assert.fail('A call for topics must not read the book.');
+  const requested = await call('get_authoring_context', { docs: ['authoring-workflow'], includeExamples: ['minimal'] });
+  assert.deepEqual(Object.keys(requested).sort(), ['docs', 'examples', 'guide', 'project', 'root']);
+  assert.deepEqual((requested.examples as { name: string }[]).map(({ name }) => name), ['minimal']);
+  await assert.rejects(call('get_authoring_context', { docs: ['authoring-workflow'], project: 'closed' }),
+    (error) => error instanceof AuthoringError && error.code === 'PROJECT_CLOSED');
+  assert.equal(isReferenceCall('get_authoring_context', {}), false);
+  assert.equal(isReferenceCall('get_authoring_context', { docs: [] }), false);
+  assert.equal(isReferenceCall('get_authoring_context', { docs: ['authoring-workflow'], includeSource: ['template/index.tsx'] }), false);
+  assert.equal(isReferenceCall('get_authoring_context', { docs: ['authoring-workflow'], includeTemplate: true }), false);
+  assert.equal(isReferenceCall('inspect_book', { docs: ['authoring-workflow'] }), false);
 });
 
 test('context lists reference topics and returns only the requested ones', async (t) => {
@@ -872,6 +959,9 @@ test('check replies count the book-wide render lists and list only the addressed
   assert.deepEqual(previewed.anchors, [render.anchors[1]]);
   const drafted = compactRender(render, { draft: { affectedSpreads: ['one'] } }, { inspect: { spread: '$new' } });
   assert.deepEqual(drafted.units, [render.units[0]]);
+  const everywhere = compactRender(render, { draft: { affectedSpreads: ['one', 'two'] } }, {});
+  assert.equal('units' in everywhere || 'flow' in everywhere || 'anchors' in everywhere, false, 'a document setting lists no spreads');
+  assert.deepEqual(compactRender(render, { image: { spread: 'two' }, draft: { affectedSpreads: ['one', 'two'] } }, {}).units, [render.units[1]]);
   const included = compactRender(render, { image: { spread: 'two' } }, { include: ['anchors'] });
   assert.deepEqual(included.anchors, render.anchors);
   assert.deepEqual(included.units, [render.units[1]]);

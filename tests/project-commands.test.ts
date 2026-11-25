@@ -419,3 +419,89 @@ test('commands keep unknown fields they do not touch, and a content change keeps
   assert.equal(index.p1.syncRevision, 4);
   assert.equal(index.p1.caption, 'New');
 });
+
+// Photo p1 shown on one spread, set aside on another, replaced content on a third, and on the cover.
+function placed(): { files: ProjectFiles; template: TemplateInfo } {
+  const book = files();
+  const crop = { crops: { main: { centerX: .3, centerY: .3, zoom: 2 } }, focus: { centerX: .3, centerY: .3 } };
+  book.project = projectSchema.parse({ ...structuredClone(book.project), format: 'standard', spreads: [
+    { id: 'one', definition: 'main', boxes: { hero: { photo: 'p1', params: { caption: true }, ...crop }, body: { text: 'note', params: {} } } },
+    { id: 'two', definition: 'minimal', boxes: { second: { photo: 'p1', params: {}, ...crop } } },
+    { id: 'three', definition: 'main', boxes: {}, displaced: [{ from: 'spread', box: 'hero', state: { photo: 'p1', params: {} } }] },
+    { id: 'four', definition: 'main', boxes: { hero: { photo: 'p2', params: {} } } },
+  ], cover: { definition: 'wrap', boxes: { front: { photo: 'p1', params: {} } } }, params: { route: 'route' } });
+  return { files: book, template: { ...template, coverFormats: { standard: {} }, coverLayouts: { wrap: { label: 'Wrap', parameters: {}, boxes: { front: photo }, elements: {} } } } as never };
+}
+const size = (width: number, height: number, caption?: string) => ({ width, height, ...(caption ? { caption } : {}) });
+
+test('replace_source swaps a photo in every box, set aside or not, and keeps crops of the same shape (API-010)', () => {
+  const { files: book, template } = placed();
+  const original = structuredClone(book);
+  const sizes: Record<string, ReturnType<typeof size>> = { p1: size(6000, 4000), p2: size(3000, 2001) };
+  const operation = { op: 'replace_source', source: 'p1', with: 'p2' };
+  const result = applyProjectCommands(book, template, [operation], { photo: (id) => sizes[id] });
+  assert.deepEqual(book, original);
+  const { project, photoIndex } = result.files;
+  assert.equal(JSON.stringify(project).includes('"p1"'), false);
+  assert.deepEqual(project.spreads[0].boxes.hero, { ...original.project.spreads[0].boxes.hero, photo: 'p2' });
+  assert.deepEqual(project.spreads[1].boxes.second.crops, original.project.spreads[1].boxes.second.crops);
+  assert.equal(project.spreads[2].displaced![0].state.photo, 'p2');
+  assert.equal(project.cover!.boxes.front.photo, 'p2');
+  assert.deepEqual(result.affectedSpreads, ['one', 'two', 'three', 'four'], 'also where the replacement stood, for its caption');
+  assert.equal(result.affectedCover, true);
+  assert.deepEqual(result.changes, ['Replaced photo p1 with p2 in 2 boxes shown and 2 set aside; caption copied']);
+  assert.deepEqual(photoIndex.p1, original.photoIndex.p1);
+  assert.deepEqual(photoIndex.p2, { ...original.photoIndex.p2, caption: 'Old caption' });
+  // Another shape, and one that is not known, drop the crops; a caption of its own stays.
+  for (const p2 of [size(4000, 6000, 'From Lightroom'), undefined]) {
+    const other = applyProjectCommands(book, template, [operation], { photo: (id) => id === 'p1' ? sizes.p1 : p2 });
+    assert.equal(other.files.project.spreads[0].boxes.hero.crops, undefined);
+    assert.equal(other.files.project.spreads[0].boxes.hero.focus, undefined);
+    assert.deepEqual(other.files.project.spreads[0].boxes.hero.params, { caption: true });
+    assert.match(other.changes[0], p2 ? /crops of 2 boxes dropped, as the shapes differ$/ : /as the shapes are not known; caption copied$/);
+    assert.equal(other.files.photoIndex.p2.caption, p2 ? undefined : 'Old caption');
+  }
+  assert.deepEqual(applyProjectCommands(book, template, [{ op: 'replace_source', source: 'p1', with: 'p1' }]).changes, []);
+  failure([{ op: 'replace_source', source: 'p1', with: 'nope' }], 'SOURCE_NOT_FOUND');
+});
+
+test('remove_sources clears every use and says how many boxes that is (API-011)', () => {
+  const { files: book, template } = placed();
+  const result = applyProjectCommands(book, template, [{ op: 'remove_sources', kind: 'photo', sources: ['p1', 'p1'] }]);
+  assert.equal(result.removedSources, true);
+  assert.deepEqual(Object.keys(result.files.photoIndex), ['p2']);
+  assert.equal(JSON.stringify(result.files.project).includes('"p1"'), false);
+  assert.deepEqual(result.files.project.spreads[0].boxes.hero, { params: { caption: true } });
+  assert.equal(result.files.project.spreads[2].displaced, undefined);
+  assert.deepEqual(result.changes, ['Removed photo p1 from the book; cleared 2 boxes shown and 2 set aside']);
+  assert.deepEqual([result.affectedSpreads, result.affectedCover], [['one', 'two', 'three'], true]);
+  const text = applyProjectCommands(book, template, [{ op: 'remove_sources', kind: 'text', sources: ['note'] }]);
+  assert.deepEqual([text.files.project.texts, text.files.project.spreads[0].boxes.body, text.reflow], [{}, { params: {} }, true]);
+  const file = applyProjectCommands(book, template, [{ op: 'remove_sources', kind: 'file', sources: ['route', 'unsupported'] }]);
+  assert.deepEqual([file.files.project.files, file.files.project.params], [{}, {}]);
+  assert.equal(file.affectedSpreads.length, 4);
+  assert.deepEqual(applyProjectCommands(book, template, [{ op: 'remove_sources', kind: 'file', sources: ['unsupported'] }]).changes, ['Removed file unsupported from the book; unused']);
+  failure([{ op: 'remove_sources', kind: 'photo', sources: ['p1', 'nope'] }], 'SOURCE_NOT_FOUND');
+});
+
+test('changes of a photo or file on the cover are reported for the cover', () => {
+  const { files: book, template } = placed();
+  // Only the replacement is on the cover: it gets the caption.
+  book.project.cover!.boxes.front.photo = 'p2';
+  assert.equal(applyProjectCommands(book, template, [{ op: 'replace_source', source: 'p1', with: 'p2' }]).affectedCover, true);
+  assert.equal(applyProjectCommands(book, template, [{ op: 'set_photo_metadata', photo: 'p2', values: { caption: 'New' } }]).affectedCover, true);
+  // A file of the book settings and of the cover.
+  book.project.cover!.params = { track: 'route' };
+  const removed = applyProjectCommands(book, template, [{ op: 'remove_sources', kind: 'file', sources: ['route'] }]);
+  assert.match(removed.changes[0], /cleared from book settings, the cover$/);
+  assert.equal(removed.affectedCover, true);
+  assert.equal(removed.affectedSpreads.length, 4);
+});
+
+test('replace_source sees captions cleared earlier in its batch', () => {
+  const { files: book, template } = placed();
+  book.photoIndex.p2.caption = 'Its own';
+  const result = applyProjectCommands(book, template, [{ op: 'set_photo_metadata', photo: 'p2', values: { caption: null } },
+    { op: 'replace_source', source: 'p1', with: 'p2' }], { photo: () => size(6000, 4000) });
+  assert.equal(result.files.photoIndex.p2.caption, 'Old caption');
+});

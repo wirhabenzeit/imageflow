@@ -398,3 +398,32 @@ test('the portable book-state revision refuses a link that leaves the book', asy
   await symlink(outside, join(folder, 'template', 'linked.css'));
   await assert.rejects(captureBookStateRevision(folder), { code: 'source-outside-project' });
 });
+
+test('a capture tells saves of the manifests and photos from a source from changes of files', async (t) => {
+  const folder = await realpath(await mkdtemp(join(tmpdir(), 'imageflow-kinds-')));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  await mkdir(join(folder, 'template'));
+  await writeFile(join(folder, 'template/index.tsx'), 'export default {};');
+  const save = (title: string) => writeFile(join(folder, 'project.json'), JSON.stringify({ schemaVersion: 1, title, template: { id: 'test', version: '1' }, spreads: [] }));
+  await save('One');
+  await writeFile(join(folder, 'photos.json'), '{}');
+  const index = new ProjectInputIndex(folder);
+  t.after(() => index.close());
+  const first = await index.capture();
+  index.providedChanged();
+  const provided = await index.capture();
+  assert.notEqual(provided.observation, first.observation);
+  assert.deepEqual([provided.revision, provided.content, provided.files], [first.revision, first.content, first.files]);
+  await save('Two');
+  index.invalidate('project.json');
+  const saved = await index.capture();
+  assert.notEqual(saved.revision, first.revision);
+  assert.notEqual(saved.content, first.content);
+  assert.equal(saved.files, first.files);
+  // Also one reverted before anyone looked.
+  index.invalidate('template/index.tsx');
+  assert.notEqual((await index.capture()).files, first.files);
+  const before = await index.capture();
+  await writeFile(join(folder, 'template/new.ts'), '');
+  assert.notEqual((await index.capture()).files, before.files);
+});

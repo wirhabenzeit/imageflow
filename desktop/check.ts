@@ -10,6 +10,7 @@ import { PreviewError } from '../src/preview';
 import { captureProjectInputs, ProjectRevisionError } from './revisions';
 import type { ProjectInputIndex } from './revisions';
 import type { CheckRenditionCache } from './check-cache';
+import { placedPhotos } from './materialized-photos';
 import { loadProject, TemplateCompileError } from './project';
 import type { OpenProject } from './project';
 import type { BookPreview } from './preview';
@@ -18,6 +19,9 @@ import type { Typecheck, TypecheckResult } from './typecheck';
 import { templateLocation } from './source-location';
 
 type ReadyStatus = Extract<RenderStatus, { state: 'ready' }>;
+// A book saved every few moments is loaded again this often before its check is given up.
+const loadAttempts = 3;
+
 type RenderCheck = (book: OpenProject, preview: PreviewRequest | undefined, signal: AbortSignal, inspect?: InspectionRequest, cover?: true) => Promise<{
   status: ReadyStatus; preview?: BookPreview;
 }>;
@@ -42,9 +46,21 @@ function diagnostic(issue: Issue, severity: 'error' | 'warning'): AuthoringDiagn
   };
 }
 
+/** Placed photos drawn as empty frames because their previews are still being fetched: one finding for all of them. */
+function loadingPreviews(book: OpenProject): AuthoringDiagnostic[] {
+  const photos = [...placedPhotos(book)].filter((id) => book.sources?.['photo:' + id]?.pending);
+  if (!photos.length) return [];
+  return [{ code: 'photo-preview-loading', stage: 'render', severity: 'warning',
+    message: photos.length === 1 ? 'The preview of a placed photo is still loading. It is drawn as an empty frame of its size.'
+      : 'The previews of ' + photos.length + ' placed photos are still loading. They are drawn as empty frames of their size.',
+    details: { photos: photos.length }, suggestion: 'Layout and resolution are checked. To see the pictures, check again once ImageFlow has loaded them.' }];
+}
+
 /** Read-only authoring check. The app supplies a private, temporary render session.
  * A check never adopts its disk reload into the editor or changes its Undo history.
- * Inputs are checked again after rendering; changed inputs invalidate the entire result.
+ * Inputs are checked again after rendering; changed files invalidate the entire result. A save of the manifests meanwhile
+ * does not, nor do photos that change in their source: the book is drawn as it was loaded, and the result says that the
+ * revision it is of has been superseded (API-007).
  */
 export async function checkProject(
   source: OpenProject, fallbackCache: string, request: unknown, render: RenderCheck, signal: AbortSignal, index?: ProjectInputIndex,
@@ -73,6 +89,14 @@ export async function checkProject(
     const current = await capture();
     return inputs && current.revision === inputs.revision && current.observation === inputs.observation;
   };
+  // Whether what was loaded is of the captured inputs, and whether a book loaded from them is still drawn as it was.
+  const filesMatch = async () => (await capture()).files === inputs?.files;
+  const stillDrawn = async () => {
+    const current = await capture();
+    if (!inputs || current.files !== inputs.files) return false;
+    if (current.revision !== inputs.revision) result.superseded = { revision: current.revision };
+    return true;
+  };
   try {
     signal.throwIfAborted();
     inputs = await capture();
@@ -88,7 +112,7 @@ export async function checkProject(
       result.checks.typescript = types.diagnostics.length ? 'failed' : 'passed';
       const { diagnostics: _diagnostics, ...coverage } = types;
       result.typecheck = coverage;
-      if (!await inputsMatch()) throw new ProjectRevisionError('source-changed');
+      if (!await filesMatch()) throw new ProjectRevisionError('source-changed');
     }
     phase = 'template';
     // A rejected check may have read changed photo bytes. Never let its renditions poison a later check.
@@ -96,11 +120,18 @@ export async function checkProject(
     // Photos are read where they are, as in the editor: copying, hashing and decoding every photo cost each check about
     // 8 s for a book of 163 linked photos (F-037). Their renditions are keyed by the original's stamp and made only
     // while it is unchanged, and the inputs, photo stamps included, are compared again after rendering.
-    const book = await loadProject(source.folder, privateCache, true);
-    loaded = book;
-    if (!await inputsMatch()) {
-      throw new ProjectRevisionError('source-changed');
+    // Nor does it wait for previews of photos without a file: an import of a thousand takes minutes (API-009).
+    let book: OpenProject;
+    for (let attempt = 1; ; attempt++) {
+      book = await loadProject(source.folder, privateCache, true, false, { previews: 'none', signal });
+      const current = await capture();
+      if (current.content === inputs.content) break;
+      // A save of the manifests during the load: the book is loaded as it is now, unless an exact revision was asked for.
+      if (attempt === loadAttempts || parsed.data.expectedRevision || current.files !== inputs.files) throw new ProjectRevisionError('source-changed');
+      inputs = current;
+      result.revision = current.revision;
     }
+    loaded = book;
     const photoKeys = new Set([...book.photos.values()].map((photo) => photo.key));
     await renditions?.seed(privateCache, photoKeys);
     result.checks.bundle = 'passed';
@@ -121,7 +152,7 @@ export async function checkProject(
       fixture = !!planned.fixture;
     }
     const checked = await render(rendered, preview, signal, inspect, parsed.data.cover);
-    if (!await inputsMatch()) {
+    if (!await stillDrawn()) {
       throw new ProjectRevisionError('source-changed');
     }
     signal.throwIfAborted();
@@ -136,6 +167,7 @@ export async function checkProject(
       ...found.errors.map((issue) => diagnostic(issue, 'error')),
       ...found.warnings.map((issue) => diagnostic(issue, 'warning')),
       ...awayDiagnostics(found.notes),
+      ...loadingPreviews(rendered),
     ];
     if (checked.preview) {
       const { bytes, mimeType, status: _status, ...metadata } = checked.preview;
@@ -194,7 +226,7 @@ export async function checkProject(
     // Compiler/render failures are only attributable to the captured revision if inputs stayed stable.
     if (result.revision) {
       try {
-        if (!await inputsMatch()) {
+        if (loaded ? !await stillDrawn() : !await inputsMatch()) {
           delete result.template;
           result.diagnostics = [{ code: 'source-changed', stage: 'project', severity: 'error',
             message: 'Project inputs changed during this check. Run it again for current diagnostics.' }];

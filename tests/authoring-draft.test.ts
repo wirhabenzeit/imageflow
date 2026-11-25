@@ -260,3 +260,40 @@ test('a draft reports the book\'s page sequence as a warning, and the saved book
   assert.equal(finding?.severity, 'warning');
   assert.match(finding?.message ?? '', /^Page count is 58\. A draft reports this as a warning/);
 });
+
+test('a draft whose book is saved between the look and the check is planned at the revision it has then (API-007)', async (t) => {
+  const { folder, session, call, revision, hooks } = await fixture(t);
+  const original = hooks.check;
+  let saves = 0;
+  hooks.check = async (book, request, signal, index, draft) => {
+    if (draft && !saves++) {
+      await writeFile(join(folder, 'project.json'), JSON.stringify({ ...saved, title: 'Saved by the user' }));
+      session.inputs.invalidate('project.json');
+    }
+    return original(book, request, signal, index, draft);
+  };
+  const expectedRevision = await revision();
+  const result = await call('check_book', { expectedRevision, draft: { operations: [{ op: 'set_title', title: 'Draft title' }] } }) as AuthoringCheckResult & { revisionMoved?: unknown };
+  assert.equal(result.state, 'ready', JSON.stringify(result.diagnostics));
+  assert.equal(result.draft?.applied, true);
+  assert.deepEqual(result.revisionMoved, { expectedRevision, revision: await revision() });
+});
+
+test('an agent removes a photo as one Undo step, and Redo takes it out again (API-011)', async (t) => {
+  const { folder, session, call, revision } = await fixture(t, saved, undefined, true);
+  await writeFile(join(folder, 'photos.json'), JSON.stringify({ p1: { path: 'photos/one.jpg' }, p2: { path: 'photos/two.jpg' } }));
+  session.adoptExternal(await loadProject(folder, join(folder, '..', 'cache')));
+  const request = { label: 'Remove a photo', operations: [{ op: 'remove_sources', kind: 'photo', sources: ['p1'] }] };
+  const dry = await call('apply_project_changes', { ...request, dryRun: true, expectedRevision: await revision(), idempotencyKey: 'dry' });
+  assert.deepEqual(dry.changes, ['Removed photo p1 from the book; cleared no boxes']);
+  assert.deepEqual(Object.keys(session.book.photoIndex), ['p1', 'p2']);
+  const result = await call('apply_project_changes', { ...request, expectedRevision: await revision(), idempotencyKey: 'remove' });
+  assert.equal(result.committed, true);
+  const photos = async () => Object.keys(JSON.parse(await readFile(join(folder, 'photos.json'), 'utf8')));
+  assert.deepEqual(await photos(), ['p2']);
+  assert.deepEqual(Object.keys(session.book.sources ?? {}).filter((key) => key.startsWith('photo:')), ['photo:p2']);
+  await session.undo('undo');
+  assert.deepEqual((await photos()).sort(), ['p1', 'p2']);
+  await session.undo('redo');
+  assert.deepEqual(await photos(), ['p2']);
+});

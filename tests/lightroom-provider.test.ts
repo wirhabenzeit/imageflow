@@ -12,6 +12,9 @@ import { configureSourceAccess } from '../desktop/source-access';
 import { configureProxyStore } from '../desktop/proxy-store';
 import { AssetFacts, readAssetFacts } from '../desktop/asset-facts';
 import { acquireProjectLock } from '../desktop/persistence';
+import { loadedPhoto } from '../desktop/authoring-service';
+import { checkProject } from '../desktop/check';
+import { saveDocumentCopy } from '../desktop/source-actions';
 import { loadProject, projectSummary, updateProject } from '../desktop/project';
 import { backgroundPreviews, providedChanges } from '../desktop/provided-photos';
 import { copySample } from '../desktop/sample-book.mjs';
@@ -578,4 +581,109 @@ test('a book open in a session loads without waiting for previews: it names thos
   const last = await updateProject(shown, more, true);
   assert.equal(last.sources!['photo:lr5'].pending, undefined);
   assert.equal(last.sources!['photo:lr5'].problem, 'No preview of it.');
+});
+
+// The book of `bookWithLightroom` with more photos, whose previews an open session is fetching; `open` lets them come.
+async function bookFetchingPreviews(t: Parameters<typeof setup>[0], count: number) {
+  const f = await bookWithLightroom(t);
+  const ids = Array.from({ length: count }, (_, index) => index + 3);
+  for (const n of ids) f.plugin.add(n);
+  const wanted: string[] = [];
+  const stop = backgroundPreviews(f.folder, { wanted: (previews) => wanted.push(...previews.map(({ id }) => id)), problem: () => undefined });
+  t.after(async () => stop());
+  let open!: () => void;
+  f.plugin.thumbnailGate = new Promise((resolve) => { open = resolve; });
+  const files = structuredClone({ project: f.loaded.project, photoIndex: f.loaded.photoIndex });
+  for (const n of ids) files.photoIndex['lr' + n] = lightroomLocator.write({ provider: 'lightroom', catalog: catalogId, uuid: uuid(n) }) as never;
+  const box = Object.values(files.project.spreads).flatMap((spread) => Object.values(spread.boxes)).find(({ photo }) => photo)!;
+  box.photo = 'lr3';
+  const book = await updateProject(f.loaded, files, true);
+  const before = thumbnailJobs(f.plugin).length;
+  const refs = ids.map((n) => ({ id: 'lr' + n, locator: lightroomLocator.read(book.photoIndex['lr' + n] as Record<string, unknown>)! }));
+  const fetching = providedChanges(f.folder, f.provider, refs, f.facts, { staging: join(f.cache, 'provider-staging'), available: () => false, shown: () => ({ available: false, pending: true }) });
+  await until(() => thumbnailJobs(f.plugin).length > before);
+  const asked = () => thumbnailJobs(f.plugin).slice(before).reduce((sum, { photos }) => sum + (photos as unknown[]).length, 0);
+  const check = (signal = new AbortController().signal) => checkProject(book, f.cache, {}, async () => ({
+    status: { state: 'ready', pages: 2, units: [], errors: [], warnings: [], flow: {}, anchors: [], template: {} } as never }), signal);
+  return { ...f, book, wanted, fetching, open, asked, check };
+}
+
+test('a check of a book whose previews are being fetched waits for none and asks for none (API-009, UI-008)', async (t) => {
+  const f = await bookFetchingPreviews(t, 30);
+  f.wanted.length = 0;
+  // Held until `open`: a check that waited for the previews would never end.
+  const during = await f.check();
+  assert.equal(during.state, 'ready');
+  assert.deepEqual(during.diagnostics.filter(({ code }) => code === 'photo-preview-loading').map(({ severity, details }) => ({ severity, details })),
+    [{ severity: 'warning', details: { photos: 1 } }], 'the placed photo drawn without its picture is named');
+  // Previews that come while it renders move the revision, and the check stands (API-007).
+  const revised = await checkProject(f.book, f.cache, {}, async () => {
+    f.open();
+    await f.fetching;
+    return { status: { state: 'ready', pages: 2, units: [], errors: [], warnings: [], flow: {}, anchors: [], template: {} } as never };
+  }, new AbortController().signal);
+  assert.equal(revised.state, 'ready', JSON.stringify(revised.diagnostics));
+  assert.ok(revised.superseded && revised.superseded.revision !== revised.revision);
+  // The facts of the previews that came are not in the file yet: the check reads them from the open book.
+  const after = await f.check();
+  assert.deepEqual(after.diagnostics.filter(({ code }) => code === 'photo-preview-loading'), []);
+  assert.equal(f.asked(), 30, 'each preview was asked for once');
+  assert.deepEqual(f.wanted, [], 'a check wants no previews');
+});
+
+test('a check that is given up ends while Lightroom has not answered yet', async (t) => {
+  const f = await bookFetchingPreviews(t, 1);
+  t.after(async () => f.open());
+  const observe = f.provider.observe;
+  let asked!: () => void;
+  const waiting = new Promise<void>((resolve) => { asked = resolve; });
+  f.provider.observe = (folder, refs, options) => {
+    asked();
+    return options?.signal ? new Promise((_, reject) => options.signal!.addEventListener('abort', () => reject(options.signal!.reason), { once: true })) : observe(folder, refs, options);
+  };
+  const job = new AbortController();
+  const check = f.check(job.signal);
+  await waiting;
+  job.abort(new Error('Timed out.'));
+  await assert.rejects(check, /Timed out/);
+});
+
+test('an observation that is given up ends its request to the plugin', async (t) => {
+  const { provider, fake, bridge } = await setup(t);
+  const plugin = fake('1.1.0');
+  plugin.add(1);
+  await plugin.connect();
+  await until(() => !!bridge.connection);
+  const job = new AbortController();
+  job.abort();
+  const [result] = await provider.observe('/book', [ref('a', uuid(1))], { signal: job.signal });
+  assert.equal(result.state, 'unreadable');
+  assert.equal(plugin.jobs.filter(({ type }) => type === 'metadata').length, 0);
+});
+
+test('a photo is known to commands by its size and its source’s caption, also while its preview loads', async (t) => {
+  const f = await bookFetchingPreviews(t, 1);
+  t.after(async () => f.open());
+  f.plugin.photos.get(uuid(3))!.caption = 'From Lightroom';
+  f.plugin.edit(uuid(3), { title: 'Edited' });
+  const pending = await f.load();
+  assert.equal(pending.sources!['photo:lr3'].pending, true);
+  const known = loadedPhoto(pending)('lr3')!;
+  assert.deepEqual([known.width, known.height, known.caption], [6000, 4000, 'From Lightroom']);
+  // A caption saved in the book is the registry's to tell, which a batch may have changed: not what was loaded.
+  const files = structuredClone({ project: pending.project, photoIndex: pending.photoIndex });
+  files.photoIndex.lr1.caption = 'Saved';
+  assert.equal(loadedPhoto(await updateProject(pending, files, true))('lr1')!.caption, undefined);
+  assert.equal(loadedPhoto(pending)('none'), undefined);
+});
+
+test('Save a Copy waits for no previews, and previews that come meanwhile do not fail it', async (t) => {
+  const f = await bookFetchingPreviews(t, 20);
+  const asked = f.asked();
+  // Held until the copy is done: one that waited for the previews would never end.
+  await saveDocumentCopy(f.book, join(f.root, 'Copy.imageflow'), false);
+  assert.equal(f.asked(), asked, 'and asks for none');
+  f.open();
+  await f.fetching;
+  assert.deepEqual(Object.keys(JSON.parse(await readFile(join(f.root, 'Copy.imageflow/photos.json'), 'utf8'))), Object.keys(f.book.photoIndex));
 });

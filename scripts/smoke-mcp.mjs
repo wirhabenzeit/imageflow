@@ -98,6 +98,14 @@ try {
   ]);
   assert.equal(parallel[0].project,project);
   assert.equal(parallel[2].projects[0].project,project);
+  // A call for topics alone looks at nothing of the book, so it does not wait for the calls that do (API-009).
+  let slowDone=false;
+  const slow=good('check_book',{project}).then(()=>{slowDone=true;});
+  const topics=await good('get_authoring_context',{project,docs:['project-commands']});
+  assert.equal(slowDone,false,'The topics came before the check that was asked for first');
+  assert.ok(topics.docs['project-commands'].includes('replace_source'));
+  assert.equal(topics.revision,undefined);
+  await slow;
   let context=await good('get_authoring_context',{project});
   assert.equal(context.apiReference,undefined);
   assert.deepEqual(context.sources,{});

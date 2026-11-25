@@ -247,6 +247,8 @@ test('fixture checks render unused layouts per format with synthetic content and
   assert.equal(report.coverage.rendered, 14);
   assert.equal(report.cells.length, 14);
   assert.ok(report.coverage.skipped.some(({ layout, case: fixture }) => layout === 'main' && fixture === 'malformed-files'));
+  const passed = report.cells.find(({ state }) => state === 'passed')!;
+  assert.deepEqual(Object.keys(passed).sort(), ['case', 'format', 'layout', 'state'], 'one that passed says no more');
   const long = report.cells.find((cell) => cell.layout === 'main' && cell.case === 'long-text' && cell.format === 'landscape')!;
   assert.deepEqual([long.state, long.errors, long.codes], ['errors', 1, ['text-overflow']]);
   // Synthetic photos cannot judge resolution, and the arrangement of a fixture book is not a page-sequence finding.
