@@ -61,6 +61,7 @@ import { syncSetupPatch } from './sync-settings';
 import { cleanUp, cleanUpQuestion, cleanUpSummary, planCleanUp, unusedStorage } from './sync-sweep';
 import type { CleanUpPlan } from './sync-sweep';
 import { configureMacHeader, setToolbarDragRegions } from './mac-header';
+import { showSavePanel } from './save-panel';
 import type { RenderSessions } from './document-session';
 import { AssetFacts } from './asset-facts';
 import { createDocument, documentIdentity, documentPath, isDocument, RecentDocuments } from './documents';
@@ -2695,24 +2696,17 @@ void app.whenReady().then(async () => {
     if (!document || quitting) return { error: 'Request is only available to an open book.' };
     try { return { value: await document.leftovers(markdownWindows.paths(document)) }; } catch (error) { return { error: errorMessage(error) }; }
   });
-  ipcMain.handle(channels.saveCopy, (event, includeAssets?: boolean) => fromEditor(event, async (document) => {
-    if (includeAssets === undefined) {
-      const linked = sourceEntries(document.book).some((entry) => sourceReach(entry) !== 'book') ? 'Unchecked: linked files keep their full paths, and photos from other sources stay linked to them.' : undefined;
-      // iCloud cannot copy inside the store (#285): a copy of a synced book uploads its originals again when it syncs.
-      const icloud = syncService.kind === 'icloud' && !!(await readSyncState(document.book.folder).catch(() => undefined))?.lastSynced
-        ? 'The copy syncs as a new book. iCloud cannot copy its originals, so they are uploaded again and count toward your iCloud storage a second time.' : undefined;
-      const answer = await dialog.showMessageBox(document.window, { type: 'question', message: 'Duplicate this book?',
-        buttons: ['Duplicate', 'Cancel'], defaultId: 0, cancelId: 1, checkboxLabel: 'Include all files', checkboxChecked: true,
-        detail: [linked, icloud].filter(Boolean).join('\n\n') || undefined });
-      if (answer.response !== 0) return null;
-      includeAssets = answer.checkboxChecked;
-    }
-    if (typeof includeAssets !== 'boolean') throw new Error('Choose whether to include all files.');
-    const choice = await dialog.showSaveDialog(document.window, { title: 'Duplicate Book', buttonLabel: 'Duplicate',
-      defaultPath: join(app.getPath('documents'), bookName(document.book.folder) + ' Copy.imageflow'), filters: [{ name: 'ImageFlow Book', extensions: ['imageflow'] }] });
-    if (choice.canceled || !choice.filePath) return null;
+  ipcMain.handle(channels.saveCopy, (event) => fromEditor(event, async (document) => {
+    const linked = sourceEntries(document.book).some((entry) => sourceReach(entry) !== 'book') ? 'Unchecked: linked files keep their full paths, and photos from other sources stay linked to them.' : undefined;
+    // iCloud cannot copy inside the store (#285): a copy of a synced book uploads its originals again when it syncs.
+    const icloud = syncService.kind === 'icloud' && !!(await readSyncState(document.book.folder).catch(() => undefined))?.lastSynced
+      ? 'The copy syncs as a new book. iCloud cannot copy its originals, so they are uploaded again and count toward your iCloud storage a second time.' : undefined;
+    const choice = await showSavePanel<boolean>(document.window, { title: 'Duplicate Book', buttonLabel: 'Duplicate',
+      defaultPath: join(app.getPath('documents'), bookName(document.book.folder) + ' Copy.imageflow'), filter: { name: 'ImageFlow Book', extension: 'imageflow' } },
+    { label: 'Include all files', value: true, note: [linked, icloud].filter(Boolean).join('\n\n') || undefined });
+    if (!choice) return null;
     let folder: string;
-    try { folder = await document.copying(document.window, (options) => saveDocumentCopy(document.book, choice.filePath!, includeAssets!, undefined, false, options), 'Duplicating book'); }
+    try { folder = await document.copying(document.window, (options) => saveDocumentCopy(document.book, choice.filePath, choice.value, undefined, false, options), 'Duplicating book'); }
     catch (error) { if (error instanceof CopyCancelled) return null; throw error; }
     await openDocument(folder);
     return null;

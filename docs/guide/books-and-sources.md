@@ -59,7 +59,7 @@ The plugin and ImageFlow talk only on this Mac: ImageFlow listens on the loopbac
 
 ## Save a copy
 
-**File → Duplicate…** creates a copy. **Include all files**, checked by default, copies linked files into it for portability. Uncheck it to preserve links. Missing originals are reported.
+**File → Duplicate…** creates a copy. **Include all files** in the save panel, checked by default, copies linked files into it for portability. Uncheck it to preserve links. Missing originals are reported.
 
 ## Edit files externally
 

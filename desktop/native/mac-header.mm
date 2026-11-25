@@ -1,6 +1,8 @@
 #import <AppKit/AppKit.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include <node_api.h>
 #include <cstring>
+#include <string>
 
 // A transparent native drag target lets AppKit receive mouseDown directly,
 // before Chromium handles it. Buttons and the document pass through untouched.
@@ -184,12 +186,170 @@ static napi_value setDragRegions(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static NSString *stringValue(napi_env env, napi_value value) {
+  napi_valuetype type;
+  size_t length = 0;
+  if (napi_typeof(env, value, &type) != napi_ok || type != napi_string ||
+      napi_get_value_string_utf8(env, value, nullptr, 0, &length) != napi_ok) return nil;
+  std::string text(length, '\0');
+  napi_get_value_string_utf8(env, value, text.data(), length + 1, &length);
+  return [[NSString alloc] initWithBytes:text.data() length:length encoding:NSUTF8StringEncoding];
+}
+
+static napi_value property(napi_env env, napi_value object, const char *key) {
+  napi_value value = nullptr;
+  napi_get_named_property(env, object, key, &value);
+  return value;
+}
+
+// The option asked in a save panel: a pop-up button when the description lists `options`, otherwise a checkbox. `value`
+// is the selected index, or 1 for a checked box.
+static NSControl *savePanelControl(napi_env env, napi_value spec, NSView **accessory) {
+  NSString *label = stringValue(env, property(env, spec, "label")) ?: @"";
+  NSString *note = stringValue(env, property(env, spec, "note"));
+  int32_t value = 0;
+  napi_get_value_int32(env, property(env, spec, "value"), &value);
+  napi_value options = property(env, spec, "options");
+  bool popup = false;
+  napi_is_array(env, options, &popup);
+  NSControl *control;
+  NSView *row;
+  if (popup) {
+    NSPopUpButton *button = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
+    uint32_t count = 0;
+    napi_get_array_length(env, options, &count);
+    for (uint32_t index = 0; index < count; ++index) {
+      napi_value item;
+      napi_get_element(env, options, index, &item);
+      [button addItemWithTitle:stringValue(env, item) ?: @""];
+    }
+    if (value >= 0 && value < button.numberOfItems) [button selectItemAtIndex:value];
+    button.accessibilityLabel = label;
+    NSStackView *pair = [NSStackView stackViewWithViews:@[[NSTextField labelWithString:[label stringByAppendingString:@":"]], button]];
+    pair.alignment = NSLayoutAttributeFirstBaseline;
+    control = button;
+    row = pair;
+  } else {
+    NSButton *button = [NSButton checkboxWithTitle:label target:nil action:nil];
+    button.state = value ? NSControlStateValueOn : NSControlStateValueOff;
+    control = button;
+    row = button;
+  }
+  NSMutableArray<NSView *> *rows = [NSMutableArray arrayWithObject:row];
+  if (note.length) {
+    NSTextField *text = [NSTextField wrappingLabelWithString:note];
+    text.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
+    text.textColor = NSColor.secondaryLabelColor;
+    text.selectable = NO;
+    text.alignment = popup ? NSTextAlignmentCenter : NSTextAlignmentNatural;
+    // The panel is as wide as its accessory view; this is about the width it has without one.
+    text.preferredMaxLayoutWidth = 330;
+    [rows addObject:text];
+    control.accessibilityHelp = note;
+  }
+  NSStackView *stack = [NSStackView stackViewWithViews:rows];
+  stack.orientation = NSUserInterfaceLayoutOrientationVertical;
+  stack.alignment = popup ? NSLayoutAttributeCenterX : NSLayoutAttributeLeading;
+  stack.spacing = 6;
+  stack.edgeInsets = NSEdgeInsetsMake(12, 20, 12, 20);
+  *accessory = stack;
+  return control;
+}
+
+struct SavePanelAnswer {
+  napi_deferred deferred;
+  bool accepted = false;
+  std::string path;
+  int32_t value = 0;
+};
+
+static void settleSavePanel(napi_env env, napi_value, void *, void *data) {
+  SavePanelAnswer *answer = static_cast<SavePanelAnswer *>(data);
+  if (env) {
+    napi_value result, path, value;
+    if (answer->accepted) {
+      napi_create_object(env, &result);
+      napi_create_string_utf8(env, answer->path.data(), answer->path.size(), &path);
+      napi_set_named_property(env, result, "filePath", path);
+      napi_create_int32(env, answer->value, &value);
+      napi_set_named_property(env, result, "value", value);
+    } else napi_get_null(env, &result);
+    napi_resolve_deferred(env, answer->deferred, result);
+  }
+  delete answer;
+}
+
+// The standard save sheet with one option in it, which Electron's save dialog cannot show (#274). Resolves with the
+// chosen path and the control's value, or null when cancelled.
+static napi_value savePanel(napi_env env, napi_callback_info info) {
+  size_t argc = 2;
+  napi_value args[2];
+  napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+  NSWindow *window = windowArgument(env, info);
+  if (!window) return nullptr;
+  napi_valuetype type = napi_undefined;
+  if (argc != 2 || napi_typeof(env, args[1], &type) != napi_ok || type != napi_object) {
+    napi_throw_type_error(env, nullptr, "Expected a description of the save panel.");
+    return nullptr;
+  }
+  napi_value spec = args[1];
+  NSString *defaultPath = stringValue(env, property(env, spec, "defaultPath"));
+  NSString *extension = stringValue(env, property(env, spec, "extension"));
+  NSString *button = stringValue(env, property(env, spec, "buttonLabel"));
+  if (!defaultPath.length || !extension.length) {
+    napi_throw_type_error(env, nullptr, "A save panel needs a default path and an extension.");
+    return nullptr;
+  }
+  NSSavePanel *panel = [NSSavePanel savePanel];
+  if (button.length) panel.prompt = button;
+  panel.directoryURL = [NSURL fileURLWithPath:defaultPath.stringByDeletingLastPathComponent isDirectory:YES];
+  panel.nameFieldStringValue = defaultPath.lastPathComponent;
+  panel.canSelectHiddenExtension = YES;
+  // Nothing writes the tags to the file, so do not ask for them.
+  panel.showsTagField = NO;
+  // Not typeWithFilenameExtension: alone, which only finds flat files and so misses the registered book package.
+  NSArray<UTType *> *types = [UTType typesWithTag:extension tagClass:UTTagClassFilenameExtension conformingToType:nil];
+  if (!types.count) {
+    UTType *unregistered = [UTType typeWithFilenameExtension:extension];
+    types = unregistered ? @[unregistered] : @[];
+  }
+  panel.allowedContentTypes = types;
+  NSView *accessory;
+  NSControl *control = savePanelControl(env, spec, &accessory);
+  panel.accessoryView = accessory;
+
+  napi_value promise, name;
+  napi_threadsafe_function settle;
+  SavePanelAnswer *answer = new SavePanelAnswer();
+  napi_create_string_utf8(env, "ImageFlowSavePanel", NAPI_AUTO_LENGTH, &name);
+  if (napi_create_threadsafe_function(env, nullptr, nullptr, name, 0, 1, nullptr, nullptr, nullptr, settleSavePanel, &settle) != napi_ok) {
+    delete answer;
+    napi_throw_error(env, nullptr, "The save panel could not be shown.");
+    return nullptr;
+  }
+  napi_create_promise(env, &answer->deferred, &promise);
+  // AppKit calls back outside any JavaScript scope; the threadsafe function enters one to resolve the promise.
+  [panel beginSheetModalForWindow:window completionHandler:^(NSModalResponse response) {
+    const char *path = panel.URL.path.UTF8String;
+    answer->accepted = response == NSModalResponseOK && path;
+    if (answer->accepted) answer->path = path;
+    answer->value = [control isKindOfClass:NSPopUpButton.class]
+      ? static_cast<int32_t>(static_cast<NSPopUpButton *>(control).indexOfSelectedItem)
+      : static_cast<NSButton *>(control).state == NSControlStateValueOn;
+    if (napi_call_threadsafe_function(settle, answer, napi_tsfn_nonblocking) != napi_ok) delete answer;
+    napi_release_threadsafe_function(settle, napi_tsfn_release);
+  }];
+  return promise;
+}
+
 static napi_value initialize(napi_env env, napi_value exports) {
   napi_value function;
   napi_create_function(env, "configure", NAPI_AUTO_LENGTH, configure, nullptr, &function);
   napi_set_named_property(env, exports, "configure", function);
   napi_create_function(env, "setDragRegions", NAPI_AUTO_LENGTH, setDragRegions, nullptr, &function);
   napi_set_named_property(env, exports, "setDragRegions", function);
+  napi_create_function(env, "savePanel", NAPI_AUTO_LENGTH, savePanel, nullptr, &function);
+  napi_set_named_property(env, exports, "savePanel", function);
   return exports;
 }
 

@@ -298,7 +298,7 @@ export type DesktopApi = {
   sourceAction(request: SourceAction): Promise<Result<{ summary: ProjectSummary; message?: string }>>;
   /** The files of the package the book no longer uses (UI-010); none of a book that is only read. */
   leftoverFiles(): Promise<Result<LeftoverFile[]>>;
-  saveCopy(includeAssets?: boolean): Promise<Result<null>>;
+  saveCopy(): Promise<Result<null>>;
   currentProject(): Promise<Result<ProjectSummary>>;
   onAppError(listener: (message: string) => void): () => void;
   onAppNotice(listener: (message: string) => void): () => void;
