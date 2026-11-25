@@ -260,3 +260,21 @@ test('a draft reports the book\'s page sequence as a warning, and the saved book
   assert.equal(finding?.severity, 'warning');
   assert.match(finding?.message ?? '', /^Page count is 58\. A draft reports this as a warning/);
 });
+
+test('a draft whose book is saved between the look and the check is planned at the revision it has then (API-007)', async (t) => {
+  const { folder, session, call, revision, hooks } = await fixture(t);
+  const original = hooks.check;
+  let saves = 0;
+  hooks.check = async (book, request, signal, index, draft) => {
+    if (draft && !saves++) {
+      await writeFile(join(folder, 'project.json'), JSON.stringify({ ...saved, title: 'Saved by the user' }));
+      session.inputs.invalidate('project.json');
+    }
+    return original(book, request, signal, index, draft);
+  };
+  const expectedRevision = await revision();
+  const result = await call('check_book', { expectedRevision, draft: { operations: [{ op: 'set_title', title: 'Draft title' }] } }) as AuthoringCheckResult & { revisionMoved?: unknown };
+  assert.equal(result.state, 'ready', JSON.stringify(result.diagnostics));
+  assert.equal(result.draft?.applied, true);
+  assert.deepEqual(result.revisionMoved, { expectedRevision, revision: await revision() });
+});

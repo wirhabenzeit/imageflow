@@ -1385,7 +1385,7 @@ export class DocumentSession {
   }
   // `noticed`: the photos a notice of this refresh named already, as it shows what has come so far.
   private showProvided(changes: ProvidedChanges, noticed: Set<string>) {
-    if (changes.revised.length) this.projectSession.inputs.invalidate();
+    if (changes.revised.length) this.projectSession.inputs.providedChanged();
     const usage = changes.reshaped.length ? assetUsage(this.book, assetPageLabels(this.summary)) : undefined;
     const placed = changes.reshaped.filter((id) => usage?.photo[id]?.length && !noticed.has(id));
     if (placed.length) {

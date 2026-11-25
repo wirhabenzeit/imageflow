@@ -19,6 +19,8 @@ export function checksCover({ cover, preview, inspect }: AuthoringCheckRequest) 
 }
 export type AuthoringCheckResult = AuthoringReport & {
   state: 'ready' | 'error';
+  // The book was saved again while it was checked: the result is of `revision`, as it was loaded, and this is the revision now.
+  superseded?: { revision: string };
   checks: {
     bundle: 'passed' | 'failed' | 'not-run';
     // The template's default export satisfies the template contract, and its ID matches project.json.

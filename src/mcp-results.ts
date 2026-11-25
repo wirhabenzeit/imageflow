@@ -95,6 +95,8 @@ export const imageSchema = z.union([
 ]).describe('Metadata of the returned image.');
 
 const state = z.enum(['ready', 'error']);
+const superseded = z.looseObject({ revision: z.string() }).optional()
+  .describe('Saved again during the check; this is the revision now.');
 const reportFields = { revision, diagnostics: z.array(diagnosticSchema), checks: checksSchema };
 const commandFields = {
   changes: z.array(z.string()).optional().describe('One line per change, as shown in Undo.'),
@@ -143,7 +145,7 @@ export const mcpOutputSchemas = {
   }),
   get_authoring_context: z.looseObject({
     project: z.string(), root: z.string().describe('The book folder.'), guide: z.string(),
-    revision: reportFields.revision.optional().describe('Like diagnostics, checks, templateIdentity and sources, left out when only docs or examples were requested: such a call does not look at the book.'),
+    revision: reportFields.revision.optional(),
     diagnostics: reportFields.diagnostics.optional(), checks: reportFields.checks.optional(),
     template: z.looseObject({}).optional().describe('Parsed template declarations: the active format, every format in full (printFormats), parameters, layouts with their boxes and elements, layout families and opening spreads.'),
     templateIdentity: templateIdentitySchema.optional(),
@@ -164,7 +166,7 @@ export const mcpOutputSchemas = {
     items: z.array(z.looseObject({})).optional(), total: z.number().optional(), nextOffset: z.number().nullable().optional(),
   }),
   check_book: z.looseObject({
-    state, ...reportFields,
+    state, ...reportFields, superseded,
     image: imageSchema.optional(),
     typecheck: z.looseObject({ files: z.array(z.string()), totalDiagnostics: z.number(), truncated: z.boolean(), elapsedMs: z.number() }).optional(),
     draft: z.looseObject({ applied: z.boolean(), committed: z.literal(false), ...commandFields }).optional()

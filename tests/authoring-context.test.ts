@@ -562,19 +562,66 @@ test('continued watcher churn is rejected after four calls of two full attempts,
   assert.equal(attempts, 8);
 });
 
-test('a check that saw the book change while the user edits is repeated once the book is quiet', async (t) => {
+test('a check that saw a text change while the user edits is repeated once the book is quiet', async (t) => {
   const { hooks, call, session } = await fixture(t);
   const check = hooks.check;
   let attempts = 0;
   hooks.check = async (...args) => {
     const result = await check(...args);
-    // The app saves project.json a few times in a row, as while the user drags photos (API-007).
-    if (++attempts <= 3) session.inputs.invalidate('project.json');
+    if (++attempts <= 3) session.inputs.invalidate('texts/one.md');
     return result;
   };
   const result = await call('check_book');
   assert.equal(result.state, 'ready');
   assert.equal(attempts, 4);
+});
+
+test('calls stand while the user saves the book during every check, and say which revision they are of (API-007)', async (t) => {
+  const { folder, hooks, call, session } = await fixture(t);
+  const check = hooks.check;
+  let saves = 0, checks = 0;
+  // The app saves project.json during the render, as while the user drags photos.
+  hooks.check = (book, request, signal, index, draft) => {
+    checks++;
+    return checkProject(book, hooks.cache, request, async () => {
+      await writeFile(join(folder, 'project.json'), JSON.stringify({ ...project, title: 'Saved ' + ++saves }));
+      session.inputs.invalidate('project.json');
+      return { status };
+    }, signal, index, undefined, draft);
+  };
+  const before = (await session.inputs.capture()).revision;
+  const checked = await call('check_book');
+  assert.equal(checks, 1, 'nothing is checked again');
+  assert.equal(checked.revision, before);
+  assert.deepEqual(checked.superseded, { revision: (await session.inputs.capture()).revision });
+  // Reads are of the book as it is now, with the report of the revision that was checked.
+  for (const name of ['inspect_book', 'get_authoring_context']) {
+    const was = (await session.inputs.capture()).revision;
+    const read = await call(name);
+    const now = (await session.inputs.capture()).revision;
+    assert.notEqual(now, was);
+    assert.equal(read.revision, now);
+    assert.equal(read.checkedRevision, was);
+    if (name === 'inspect_book') { assert.equal(read.title, 'Saved ' + saves); assert.equal(read.pages, 2); }
+  }
+  assert.equal(checks, 3);
+  // A superseded check answers no later one, and a commit still needs the revision of now.
+  hooks.check = check;
+  assert.equal((await call('check_book')).superseded, undefined);
+  session.book.readOnly = false;
+  await assert.rejects(call('apply_project_changes', { label: 'Old', operations: [{ op: 'set_title', title: 'Must not save' }], expectedRevision: before, idempotencyKey: 'old' }),
+    (error) => error instanceof AuthoringError && error.code === 'REVISION_CONFLICT');
+});
+
+test('a template edit while the book is saved still rejects the check', async (t) => {
+  const { folder, hooks, call } = await fixture(t);
+  let edits = 0;
+  hooks.check = (book, request, signal, index, draft) => checkProject(book, hooks.cache, request, async () => {
+    await writeFile(join(folder, 'project.json'), JSON.stringify({ ...project, title: 'Saved ' + ++edits }));
+    await writeFile(join(folder, 'template/index.tsx'), source + '\n// ' + edits);
+    return { status };
+  }, signal, index, undefined, draft);
+  await assert.rejects(call('check_book'), (error) => error instanceof AuthoringError && error.code === 'SOURCE_CHANGED');
 });
 
 test('a watcher retry preserves the requested revision and preview target', async (t) => {

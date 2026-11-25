@@ -614,8 +614,14 @@ test('a check of a book whose previews are being fetched waits for none and asks
   assert.equal(during.state, 'ready');
   assert.deepEqual(during.diagnostics.filter(({ code }) => code === 'photo-preview-loading').map(({ severity, details }) => ({ severity, details })),
     [{ severity: 'warning', details: { photos: 1 } }], 'the placed photo drawn without its picture is named');
-  f.open();
-  await f.fetching;
+  // Previews that come while it renders move the revision, and the check stands (API-007).
+  const revised = await checkProject(f.book, f.cache, {}, async () => {
+    f.open();
+    await f.fetching;
+    return { status: { state: 'ready', pages: 2, units: [], errors: [], warnings: [], flow: {}, anchors: [], template: {} } as never };
+  }, new AbortController().signal);
+  assert.equal(revised.state, 'ready', JSON.stringify(revised.diagnostics));
+  assert.ok(revised.superseded && revised.superseded.revision !== revised.revision);
   // The facts of the previews that came are not in the file yet: the check reads them from the open book.
   const after = await f.check();
   assert.deepEqual(after.diagnostics.filter(({ code }) => code === 'photo-preview-loading'), []);

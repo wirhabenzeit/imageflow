@@ -41,7 +41,7 @@ An IPC failure returns `{ error }`. A completed check returns `{ value }`, with:
 - `render`, when available, with the actual template declarations, page sequence, flow positions, and findings.
 - `image`, when requested and available, with MIME type, base64 data, pixel/physical dimensions, spread identity, page side, and page numbers.
 
-`state: 'ready'` means rendering completed. Layout errors may still be present, and it does not imply print readiness. `revision-conflict` and `source-changed` results must be handled by inspecting/checking again rather than treating an old image as current.
+`state: 'ready'` means rendering completed. Layout errors may still be present, and it does not imply print readiness. A result with `superseded` is of its own `revision`: the book was saved again meanwhile, and `superseded.revision` is the one now. `revision-conflict` and `source-changed` results must be handled by inspecting/checking again rather than treating an old image as current.
 
 ## Scope and limitations
 

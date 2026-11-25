@@ -21,11 +21,19 @@ type InputState = { kind: 'missing' } | { kind: 'unavailable' } | { kind: 'provi
 const isExisting = (state: InputState): state is ExistingInput => state.kind === 'file' || state.kind === 'directory';
 type Entry = { input: Input; state: InputState; digest?: string; children?: string[] };
 type CaptureOptions = { signal?: AbortSignal; attempts?: 1 | 2 | 3 };
-export type ProjectInputCapture = { revision: ProjectRevision; observation: string; metadataObservation: string };
+export type ProjectInputCapture = { revision: ProjectRevision; observation: string; metadataObservation: string;
+  /** Everything but the revisions of photos without a file: equal while nothing but those moved. */
+  content: string;
+  /**
+   * The files a loaded book still reads or depends on: everything but the two manifests and the photos without a file.
+   * While it is equal, a book loaded before is drawn as it was loaded, whatever was saved to its manifests since.
+   */
+  files: string };
 export type InputIndexMetrics = { captures: number; filesHashed: number; bytesHashed: number; cacheHits: number;
   photoFilesHashed: number; photoBytesHashed: number };
 type IndexedDigest = { state: ExistingInput; digest: string };
-type IndexState = { entries: Map<string, IndexedDigest>; generation: number; closed: boolean; metrics: InputIndexMetrics };
+type Generations = { all: number; content: number; files: number };
+type IndexState = { entries: Map<string, IndexedDigest>; generation: Generations; closed: boolean; metrics: InputIndexMetrics };
 const maximumIndexedFiles = 8192;
 
 export const ignoredName = (name: string) => name === '.DS_Store' || name === '.imageflow' ||
@@ -173,7 +181,8 @@ function readManifest(bytes: Buffer): unknown {
 
 async function capture(folder: string, signal?: AbortSignal, index?: IndexState): Promise<ProjectInputCapture> {
   signal?.throwIfAborted();
-  const generation = index?.generation;
+  // Photos without a file that change in their source (`all` alone moves) disturb no capture: none of its files changed.
+  const generation = index && { ...index.generation };
   if (index) {
     if (index.closed) throw new ProjectRevisionError('source-changed');
     index.metrics.captures++;
@@ -204,7 +213,7 @@ async function capture(folder: string, signal?: AbortSignal, index?: IndexState)
         index!.entries.set(input.path, cached);
       } else {
         result = await readInput(root, input, state, signal, keepBytes, index?.metrics);
-        if (index && (index.closed || index.generation !== generation)) throw new ProjectRevisionError('source-changed', input.path);
+        if (index && (index.closed || index.generation.content !== generation!.content)) throw new ProjectRevisionError('source-changed', input.path);
         if (index && !keepBytes) {
           index.entries.set(input.path, { state, digest: result.digest });
           while (index.entries.size > maximumIndexedFiles) index.entries.delete(index.entries.keys().next().value!);
@@ -255,6 +264,7 @@ async function capture(folder: string, signal?: AbortSignal, index?: IndexState)
 
   const hash = createHash('sha256').update('imageflow-project-revision-1\n');
   const observation = createHash('sha256').update('imageflow-project-observation-1\n');
+  const content = createHash('sha256'), files = createHash('sha256');
   for (const { input, state, digest, children } of [...entries.values()].sort((a, b) => a.input.path < b.input.path ? -1 : 1)) {
     signal?.throwIfAborted();
     const { path } = input;
@@ -265,27 +275,35 @@ async function capture(folder: string, signal?: AbortSignal, index?: IndexState)
     }
     const actual = isExisting(state) ? portable(relative(root, state.actual)) : null;
     hash.update(JSON.stringify([portable(path), input.external ?? null, state.kind, actual, state.kind === 'provided' ? state.token : digest ?? null]) + '\n');
+    let stamp: string | null = null;
     if (isExisting(current)) {
       const { dev, ino, size, mtimeNs, ctimeNs } = current.info;
-      observation.update(JSON.stringify([portable(path), [dev, ino, size, mtimeNs, ctimeNs].join(':')]) + '\n');
+      stamp = [dev, ino, size, mtimeNs, ctimeNs].join(':');
+      observation.update(JSON.stringify([portable(path), stamp]) + '\n');
     }
+    const provided = input.token !== undefined;
+    const record = JSON.stringify([portable(path), input.external ?? null, provided ? null : state.kind, actual, digest ?? null, stamp]) + '\n';
+    content.update(record);
+    if (!provided && input.folder) files.update(record);
   }
   if (await realpath(folder).catch(() => undefined) !== root) throw new ProjectRevisionError('source-changed');
   signal?.throwIfAborted();
   const metadataObservation = observation.copy().digest('hex');
   if (index) {
-    if (index.closed || index.generation !== generation) throw new ProjectRevisionError('source-changed');
+    if (index.closed || index.generation.content !== generation!.content) throw new ProjectRevisionError('source-changed');
     // Even a reverted edit observed by the watcher invalidates an in-flight result.
-    observation.update('generation:' + generation);
+    observation.update('generation:' + generation!.all);
+    content.update('generation:' + generation!.content);
+    files.update('generation:' + generation!.files);
     for (const path of index.entries.keys()) if (!entries.has(path)) index.entries.delete(path);
   }
-  return { revision: hash.digest('hex'), observation: observation.digest('hex'), metadataObservation };
+  return { revision: hash.digest('hex'), observation: observation.digest('hex'), metadataObservation, content: content.digest('hex'), files: files.digest('hex') };
 }
 
 /** One bounded digest index per open project. Watchers invalidate it immediately, while every capture
  * also reconciles metadata and directory membership so missed events cannot silently reuse changed files. */
 export class ProjectInputIndex {
-  private readonly state: IndexState = { entries: new Map(), generation: 0, closed: false,
+  private readonly state: IndexState = { entries: new Map(), generation: { all: 0, content: 0, files: 0 }, closed: false,
     metrics: { captures: 0, filesHashed: 0, bytesHashed: 0, cacheHits: 0, photoFilesHashed: 0, photoBytesHashed: 0 } };
   private pending: Promise<unknown> = Promise.resolve();
   // Recent watcher events, newest last, so a check that gave up can say what kept changing (API-007).
@@ -298,10 +316,20 @@ export class ProjectInputIndex {
     if (this.state.closed || (path !== undefined && !isProjectInputPath(path))) return;
     this.changes.push({ at: Date.now(), path: path === undefined ? undefined : portable(path) });
     if (this.changes.length > 64) this.changes.splice(0, this.changes.length - 64);
-    this.state.generation++;
+    this.state.generation.all++;
+    this.state.generation.content++;
+    if (!manifests.some((name) => name === path)) this.state.generation.files++;
     for (const name of this.state.entries.keys()) {
       if (path === undefined || name === path || name.startsWith(path + sep)) this.state.entries.delete(name);
     }
+  }
+
+  /** Photos without a file changed in their source: no file did, so nothing is read again. */
+  providedChanged() {
+    if (this.state.closed) return;
+    this.changes.push({ at: Date.now(), path: '(photos from Lightroom Classic)' });
+    if (this.changes.length > 64) this.changes.splice(0, this.changes.length - 64);
+    this.state.generation.all++;
   }
 
   capture({ signal, attempts = 2 }: CaptureOptions = {}): Promise<ProjectInputCapture> {

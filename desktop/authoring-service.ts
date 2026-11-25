@@ -263,6 +263,8 @@ export function createAuthoringService(hooks: Hooks) {
     if (!session || session.handle !== handle) throw new AuthoringError('PROJECT_CLOSED', 'This project is no longer open. Call list_projects for current handles.');
     return session;
   };
+  // The files each report was checked against (`ProjectInputCapture.files`), for calls that combine it with what they read.
+  const checkedFiles = new WeakMap<AuthoringCheckResult, string>();
   const checkOnce = async (session: ProjectSession, signal: AbortSignal, request: AuthoringCheckRequest, fresh: boolean, draft?: CheckDraft,
     cacheMode: 'complete' | 'draft-base' = 'complete') => {
     signal.throwIfAborted();
@@ -276,7 +278,9 @@ export function createAuthoringService(hooks: Hooks) {
     // A draft can use cached declarations and defer its requested type check to the subsequent draft render.
     if (!fresh && !draft && !coverCheck && !request.preview && !request.inspect && (!request.typescript || cacheMode === 'draft-base') && expectedMatches && cachedCheck) {
       get(session.handle);
-      return { result: structuredClone(cachedCheck.result), watcherInvalidated: false };
+      const result = structuredClone(cachedCheck.result);
+      checkedFiles.set(result, cachedCheck.inputs.files);
+      return { result, watcherInvalidated: false };
     }
     if (fresh && !draft && !coverCheck) cachedCheck = undefined;
     const result = await hooks.check(session.book, request, signal, session.inputs, draft);
@@ -284,6 +288,14 @@ export function createAuthoringService(hooks: Hooks) {
     const after = await contextInputs(session.inputs, signal);
     if (before.failure !== after.failure || before.inputs?.revision !== after.inputs?.revision ||
         before.inputs?.observation !== after.inputs?.observation || result.revision !== (after.inputs?.revision ?? null)) {
+      // Saved again meanwhile, with every file as it was: the report stands for the revision it names.
+      if (before.inputs && after.inputs && before.inputs.files === after.inputs.files && result.revision &&
+          !result.diagnostics.some(({ code }) => code === 'source-changed')) {
+        checkedFiles.set(result, after.inputs.files);
+        if (after.inputs.revision === result.revision) delete result.superseded;
+        else result.superseded = { revision: after.inputs.revision };
+        return { result, watcherInvalidated: false };
+      }
       if (before.inputs && after.inputs && before.inputs.revision === after.inputs.revision &&
           before.inputs.metadataObservation === after.inputs.metadataObservation && before.inputs.observation !== after.inputs.observation) {
         return { result, watcherInvalidated: true };
@@ -295,6 +307,7 @@ export function createAuthoringService(hooks: Hooks) {
       const { image: _image, ...baseline } = result;
       cachedCheck = { session, inputs: after.inputs, result: structuredClone(baseline) };
     }
+    if (after.inputs) checkedFiles.set(result, after.inputs.files);
     return { result, watcherInvalidated: false };
   };
   const checked = async (session: ProjectSession, signal: AbortSignal, request: AuthoringCheckRequest = {}, fresh = false, draft?: CheckDraft,
@@ -662,9 +675,13 @@ export function createAuthoringService(hooks: Hooks) {
       // Drafts follow the book like dry runs, except a page-number preview, whose page may now show another spread.
       const movedDraftCheck = async () => {
         const pageTarget = typeof args.preview?.target?.page === 'number' && !args.preview?.target?.spread;
-        const moved = pageTarget ? undefined : await movedRevision(session, args.expectedRevision, signal);
-        const result = await draftCheck(session, signal, moved?.current ?? args.expectedRevision, args.draft.operations, args.preview, args.inspect, args.typescript, args.cover);
-        return moved && result.revision === moved.current ? { ...result, ...moved.reply } : result;
+        for (let attempt = 1; ; attempt++) {
+          const moved = pageTarget ? undefined : await movedRevision(session, args.expectedRevision, signal);
+          const result = await draftCheck(session, signal, moved?.current ?? args.expectedRevision, args.draft.operations, args.preview, args.inspect, args.typescript, args.cover);
+          // Saved again between the look and the check: planned at the revision it has now.
+          if (!pageTarget && attempt < 3 && result.diagnostics.some(({ code }) => code === 'revision-conflict')) continue;
+          return moved && result.revision === moved.current ? { ...result, ...moved.reply } : result;
+        }
       };
       const report = args.fixtures
         ? await fixtureCheck(session, signal, args.fixtures, args.expectedRevision, args.typescript)
@@ -681,14 +698,19 @@ export function createAuthoringService(hooks: Hooks) {
     if (name === 'inspect_book' && args.view === 'elements') {
       const report = await checked(session, signal, { inspect: { spread: args.spread, cover: args.cover, page: args.page, box: args.box, element: args.element,
         offset: args.offset, limit: args.limit } });
-      return { project: session.handle, revision: report.revision, state: report.state, diagnostics: report.diagnostics,
+      return { project: session.handle, revision: report.revision, ...(report.superseded ? { superseded: report.superseded } : {}), state: report.state, diagnostics: report.diagnostics,
         checks: report.checks, ...report.render?.inspection };
     }
     if (name === 'get_authoring_context' || name === 'inspect_book') {
       const report = await checked(session, signal);
       const folder = session.book.folder;
       const before = await contextInputs(session.inputs, signal);
-      if (report.revision !== (before.inputs?.revision ?? null)) throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while preparing context. Check again.');
+      // Saved again since the check, with every file as it was: the declarations are the template's still, and the rest is read now.
+      const savedSince = report.revision !== (before.inputs?.revision ?? null);
+      if (savedSince && !(report.revision && before.inputs && checkedFiles.get(report) === before.inputs.files)) {
+        throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while preparing context. Check again.');
+      }
+      const revisions = { revision: before.inputs?.revision ?? null, ...(savedSince ? { checkedRevision: report.revision } : {}) };
       const reportedFailure = report.diagnostics.find(({ code }) => ['source-missing', 'source-outside-project', 'source-unreadable'].includes(code));
       if (before.failure && reportedFailure && before.failure !== JSON.stringify([reportedFailure.code, reportedFailure.location?.path])) {
         throw new AuthoringError('SOURCE_CHANGED', 'Unavailable inputs changed after checking. Check again.');
@@ -765,12 +787,12 @@ export function createAuthoringService(hooks: Hooks) {
         // One for topics or examples alone never comes here (isReferenceCall).
         const requestedOnly = !args.includeTemplate && !!args.includeSource?.length;
         if (requestedOnly) {
-          result = { project: session.handle, revision: report.revision, root: session.book.folder, guide: contextGuide,
+          result = { project: session.handle, ...revisions, root: session.book.folder, guide: contextGuide,
             templateIdentity, diagnostics, checks: report.checks, sources,
             ...(args.docs?.length ? { docs: reference.docs } : {}),
             examples: examples.filter((example) => 'source' in example) };
         } else result = {
-          project: session.handle, revision: report.revision, root: session.book.folder, guide: contextGuide,
+          project: session.handle, ...revisions, root: session.book.folder, guide: contextGuide,
           template, templateIdentity, diagnostics, checks: report.checks, sources,
           templateFiles: files[0].status === 'fulfilled' ? files[0].value : [],
           topics: reference.topics,
@@ -831,8 +853,8 @@ export function createAuthoringService(hooks: Hooks) {
         if (view === 'sources' && args.kind) records = records.filter((record) => (record as { kind?: string }).kind === args.kind);
         const listed = view === 'summary' ? {} : { offset, items: records.slice(offset, offset + limit), nextOffset: offset + limit < records.length ? offset + limit : null,
           ...(counts ? { counts } : {}) };
-        result = { project: session.handle, revision: report.revision, title: project?.title, format: project?.format, templateIdentity,
-          pages: report.render?.pages, total: records.length, ...listed,
+        result = { project: session.handle, ...revisions, title: project?.title, format: project?.format, templateIdentity,
+          pages: savedSince ? sequence?.count : report.render?.pages, total: records.length, ...listed,
           ...((view === 'summary' || view === 'cover') && (availableCover || savedCover) ? {
             cover: { ...(availableCover ?? { status: 'unavailable', reason: 'The active format has no exterior cover.' }),
               layout: savedCover?.definition ?? null, ...(view === 'cover' ? { artwork: savedCover ?? null } : {}) },
@@ -852,7 +874,7 @@ export function createAuthoringService(hooks: Hooks) {
       const documentsAfter = await readDocuments();
       const after = await contextInputs(session.inputs, signal);
       if (!sameDocuments(documents, documentsAfter) || before.failure !== after.failure ||
-          before.inputs?.revision !== after.inputs?.revision || before.inputs?.observation !== after.inputs?.observation) {
+          before.inputs?.content !== after.inputs?.content) {
         throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while inspecting. Retry for current context.');
       }
       get(session.handle);
