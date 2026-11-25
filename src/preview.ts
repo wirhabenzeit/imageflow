@@ -108,6 +108,15 @@ export function parsePreviewRequest(value: unknown) {
   return parsed.data;
 }
 
+/** The spread an ID names: itself, or the only one that starts with it, at least six characters long (API-023). */
+export function spreadByPrefix(ids: readonly string[], id: string) {
+  if (ids.includes(id)) return id;
+  const matches = id.length >= 6 ? ids.filter((candidate) => candidate.startsWith(id)) : [];
+  if (matches.length === 1) return matches[0];
+  throw new PreviewError('preview-target-not-found', matches.length ? 'Several spreads start with ' + id + ': ' + matches.slice(0, 5).join(', ') + '.'
+    : 'Spread ' + id + ' does not exist in this book. List spreads with inspect_book view spreads.');
+}
+
 export function artworkTarget(spreads: Pick<SpreadState, 'id'>[], sequence: ReturnType<typeof pageSequence>,
   target: Exclude<ReturnType<typeof parsePreviewRequest>['target'], { spreads: string[] } | { cover: true } | { picker: true }>): { index: number; side: PrintSide; page: UnitPages; spread: string } {
   if ('page' in target && !('spread' in target)) {

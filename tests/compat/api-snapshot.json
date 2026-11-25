@@ -2701,14 +2701,15 @@
             "type": "boolean"
           },
           "include": {
-            "maxItems": 3,
+            "maxItems": 4,
             "type": "array",
             "items": {
               "type": "string",
               "enum": [
                 "units",
                 "flow",
-                "anchors"
+                "anchors",
+                "occurrences"
               ]
             }
           },
@@ -6734,120 +6735,22 @@
     "import_sources": {
       "readOnly": false,
       "input": {
-        "anyOf": [
-          {
-            "type": "object",
-            "properties": {
-              "project": {
-                "$ref": "#/$defs/__schema0"
-              },
-              "expectedRevision": {
-                "$ref": "#/$defs/__schema1"
-              },
-              "idempotencyKey": {
-                "$ref": "#/$defs/__schema2"
-              },
-              "paths": {
-                "$ref": "#/$defs/__schema3"
-              },
-              "kind": {
-                "type": "string",
-                "const": "photo"
-              }
-            },
-            "required": [
-              "project",
-              "expectedRevision",
-              "idempotencyKey",
-              "paths",
-              "kind"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "project": {
-                "$ref": "#/$defs/__schema0"
-              },
-              "expectedRevision": {
-                "$ref": "#/$defs/__schema1"
-              },
-              "idempotencyKey": {
-                "$ref": "#/$defs/__schema2"
-              },
-              "paths": {
-                "$ref": "#/$defs/__schema3"
-              },
-              "kind": {
-                "type": "string",
-                "const": "markdown"
-              }
-            },
-            "required": [
-              "project",
-              "expectedRevision",
-              "idempotencyKey",
-              "paths",
-              "kind"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "project": {
-                "$ref": "#/$defs/__schema0"
-              },
-              "expectedRevision": {
-                "$ref": "#/$defs/__schema1"
-              },
-              "idempotencyKey": {
-                "$ref": "#/$defs/__schema2"
-              },
-              "paths": {
-                "$ref": "#/$defs/__schema3"
-              },
-              "kind": {
-                "type": "string",
-                "const": "file"
-              },
-              "accept": {
-                "minItems": 1,
-                "maxItems": 20,
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "pattern": "^\\.[a-z0-9]{1,10}$"
-                }
-              }
-            },
-            "required": [
-              "project",
-              "expectedRevision",
-              "idempotencyKey",
-              "paths",
-              "kind",
-              "accept"
-            ],
-            "additionalProperties": false
-          }
-        ],
-        "$defs": {
-          "__schema0": {
+        "type": "object",
+        "properties": {
+          "project": {
             "type": "string",
             "minLength": 1,
             "maxLength": 128
           },
-          "__schema1": {
+          "expectedRevision": {
             "type": "string",
             "pattern": "^[a-f0-9]{64}$"
           },
-          "__schema2": {
+          "idempotencyKey": {
             "type": "string",
             "pattern": "^[a-zA-Z0-9_-]{1,128}$"
           },
-          "__schema3": {
+          "paths": {
             "minItems": 1,
             "maxItems": 20,
             "type": "array",
@@ -6856,9 +6759,33 @@
               "minLength": 1,
               "maxLength": 512
             }
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "photo",
+              "markdown",
+              "file"
+            ]
+          },
+          "accept": {
+            "minItems": 1,
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^\\.[a-z0-9]{1,10}$"
+            }
           }
         },
-        "type": "object"
+        "required": [
+          "project",
+          "expectedRevision",
+          "idempotencyKey",
+          "paths",
+          "kind"
+        ],
+        "additionalProperties": false
       },
       "output": {
         "type": "object",

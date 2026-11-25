@@ -6,7 +6,7 @@ import type { AuthoringCheckResult, AuthoringDraftSummary } from '../src/authori
 import type { AuthoringDiagnostic } from '../src/authoring';
 import type { Issue, RenderStatus } from '../src/desktop';
 import type { PreviewRequest } from '../src/preview';
-import { PreviewError } from '../src/preview';
+import { PreviewError, spreadByPrefix } from '../src/preview';
 import { captureProjectInputs, ProjectRevisionError } from './revisions';
 import type { ProjectInputIndex } from './revisions';
 import type { CheckRenditionCache } from './check-cache';
@@ -151,6 +151,11 @@ export async function checkProject(
       if (planned.summary) result.draft = planned.summary;
       fixture = !!planned.fixture;
     }
+    // Looked up before anything is drawn: a wrong spread costs no render of the book (API-023).
+    const spreadIds = rendered.project.spreads.map(({ id }) => id);
+    if (preview && 'spread' in preview.target) preview = { ...preview, target: { ...preview.target, spread: spreadByPrefix(spreadIds, preview.target.spread) } };
+    if (preview && 'spreads' in preview.target) preview = { ...preview, target: { ...preview.target, spreads: preview.target.spreads.map((id) => spreadByPrefix(spreadIds, id)) } };
+    if (inspect?.spread) inspect = { ...inspect, spread: spreadByPrefix(spreadIds, inspect.spread) };
     const checked = await render(rendered, preview, signal, inspect, parsed.data.cover);
     if (!await stillDrawn()) {
       throw new ProjectRevisionError('source-changed');

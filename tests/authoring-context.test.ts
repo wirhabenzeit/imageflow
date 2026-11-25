@@ -8,7 +8,7 @@ import { checkedOutput } from './mcp-output-check';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import sharp from 'sharp';
-import { AuthoringError, compactRender, createAuthoringService, isReferenceCall } from '../desktop/authoring-service';
+import { AuthoringError, compactDiagnostics, compactRender, createAuthoringService, isReferenceCall } from '../desktop/authoring-service';
 import { checkProject } from '../desktop/check';
 import { importIntoProject, loadProject } from '../desktop/project';
 import { ProjectSession } from '../desktop/project-session';
@@ -965,6 +965,23 @@ test('check replies count the book-wide render lists and list only the addressed
   const included = compactRender(render, { image: { spread: 'two' } }, { include: ['anchors'] });
   assert.deepEqual(included.anchors, render.anchors);
   assert.deepEqual(included.units, [render.units[1]]);
+});
+
+test('a finding in many places names the first few and counts them, unless all are asked for (API-014)', async (t) => {
+  const { hooks, call } = await fixture(t);
+  const errors = Array.from({ length: 32 }, (_, n) => ({ message: 'Original unavailable', code: 'source-unavailable', spread: 'one', where: 'Pages 1–2', box: 'b' + n, source: 'p' + n,
+    sourceKind: 'photo' as const, problem: 'Offline', away: 'catalog' as const }));
+  hooks.check = (book, request, signal, index) => checkProject(book, hooks.cache, request, async () => ({ status: { ...status, errors } }), signal, index);
+  for (const name of ['check_book', 'inspect_book', 'get_authoring_context']) {
+    const [finding, ...rest] = (await call(name)).diagnostics as AuthoringDiagnostic[];
+    assert.deepEqual(rest, []);
+    assert.equal(finding.severity, 'warning');
+    assert.deepEqual(finding.details, { reason: 'catalog', originals: 32, placed: 32, places: 32 });
+    assert.deepEqual(finding.occurrences!.map(({ box }) => box), ['b0', 'b1', 'b2']);
+  }
+  const [all] = (await call('check_book', { include: ['occurrences'] })).diagnostics as AuthoringDiagnostic[];
+  assert.equal(all.occurrences!.length, 32);
+  assert.deepEqual(compactDiagnostics([{ ...all, occurrences: all.occurrences!.slice(0, 3) }])[0].details, all.details, 'three places are all of them');
 });
 
 test('inspection reports a split sheet\'s merge layout as restoreDefinition and lists sources by kind (F-017)', async (t) => {

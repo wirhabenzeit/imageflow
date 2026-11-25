@@ -27,7 +27,7 @@ const importFields = {
     .describe('Up to 20 files inside the book\'s inbox/ folder, at most 100 MB together. Each must match kind.'),
 };
 const extensions = z.array(z.string().regex(/^\.[a-z0-9]{1,10}$/).describe('A lower-case extension with its dot, such as .gpx.')).min(1).max(20)
-  .describe('Extensions the file parameter accepts, matching its accept option.');
+  .describe('Required with kind file: the extensions the file parameter accepts, matching its accept option.');
 
 export const mcpToolSchemas = {
   list_projects: z.strictObject({}),
@@ -68,8 +68,8 @@ export const mcpToolSchemas = {
     project,
     cover: z.literal(true).optional().describe('Check the exterior cover.'),
     includeTemplate: z.boolean().optional().describe('Include full template declarations and render summary.'),
-    include: z.array(z.enum(['units', 'flow', 'anchors'])).max(3).optional()
-      .describe('Render lists to return for the whole book, not just the addressed spreads.'),
+    include: z.array(z.enum(['units', 'flow', 'anchors', 'occurrences'])).max(4).optional()
+      .describe('Render lists to return for the whole book, not just the addressed spreads; occurrences: every place of a finding.'),
     expectedRevision: revision.optional()
       .describe('Required for drafts and page-number previews. Changed inputs return revision-conflict.'),
     preview: makePreviewRequestSchema(spreadReference).optional()
@@ -124,11 +124,14 @@ export const mcpToolSchemas = {
     replaceHash: z.string().regex(/^[a-f0-9]{64}$/, 'Expected a template hash from list_templates.').optional()
       .describe('Hash of the library entry with the same ID that this save may replace, from list_templates or a conflict result. Needed to replace a built-in template, the same version with other files, or a later version.'),
   }),
-  import_sources: z.discriminatedUnion('kind', [
-    z.strictObject({ ...importFields, kind: z.literal('photo').describe('Import photos (.jpg, .jpeg, .png or .webp).') }),
-    z.strictObject({ ...importFields, kind: z.literal('markdown').describe('Import Markdown texts (.md).') }),
-    z.strictObject({ ...importFields, kind: z.literal('file').describe('Import files for file parameters, such as GPX tracks.'), accept: extensions }),
-  ]),
+  // One object, not a union by kind: clients that show only top-level properties would show none (API-016).
+  import_sources: z.strictObject({ ...importFields,
+    kind: z.enum(['photo', 'markdown', 'file']).describe('photo: .jpg, .jpeg, .png or .webp. markdown: .md texts. file: for file parameters, such as GPX tracks.'),
+    accept: extensions.optional(),
+  }).superRefine(({ kind, accept }, context) => {
+    if (kind === 'file' && !accept) context.addIssue({ code: 'custom', path: ['accept'], message: 'Name the extensions the file parameter accepts.' });
+    if (kind !== 'file' && accept) context.addIssue({ code: 'custom', path: ['accept'], message: 'accept is only for kind file.' });
+  }),
   rename_source: z.strictObject({
     project, expectedRevision: revision, idempotencyKey,
     source: z.string().min(1).max(256).describe('ID of a text or file stored in the book, not linked.'),

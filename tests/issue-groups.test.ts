@@ -114,11 +114,12 @@ test('exports still name, count and mark originals that are elsewhere', () => {
   assert.equal(foundText({ errors: [], warnings: [] }, 'proof'), '');
 });
 
-test('a check reports originals that are elsewhere as one error with every place, and as a warning only while none is placed', () => {
+test('a check reports originals that are elsewhere as one warning with every place', () => {
   const { errors, warnings } = secondMac();
   const [one, ...rest] = awayDiagnostics(takeAway({ errors, warnings }).notes);
   assert.deepEqual(rest, []);
-  assert.deepEqual([one.code, one.severity, one.location], ['source-unavailable', 'error', undefined]);
+  assert.deepEqual([one.code, one.severity, one.location], ['source-unavailable', 'warning', undefined]);
+  assert.match(one.message, /Needed for printing\..*marked proofs/);
   assert.equal(one.occurrences!.length, 41);
   assert.deepEqual(one.occurrences![0], { spread: 's1', box: 'hero', source: 'ph-0', where: 'Pages 2–3' });
   assert.deepEqual(one.occurrences!.at(-1), { cover: true, box: 'back', source: 'ph-40', where: 'Cover' });
