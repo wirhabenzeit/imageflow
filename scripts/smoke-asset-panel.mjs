@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { closeApp, testBook } from './ui-actions.mjs';
+import { closeApp, nextWindow, testBook } from './ui-actions.mjs';
 
 // The bottom panel's Assets tab: every asset of the book as a plain list with its system document icon.
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -21,6 +21,10 @@ await writeFile(join(folder, 'project.json'), JSON.stringify({ schemaVersion: 1,
   files: { data: 'files/data.csv' }, spreads: [{ id: 'one', definition: 'story', boxes: { hero: { photo: 'one' } } }] }));
 await sharp({ create: { width: 800, height: 600, channels: 3, background: '#709fb0' } }).jpeg().toFile(join(folder, 'photos/one.jpg'));
 await writeFile(join(folder, 'photos.json'), JSON.stringify({ one: { path: 'photos/one.jpg', title: 'One' }, gone: { path: 'photos/Gone.jpg', title: 'Gone' } }));
+
+// Left by an import that was undone in an earlier session, and by a text removed then (UI-010).
+await sharp({ create: { width: 2400, height: 1800, channels: 3, background: '#a06040', noise: { type: 'gaussian', mean: 120, sigma: 40 } } }).jpeg({ quality: 95 }).toFile(join(folder, 'photos/ph-de3e610f-6e6-Rigi.jpg'));
+await writeFile(join(folder, 'texts/tx-2d37dbab-2a5-Old.md'), 'An old text.');
 
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')], env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 const until = async (check, message = 'Operation completed') => { for (let i = 0; i < 250; i++) { if (await check()) return; await new Promise((resolve) => setTimeout(resolve, 40)); } assert.ok(await check(), message); };
@@ -90,6 +94,35 @@ try {
   await until(async () => await tabs.count() === 2);
   assert.deepEqual(await tabs.allTextContents(), ['Photos 2', 'Texts 1']);
   await page.locator('.source-items-photo').waitFor();
+  // The Assets window lists the files the book no longer uses, and moves them to the Trash when asked. The file removed
+  // a moment ago is not among them: Undo needs it.
+  const [assets] = await Promise.all([nextWindow(app, 'imageflow://editor/assets'), page.evaluate(() => window.imageflow.showAssets([]))]);
+  const title = assets.getByRole('button', { name: /^2 files the book no longer uses · [0-9.]+ [KM]B$/ });
+  await title.click();
+  const left = assets.locator('.asset-leftovers li');
+  assert.deepEqual(await left.evaluateAll((items) => items.map((item) => item.dataset.leftover)), ['photos/ph-de3e610f-6e6-Rigi.jpg', 'texts/tx-2d37dbab-2a5-Old.md']);
+  assert.equal(await left.first().locator('label').innerText(), 'Rigi.jpg');
+  await app.evaluate(({ dialog, shell }) => {
+    globalThis.trashed = []; globalThis.answers = [1, 0];
+    shell.trashItem = async (path) => { globalThis.trashed.push(path); await process.getBuiltinModule('node:fs/promises').rm(path); };
+    dialog.showMessageBox = async (owner, options) => { globalThis.asked = options ?? owner; return { response: globalThis.answers.shift(), checkboxChecked: false }; };
+  });
+  await left.nth(1).getByRole('checkbox').uncheck();
+  const move = assets.getByRole('button', { name: 'Move 1 File to Trash…' });
+  await move.click();
+  await until(async () => !!(await app.evaluate(() => globalThis.asked)), 'It asks first');
+  assert.match((await app.evaluate(() => globalThis.asked)).detail, /ph-de3e610f-6e6-Rigi\.jpg/);
+  await until(async () => await move.isEnabled());
+  assert.deepEqual(await app.evaluate(() => globalThis.trashed), [], 'Cancel moves nothing');
+  await move.click();
+  await assets.getByText('Moved 1 file to the Trash.').waitFor();
+  assert.deepEqual((await app.evaluate(() => globalThis.trashed)).map((path) => path.split('/').pop()), ['ph-de3e610f-6e6-Rigi.jpg']);
+  await assets.getByRole('button', { name: /^1 file the book no longer uses/ }).waitFor();
+  await access(join(folder, 'texts/tx-2d37dbab-2a5-Old.md'));
+  // A file the book uses cannot be named.
+  const refused = await assets.evaluate(() => window.imageflow.sourceAction({ action: 'trash-leftovers', paths: ['photos/one.jpg', 'project.json', '../trash'] }));
+  assert.match(refused.error, /uses these files again, or they are gone/);
+  assert.equal(await page.locator('.status-error').count(), 0);
   assert.deepEqual(errors, []);
   console.log('Assets tab passed:', work);
 } finally { await closeApp(app); }

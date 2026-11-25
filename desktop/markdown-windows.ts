@@ -19,6 +19,8 @@ export class MarkdownWindows {
   constructor(private options: { window(): Electron.BrowserWindowConstructorOptions; secure(window: BrowserWindow): void;
     focus(window: BrowserWindow): void; focused(document: DocumentSession): void }) {}
   windows() { return [...this.entries].map(({ window }) => window); }
+  /** The files a book's open text editors write. */
+  paths(document: DocumentSession) { return [...this.entries].filter((entry) => entry.document === document).map(({ buffer }) => buffer.state.path); }
   documentFor(window: BrowserWindow) { return [...this.entries].find((entry) => entry.window === window)?.document; }
   owner(event: Pick<IpcMainInvokeEvent, 'sender' | 'senderFrame'>) {
     return [...this.entries].find(({ window }) => !window.isDestroyed() && event.sender === window.webContents &&

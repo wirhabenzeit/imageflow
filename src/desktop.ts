@@ -34,7 +34,7 @@ export const channels = {
   showMarkdown: 'markdown:open', markdownAction: 'markdown:action', markdownChanged: 'markdown:changed', markdownPrepareClose: 'markdown:prepare-close',
   presentationState: 'presentation:state', presentationSpread: 'presentation:spread', presentationClose: 'presentation:close', presentationClosed: 'presentation:closed',
   showAssets: 'document:show-assets', showTemplates: 'library:show', templatePreview: 'library:preview',
-  current: 'document:current', appError: 'app:error', appNotice: 'app:notice', previewProgress: 'project:preview-progress',
+  current: 'document:current', appError: 'app:error', appNotice: 'app:notice', previewProgress: 'project:preview-progress', leftoverFiles: 'project:leftover-files',
   recents: 'app:recents', recentsChanged: 'app:recents-changed', recentAction: 'app:recent-action',
   libraryRemote: 'books:remote', libraryBook: 'books:book', libraryAction: 'books:action', downloads: 'books:downloads', downloadsChanged: 'books:downloads-changed',
   sourceCommand: 'document:source-command', templateAction: 'library:action', sourceAction: 'document:source-action', saveCopy: 'document:save-copy',
@@ -252,8 +252,10 @@ export type SyncBook = { id: string; open?: true; view: SyncView | null };
  */
 export type LibraryAction = { action: 'download' | 'cancel-download' | 'delete' | 'update'; bookId: string } | { action: 'start' | 'stop' | 'keep-here' | 'sync-again' | 'delete'; id: string };
 
-export type SourceAction = { action: 'retry' | 'refresh' | 'launch' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump' | 'import' | 'rename'; spread?: string; key?: string; keys?: string[]; accept?: string[]; paths?: string[]; name?: string };
+export type SourceAction = { action: 'retry' | 'refresh' | 'launch' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump' | 'import' | 'rename' | 'reveal-leftovers' | 'trash-leftovers'; spread?: string; key?: string; keys?: string[]; accept?: string[]; paths?: string[]; name?: string };
 
+/** A file in the package that the book no longer uses: its path in the package. */
+export type LeftoverFile = { path: string; size: number; modified: number };
 export type ContextMenuItem = import('./commands').RegisteredCommand | { command: import('./commands').RegisteredCommand; value?: string; label?: string; enabled?: boolean; checked?: boolean; items?: ContextMenuItem[] } | { type: 'separator' };
 export type ContextMenuResult = { command: import('./commands').RegisteredCommand; value?: string };
 export type SourceCommand = { action: 'place'; keys: string[] } | { action: 'jump'; spread: string };
@@ -294,6 +296,8 @@ export type DesktopApi = {
   showTemplates(): Promise<void>;
   templatePreview(id: string, hash: string): Promise<Result<string | null>>;
   sourceAction(request: SourceAction): Promise<Result<{ summary: ProjectSummary; message?: string }>>;
+  /** The files of the package the book no longer uses (UI-010); none of a book that is only read. */
+  leftoverFiles(): Promise<Result<LeftoverFile[]>>;
   saveCopy(includeAssets?: boolean): Promise<Result<null>>;
   currentProject(): Promise<Result<ProjectSummary>>;
   onAppError(listener: (message: string) => void): () => void;

@@ -39,6 +39,7 @@ const api: DesktopApi = {
   showTemplates: () => ipcRenderer.invoke(channels.showTemplates),
   templatePreview: (id, hash) => ipcRenderer.invoke(channels.templatePreview, id, hash),
   sourceAction: (request) => ipcRenderer.invoke(channels.sourceAction, request),
+  leftoverFiles: () => ipcRenderer.invoke(channels.leftoverFiles),
   saveCopy: (includeAssets) => ipcRenderer.invoke(channels.saveCopy, includeAssets),
   currentProject: () => ipcRenderer.invoke(channels.current),
   onAppError: (listener) => listen(channels.appError, listener),
