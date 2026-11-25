@@ -10,6 +10,7 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { selectUpdate, nativeUpdateURL } from '../src/update-feed.ts';
 import { run, verifyMacSigning } from './verify-mac-signing.mjs';
+import { waitForPage, waitForProject } from './ui-actions.mjs';
 import { readPlan, work } from './upgrade-fixtures.mjs';
 import { readWriterLock } from './book-state.mjs';
 
@@ -61,7 +62,7 @@ const editor = async (expectedVersion, previousSocket) => {
   browser = await chromium.connectOverCDP(`http://127.0.0.1:${plan.debugPort}`);
   const page = await until(() => browser.contexts()[0]?.pages().find((page) => page.url() === 'imageflow://editor/'), 'Book did not reopen after upgrade');
   page.setDefaultTimeout(30000);
-  await page.waitForFunction(async (version) => (await window.imageflow?.updateState()).installedVersion === version, expectedVersion);
+  await waitForPage(page, async (version) => (await window.imageflow?.updateState())?.installedVersion === version, expectedVersion);
   await page.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
   return page;
 };
@@ -129,7 +130,7 @@ try {
   await page.evaluate(() => window.imageflow.updateSettings({ automaticUpdates: false }));
   const heading = page.getByRole('textbox', { name: 'Heading', exact: true });
   await heading.fill('Kept through signed upgrades'); await heading.blur();
-  await page.waitForFunction(async () => (await window.imageflow.currentProject()).value.project.spreads[0].params.heading === 'Kept through signed upgrades');
+  await waitForProject(page, ({ project }) => project.spreads[0].params.heading === 'Kept through signed upgrades');
   await reconnect(page);
   channelHeads.beta = releases.get(plan.versions[1]);
   await page.evaluate(async () => { await window.imageflow.updateSettings({ updateChannel: 'stable' }); await window.imageflow.checkUpdates(); });

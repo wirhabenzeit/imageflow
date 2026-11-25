@@ -35,7 +35,7 @@ try {
   await page.waitForTimeout(300);
   assert.equal(JSON.parse(await readFile(join(folder, 'project.json'), 'utf8')).spreads[0].params?.sheet, undefined);
   await row.dragTo(field('Stage GPX'));
-  await page.waitForFunction(async () => document.querySelector('.pc-file .box-photo-name')?.textContent === 'Song Kul.gpx');
+  await page.waitForFunction(() => document.querySelector('.pc-file .box-photo-name')?.textContent === 'Song Kul.gpx');
   for (let i = 0; i < 50 && JSON.parse(await readFile(join(folder, 'project.json'), 'utf8')).spreads[0].params?.track !== 'route'; i++) await page.waitForTimeout(100);
   assert.equal(JSON.parse(await readFile(join(folder, 'project.json'), 'utf8')).spreads[0].params.track, 'route');
   assert.deepEqual(errors, []);

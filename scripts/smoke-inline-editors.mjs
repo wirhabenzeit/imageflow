@@ -126,7 +126,6 @@ try {
     await w.mouse.up();
     await w.waitForFunction(() => new Promise((resolve) => setTimeout(() => resolve(true), 400)));
   }
-  await w.waitForFunction(async () => true);
   let after;
   for (let i = 0; i < 50 && !(after && after.longitude > before.longitude); i++) {
     await new Promise((resolve) => setTimeout(resolve, 200));
