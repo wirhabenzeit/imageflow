@@ -2025,6 +2025,9 @@
             ],
             "additionalProperties": {}
           },
+          "checkedRevision": {
+            "type": "string"
+          },
           "template": {
             "type": "object",
             "properties": {},
@@ -2492,6 +2495,21 @@
               "print"
             ],
             "additionalProperties": {}
+          },
+          "superseded": {
+            "type": "object",
+            "properties": {
+              "revision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "revision"
+            ],
+            "additionalProperties": {}
+          },
+          "checkedRevision": {
+            "type": "string"
           },
           "activeEditor": {
             "type": "object",

@@ -483,3 +483,25 @@ test('remove_sources clears every use and says how many boxes that is (API-011)'
   assert.deepEqual(applyProjectCommands(book, template, [{ op: 'remove_sources', kind: 'file', sources: ['unsupported'] }]).changes, ['Removed file unsupported from the book; unused']);
   failure([{ op: 'remove_sources', kind: 'photo', sources: ['p1', 'nope'] }], 'SOURCE_NOT_FOUND');
 });
+
+test('changes of a photo or file on the cover are reported for the cover', () => {
+  const { files: book, template } = placed();
+  // Only the replacement is on the cover: it gets the caption.
+  book.project.cover!.boxes.front.photo = 'p2';
+  assert.equal(applyProjectCommands(book, template, [{ op: 'replace_source', source: 'p1', with: 'p2' }]).affectedCover, true);
+  assert.equal(applyProjectCommands(book, template, [{ op: 'set_photo_metadata', photo: 'p2', values: { caption: 'New' } }]).affectedCover, true);
+  // A file of the book settings and of the cover.
+  book.project.cover!.params = { track: 'route' };
+  const removed = applyProjectCommands(book, template, [{ op: 'remove_sources', kind: 'file', sources: ['route'] }]);
+  assert.match(removed.changes[0], /cleared from book settings, the cover$/);
+  assert.equal(removed.affectedCover, true);
+  assert.equal(removed.affectedSpreads.length, 4);
+});
+
+test('replace_source sees captions cleared earlier in its batch', () => {
+  const { files: book, template } = placed();
+  book.photoIndex.p2.caption = 'Its own';
+  const result = applyProjectCommands(book, template, [{ op: 'set_photo_metadata', photo: 'p2', values: { caption: null } },
+    { op: 'replace_source', source: 'p1', with: 'p2' }], { photo: () => size(6000, 4000) });
+  assert.equal(result.files.photoIndex.p2.caption, 'Old caption');
+});

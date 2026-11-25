@@ -12,6 +12,7 @@ import { configureSourceAccess } from '../desktop/source-access';
 import { configureProxyStore } from '../desktop/proxy-store';
 import { AssetFacts, readAssetFacts } from '../desktop/asset-facts';
 import { acquireProjectLock } from '../desktop/persistence';
+import { loadedPhoto } from '../desktop/authoring-service';
 import { checkProject } from '../desktop/check';
 import { saveDocumentCopy } from '../desktop/source-actions';
 import { loadProject, projectSummary, updateProject } from '../desktop/project';
@@ -658,6 +659,22 @@ test('an observation that is given up ends its request to the plugin', async (t)
   const [result] = await provider.observe('/book', [ref('a', uuid(1))], { signal: job.signal });
   assert.equal(result.state, 'unreadable');
   assert.equal(plugin.jobs.filter(({ type }) => type === 'metadata').length, 0);
+});
+
+test('a photo is known to commands by its size and its source’s caption, also while its preview loads', async (t) => {
+  const f = await bookFetchingPreviews(t, 1);
+  t.after(async () => f.open());
+  f.plugin.photos.get(uuid(3))!.caption = 'From Lightroom';
+  f.plugin.edit(uuid(3), { title: 'Edited' });
+  const pending = await f.load();
+  assert.equal(pending.sources!['photo:lr3'].pending, true);
+  const known = loadedPhoto(pending)('lr3')!;
+  assert.deepEqual([known.width, known.height, known.caption], [6000, 4000, 'From Lightroom']);
+  // A caption saved in the book is the registry's to tell, which a batch may have changed: not what was loaded.
+  const files = structuredClone({ project: pending.project, photoIndex: pending.photoIndex });
+  files.photoIndex.lr1.caption = 'Saved';
+  assert.equal(loadedPhoto(await updateProject(pending, files, true))('lr1')!.caption, undefined);
+  assert.equal(loadedPhoto(pending)('none'), undefined);
 });
 
 test('Save a Copy waits for no previews, and previews that come meanwhile do not fail it', async (t) => {

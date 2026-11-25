@@ -613,6 +613,28 @@ test('calls stand while the user saves the book during every check, and say whic
     (error) => error instanceof AuthoringError && error.code === 'REVISION_CONFLICT');
 });
 
+test('a read of a book whose format was changed during its check is checked again in that format (API-007)', async (t) => {
+  const { folder, hooks, call, session } = await fixture(t);
+  const save = (format?: string) => writeFile(join(folder, 'project.json'), JSON.stringify({ ...project, format }));
+  // The second is the Undo of a first choice: the book is back in the template's own format.
+  for (const [from, to] of [['small', 'large'], ['large', undefined]]) for (const name of ['inspect_book', 'get_authoring_context']) {
+    await save(from);
+    session.inputs.invalidate('project.json');
+    let checks = 0;
+    hooks.check = (book, request, signal, index, draft) => checkProject(book, hooks.cache, request, async (snapshot) => {
+      const formatId = snapshot.project.format ?? 'small';
+      if (!checks++) { await save(to); session.inputs.invalidate('project.json'); }
+      return { status: { ...status, template: { ...status.template, formatId, formats: { small: 'Small', large: 'Large' } } } };
+    }, signal, index, undefined, draft);
+    const read = await call(name);
+    assert.equal(checks, 2);
+    assert.equal(read.checkedRevision, undefined);
+    assert.equal(read.revision, (await session.inputs.capture()).revision);
+    if (name === 'inspect_book') assert.equal(read.format, to);
+    else assert.equal((read.template as { formatId: string }).formatId, to ?? 'small');
+  }
+});
+
 test('a template edit while the book is saved still rejects the check', async (t) => {
   const { folder, hooks, call } = await fixture(t);
   let edits = 0;

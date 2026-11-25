@@ -8,6 +8,7 @@ export type PreviewFailure = { state: SourceState; problem: string };
 export class PreviewFetches {
   private running = new Set<{ done: number; total: number }>();
   private published = 0;
+  private timer?: ReturnType<typeof setTimeout>;
   constructor(private readonly publish: (progress: { done: number; total: number } | null) => void, private readonly everyMs = 250) {}
 
   /** Starts a fetch. `total` is 0 until it is known how many previews it asks for. */
@@ -21,7 +22,15 @@ export class PreviewFetches {
     };
   }
   private report(now: boolean) {
-    if (!now && Date.now() - this.published < this.everyMs) return;
+    const wait = this.published + this.everyMs - Date.now();
+    if (!now && wait > 0) {
+      // Shown a little later even if no further preview comes for a while, as when Lightroom renders one.
+      this.timer ??= setTimeout(() => { this.timer = undefined; this.report(true); }, wait);
+      this.timer.unref?.();
+      return;
+    }
+    clearTimeout(this.timer);
+    this.timer = undefined;
     this.published = Date.now();
     const all = [...this.running].reduce((sum, { done, total }) => ({ done: sum.done + done, total: sum.total + total }), { done: 0, total: 0 });
     this.publish(all.total ? all : null);

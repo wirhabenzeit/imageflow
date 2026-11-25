@@ -172,7 +172,7 @@ export class ProjectCommandError extends Error {
 export function applyProjectCommands(
   files: ProjectFiles, template: TemplateInfo, operations: unknown,
   options: { generateId?: () => string;
-    /** What is known of a registered photo's original: its size, and the caption it is shown with. */
+    /** What is known of a registered photo's original: its size, and the caption its source gives it. */
     photo?: (id: string) => { width: number; height: number; caption?: string } | undefined } = {},
 ): ProjectCommandResult {
   const parsed = projectOperationsSchema.safeParse(operations);
@@ -193,7 +193,8 @@ export function applyProjectCommands(
   function fail(code: ProjectCommandErrorCode, message: string): never {
     throw new ProjectCommandError(code, message, operationIndex);
   }
-  const usersOf = (photo: string) => project.spreads.filter((spread) => storedBoxes(spread).some(({ state }) => state.photo === photo)).map(({ id }) => id);
+  // The layouts, the cover among them, that store a photo.
+  const usersOf = (photo: string) => storedLayouts(project).filter((layout) => storedBoxes(layout).some(({ state }) => state.photo === photo)).map(({ id }) => id);
   const allSpreads = () => project.spreads.map(({ id }) => id);
   // The book's format as the batch has changed it so far: a select_format earlier in the batch applies to the
   // commands after it.
@@ -636,7 +637,8 @@ export function applyProjectCommands(
           const everywhere = used.some(({ spread }) => !spread);
           removeFromBook(next, ids.map((source) => ({ kind: 'file', id: source })));
           changed('Removed ' + what + ' from the book' + (used.length ? '; cleared from ' + [...new Set(used.map(({ spread, cover }) => cover ? 'the cover' : spread || 'book settings'))].join(', ') : '; unused'),
-            everywhere ? allSpreads() : [...new Set(used.map(({ spread }) => spread))], used.length > 0);
+            // A book setting may show anywhere, also on the cover.
+            everywhere ? [...allSpreads(), ...(project.cover ? [coverInstance] : [])] : [...new Set(used.map(({ spread }) => spread))], used.length > 0);
         } else {
           const places = placesOf(operation.kind, new Set(ids));
           removeFromBook(next, ids.map((source) => ({ kind: operation.kind === 'photo' ? 'photo' : 'markdown', id: source })));

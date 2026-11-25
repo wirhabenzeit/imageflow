@@ -97,6 +97,7 @@ export const imageSchema = z.union([
 const state = z.enum(['ready', 'error']);
 const superseded = z.looseObject({ revision: z.string() }).optional()
   .describe('Saved again during the check; this is the revision now.');
+const checkedRevision = z.string().optional().describe('The revision of diagnostics and checks, when it is an earlier one.');
 const reportFields = { revision, diagnostics: z.array(diagnosticSchema), checks: checksSchema };
 const commandFields = {
   changes: z.array(z.string()).optional().describe('One line per change, as shown in Undo.'),
@@ -146,7 +147,7 @@ export const mcpOutputSchemas = {
   get_authoring_context: z.looseObject({
     project: z.string(), root: z.string().describe('The book folder.'), guide: z.string(),
     revision: reportFields.revision.optional(),
-    diagnostics: reportFields.diagnostics.optional(), checks: reportFields.checks.optional(),
+    diagnostics: reportFields.diagnostics.optional(), checks: reportFields.checks.optional(), checkedRevision,
     template: z.looseObject({}).optional().describe('Parsed template declarations: the active format, every format in full (printFormats), parameters, layouts with their boxes and elements, layout families and opening spreads.'),
     templateIdentity: templateIdentitySchema.optional(),
     sources: z.record(z.string(), z.looseObject({ text: z.string(), sha256: z.string(), truncated: z.boolean() })).optional().describe('Requested includeSource files.'),
@@ -159,7 +160,7 @@ export const mcpOutputSchemas = {
     capabilities: z.looseObject({}).optional(),
   }),
   inspect_book: z.looseObject({
-    project: z.string(), ...reportFields,
+    project: z.string(), ...reportFields, superseded, checkedRevision,
     activeEditor: activeBookEditorSchema.optional().describe('Editor open in ImageFlow at the time of summary inspection, with its saved field address when available.'),
     templateIdentity: templateIdentitySchema.optional(),
     cover: z.looseObject({}).optional().describe('Cover availability, saved artwork and resolved geometry for the active format.'),

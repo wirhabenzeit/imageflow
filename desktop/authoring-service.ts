@@ -261,8 +261,14 @@ async function referenceTopics(docs: string, requested: string[]) {
 export const isReferenceCall = (name: string, args: Record<string, any>) => name === 'get_authoring_context' &&
   !args.includeTemplate && !args.includeSource?.length && !!(args.docs?.length || args.includeExamples);
 
-// What commands need to know of a photo beyond its registry entry: its size, and the caption it is shown with.
-const loadedPhoto = (book: OpenProject) => (id: string) => book.photos.get(id) ?? book.unavailablePhotos?.[id];
+/**
+ * What commands need to know of a photo beyond its registry entry: its size, and the caption its source gives it. One
+ * saved in the book is left out: the batch may have changed it.
+ */
+export const loadedPhoto = (book: OpenProject) => (id: string) => {
+  const photo = book.photos.get(id) ?? book.unavailablePhotos?.[id];
+  return photo && { width: photo.width, height: photo.height, caption: photo.provided?.caption };
+};
 
 const contextGuide = 'Start with docs: ["authoring-workflow"]. Use docs for topics, includeExamples for examples and includeSource for files; ' +
   'such calls return just those, without declarations, unless includeTemplate is true. ' +
@@ -750,6 +756,13 @@ export function createAuthoringService(hooks: Hooks) {
         if (document.status === 'rejected') unavailable(document.reason, index === 0 ? 'project.json' : 'photos.json');
       }
       const template = report.render?.template ?? report.template;
+      // The declarations are those of the format that was checked: in another one, the book is checked again.
+      // A book without a saved format, or with one the template no longer has, is in the template's own, usually the first.
+      const formats = Object.keys(template?.formats ?? {});
+      const savedFormat = project?.format && formats.includes(project.format) ? project.format : formats[0];
+      if (savedSince && template && formats.length && savedFormat !== template.formatId) {
+        throw new AuthoringError('SOURCE_CHANGED', 'The format changed while preparing context. Check again.');
+      }
       // This is the library's authored-file hash, not the saved provenance or a source-file/revision digest.
       // Reconcile the library's complete file set: revision capture skips e.g. *.tmp files that the library hashes.
       const observed = await Promise.allSettled([templateObservation(folder, signal)]);

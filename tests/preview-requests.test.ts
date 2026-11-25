@@ -74,3 +74,19 @@ test('a fetch reports now and then, but always its start and its end', () => {
   fetch.end();
   assert.deepEqual(seen, [{ done: 0, total: 3 }, null]);
 });
+
+test('the last progress of a burst shows soon, also when no further preview comes', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const seen: ({ done: number; total: number } | null)[] = [];
+  const fetches = new PreviewFetches((progress) => seen.push(progress), 250);
+  const fetch = fetches.start(10);
+  fetch.progress(1, 10);
+  fetch.progress(2, 10);
+  assert.deepEqual(seen, [{ done: 0, total: 10 }]);
+  t.mock.timers.tick(250);
+  assert.deepEqual(seen.at(-1), { done: 2, total: 10 });
+  fetch.progress(3, 10);
+  fetch.end();
+  t.mock.timers.tick(1000);
+  assert.deepEqual(seen, [{ done: 0, total: 10 }, { done: 2, total: 10 }, null], 'nothing follows the end');
+});
