@@ -16,6 +16,8 @@ import { isLightroomIdentifier } from '../../src/source-locator';
  * - `render { uuids, size: 'preview' | 'full', folder }`: one `LrExportSession` of a few photos into `folder`,
  *   each with its revision (and develop hash) read before the session and after its own render (§4.3).
  * - `selection {}`: the photos selected in Lightroom, for Import from Lightroom Classic….
+ * - `show { uuids }` (plugin 1.2.0): selects the photos, the first one active: in Develop when that is open, else in the Library
+ *   grid. It looks in the folder or collection shown now first, and in All Photographs when they are not all there.
  * - `watch { uuids }`: the photos to poll for changes; the plugin posts `/lightroom/changes` when one moves.
  */
 
@@ -69,6 +71,11 @@ export const selectionResultSchema = z.object({
   photos: z.array(z.object({ uuid: identifier, name: z.string().max(255).optional() })).max(5000),
 });
 export type SelectionResult = z.infer<typeof selectionResultSchema>;
+
+/** How many of the photos are selected now, and the ones the catalog does not hold. */
+export const showResultSchema = z.object({ shown: z.number().int().min(0).max(1000), missing: z.array(z.string()).max(1000).optional() });
+/** The first plugin version that answers the `show` job. */
+export const showSince = '1.2.0';
 
 /** A result checked against its schema; a malformed one is a failure of the job, never half used. */
 export function parseResult<T>(schema: z.ZodType<T>, value: unknown, job: string): T {

@@ -51,6 +51,8 @@ ImageFlow can lay out photos straight from a Lightroom Classic catalog without e
 
 Videos are left out. A photo the book holds already is not added again, and **Edit → Undo** removes what an import added. A Lightroom photo takes its title, caption and credit (Lightroom's copyright, else its creator) from Lightroom; whatever you type in the Inspector wins, and **Revert** goes back to Lightroom's. ImageFlow never writes into the catalog.
 
+**To find a photo in Lightroom,** choose **Show in Lightroom Classic** in the asset's menu, or in the menu of a placed photo. Lightroom comes to the front with the photo, or all the photos you selected, selected. If it is in Develop, it stays there and opens the photo, with the others selected in the filmstrip; otherwise it shows Library's grid. It keeps the folder or collection it shows when that has them all, and switches to All Photographs otherwise. A photo that a filter or a collapsed stack hides cannot be selected; ImageFlow says so. This needs plugin 1.2.0.
+
 **When Lightroom is not running**, or another catalog is open, the photos show as **Offline** and are drawn from their last preview. Choose **Open Lightroom Classic** in the asset's menu or at the bottom of **Assets → Manage Assets…**; the photos come back once the plugin connects. A photo removed from the catalog shows as missing.
 
 **Export.** A PDF export has Lightroom render the photos you placed at full size first, and reuses those renders until a photo changes. While Lightroom is not running it uses their previews, marks those pages ORIGINAL UNAVAILABLE and asks you to confirm a proof. **Copy into Book** renders the photos you choose and makes them the book's own files.

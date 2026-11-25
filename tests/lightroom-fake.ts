@@ -20,6 +20,8 @@ export class FakeLightroom {
   catalog: { id: string; name: string } = { id: catalogId, name: 'Photos.lrcat' };
   readonly photos = new Map<string, FakePhoto>();
   selection: string[] = [];
+  /** Photos a filter or a collapsed stack hides: they cannot be selected. */
+  readonly hidden = new Set<string>();
   watched: string[] = [];
   jobs: Job[] = [];
   /** Called for each photo after it is rendered and before its revision is read again. */
@@ -128,6 +130,13 @@ export class FakeLightroom {
 
   private async answer(job: Job): Promise<unknown> {
     if (job.type === 'watch') { this.watched = job.uuids as string[]; return {}; }
+    // Like the real plugin, one that does not know a job never answers it.
+    if (job.type === 'show' && (this.version === '1.0.0' || this.version === '1.1.0')) return new Promise(() => {});
+    if (job.type === 'show') {
+      const known = (job.uuids as string[]).filter((id) => this.photos.has(id));
+      this.selection = known.filter((id) => !this.hidden.has(id));
+      return { shown: this.selection.length, missing: (job.uuids as string[]).filter((id) => !this.photos.has(id)) };
+    }
     if (job.type === 'selection') return { catalog: this.catalog.id, photos: this.selection.map((id) => ({ uuid: id, name: this.photos.get(id)?.fileName })) };
     if (job.type === 'metadata') {
       const photos = job.photos as { uuid: string; known?: string }[];

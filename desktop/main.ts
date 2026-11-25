@@ -101,6 +101,7 @@ import type { SentPhotos } from './lightroom/bridge';
 import { parseResult, selectionResultSchema } from './lightroom/protocol';
 import type { LightroomLocator } from '../src/source-locator';
 import { launchLightroom } from './lightroom/launch';
+import { showInLightroom } from './lightroom/show';
 import { defaultModules, installMessage, installPlugin, lightroomRunning, pluginStatus } from './lightroom/plugin-install';
 import { lightroomProvider } from './providers/lightroom';
 import { backgroundPreviews } from './provided-photos';
@@ -2608,6 +2609,11 @@ void app.whenReady().then(async () => {
       const count = document.refreshPreviews(chosen.filter(({ key }) => document.book.sources?.[key]?.state === 'available').map(({ id }) => id));
       if (!count) throw new Error('Choose photos whose source is available now.');
       return { summary: document.summary, message: count === 1 ? 'Refreshing the preview from its source…' : 'Refreshing ' + count + ' previews from their source…' };
+    }
+    if (request.action === 'show-lightroom') {
+      if (!lightroom) throw new Error('Lightroom Classic is not available.');
+      const locators = chosen.flatMap((entry) => entry.kind === 'photo' && entry.locator.provider === 'lightroom' ? [entry.locator as LightroomLocator] : []);
+      return { summary: document.summary, message: await showInLightroom(lightroom, locators) };
     }
     if (request.action === 'launch') {
       // Offered only where the photo's provider offers it (`SourceProvider.repairs`). Once the plugin connects, the

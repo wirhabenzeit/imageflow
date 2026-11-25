@@ -26,7 +26,9 @@ import { commandState } from './commands';
 import type { ActiveBookEditor, BookMenuState, TaskProgress } from './desktop';
 import { TaskStatus, taskProgress } from './TaskStatus';
 import { bookName } from './book-name';
+import { sourceEntries, sourceProvider } from './source-locations';
 import type { ImportMode } from './source-locations';
+import { showsInLightroom } from './asset-menu';
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
 import { bookLayout, gridColumns, isRenderOrigin, renderOrigin, spreadCommands, thumbsOrigin } from './desktop';
@@ -1391,7 +1393,9 @@ export function App() {
     const photo = top.type === 'photo';
     const items: import('./desktop').ContextMenuItem[] = photo ? ['box-replace-photo',
       { command: 'box-adjust-crop', enabled: !!source && !cropBlocked(sheet, top.id, top.page) }, { command: 'box-reset-crop', enabled: !!source }] : ['box-edit-text', 'box-replace-text'];
-    if (source) items.push({ type: 'separator' }, 'asset-preview', 'box-show-assets', photo ? 'box-remove-photo' : 'box-remove-text');
+    const entry = source?.kind === 'photo' ? sourceEntries(summary).find(({ key }) => key === 'photo:' + source.id) : undefined;
+    if (source) items.push({ type: 'separator' }, 'asset-preview', 'box-show-assets',
+      ...(entry && sourceProvider(entry) === 'lightroom' ? [{ command: 'asset-show-lightroom' as const, enabled: showsInLightroom(summary, entry) }] : []), photo ? 'box-remove-photo' : 'box-remove-text');
     const result = await api.showContextMenu(items, { ...menuState, editing: false });
     if (!result || current.current?.id !== summary.id) return;
     switch (result.command) {
@@ -1400,6 +1404,7 @@ export function App() {
       case 'box-reset-crop': changeSpreadAt(sheet, (spread) => { const box = spread.boxes[top.id]; if (box?.photo) setPlacement(box, spread.definition, centered); }, 'Crop reset', top.page); break;
       case 'box-edit-text': openOwner(sheet, { type: 'markdown', id: top.id, page: top.page }); break;
       case 'asset-preview': if (source) setQuick(source); break;
+      case 'asset-show-lightroom': if (entry) void runSourceAction({ action: 'show-lightroom', keys: [entry.key] }); break;
       case 'box-show-assets': if (source) { choose(source); showPanel('bottom'); } break;
       case 'box-remove-photo': case 'box-remove-text': changeSpreadAt(sheet, (spread) => { spread.boxes[top.id] = boxBase(spread.boxes[top.id]); }, photo ? 'Photo removed' : 'Text removed', top.page); setCropping(undefined); break;
     }
