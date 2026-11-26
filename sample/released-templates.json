@@ -52,6 +52,10 @@
     "01f2969ca396fb45d36e1db030c782c1887464819c2d51d0d9c0ccdaab1c87c5": {
       "template": "starter",
       "app": "1.0.0-beta.21"
+    },
+    "5d2f202b9138913d604411e958e63b90ee352879118d292ba07267aa23229902": {
+      "template": "starter",
+      "app": "1.0.0-beta.25"
     }
   }
 }
