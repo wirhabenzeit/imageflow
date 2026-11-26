@@ -15,6 +15,7 @@ import type { SourceRef } from './source-items';
 import { captureFact, photoDate } from './photo-view';
 import { bookPhotoMarks } from './source-properties';
 import { MarkFacts } from './SourceMarks';
+import { unreadableHelp } from './away-originals';
 
 const photoFields = [['title', 'Title'], ['caption', 'Caption'], ['credit', 'Credit'], ['altText', 'Alt text']] as const;
 
@@ -79,6 +80,7 @@ export function SourceInspector({ summary, source, template, render, usage, writ
         <p className="muted si-source">{origin && <SourceBadge origin={origin} labelled />}<span title={file?.path}>{photoSourceName(summary, source.id)}</span></p>
         {status?.outOfDate && <p className="muted">{outOfDateNote(status)}</p>}
         {status?.pending ? <p className="muted">{status.problem}</p> : summary.sources?.['photo:' + source.id]?.problem && <p className={status?.away ? 'muted' : 'error-text'}>{summary.sources['photo:' + source.id].problem}{summary.sources['photo:' + source.id].cached ? ' · Showing cached preview' : ''}</p>}
+        {!status?.pending && unreadableHelp(status) && <p className="muted">{unreadableHelp(status)}</p>}
       </div>
       {summary.photos[source.id]
         ? <button type="button" className="si-preview" title="Quick Look (Space)" onClick={quickLook}>

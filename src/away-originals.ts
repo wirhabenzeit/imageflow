@@ -74,6 +74,34 @@ const suggestions: Record<SourceAway, string> = {
   uploading: 'Nothing needs to be done to edit the book. Print it once the other Mac has uploaded the originals.',
 };
 export const awaySuggestion = (away: SourceAway) => suggestions[away];
+/**
+ * A photo of Apple Photos that this Mac cannot read now (UI-018): not in its Photos library (often one another Mac
+ * added, which iCloud Photos has not brought yet), no access, or iCloud out of reach. Told from the state a load found
+ * already, so nothing more is asked of Photos; with or without a preview.
+ */
+export const unreadableInPhotos = (status: SourceStatus | undefined) => status?.kind === 'photo' && status.locator.provider === 'photos' && !status.pending &&
+  (status.state === 'missing' || status.state === 'offline' || status.state === 'denied');
+/** What the user can do about such a photo, where Assets and the Inspector show it: the help a Book check gives. */
+export const unreadableHelp = (status: SourceStatus | undefined) => unreadableInPhotos(status)
+  ? 'To print it, use a Mac whose Photos library has it (the same iCloud Photos library), with ImageFlow allowed to read it in Settings → Sources and iCloud reachable.' : undefined;
+/** The photos of a book that are such photos. */
+export const unreadablePhotos = (sources: Record<string, SourceStatus> | undefined) => Object.values(sources ?? {}).flatMap((status) => unreadableInPhotos(status) ? [status.id] : []);
+/**
+ * The quiet notice an open book gives of such photos: once for the photos it has not named before, so a reload, a sync
+ * or an edit says nothing new of the same photos. A photo that became readable, or left the book, is forgotten, and
+ * named again should it be unreadable once more. `noticed` is what the book named so far; the result is what it has
+ * named after this.
+ */
+export function unreadableNotice(sources: Record<string, SourceStatus> | undefined, noticed: ReadonlySet<string>): { notice?: string; noticed: Set<string> } {
+  const unreadable = unreadablePhotos(sources);
+  const kept = [...noticed].filter((id) => { const state = sources?.['photo:' + id]?.state; return state !== undefined && state !== 'available'; });
+  const next = new Set([...kept, ...unreadable]);
+  const fresh = unreadable.filter((id) => !noticed.has(id)).length;
+  if (!fresh) return { noticed: next };
+  const one = fresh === 1;
+  return { noticed: next, notice: fresh + (kept.length ? ' more' : '') + (one ? ' photo' : ' photos') + ' from Photos can’t be read on this Mac now. Assets marks ' +
+    (one ? 'it' : 'them') + ' and says why.' };
+}
 
 /**
  * An authoring check's finding for each reason: one, instead of one per photo and per box, with every place. A warning: it

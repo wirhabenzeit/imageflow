@@ -8,7 +8,7 @@ import type { PhotosPort } from '../desktop/providers/photos';
 import { matchDragged, photosDrop, PhotosDropError, photosLocators } from '../desktop/photos-drop';
 import { photosLibraryOf } from '../desktop/photos-library';
 import { photosAssetURL, showInPhotos } from '../desktop/photos-show';
-import { awayOriginal } from '../src/away-originals';
+import { awayOriginal, unreadableHelp, unreadableNotice, unreadablePhotos } from '../src/away-originals';
 import type { SourceStatus } from '../src/source-locations';
 import type { DraggedPhoto, PhotosAccess, PhotosFacts, PhotosLibrary } from '../desktop/photos-library';
 import type { Materialized, SourceRef } from '../desktop/source-provider';
@@ -139,6 +139,9 @@ test('observe reports facts, finds a photo by its cloud identifier, and is denie
   assert.equal(b.state === 'available' && b.facts?.extra?.favorite, undefined);
   assert.deepEqual(gone, { state: 'missing', problem: 'No longer in the Photos library.' });
   assert.equal(bare.state, 'available');
+  // A photo this Mac never had (no local identifier of its own, as one a sync brought) is not in its library, not gone.
+  const [never] = await provider.observe('/book', [ref('never', 9, false)]);
+  assert.deepEqual(never, { state: 'missing', problem: 'Not in this Mac’s Photos library.' });
   library.access = 'denied';
   const [denied] = await provider.observe('/book', [ref('a', 1)]);
   assert.equal(denied.state, 'denied');
@@ -229,6 +232,80 @@ test('watch tracks the photos of every book and reports changes by photo', async
   assert.deepEqual(second.at(-1)!.sort(), ['b', 'c']);
   stopFirst();
   assert.deepEqual(library.tracked.sort(), [local(1), local(2)]);
+});
+
+test('a watched photo this library does not have is looked for again, and reported once Photos has it', async (t) => {
+  const library = new FakeLibrary();
+  library.add(1);
+  let lookups = 0;
+  const lookup = library.localIdentifiers.bind(library);
+  library.localIdentifiers = async (clouds) => { lookups++; return lookup(clouds); };
+  const provider = photosProvider(library, { recheck: 10 });
+  const reported: string[][] = [];
+  const stop = provider.watch('/book', [ref('a', 1), ref('late', 2, false)], (ids) => reported.push(ids));
+  t.after(stop);
+  const until = async (done: () => boolean) => { for (let i = 0; i < 200 && !done(); i++) await new Promise((resolve) => setTimeout(resolve, 5)); assert.ok(done()); };
+  await until(() => library.tracked.length === 1);
+  await until(() => lookups >= 3);
+  assert.deepEqual(reported, [], 'nothing to report while Photos does not have it');
+  // iCloud Photos brought it: reported as changed, tracked from then on, and not looked for any more.
+  library.add(2);
+  await until(() => reported.length === 1);
+  assert.deepEqual(reported, [['late']]);
+  assert.deepEqual(library.tracked.sort(), [local(1), local(2)]);
+  const after = lookups;
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(lookups, after);
+  library.listener!([local(2)]);
+  assert.deepEqual(reported.at(-1), ['late']);
+});
+
+test('a watched photo is not looked for again once its book stops watching, nor while access is denied', async () => {
+  const library = new FakeLibrary();
+  let lookups = 0;
+  const lookup = library.localIdentifiers.bind(library);
+  library.localIdentifiers = async (clouds) => { lookups++; return lookup(clouds); };
+  const provider = photosProvider(library, { recheck: 10 });
+  const stop = provider.watch('/book', [ref('late', 2, false)], () => {});
+  for (let i = 0; i < 200 && lookups < 2; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  library.access = 'denied';
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const denied = lookups;
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(lookups, denied);
+  stop();
+  library.access = 'authorized';
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(lookups, denied);
+});
+
+test('photos of Photos this Mac cannot read are marked with help, and named once in a notice', () => {
+  const status = (id: string, state: SourceStatus['state'], extra: Partial<SourceStatus> = {}) => ({ kind: 'photo', id, key: 'photo:' + id,
+    locator: { provider: 'photos', cloud: cloud(1) }, state, problem: state === 'available' ? undefined : 'Not in this Mac’s Photos library.', cached: true, ...extra }) as unknown as SourceStatus;
+  const book = (...statuses: SourceStatus[]) => Object.fromEntries(statuses.map((one) => [one.key, one]));
+  const file = { kind: 'photo', id: 'f', key: 'photo:f', locator: { provider: 'linked', path: '/x.jpg' }, state: 'missing', problem: 'Original missing' } as unknown as SourceStatus;
+  // Missing, offline or denied, with or without a preview; not a file, not one whose preview is still coming, not one that can't be read for another reason.
+  const sources = book(status('a', 'missing'), status('b', 'offline', { cached: false }), status('c', 'denied'), status('d', 'available'), status('e', 'missing', { pending: true }),
+    status('u', 'unreadable'), file);
+  assert.deepEqual(unreadablePhotos(sources), ['a', 'b', 'c']);
+  assert.match(unreadableHelp(sources['photo:a'])!, /same iCloud Photos library.*Settings → Sources and iCloud reachable/);
+  assert.equal(unreadableHelp(sources['photo:d']), undefined);
+  assert.equal(unreadableHelp(file), undefined);
+
+  // The book opens: one notice for all of them.
+  const opened = unreadableNotice(sources, new Set());
+  assert.equal(opened.notice, '3 photos from Photos can’t be read on this Mac now. Assets marks them and says why.');
+  // A reload, an edit or a sync with the same photos says nothing.
+  assert.deepEqual(unreadableNotice(sources, opened.noticed), { noticed: opened.noticed });
+  // A sync brings one more: named alone.
+  const synced = unreadableNotice(book(status('a', 'missing'), status('b', 'offline'), status('c', 'denied'), status('n', 'missing')), opened.noticed);
+  assert.equal(synced.notice, '1 more photo from Photos can’t be read on this Mac now. Assets marks it and says why.');
+  // A photo whose preview is being fetched again stays named; one Photos delivered is forgotten, and named again should it go.
+  const fetching = unreadableNotice(book(status('a', 'missing', { pending: true }), status('b', 'available'), status('c', 'denied'), status('n', 'missing')), synced.noticed);
+  assert.equal(fetching.notice, undefined);
+  assert.deepEqual([...fetching.noticed].sort(), ['a', 'c', 'n']);
+  assert.equal(unreadableNotice(book(status('b', 'missing')), fetching.noticed).notice, '1 photo from Photos can’t be read on this Mac now. Assets marks it and says why.');
+  assert.equal(unreadableNotice(book(status('d', 'available')), new Set()).notice, undefined);
 });
 
 // ---------- Drags from Photos

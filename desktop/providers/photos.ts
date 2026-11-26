@@ -19,17 +19,25 @@ import type { Materialized, MaterializeOptions, Observed, ProvidedFacts, Repair,
  * - Previews and originals are rendered by Photos as they are now, downloaded from iCloud where the photo is not on
  *   this Mac (with Optimize Mac Storage, most are not): about a second per preview, two to four per original.
  * - A photo is `denied` while ImageFlow may not read the library, `offline` while its library or iCloud cannot be
- *   reached, and `missing` once it left the library.
+ *   reached, and `missing` once it left the library. A photo this Mac never had (no local identifier of its own, as
+ *   one another Mac added and a sync brought here) is `missing` too, but says it is not in this Mac's library: often
+ *   iCloud Photos has not brought it yet (UI-018). Such photos are looked for again now and then while a book watches
+ *   them, as PhotoKit reports changes only of the photos it tracks.
  */
 export type PhotosPort = Pick<PhotosLibrary, 'status' | 'localIdentifiers' | 'facts' | 'image' | 'cancel' | 'onChanges' | 'track'>;
 
 // Requests in flight at once: Photos downloads and renders several in parallel, and an abort cancels them all.
 const previewsAtOnce = 4;
 const originalsAtOnce = 2;
+// How often a watched photo that this library does not have is looked for again: one lookup of its cloud identifier.
+const recheckMs = 5 * 60_000;
 
 type Problem = { state: Unavailable; problem: string };
 const denied: Problem = { state: 'denied', problem: 'ImageFlow may not read the Photos library. Allow it in System Settings → Privacy & Security → Photos.' };
 const gone: Problem = { state: 'missing', problem: 'No longer in the Photos library.' };
+const notHere: Problem = { state: 'missing', problem: 'Not in this Mac’s Photos library.' };
+/** A photo the library does not have: gone, if this Mac had it (it holds a local identifier of it), else never here. */
+const absent = (locator: PhotosLocator): Problem => locator.local ? gone : notHere;
 /** Why no photo of the library can be read now, or undefined when ImageFlow may read it. */
 export function accessProblem(access: PhotosAccess | undefined): Problem | undefined {
   if (access === 'authorized') return undefined;
@@ -93,7 +101,7 @@ export function photosFacts(facts: PhotosFacts): ProvidedFacts {
 let requestIds = 0;
 
 /** The Apple Photos provider over the PhotoKit addon. */
-export function photosProvider(library: PhotosPort | undefined): SourceProvider<PhotosLocator> {
+export function photosProvider(library: PhotosPort | undefined, { recheck = recheckMs }: { recheck?: number } = {}): SourceProvider<PhotosLocator> {
   // This Mac's local identifier of each cloud identifier, once looked up: the one in the locator may be another Mac's
   // or out of date, and the lookup of a cloud identifier is costly.
   const locals = new Map<string, string>();
@@ -126,7 +134,7 @@ export function photosProvider(library: PhotosPort | undefined): SourceProvider<
     if (blocked) return { results: refs.map(() => blocked), localOf: refs.map(() => undefined) };
     try {
       const { localOf, facts } = await resolve(refs);
-      return { localOf, results: facts.map((row): Observed => row ? { state: 'available', revisions: photosRevisions(row), facts: photosFacts(row) } : gone) };
+      return { localOf, results: facts.map((row, index): Observed => row ? { state: 'available', revisions: photosRevisions(row), facts: photosFacts(row) } : absent(refs[index].locator)) };
     } catch (error) {
       const problem = photosFailure(error);
       return { results: refs.map(() => problem), localOf: refs.map(() => undefined) };
@@ -197,13 +205,44 @@ export function photosProvider(library: PhotosPort | undefined): SourceProvider<
         });
       }
       const ids = new Map<string, string[]>();
+      const track = (local: string, id: string) => ids.set(local, [...ids.get(local) ?? [], id]);
+      // The photos this library does not have, by cloud identifier: a photo iCloud Photos brings later is reported
+      // like a change once it is found, and tracked from then on.
+      const absentRefs = new Map<string, string[]>();
+      let timer: ReturnType<typeof setInterval> | undefined;
+      let looking = false;
+      const lookAgain = async () => {
+        if (looking || !watchers.has(owner) || library.status() !== 'authorized') return;
+        looking = true;
+        try {
+          const clouds = [...absentRefs.keys()];
+          const found = await library.localIdentifiers(clouds);
+          if (!watchers.has(owner)) return;
+          const arrived = clouds.flatMap((cloud, at) => {
+            const local = found[at];
+            if (!local) return [];
+            locals.set(cloud, local);
+            const own = absentRefs.get(cloud)!;
+            absentRefs.delete(cloud);
+            for (const id of own) track(local, id);
+            return own;
+          });
+          if (!absentRefs.size) { clearInterval(timer); timer = undefined; }
+          if (arrived.length) { retrack(); changed(arrived); }
+        } catch { /* Looked for again next time. */ }
+        finally { looking = false; }
+      };
       void resolve(refs).then(({ localOf }) => {
         if (!watchers.has(owner)) return;
-        localOf.forEach((local, index) => { if (local) ids.set(local, [...ids.get(local) ?? [], refs[index].id]); });
+        localOf.forEach((local, index) => {
+          if (local) track(local, refs[index].id);
+          else absentRefs.set(refs[index].locator.cloud, [...absentRefs.get(refs[index].locator.cloud) ?? [], refs[index].id]);
+        });
         retrack();
+        if (absentRefs.size) { timer = setInterval(() => void lookAgain(), recheck); timer.unref?.(); }
       }, () => {});
       watchers.set(owner, { ids, changed });
-      return () => { watchers.delete(owner); retrack(); };
+      return () => { clearInterval(timer); watchers.delete(owner); retrack(); };
     },
     // Access is given in System Settings, or by answering the question that asks for it.
     repairs: (state): readonly Repair[] => state === 'denied' ? ['allow'] : [],
