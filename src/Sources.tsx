@@ -139,7 +139,7 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
     await sourceAction(request);
   }
   function keys(event: KeyboardEvent<HTMLElement>) {
-    if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); void context(selection.selected.length ? selection.selected : current ? [current] : []); return; }
+    if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); void context(selection.selected.length ? selection.selected : visibleCurrent ? [visibleCurrent] : []); return; }
     const at = items.findIndex(({ id }) => id === current);
     const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
     if (step && items.length) {
@@ -152,7 +152,8 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
       if (items.length) { const id = items[event.key === 'Home' ? 0 : items.length - 1].id; selection.setSelection([id]); focus(id); }
     } else if (event.key === ' ') {
       event.preventDefault();
-      if (current) quickLook({ kind: tab, id: current });
+      // Never the selected photo while a filter hides it: the strip's keys act on what the strip shows.
+      if (visibleCurrent) quickLook({ kind: tab, id: visibleCurrent });
     } else selection.key(event);
   }
 
