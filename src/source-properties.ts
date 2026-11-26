@@ -1,4 +1,5 @@
 import { canonicalJson } from './canonical-json';
+import type { ProjectSummary } from './desktop';
 
 /**
  * Curation marks a source provider's library keeps for a photo (ADR 0014): stars, pick and reject flags and colour
@@ -105,6 +106,39 @@ export function withDeclaredExtra(extra: Record<string, unknown> | undefined, de
 export function activeProvidersOf(providers: Iterable<string | undefined>): SourceProviderProperties[] {
   const present = new Set(providers);
   return sourceProperties.filter(({ provider }) => present.has(provider));
+}
+
+/** The provider of a book's photo (`package`, `linked`, `lightroom`, `photos`), as its source entry names it. */
+export function photoProvider(summary: Pick<ProjectSummary, 'sources'>, id: string): string | undefined {
+  const entry = summary.sources?.['photo:' + id];
+  return entry?.kind === 'photo' ? entry.locator.provider : undefined;
+}
+/** The marks of a book's photo, read through its own provider's specs from what the summary hands over. */
+export const bookPhotoMarks = (summary: Pick<ProjectSummary, 'sources' | 'photoExtra'>, id: string) =>
+  readPhotoMarks(photoProvider(summary, id), summary.photoExtra?.[id]);
+/** The providers of a book's photos, sorted: what the View menus offer a submenu for (`BookMenuState.photoProviders`). */
+export function bookPhotoProviders(summary: Pick<ProjectSummary, 'sources' | 'photoIndex'>): string[] {
+  return [...new Set(Object.keys(summary.photoIndex).flatMap((id) => photoProvider(summary, id) ?? []))].sort();
+}
+
+export const sourceColorNames: Record<SourceColor, string> = { red: 'Red', yellow: 'Yellow', green: 'Green', blue: 'Blue', purple: 'Purple' };
+/**
+ * How the host writes a mark (ADR 0014, sections 4 and 6): `glyph` on a thumbnail (filled stars only), `label` as its
+ * accessible name, `title` as its tooltip (with a custom colour label's own name), and `value` and `valueLabel` for
+ * the Inspector row, where stars show the empty slots too.
+ */
+export function markText(mark: SourceBadgeMark): { glyph: string; label: string; title: string; value: string; valueLabel: string } {
+  if (mark.kind === 'stars') {
+    const label = mark.value + ' of 5 stars';
+    return { glyph: '★'.repeat(mark.value), label, title: label, value: '★'.repeat(mark.value) + '☆'.repeat(5 - mark.value), valueLabel: label };
+  }
+  if (mark.kind === 'heart') return { glyph: '♥', label: 'Favorite', title: 'Favorite', value: 'Yes', valueLabel: 'Yes' };
+  if (mark.kind === 'flag') {
+    const label = mark.value === 'pick' ? 'Picked' : 'Rejected';
+    return { glyph: mark.value === 'pick' ? '⚑' : '✕', label, title: label, value: label, valueLabel: label };
+  }
+  const name = sourceColorNames[mark.value], value = name + (mark.label ? ' (' + mark.label + ')' : '');
+  return { glyph: '', label: name + ' label', title: name + ' label' + (mark.label ? ': ' + mark.label : ''), value, valueLabel: value };
 }
 
 /** What one property filters by: a minimum rating, favourites only, one flag choice, or any of some colours. */

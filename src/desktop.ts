@@ -53,6 +53,7 @@ export const channels = {
   syncState: 'project:sync-state', syncChanged: 'project:sync-changed', syncAction: 'project:sync-action',
   chooseSyncFolder: 'app:choose-sync-folder',
   lightroom: 'lightroom:state', lightroomChanged: 'lightroom:changed', lightroomInstall: 'lightroom:install', lightroomLaunch: 'lightroom:launch',
+  lightroomOutdated: 'lightroom:outdated', lightroomOutdatedChanged: 'lightroom:outdated-changed',
   photosAccess: 'photos:access', sourceIcons: 'sources:icons',
   syncBackend: 'sync:backend', saveSyncBackend: 'sync:save-backend', testSyncConnection: 'sync:test-connection', showSync: 'sync:show', syncBooks: 'sync:books', syncBooksChanged: 'sync:books-changed', syncBookStatus: 'sync:book-status', syncBookSize: 'sync:book-size', syncBookUnused: 'sync:book-unused', manageSyncStorage: 'sync:manage-storage', syncCleanUpPlan: 'sync:clean-up-plan', syncCleanUp: 'sync:clean-up',
 } as const;
@@ -130,7 +131,10 @@ export type BookMenuState = { document: boolean; enabled: Record<SpreadCommand, 
   canProof?: boolean; canSwapPages?: boolean; activeEditor?: ActiveBookEditor;
   sidebar?: boolean; inspector?: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout; zoom?: number; photoView?: PhotoView;
   selectionCount?: number; selectedSpread?: string; saving?: boolean; importMode?: ImportMode; pageLabels?: Record<string, string>;
-  view?: 'content' | 'cover'; coverBoxIds?: string[]; layoutBoxes?: LayoutBoxIds };
+  view?: 'content' | 'cover'; coverBoxIds?: string[]; layoutBoxes?: LayoutBoxIds;
+  // The providers of the book's photos (src/source-properties.ts, bookPhotoProviders): View shows a submenu of marks
+  // for each of them that declares any (ADR 0014).
+  photoProviders?: string[] };
 export type Command = PhotoViewCommand | SpreadCommand | 'swap-pages' | 'book-check' | OpenAction | 'toggle-project' | 'toggle-inspector' | 'toggle-sources' | 'toggle-guides' | LayoutCommand | 'export' | 'export-proof' | 'import' | 'copy-assets' | 'presentation' | 'presentation-start' | 'manage-sources' | 'save-copy' | 'undo' | 'redo' | 'zoom-in' | 'zoom-out' | 'zoom-actual' | 'zoom-fit' | 'revert-opened';
 export type ProjectSummary = ProjectFiles & {
   id: string; folder: string;
@@ -390,6 +394,12 @@ export type DesktopApi = {
   onLightroomChanged(listener: (state: LightroomState) => void): () => void;
   installLightroomPlugin(): Promise<Result<{ state: LightroomState; message: string }>>;
   launchLightroom(): Promise<Result<void>>;
+  /**
+   * Whether the connected Lightroom Classic plugin is older than the first that reports marks (ADR 0014), for the line
+   * in View → Lightroom Classic that leads to its update; false while none is connected or its version cannot be read.
+   */
+  lightroomOutdated(): Promise<boolean>;
+  onLightroomOutdated(listener: (outdated: boolean) => void): () => void;
   // Apple Photos (ADR 0013): whether ImageFlow may read the Photos library; `ask` shows the system question where it was
   // never asked, `settings` opens the Photos pane of System Settings.
   photosAccess(request?: 'ask' | 'settings'): Promise<Result<PhotosAccessState>>;

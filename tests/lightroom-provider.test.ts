@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { LightroomBridge } from '../desktop/lightroom/bridge';
 import { captureTime, lightroomFacts, lightroomProvider } from '../desktop/providers/lightroom';
-import { metadataResultSchema, parseResult } from '../desktop/lightroom/protocol';
+import { metadataResultSchema, parseResult, predatesMarks } from '../desktop/lightroom/protocol';
 import { readPhotoMarks } from '../src/source-properties';
 import { launchLightroom } from '../desktop/lightroom/launch';
 import { showInLightroom } from '../desktop/lightroom/show';
@@ -769,4 +769,13 @@ test('Save a Copy waits for no previews, and previews that come meanwhile do not
   f.open();
   await f.fetching;
   assert.deepEqual(Object.keys(JSON.parse(await readFile(join(f.root, 'Copy.imageflow/photos.json'), 'utf8'))), Object.keys(f.book.photoIndex));
+});
+
+test('a connected plugin before 1.3.0 predates the marks; none connected, or a version that cannot be read, does not', () => {
+  assert.equal(predatesMarks('1.2.0'), true);
+  assert.equal(predatesMarks('1.1.4'), true);
+  assert.equal(predatesMarks('1.3.0'), false);
+  assert.equal(predatesMarks('1.4.0'), false);
+  assert.equal(predatesMarks(undefined), false);
+  assert.equal(predatesMarks('dev'), false);
 });

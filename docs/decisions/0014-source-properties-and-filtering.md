@@ -112,7 +112,7 @@ A filmstrip thumbnail (`.source-photo` in `src/styles.css`) is `114px` tall and 
   - **Heart:** Compact pill with a filled heart glyph (`♥`).
   - **Flags:** Pick shows a subtle white flag badge (`⚑`); **Reject dims the thumbnail** (reduced opacity and slight desaturation, matching Lightroom) and shows a dark `✕` flag pill so rejected photos stand out immediately before being dragged onto a spread.
   - **Colour label:** A crisp 3 px bottom accent stripe (or small colour dot inside the mark pill) using Lightroom's five label colours — never tinting the image itself so colour judgement stays accurate.
-- **Manage Assets (`src/SourceManager.tsx`) & Quick Look (`src/Sources.tsx`).** Render active marks inline in `.asset-status` on photo rows (respecting the same `PhotoView` toggles or always visible in Manage Assets) and in the Quick Look footer details.
+- **Manage Assets (`src/SourceManager.tsx`) & Quick Look (`src/Sources.tsx`).** Render a photo's marks inline in `.asset-status` on photo rows and in the Quick Look footer details. Both show every mark that is set, as the Inspector does: the `PhotoView` toggles decide what the thumbnails show, not what a closer look at one photo shows.
 
 ### 5. Filtering (outside the View menu)
 

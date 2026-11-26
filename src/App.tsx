@@ -17,6 +17,7 @@ import type { InspectorTarget } from './inspector-targets';
 import { useLiveCallback } from './useLiveCallback';
 import { usePhotoView } from './PhotoViewMenu';
 import { isPhotoViewCommand } from './photo-view';
+import { bookPhotoProviders } from './source-properties';
 import { captureViewAnchor, restoreViewAnchor, scaleBookGeometry } from './view-anchor';
 import type { ViewAnchor } from './view-anchor';
 import { assetUsage, fileExtensions } from './asset-usage';
@@ -2061,13 +2062,14 @@ export function App() {
   } else if (cropping) {
     activeEditor = { label: 'crop editor', spread: cropping.spread, page: cropping.page, field: cropping.box };
   } else if (focusedEditor) activeEditor = { label: focusedEditor };
+  const photoProviders = useMemo(() => summary && bookPhotoProviders(summary), [summary?.sources, summary?.photoIndex]);
   const menuState: BookMenuState = { importMode: summary?.project.importMode, document: !!summary, enabled: { 'add-spread': !coverActive && canAdd, 'duplicate-spread': !coverActive && canDuplicate,
     'move-spread-up': !coverActive && canMoveUp, 'move-spread-down': !coverActive && canMoveDown, 'delete-spread': !coverActive && canDelete && spreadFocused },
     editing: controlFocused || !!editing || !!cropping || !!elementEditor || !!quick, textEditing,
     writable, busy: !!busy || exporting || !!reload || !!agentWorking, history: summary?.history,
     canExport, canProof, canSwapPages: !coverActive && !!spread && !!template && hasFacingPages(template.format) && sequence?.spreads[index]?.span === 'spread' && canSwapPages(spread, template.spreads),
     sidebar: !panels.leftHidden, inspector: !panels.rightHidden, sources: !panels.bottomHidden, guides: showGuides, layout, zoom, selectedSpread: spreadId, photoView: photoView.value, selectionCount: selectedSpreads.length,
-    saving, activeEditor, view: coverGeometry ? (coverActive ? 'cover' : 'content') : undefined, coverBoxIds, layoutBoxes,
+    saving, activeEditor, photoProviders, view: coverGeometry ? (coverActive ? 'cover' : 'content') : undefined, coverBoxIds, layoutBoxes,
     pageLabels: Object.fromEntries(spreads.map(({ id }, i) => [id, pageLabels[i]])) };
   const menuKey = JSON.stringify(menuState);
   useEffect(() => { void api?.setBookMenuState(menuState); }, [api, menuKey]);

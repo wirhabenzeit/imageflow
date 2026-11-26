@@ -8,6 +8,8 @@ import { PhotoViewMenu } from './PhotoViewMenu';
 import type { PhotoViewControl } from './PhotoViewMenu';
 import { photoGroups, photoDate, captureLabel } from './photo-view';
 import { SourceBadge, sourceOrigin } from './SourceBadge';
+import { SourceMarks } from './SourceMarks';
+import { bookPhotoMarks, bookPhotoProviders } from './source-properties';
 import { TaskStatus, taskProgress } from './TaskStatus';
 import type { TaskProgress } from './desktop';
 import { sourceList } from './source-items';
@@ -149,7 +151,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
       {!embedded && <NewMarkdown api={api} disabled={locked} />}
       <button type="button" className="new-markdown" disabled={locked || (embedded && !fileTypes.length)} onClick={() => bring()}
         title={embedded ? fileTypes.length ? 'Import ' + fileTypes.join(', ') + ' files' : 'This template has no file parameters' : 'Import photos, texts and files for the template\'s file parameters'}><Icon name="down" /> Import…</button>
-      {!embedded && <PhotoViewMenu view={view.value} update={view.update} custom={view.custom} />}
+      {!embedded && <PhotoViewMenu view={view.value} update={view.update} custom={view.custom} providers={bookPhotoProviders(summary)} />}
       <ActionMenu className="asset-filter" label={<>Filter <Icon name="chevron" /></>}>
         {!embedded && <>{(['photo', 'markdown', 'file'] as const).map((value) => <button key={value} onClick={() => setKind(kind === value ? 'all' : value)}>{({ photo: 'Photos', markdown: 'Markdown', file: 'Files' })[value]}</button>)}
         <hr /></>}
@@ -215,7 +217,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
               }} />
             : <strong>{entry.name}</strong>}
             {(file?.linked || problem) && sourceFolderName(entry) && <span className="muted">{sourceFolderName(entry)}</span>}</span></span>
-          <span className="asset-status">{entry.kind === 'markdown' && <EditMarkdown api={api} id={entry.id} name={entry.name} disabled={locked || problem} failure={(message) => setError({ message })} />}{entry.kind === 'photo' && view.value.showTime && <span className="muted" title={photoDate(summary, entry.id)?.capturedEstimated ? 'Estimated from file modification time' : undefined}>{captureLabel(photoDate(summary, entry.id)?.captured, photoDate(summary, entry.id)?.capturedEstimated)}{photoDate(summary, entry.id)?.capturedEstimated ? ' ≈' : ''}</span>}<span className="muted" title={placements(entry).length ? undefined : aside(entry)}>{placements(entry).length ? placements(entry).length + '×' : aside(entry) ? 'Set aside' : 'Not used'}</span>{badge && <span className={'source-badge' + (status?.pending || status?.away ? '' : ' warning')} title={status?.outOfDate ? outOfDateNote(status) : status?.problem}>{badge}</span>}
+          <span className="asset-status">{entry.kind === 'markdown' && <EditMarkdown api={api} id={entry.id} name={entry.name} disabled={locked || problem} failure={(message) => setError({ message })} />}{entry.kind === 'photo' && view.value.showTime && <span className="muted" title={photoDate(summary, entry.id)?.capturedEstimated ? 'Estimated from file modification time' : undefined}>{captureLabel(photoDate(summary, entry.id)?.captured, photoDate(summary, entry.id)?.capturedEstimated)}{photoDate(summary, entry.id)?.capturedEstimated ? ' ≈' : ''}</span>}{entry.kind === 'photo' && <SourceMarks marks={bookPhotoMarks(summary, entry.id)} />}<span className="muted" title={placements(entry).length ? undefined : aside(entry)}>{placements(entry).length ? placements(entry).length + '×' : aside(entry) ? 'Set aside' : 'Not used'}</span>{badge && <span className={'source-badge' + (status?.pending || status?.away ? '' : ' warning')} title={status?.outOfDate ? outOfDateNote(status) : status?.problem}>{badge}</span>}
             {view.value.showSource ? <SourceBadge origin={sourceOrigin(entry)!} className="asset-origin" />
               : file?.linked && <span className="asset-linked" role="img" aria-label="Linked to original file" title="Linked to original file"><Icon name="link" size={16} /></span>}
           </span>

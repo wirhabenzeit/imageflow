@@ -1,3 +1,4 @@
+import { lt, valid } from 'semver';
 import { z } from 'zod';
 import { isLightroomIdentifier } from '../../src/source-locator';
 
@@ -85,6 +86,16 @@ export type SelectionResult = z.infer<typeof selectionResultSchema>;
 export const showResultSchema = z.object({ shown: z.number().int().min(0).max(1000), missing: z.array(z.string()).max(1000).optional() });
 /** The first plugin version that answers the `show` job. */
 export const showSince = '1.2.0';
+/** The first plugin version that reports a photo's marks (ADR 0014). An older one works on, and its photos show none. */
+export const marksSince = '1.3.0';
+/**
+ * Whether a connected plugin of this version predates the marks, so View → Lightroom Classic says to update it. Not
+ * for a version that cannot be read: it may be a development copy, and nothing is known about it.
+ */
+export function predatesMarks(version: string | undefined): boolean {
+  const known = version ? valid(version) : null;
+  return !!known && lt(known, marksSince);
+}
 
 /** A result checked against its schema; a malformed one is a failure of the job, never half used. */
 export function parseResult<T>(schema: z.ZodType<T>, value: unknown, job: string): T {

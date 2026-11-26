@@ -4,7 +4,9 @@ import { assetMenu, assetMenuState, assetActions } from './asset-menu';
 import { PhotoViewMenu } from './PhotoViewMenu';
 import { SourceBadge, sourceOrigin } from './SourceBadge';
 import type { PhotoViewControl } from './PhotoViewMenu';
-import { photoGroups, photoDate, captureLabel, captureFact } from './photo-view';
+import { photoGroups, photoDate, captureLabel, captureFact, shownMarks } from './photo-view';
+import { bookPhotoMarks, bookPhotoProviders } from './source-properties';
+import { SourceMarks, rejectedMark } from './SourceMarks';
 import type { PhotoView } from './photo-view';
 import { useListSelection } from './list-selection';
 import { useFilmstripAnchor } from './filmstrip-anchor';
@@ -163,12 +165,22 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
     };
     if (tab === 'photo') {
       const date = photoDate(summary, id);
-      return <div key={id} className="source-item source-photo" style={{ aspectRatio: summary.photoSizes[id] ? summary.photoSizes[id].width / summary.photoSizes[id].height : 1.4 }} {...common}>
+      const time = view.value.showTime && date?.captured;
+      // The marks the View menus show (ADR 0014); a rejected photo is dimmed while its flags are.
+      const marks = shownMarks(view.value, bookPhotoMarks(summary, id));
+      return <div key={id} className={'source-item source-photo' + (rejectedMark(marks) ? ' source-rejected' : '')} style={{ aspectRatio: summary.photoSizes[id] ? summary.photoSizes[id].width / summary.photoSizes[id].height : 1.4 }} {...common}>
         {summary.photos[id] ? <img src={summary.photos[id]} alt="" loading="lazy" draggable={false} /> : <span className="missing">{sourceState?.pending ? 'Loading…' : 'Missing'}</span>}
         {origin && <SourceBadge origin={origin} className="source-origin-tile" />}
-        {view.value.showTime && date?.captured && <small className="photo-capture-time" title={date.capturedEstimated ? 'Estimated from file modification time' : date.captured}>{captureLabel(date.captured, date.capturedEstimated)}{date.capturedEstimated ? ' ≈' : ''}</small>}
         <span className="source-title">{title}</span>
-        {sourceLabel && <small className="source-storage">{sourceLabel}</small>}
+        {/* One row along the bottom, so the status, the marks and the capture time never overlap: the status above the
+            marks at the start, the time at the end, or a line up where the tile is too narrow for both. */}
+        {(sourceLabel || marks.length > 0 || time) && <div className="source-photo-foot">
+          {(sourceLabel || marks.length > 0) && <span className="source-photo-foot-start">
+            {sourceLabel && <small className="source-storage">{sourceLabel}</small>}
+            <SourceMarks marks={marks} variant="tile" />
+          </span>}
+          {time && <small className="photo-capture-time" title={date.capturedEstimated ? 'Estimated from file modification time' : date.captured}>{captureLabel(date.captured, date.capturedEstimated)}{date.capturedEstimated ? ' ≈' : ''}</small>}
+        </div>}
         {!!placed?.length && <small className="badge" aria-label={placed.length === 1 ? 'Used once' : 'Used ' + placed.length + ' times'}>
           {placed.length === 1 ? <Icon name="check" size={12} /> : placed.length + '×'}
         </small>}
@@ -187,6 +199,7 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
     </div>;
   }
   const tiles = new Map(items.map((item) => [item.id, renderItem(item)]));
+  const providers = useMemo(() => bookPhotoProviders(summary), [summary]);
 
   return <section className="sources" aria-label="Sources" onDragOver={(event) => {
     if (writable && event.dataTransfer.types.includes('Files')) event.preventDefault();
@@ -197,7 +210,7 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
     <div className="sources-bar">
       <SourceTabs summary={summary} tab={tab} setTab={setTab} assets={assets} />
       <span className="spacer" />
-      <PhotoViewMenu view={view.value} update={view.update} custom={view.custom} photos={tab === 'photo'}>
+      <PhotoViewMenu view={view.value} update={view.update} custom={view.custom} photos={tab === 'photo'} providers={providers}>
         <button onClick={() => setUnused(false)}>All assets{!unused ? ' ✓' : ''}</button>
         <button onClick={() => setUnused(true)}>Unused only{unused ? ' ✓' : ''}</button>
         {tab === 'photo' && <hr />}
@@ -256,6 +269,8 @@ export function QuickLook({ view, summary, source, usage, navigate, close, jump 
   const size = summary.photoSizes[source.id];
   const text = summary.texts[source.id];
   const date = photo && captureFact(photoDate(summary, source.id));
+  // Every mark of the photo, whatever the thumbnails show, as the Inspector lists them.
+  const marks = photo ? bookPhotoMarks(summary, source.id) : [];
   const details = photo
     ? [photoSourceName(summary, source.id), date && date.label + ' ' + date.value, size && size.width + ' × ' + size.height + ' px', photo.caption, photo.credit && '© ' + photo.credit]
     : [fileName(item.path), text !== undefined && words(text) + ' words'];
@@ -289,7 +304,7 @@ export function QuickLook({ view, summary, source, usage, navigate, close, jump 
           ? <p className="missing">The Markdown file is missing.</p>
           : <article className="ql-markdown" dangerouslySetInnerHTML={{ __html: html }} />}</div>}
       <footer className="ql-footer">
-        <span>{details.filter(Boolean).join(' · ')}</span>
+        <span>{details.filter(Boolean).join(' · ')}{marks.length > 0 && <> · <SourceMarks marks={marks} /></>}</span>
         <span className="ql-usage">{placed.length ? <>Placed on {placed.map(({ spread, pages }) =>
           jump && spread ? <button key={spread} className="link" onClick={() => { dialog.current?.close(); jump(spread); }}>{pages}</button>
             : <span key={spread}>{pages}</span>)}</> : pagesText(undefined, usage.aside?.[source.kind][source.id])}</span>

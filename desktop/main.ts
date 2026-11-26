@@ -11,6 +11,8 @@ import { PresentationWindows } from './presentation-windows';
 import { commandRegistry, commandState, emptyMenuState } from '../src/commands';
 import type { ContextMenuItem, ContextMenuResult } from '../src/desktop';
 import type { RegisteredCommand } from '../src/commands';
+import { lightroomUpdateLabel, propertyCommand } from '../src/photo-view';
+import { sourceProperties } from '../src/source-properties';
 import { bookName } from '../src/book-name';
 import { collectSources, CopyCancelled, relocateSource, relinkFolder, saveDocumentCopy, removeSources, renameSource } from './source-actions';
 import { originalPath } from './source-store';
@@ -99,7 +101,7 @@ import { decodes, readTemplatePreview } from './template-preview-file';
 import { previewTypes } from '../src/template-preview';
 import { LightroomBridge } from './lightroom/bridge';
 import type { SentPhotos } from './lightroom/bridge';
-import { parseResult, selectionResultSchema } from './lightroom/protocol';
+import { parseResult, predatesMarks, selectionResultSchema } from './lightroom/protocol';
 import type { LightroomLocator, PhotosLocator } from '../src/source-locator';
 import { showInPhotos } from './photos-show';
 import { launchLightroom } from './lightroom/launch';
@@ -1762,6 +1764,13 @@ function installMenu() {
       { label: 'Group Photos', submenu: [registered('photos-group-none', undefined, 'radio'), registered('photos-group-day', undefined, 'radio'),
         { label: 'By Time Gap', submenu: [registered('photos-gap-30', undefined, 'radio'), registered('photos-gap-120', undefined, 'radio'), registered('photos-gap-360', undefined, 'radio'), registered('photos-gap-custom')] }] },
       registered('photos-show-time', undefined, 'checkbox'), registered('photos-show-source', undefined, 'checkbox'),
+      // A submenu of marks for each provider that declares any (ADR 0014), shown by updateMenus() only while the book
+      // has photos of it. Lightroom Classic's ends in a line to the plugin update while the one connected is too old.
+      ...sourceProperties.map(({ provider, label, properties }): MenuItemConstructorOptions => ({ id: 'photos-provider-' + provider, label, visible: false, submenu: [
+        ...properties.map((spec) => registered(propertyCommand(spec.id), undefined, 'checkbox')),
+        ...provider === 'lightroom' ? [{ id: 'lightroom-update-separator', type: 'separator' as const, visible: false },
+          { id: 'lightroom-update', label: lightroomUpdateLabel, visible: false, click: () => showSettings('sources') }] : [],
+      ] })),
       { type: 'separator' }, registered('presentation'), registered('presentation-start'),
       // macOS supplies its own full-screen item, including the system keyboard shortcut.
       ...process.platform === 'darwin' ? [] : [{ type: 'separator' as const }, { role: 'togglefullscreen' as const }],
@@ -1813,6 +1822,10 @@ function updateMenus() {
     if (own) own.visible = !native;
     if (text) text.visible = native;
   }
+  const providers = state.document ? state.photoProviders ?? [] : [];
+  for (const { provider } of sourceProperties) { const item = menu?.getMenuItemById('photos-provider-' + provider); if (item) item.visible = providers.includes(provider); }
+  const outdated = lightroomOutdated();
+  for (const id of ['lightroom-update-separator', 'lightroom-update']) { const item = menu?.getMenuItemById(id); if (item) item.visible = outdated; }
   for (const columns of gridColumns) {
     const item = menu?.getMenuItemById('grid-columns-' + columns);
     if (item) { item.enabled = state.document && state.layout?.mode === 'grid'; if (state.layout?.columns === columns) item.checked = true; }
@@ -1915,6 +1928,18 @@ async function lightroomState(): Promise<LightroomState> {
   const connection = lightroom?.connection;
   return { plugin: await pluginStatus(lightroomLocations()), app: await lightroomApp(),
     ...(connection ? { connection: { plugin: connection.plugin.version, ...(connection.catalog.name ? { catalog: connection.catalog.name } : {}) } } : {}) };
+}
+/** Whether the connected plugin predates the marks (ADR 0014); the View menus then lead to its update in Settings → Sources. */
+const lightroomOutdated = () => predatesMarks(lightroom?.connection?.plugin.version);
+/** Tells the book and Assets windows, and the View menu, that a plugin connected, left, or was replaced. */
+function publishLightroomOutdated() {
+  const outdated = lightroomOutdated();
+  for (const document of documents.values()) {
+    for (const window of [document.window, assetsWindows.get(document)?.window]) {
+      if (window && !window.isDestroyed()) window.webContents.send(channels.lightroomOutdatedChanged, outdated);
+    }
+  }
+  updateMenus();
 }
 async function publishLightroom() {
   if (!settingsWindow || settingsWindow.isDestroyed()) return;
@@ -2158,7 +2183,7 @@ void app.whenReady().then(async () => {
   registerProvider(lightroomProvider(lightroom));
   // Photos of the Photos library on this Mac, through PhotoKit (ADR 0013).
   registerProvider(photosProvider(photosLibrary()));
-  lightroom.onConnection(() => void publishLightroom());
+  lightroom.onConnection(() => { void publishLightroom(); publishLightroomOutdated(); });
   lightroom.onSend((sent) => void receiveLightroomPhotos(sent).catch((error) => report(lastDocument?.window ?? startWindow, error)));
   void lightroom.start().catch((error) => console.warn('ImageFlow could not start the Lightroom bridge:', errorMessage(error)));
   nativeTheme.themeSource = settings.value.appearance;
@@ -3026,6 +3051,7 @@ void app.whenReady().then(async () => {
     try { return { value: await lightroomState() }; }
     catch (error) { return { error: errorMessage(error) }; }
   });
+  ipcMain.handle(channels.lightroomOutdated, (event) => !!(editorOwner(event) ?? assetsOwner(event)) && lightroomOutdated());
   ipcMain.handle(channels.lightroomInstall, async (event) => {
     if (!settingsOwner(event)) return { error: 'Request is only available to Settings.' };
     try {
@@ -3107,7 +3133,8 @@ void app.whenReady().then(async () => {
     const layoutBoxes = state.layoutBoxes && typeof state.layoutBoxes === 'object' ? Object.fromEntries(Object.entries(state.layoutBoxes).flatMap(([id, layout]) =>
       layout && typeof layout === 'object' && layout.boxes && typeof layout.boxes === 'object' ? [[id, { boxes: Object.fromEntries(Object.entries(layout.boxes)
         .flatMap(([box, declared]) => declared?.type === 'photo' || declared?.type === 'markdown' ? [[box, { type: declared.type }]] : [])) }]] : [])) : undefined;
-    document.menuState = { ...emptyMenuState, ...state,
+    const photoProviders = Array.isArray(state.photoProviders) ? state.photoProviders.filter((provider) => typeof provider === 'string').slice(0, 20) : undefined;
+    document.menuState = { ...emptyMenuState, ...state, photoProviders,
       pageLabels, coverBoxIds, layoutBoxes, enabled: Object.fromEntries(spreadCommands.map((id) => [id, state.enabled[id] === true])) as BookMenuState['enabled'] };
     if (previousLabels !== JSON.stringify([pageLabels, coverBoxIds, layoutBoxes])) publishAssets(document);
     document.window.setDocumentEdited(state.saving === true);

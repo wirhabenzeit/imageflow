@@ -1,26 +1,52 @@
 import { photoName, photoTitle } from './source-locations';
+import { propertySpec, sourceProperties } from './source-properties';
+import type { PhotoMark, SourcePropertySpec } from './source-properties';
 import type { ProjectSummary } from './desktop';
 
 // `showSource`: a mark on each asset for where it comes from (in the book, linked, Lightroom Classic); on unless turned off.
-export type PhotoView = { sort: 'capture' | 'name' | 'import'; group: 'none' | 'day' | 'gap'; gapMinutes: number; showTime: boolean; showSource: boolean };
+// `sourceProps`: which marks of a provider's library show on the thumbnails (ADR 0014), by spec ID; a property not in
+// it shows as its spec's `defaultVisible` says, so a view saved before a property existed takes the property's default.
+export type PhotoView = { sort: 'capture' | 'name' | 'import'; group: 'none' | 'day' | 'gap'; gapMinutes: number; showTime: boolean; showSource: boolean;
+  sourceProps?: Record<string, boolean> };
 export const defaultPhotoView: PhotoView = { sort: 'capture', group: 'none', gapMinutes: 120, showTime: false, showSource: true };
+// One toggle per declared property, named after its spec ID (`lightroom:rating` → `photos-show-lightroom-rating`).
+// Listed by hand so the command type stays a union of literals; a test holds it to `sourceProperties`.
+export const propertyCommands = ['photos-show-lightroom-rating', 'photos-show-lightroom-flag', 'photos-show-lightroom-color', 'photos-show-photos-favorite'] as const;
+export type PropertyCommand = typeof propertyCommands[number];
+export const propertyCommand = (specId: string) => ('photos-show-' + specId.replace(':', '-')) as PropertyCommand;
 export const photoViewCommands = ['photos-sort-capture', 'photos-sort-name', 'photos-sort-import', 'photos-group-none', 'photos-group-day',
-  'photos-gap-30', 'photos-gap-120', 'photos-gap-360', 'photos-gap-custom', 'photos-show-time', 'photos-show-source'] as const;
+  'photos-gap-30', 'photos-gap-120', 'photos-gap-360', 'photos-gap-custom', 'photos-show-time', 'photos-show-source', ...propertyCommands] as const;
 export type PhotoViewCommand = typeof photoViewCommands[number];
 export const isPhotoViewCommand = (id: string): id is PhotoViewCommand => (photoViewCommands as readonly string[]).includes(id);
+/** The line in View → Lightroom Classic, while the connected plugin is too old to report marks; it opens Settings → Sources. */
+export const lightroomUpdateLabel = 'Update the plugin to show stars, flags and labels…';
+const commandSpec = (id: string) => sourceProperties.flatMap(({ properties }) => properties).find((spec) => propertyCommand(spec.id) === id);
+/** Whether the thumbnails show a property's marks: as the user toggled it, or else as its spec says. */
+export const showsProperty = (view: Pick<PhotoView, 'sourceProps'> | undefined, spec: SourcePropertySpec) => view?.sourceProps?.[spec.id] ?? spec.defaultVisible;
+/** The marks among `marks` the view shows on thumbnails. */
+export const shownMarks = (view: PhotoView, marks: readonly PhotoMark[]) => marks.filter(({ spec }) => showsProperty(view, spec));
 export function validPhotoView(value: unknown): PhotoView {
   const saved = value as Partial<PhotoView> | null;
+  // Only booleans of properties this build declares: a property a later build added, or a value it stored
+  // differently, is dropped rather than carried along unread.
+  const sourceProps = saved?.sourceProps && typeof saved.sourceProps === 'object' ? Object.fromEntries(Object.entries(saved.sourceProps)
+    .filter(([id, shown]) => typeof shown === 'boolean' && propertySpec(id))) : {};
   return { sort: ['capture', 'name', 'import'].includes(saved?.sort ?? '') ? saved!.sort! : defaultPhotoView.sort,
     group: ['none', 'day', 'gap'].includes(saved?.group ?? '') ? saved!.group! : 'none',
     gapMinutes: Number.isFinite(saved?.gapMinutes) && saved!.gapMinutes! >= 1 && saved!.gapMinutes! <= 10080 ? saved!.gapMinutes! : 120,
-    showTime: saved?.showTime === true, showSource: saved?.showSource !== false };
+    showTime: saved?.showTime === true, showSource: saved?.showSource !== false, ...(Object.keys(sourceProps).length ? { sourceProps } : {}) };
 }
+/** The change that toggles one property's marks; the others keep what the user chose. */
+export const toggleProperty = (current: PhotoView, spec: SourcePropertySpec): Partial<PhotoView> =>
+  ({ sourceProps: { ...current.sourceProps, [spec.id]: !showsProperty(current, spec) } });
 export function photoViewChange(id: PhotoViewCommand, current: PhotoView): Partial<PhotoView> {
   if (id.startsWith('photos-sort-')) return { sort: id.slice(12) as PhotoView['sort'] };
   if (id === 'photos-group-none' || id === 'photos-group-day') return { group: id.endsWith('day') ? 'day' : 'none' };
   if (id === 'photos-show-time') return { showTime: !current.showTime };
   if (id === 'photos-show-source') return { showSource: !current.showSource };
   if (id === 'photos-gap-custom') return {};
+  const spec = commandSpec(id);
+  if (spec) return toggleProperty(current, spec);
   return { group: 'gap', gapMinutes: Number(id.slice(11)) };
 }
 export function photoDate(summary: ProjectSummary, id: string) {

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { activeProvidersOf, declaredExtra, declaredProperties, photoFilterPredicate, readPhotoMarks, withDeclaredExtra } from '../src/source-properties';
+import { activeProvidersOf, bookPhotoMarks, bookPhotoProviders, declaredExtra, declaredProperties, markText, photoFilterPredicate, photoProvider, readPhotoMarks, withDeclaredExtra } from '../src/source-properties';
+import type { ProjectSummary } from '../src/desktop';
 
 const marks = (provider: string, extra?: Record<string, unknown>) => readPhotoMarks(provider, extra).map(({ spec, mark }) => [spec.id, mark]);
 
@@ -80,4 +81,35 @@ test('placement and sources apply to every photo, and a deselected source\'s fil
   assert.deepEqual(shown({ placement: 'used', properties: { 'lightroom:rating': 5 } }), ['lr5', 'plain']);
   assert.deepEqual(shown({ sources: ['photos', 'package'], properties: { 'lightroom:rating': 5 } }), ['fav', 'plain', 'file']);
   assert.deepEqual(shown({ sources: [] }), book.map(({ id }) => id));
+});
+
+test('a book\'s photo is read through its own provider, and the book lists the providers of its photos', () => {
+  const entry = (id: string, provider: string) => ({ ['photo:' + id]: { kind: 'photo', id, name: id, locator: { provider }, state: 'available' } });
+  const summary = {
+    photoIndex: { lr: {}, ph: {}, pk: {}, gone: {} },
+    sources: { ...entry('lr', 'lightroom'), ...entry('ph', 'photos'), ...entry('pk', 'package') },
+    // A key of another provider's vocabulary marks nothing, and a photo the book no longer has is not listed.
+    photoExtra: { lr: { rating: 5, favorite: true }, ph: { favorite: true, rating: 2 }, pk: { rating: 4 } },
+  } as unknown as ProjectSummary;
+  assert.equal(photoProvider(summary, 'lr'), 'lightroom');
+  assert.equal(photoProvider(summary, 'gone'), undefined);
+  assert.deepEqual(bookPhotoMarks(summary, 'lr').map(({ mark }) => mark), [{ kind: 'stars', value: 5 }]);
+  assert.deepEqual(bookPhotoMarks(summary, 'ph').map(({ mark }) => mark), [{ kind: 'heart' }]);
+  assert.deepEqual(bookPhotoMarks(summary, 'pk'), []);
+  assert.deepEqual(bookPhotoProviders(summary), ['lightroom', 'package', 'photos']);
+  assert.deepEqual(activeProvidersOf(bookPhotoProviders(summary)).map(({ label }) => label), ['Lightroom Classic', 'Apple Photos']);
+});
+
+test('marks are written with filled stars on a thumbnail, empty slots in the Inspector, and an accessible name for each', () => {
+  assert.deepEqual(markText({ kind: 'stars', value: 4 }), { glyph: '★★★★', label: '4 of 5 stars', title: '4 of 5 stars', value: '★★★★☆', valueLabel: '4 of 5 stars' });
+  assert.equal(markText({ kind: 'stars', value: 1 }).label, '1 of 5 stars');
+  assert.deepEqual(markText({ kind: 'flag', value: 'pick' }), { glyph: '⚑', label: 'Picked', title: 'Picked', value: 'Picked', valueLabel: 'Picked' });
+  assert.equal(markText({ kind: 'flag', value: 'reject' }).glyph, '✕');
+  assert.equal(markText({ kind: 'flag', value: 'reject' }).label, 'Rejected');
+  assert.deepEqual(markText({ kind: 'heart' }), { glyph: '♥', label: 'Favorite', title: 'Favorite', value: 'Yes', valueLabel: 'Yes' });
+  assert.deepEqual(markText({ kind: 'color', value: 'green' }), { glyph: '', label: 'Green label', title: 'Green label', value: 'Green', valueLabel: 'Green' });
+  // A custom label set's name is in the tooltip and the Inspector.
+  const custom = markText({ kind: 'color', value: 'green', label: 'To Print' });
+  assert.equal(custom.title, 'Green label: To Print');
+  assert.equal(custom.value, 'Green (To Print)');
 });
