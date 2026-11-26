@@ -18,6 +18,7 @@ import type { RenderStatus } from '../src/desktop';
 import { mm } from '../src/format';
 import { PreviewError } from '../src/preview';
 import { docTopics } from '../src/doc-topics';
+import { parseMcpArguments } from '../src/mcp-contract';
 import './persistence-root';
 
 const source = 'export default {};';
@@ -1016,4 +1017,59 @@ test('inspection reports a split sheet\'s merge layout as restoreDefinition and 
   assert.deepEqual(texts.counts, { photo: 0, text: 2, file: 1 });
   assert.deepEqual((texts.items as { kind: string }[]).map(({ kind }) => kind), ['text', 'text']);
   assert.equal(texts.total, 2);
+});
+
+test('photos that are not placed can be listed by capture time and seen uncropped on a sheet (API-015)', async (t) => {
+  const { folder, session, call } = await fixture(t);
+  const main = status.template.spreads.main;
+  status.template.spreads.main = { ...main, boxes: { hero: { type: 'photo', label: 'Hero', parameters: {} } } };
+  t.after(() => { status.template.spreads.main = main; });
+  await mkdir(join(folder, 'photos'));
+  const taken = (time: string) => ({ IFD2: { DateTimeOriginal: time } });
+  await sharp({ create: { width: 300, height: 200, channels: 3, background: '#ff0000' } }).withExif(taken('2024:06:01 18:20:30')).jpeg().toFile(join(folder, 'photos/red.jpg'));
+  await sharp({ create: { width: 200, height: 300, channels: 3, background: '#0000ff' } }).withExif(taken('2024:06:02 09:00:00')).jpeg().toFile(join(folder, 'photos/blue.jpg'));
+  await sharp({ create: { width: 300, height: 200, channels: 3, background: '#00ff00' } }).withExif(taken('2024:06:01 07:05:00')).jpeg().toFile(join(folder, 'photos/placed.jpg'));
+  await sharp({ create: { width: 300, height: 300, channels: 3, background: '#ffff00' } }).jpeg().toFile(join(folder, 'photos/undated.jpg'));
+  await writeFile(join(folder, 'photos.json'), JSON.stringify({ red: { path: 'photos/red.jpg' }, blue: { path: 'photos/blue.jpg' },
+    placed: { path: 'photos/placed.jpg' }, undated: { path: 'photos/undated.jpg' }, gone: { path: 'photos/gone.jpg' } }));
+  await writeFile(join(folder, 'project.json'), JSON.stringify({ ...project, spreads: [{ id: 'one', definition: 'main', boxes: { hero: { photo: 'placed' } } }] }));
+  session.adoptExternal(await loadProject(folder, join(folder, '..', 'cache'), true));
+
+  const ids = (result: Record<string, unknown>) => (result.items as { id: string }[]).map(({ id }) => id);
+  const unplaced = await call('inspect_book', { view: 'sources', unplaced: true });
+  assert.deepEqual(ids(unplaced), ['red', 'blue', 'gone', 'undated'], 'by capture time, undated last');
+  assert.equal(unplaced.total, 4);
+  assert.equal(unplaced.image, undefined, 'a sheet only when asked for');
+  assert.deepEqual(ids(await call('inspect_book', { view: 'sources', captured: { from: '2024-06-01', to: '2024-06-01' } })), ['placed', 'red']);
+  assert.deepEqual(ids(await call('inspect_book', { view: 'sources', captured: { from: '2024-06-01T12' }, unplaced: true })), ['red', 'blue']);
+  assert.deepEqual(ids(await call('inspect_book', { view: 'sources', photos: ['undated', 'placed'] })), ['undated', 'placed'], 'named photos keep their order');
+  assert.equal(parseMcpArguments('inspect_book', { project: 'p', view: 'sources', photos: ['a'] }).args.limit, undefined,
+    'named photos are all listed: the default of 30 is applied only to other lists');
+  assert.equal((await call('inspect_book', { view: 'sources', photos: ['undated', 'placed', 'red'], limit: 2 })).nextOffset, 2);
+  await assert.rejects(call('inspect_book', { view: 'sources', photos: ['blu'] }),
+    (error) => error instanceof AuthoringError && error.code === 'SOURCE_NOT_FOUND' && /Did you mean blue/.test(error.message));
+
+  const sheet = await call('inspect_book', { view: 'sources', unplaced: true, sheet: { columns: 2, maxEdge: 400, format: 'png' } });
+  const image = sheet.image as { kind: string; width: number; height: number; mimeType: string; data: string;
+    cells: { photo: string; x: number; y: number; width: number; height: number; missing?: string }[] };
+  assert.equal(image.kind, 'photo-sheet');
+  assert.equal(image.mimeType, 'image/png');
+  assert.deepEqual(image.cells.map(({ photo }) => photo), ids(sheet));
+  const cell = (id: string) => image.cells.find(({ photo }) => photo === id)!;
+  // Uncropped: each keeps its shape.
+  assert.ok(Math.abs(cell('red').width / cell('red').height - 1.5) < 0.05);
+  assert.ok(Math.abs(cell('blue').height / cell('blue').width - 1.5) < 0.05);
+  assert.match(cell('gone').missing ?? '', /./, 'a photo without pixels is an empty cell that says why');
+  assert.equal(cell('red').missing, undefined);
+  const { data, info } = await sharp(Buffer.from(image.data, 'base64')).raw().toBuffer({ resolveWithObject: true });
+  assert.deepEqual([info.width, info.height], [image.width, image.height]);
+  assert.ok(Math.max(info.width, info.height) <= 400);
+  const pixel = (x: number, y: number) => [...data.subarray((y * info.width + x) * info.channels, (y * info.width + x) * info.channels + 3)];
+  const middle = (id: string) => pixel(cell(id).x + (cell(id).width >> 1), cell(id).y + (cell(id).height >> 1));
+  assert.ok(middle('red')[0] > 200 && middle('red')[2] < 60);
+  assert.ok(middle('blue')[2] > 200 && middle('blue')[0] < 60);
+
+  assert.throws(() => parseMcpArguments('inspect_book', { project: 'p', view: 'spreads', unplaced: true }), /requires the sources view/);
+  assert.throws(() => parseMcpArguments('inspect_book', { project: 'p', view: 'sources', kind: 'text', sheet: {} }), /about photos/);
+  assert.throws(() => parseMcpArguments('inspect_book', { project: 'p', view: 'sources', sheet: {}, limit: 60 }), /at most 48/);
 });

@@ -3,6 +3,7 @@ import type { AuthoringDiagnostic } from './authoring';
 import type { AuthoringCheckResult } from './authoring-check';
 import type { HistoryState } from './desktop';
 import type { LibraryEntry } from './library';
+import type { PhotoSheetMetadata } from './photo-sheet';
 import type { PreviewMetadata } from './preview';
 import { pageSides } from './project';
 import type { ActiveBookEditor } from './desktop';
@@ -94,6 +95,12 @@ export const imageSchema = z.union([
   }),
 ]).describe('Metadata of the returned image.');
 
+// Its cells also have pixel rectangles (x, y, width, height), as docs/mcp.md says: the output list has a size budget.
+export const photoSheetImageSchema = z.looseObject({
+  kind: z.literal('photo-sheet'), width: z.number(), height: z.number(), mimeType: imageFlags.mimeType,
+  cells: z.array(z.looseObject({ photo: z.string(), missing: z.string().optional() })),
+});
+
 const state = z.enum(['ready', 'error']);
 const superseded = z.looseObject({ revision: z.string() }).optional()
   .describe('Saved again during the check; this is the revision now.');
@@ -166,6 +173,7 @@ export const mcpOutputSchemas = {
     templateIdentity: templateIdentitySchema.optional(),
     cover: z.looseObject({}).optional().describe('Cover availability, saved artwork and resolved geometry for the active format.'),
     items: z.array(z.looseObject({})).optional(), total: z.number().optional(), nextOffset: z.number().nullable().optional(),
+    image: photoSheetImageSchema.optional(),
   }),
   check_book: z.looseObject({
     state, ...reportFields, superseded,
@@ -246,7 +254,8 @@ const accepts: [
   Accepts<typeof diagnosticSchema, AuthoringDiagnostic>,
   Accepts<typeof checksSchema, AuthoringCheckResult['checks']>,
   Accepts<typeof imageSchema, PreviewMetadata & Pick<NonNullable<AuthoringCheckResult['image']>, 'mimeType' | 'draft' | 'fixture'>>,
+  Accepts<typeof photoSheetImageSchema, PhotoSheetMetadata & Pick<NonNullable<AuthoringCheckResult['image']>, 'mimeType'>>,
   Accepts<typeof history, HistoryState>,
   Accepts<typeof libraryEntry, LibraryEntry>,
-] = [true, true, true, true, true];
+] = [true, true, true, true, true, true];
 void accepts;

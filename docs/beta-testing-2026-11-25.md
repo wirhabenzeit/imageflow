@@ -66,6 +66,15 @@ Its register numbered again from UI-013 and API-014, so its IDs are marked *even
 - **UI-012.** New Spread and Duplicate Spread, and crop values typed in, have names in Undo and the history.
 - **API-017 evening** is #329, beside #319. Apple Photos as a source is #327.
 
+## After the first two sessions
+
+- **API-015.** `inspect_book`'s sources view lists photos that are not placed (`unplaced`), taken in a time range
+  (`captured`) or named (`photos`), in capture-time order, and `sheet` returns an image of up to 48 of them, uncropped, with
+  their IDs and capture times. API-015 evening is
+  another finding, above.
+- **API-021.** Fixtures take values for settings: `params` for layouts, boxes and elements by name, `document` for the
+  book's. Without `layouts` they test the layouts that have the settings. The book's own anchors are still not tested.
+
 ## To retest
 
 - **UI-007**, the rarer cases with Lightroom: a filter or a collapsed stack that hides the photo, and several photos.
@@ -82,5 +91,4 @@ Its register numbered again from UI-013 and API-014, so its IDs are marked *even
 - API-013 (#316), which needs a design.
 - Every preview that comes moves the book's revision, so a commit during an import can still meet `REVISION_CONFLICT`.
 - A book opened read-only still waits for missing previews.
-- API-015 (a contact sheet of photos that are not placed) and API-021 (parameter values in fixtures), next.
 - API-019 (#319), API-020 (#320) and UI-013 (#321), which need decisions.

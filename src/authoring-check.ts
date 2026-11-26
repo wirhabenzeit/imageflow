@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { AuthoringDiagnostic, AuthoringReport } from './authoring';
-import type { FixtureCase, FixtureSkip } from './fixtures';
+import type { FixtureCase, FixtureSkip, FixtureValues } from './fixtures';
 import type { RenderStatus, TemplateInfo } from './desktop';
 import { previewRequestSchema } from './preview';
 import type { PreviewMetadata } from './preview';
@@ -55,7 +55,8 @@ export type FixtureReport = {
   // Revision of the saved inputs (template, document parameters) the fixtures were rendered from.
   revision: string | null;
   cover?: { interiorPages: number };
-  matrix: { layouts: string[]; formats: string[]; cases: FixtureCase[] };
+  // `params` and `document`: the values tested instead of the defaults and saved settings (API-021).
+  matrix: { layouts: string[]; formats: string[]; cases: FixtureCase[] } & FixtureValues;
   coverage: { planned: number; rendered: number; failed: number; notIsolated: number; skipped: FixtureSkip[] };
   cells: FixtureCellReport[];
   // Findings in fixture books, located by layout, case and format instead of a saved spread. A finding that is the

@@ -39,6 +39,10 @@ import { coverFixturePlan, FixtureError, fixtureCases, fixtureFits, fixtureLimit
 import type { FixtureCell } from '../src/fixtures';
 import type { FixtureCellReport, FixtureReport } from '../src/authoring-check';
 import { cellReport, fixtureAssets, fixtureDraft, fixtureFindings, fixtureNotEvaluated, mergeFormatFindings } from './fixtures';
+import { photoSheet } from './photo-sheet';
+import { capturedWithin } from '../src/photo-sheet';
+import type { PhotoChoice } from '../src/photo-sheet';
+import { closestIds } from '../src/closest-ids';
 import { templateFiles, templateHash } from './template-library';
 import { docTopics } from '../src/doc-topics';
 
@@ -96,6 +100,23 @@ export function compactDiagnostics(diagnostics: AuthoringDiagnostic[], all = fal
     : { ...diagnostic, occurrences: diagnostic.occurrences.slice(0, shownOccurrences), details: { ...diagnostic.details, places: diagnostic.occurrences.length } });
 }
 const shownOccurrences = 3;
+
+type PhotoRecord = { id: string; captured?: CaptureMetadata['captured']; usage?: unknown[]; [field: string]: unknown };
+/** The photos an inspection asks for (API-015): those named, in that order, or else by capture time, undated ones last. */
+export function chosenPhotos(photos: PhotoRecord[], { photos: named, unplaced, captured }: PhotoChoice) {
+  const byId = new Map(photos.map((photo) => [photo.id, photo]));
+  const chosen = named ? [...new Set(named)].map((id) => {
+    const photo = byId.get(id);
+    if (photo) return photo;
+    const likely = closestIds(id, [...byId.keys()], 3);
+    throw new AuthoringError('SOURCE_NOT_FOUND', 'The book has no photo ' + id + '.' + (likely.length ? ' Did you mean ' + likely.join(', ') + '?' : ' List them with inspect_book view sources.'));
+  }) : photos.toSorted((a, b) => {
+    // Code-point order: a time is ASCII, and '~' comes after every digit.
+    const [x, y] = [a.captured?.dateTime ?? '~', b.captured?.dateTime ?? '~'];
+    return x < y ? -1 : x > y ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+  return chosen.filter((photo) => (!unplaced || !photo.usage?.length) && (!captured || capturedWithin(photo.captured?.dateTime, captured)));
+}
 
 /** A fixture report as a reply: one that passed is named by its layout, case and format alone (API-005). */
 export function compactFixtures(report: FixtureReport) {
@@ -447,12 +468,12 @@ export function createAuthoringService(hooks: Hooks) {
     if (parsed.data.cover) {
       const { cover, cases = [...fixtureCases] } = parsed.data;
       let plan;
-      try { plan = coverFixturePlan(template, cover, cases); }
+      try { plan = coverFixturePlan(template, cover, cases, parsed.data); }
       catch (error) {
         if (error instanceof FixtureError) throw new AuthoringError(error.code, error.message);
         throw error;
       }
-      const { format, cells, skipped } = plan;
+      const { format, cells, skipped, values } = plan;
       const assets = await fixtureAssets(hooks.cache);
       const results: FixtureCellReport[] = [], diagnostics: FixtureReport['diagnostics'] = [];
       let failed = 0, notIsolated = 0;
@@ -463,7 +484,7 @@ export function createAuthoringService(hooks: Hooks) {
           continue;
         }
         const result = await checked(session, signal, { expectedRevision: base.revision }, true,
-          fixtureDraft(template, format, [cell], assets, undefined, cover.pages));
+          fixtureDraft(template, format, [cell], assets, undefined, cover.pages, values));
         if (result.revision !== base.revision || result.diagnostics.some(({ code }) => code === 'source-changed' || code === 'revision-conflict')) {
           throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while rendering fixtures. Check again.');
         }
@@ -481,7 +502,7 @@ export function createAuthoringService(hooks: Hooks) {
       return { ...base, checks: { ...base.checks, fixtures: !cells.length ? 'not-run' : notIsolated ? 'failed' : 'completed' },
         fixtures: {
           cover: { interiorPages: cover.pages }, synthetic: true, committed: false, revision: base.revision,
-          matrix: { layouts: [cover.layout], formats: [format], cases },
+          matrix: { layouts: [cover.layout], formats: [format], cases, ...values },
           coverage: { planned: cells.length, rendered: cells.length - failed - notIsolated, failed, notIsolated, skipped },
           cells: results, diagnostics: diagnostics.slice(0, fixtureLimits.diagnostics),
           diagnosticsTruncated: diagnostics.length > fixtureLimits.diagnostics,
@@ -530,7 +551,7 @@ export function createAuthoringService(hooks: Hooks) {
           renders++;
         }
         const result = await checked(session, signal, { expectedRevision: base.revision! }, true,
-          fixtureDraft(template, format, cells, assets, previewRequest(shown ?? [])));
+          fixtureDraft(template, format, cells, assets, previewRequest(shown ?? []), undefined, plan.values));
         if (result.revision !== base.revision || result.diagnostics.some(({ code }) => code === 'revision-conflict' || code === 'source-changed')) {
           throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while rendering fixtures. Check again.');
         }
@@ -571,7 +592,7 @@ export function createAuthoringService(hooks: Hooks) {
       const shown = preview?.cells.filter(({ spread }) => ['passed', 'warnings', 'errors'].includes(outcome.get(spread)?.state ?? ''));
       if (preview && !image && shown?.length && Date.now() - started < fixtureBudgetMs) {
         const result = await checked(session, signal, { expectedRevision: base.revision }, true,
-          fixtureDraft(template, format, shown, assets, previewRequest(shown)));
+          fixtureDraft(template, format, shown, assets, previewRequest(shown), undefined, plan.values));
         if (result.revision !== base.revision) throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while rendering fixtures. Check again.');
         if (result.state === 'ready' && result.image) image = result.image;
       }
@@ -581,7 +602,7 @@ export function createAuthoringService(hooks: Hooks) {
     const listed = mergeFormatFindings(findings);
     const report: FixtureReport = {
       synthetic: true, committed: false, revision: base.revision,
-      matrix: { layouts: plan.layouts, formats, cases: plan.cases },
+      matrix: { layouts: plan.layouts, formats, cases: plan.cases, ...plan.values },
       coverage: { planned: reports.length, rendered: reports.length - count('failed') - count('not-isolated'),
         failed: count('failed'), notIsolated: count('not-isolated'), skipped },
       cells: reports, diagnostics: listed.slice(0, fixtureLimits.diagnostics),
@@ -861,7 +882,8 @@ export function createAuthoringService(hooks: Hooks) {
             idempotency: 'Replay up to 1000 successful requests per open handle. After reopening, the same request returns its retained checkpoint. Find keys with list_book_checkpoints.' },
         };
       } else {
-        const offset = args.offset ?? 0, limit = args.limit ?? 30;
+        // Named photos are listed together, up to the 48 a sheet shows; other lists in pages of 30.
+        const offset = args.offset ?? 0, limit = args.limit ?? args.photos?.length ?? 30;
         const sequence = template && project && pageSequence(project.spreads.map((spread) => layoutFootprint(spread, template.spreads)), template.format);
         const labels = project?.spreads.map((_, i) => pageLabel(sequence?.spreads[i].page ?? {})) ?? [];
         const sourcePlaces = (places: import('../src/editing').SourcePlace[] = []) => places.map(({ cover, spread, pages }) =>
@@ -902,15 +924,22 @@ export function createAuthoringService(hooks: Hooks) {
         // Sources are counted per kind, and can be listed one kind at a time.
         const counts = view === 'sources' ? { photo: 0, text: 0, file: 0, ...Object.fromEntries(['photo', 'text', 'file'].map((kind) =>
           [kind, records.filter((record) => (record as { kind?: string }).kind === kind).length])) } : undefined;
-        if (view === 'sources' && args.kind) records = records.filter((record) => (record as { kind?: string }).kind === args.kind);
+        const choosing = view === 'sources' && (args.photos || args.unplaced || args.captured || args.sheet);
+        const kind = choosing ? 'photo' : args.kind;
+        if (view === 'sources' && kind) records = records.filter((record) => (record as { kind?: string }).kind === kind);
+        if (choosing) records = chosenPhotos(records as PhotoRecord[], args);
         const listed = view === 'summary' ? {} : { offset, items: records.slice(offset, offset + limit), nextOffset: offset + limit < records.length ? offset + limit : null,
           ...(counts ? { counts } : {}) };
+        const shown = records.slice(offset, offset + limit) as PhotoRecord[];
+        const image = choosing && args.sheet && shown.length
+          ? await photoSheet(session.book, shown.map(({ id, captured }) => ({ id, captured: captured?.dateTime })), args.sheet, signal) : undefined;
         result = { project: session.handle, ...revisions, title: project?.title, format: project?.format, templateIdentity,
           pages: savedSince ? sequence?.count : report.render?.pages, total: records.length, ...listed,
           ...((view === 'summary' || view === 'cover') && (availableCover || savedCover) ? {
             cover: { ...(availableCover ?? { status: 'unavailable', reason: 'The active format has no exterior cover.' }),
               layout: savedCover?.definition ?? null, ...(view === 'cover' ? { artwork: savedCover ?? null } : {}) },
           } : {}),
+          ...(image ? { image } : {}),
           ...(view === 'parameters' ? { document: { values: project?.params, declarations: template?.parameters } } : {}),
           diagnostics, checks: report.checks, history: session.history };
       }

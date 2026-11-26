@@ -4,8 +4,8 @@ import sharp from 'sharp';
 import type { AuthoringDiagnostic } from '../src/authoring';
 import type { FixtureCellReport, FixtureReport } from '../src/authoring-check';
 import type { TemplateInfo } from '../src/desktop';
-import { fixtureFiles, fixtureProject, fixtureSpread } from '../src/fixtures';
-import type { FixtureCell, FixtureSourceIds } from '../src/fixtures';
+import { fixtureFiles, fixtureProject, fixtureSpread, valuesLabel } from '../src/fixtures';
+import type { FixtureCell, FixtureSourceIds, FixtureValues } from '../src/fixtures';
 import type { PreviewRequest } from '../src/preview';
 import type { Project, ProjectFile } from '../src/project';
 import type { CheckDraft } from './check';
@@ -83,7 +83,7 @@ export const fixtureSourceIds = {
 
 /** Builds the synthetic book for one format from the freshly loaded, revision-verified book. */
 export function fixtureDraft(template: TemplateInfo, format: string, cells: FixtureCell[], assets: FixtureAssets,
-  preview?: PreviewRequest, coverPages?: number): CheckDraft {
+  preview?: PreviewRequest, coverPages?: number, values?: FixtureValues): CheckDraft {
   return (book) => {
     const extensions = new Set<string>();
     const samples = new Map<string, { extension: string; variant: 'typical' | 'alternate' }>();
@@ -93,12 +93,12 @@ export function fixtureDraft(template: TemplateInfo, format: string, cells: Fixt
         samples.set(id, { extension, variant });
         return id;
       } };
-    const synthetic = fixtureProject(book.project, template, format, coverPages === undefined ? cells : [], ids);
+    const synthetic = fixtureProject(book.project, template, format, coverPages === undefined ? cells : [], ids, values);
     const { markdown } = synthetic;
     const project: Project = synthetic.project;
     if (coverPages !== undefined) {
       const cell = cells[0];
-      const { id: _id, ...cover } = fixtureSpread(cell, template.coverLayouts![cell.layout], ids, '');
+      const { id: _id, ...cover } = fixtureSpread(cell, template.coverLayouts![cell.layout], ids, '', values?.params);
       project.cover = cover;
     }
     const files: Record<string, ProjectFile> = { ...book.files };
@@ -124,7 +124,7 @@ export function fixtureDraft(template: TemplateInfo, format: string, cells: Fixt
     const formatLabel = template.formats[format] ?? template.format.label;
     const fixtureBook: OpenProject = {
       ...drafted, photos, files, texts: { ...book.texts, ...markdown },
-      fixture: { banner: 'SYNTHETIC FIXTURES · ' + formatLabel + ' · not the saved book',
+      fixture: { banner: 'SYNTHETIC FIXTURES · ' + formatLabel + (values ? ' · ' + valuesLabel(values) : '') + ' · not the saved book',
         labels: Object.fromEntries(cells.map((cell) => [cell.spread, cell.label])),
         ...(coverPages === undefined ? {} : { coverPages }) },
     };
@@ -136,7 +136,7 @@ export const fixtureNotEvaluated = [
   'Photo resolution: synthetic photos stand in for real originals, so photo-resolution-low findings are omitted.',
   'Page count, page sequence and book ends: fixture books place layouts side by side regardless of span.',
   'Anchors declared on other spreads, document parameter and book-level findings: see the saved-book diagnostics.',
-  'Parameters other than strings and files keep their declared defaults; crops use the default fill.',
+  'Parameters other than strings and files keep their declared defaults, or the values in params and document; crops use the default fill.',
   'File parameters get valid synthetic files only for types with built-in samples (' + Object.keys(fixtureFiles).join(', ') + '); others stay unassigned except in malformed-files.',
   'Text continuation from the saved book: each fixture flows its own synthetic Markdown.',
   'Print preflight.',
