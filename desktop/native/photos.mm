@@ -121,6 +121,7 @@ static void reportProgress(const PendingRef &pending, double fraction) {
 static napi_value str(napi_env env, NSString *value) { napi_value r; napi_create_string_utf8(env, value.UTF8String ?: "", NAPI_AUTO_LENGTH, &r); return r; }
 static napi_value num(napi_env env, double value) { napi_value r; napi_create_double(env, value, &r); return r; }
 static napi_value nullValue(napi_env env) { napi_value r; napi_get_null(env, &r); return r; }
+static napi_value boolean(napi_env env, bool value) { napi_value r; napi_get_boolean(env, value, &r); return r; }
 static napi_value undefinedValue(napi_env env) { napi_value r; napi_get_undefined(env, &r); return r; }
 static void setProp(napi_env env, napi_value object, const char *key, napi_value value) { napi_set_named_property(env, object, key, value); }
 static napi_value object(napi_env env) { napi_value r; napi_create_object(env, &r); return r; }
@@ -316,7 +317,8 @@ static napi_value LocalIdentifiers(napi_env env, napi_callback_info info) {
 /**
  * facts(locals): for each local identifier, null when the library has no such still photo, else
  * { width, height, created (ms since 1970), offsetMinutes (this Mac's UTC offset at that instant), latitude?, longitude?,
- *   adjusted (ms of the last edit or revert, or null), base ('raw' | 'compressed'), caption?, keywords?, filename?, type? }
+ *   adjusted (ms of the last edit or revert, or null), base ('raw' | 'compressed'), caption?, keywords?, filename?, type?,
+ *   favorite? (true, or absent) }
  */
 static napi_value Facts(napi_env env, napi_callback_info info) {
   size_t argc = 1; napi_value argv[1];
@@ -364,6 +366,8 @@ static napi_value Facts(napi_env env, napi_callback_info info) {
       // Its type (macOS 26).
       id type = property(property(asset, @"contentType"), @"identifier");
       if ([type isKindOfClass:NSString.class]) row[@"type"] = type;
+      // Whether it is a favourite, only when it is one. `isFavorite` is older than any macOS the addon runs on.
+      if (asset.isFavorite) row[@"favorite"] = @YES;
       [rows addObject:row];
     }
     settle(pending, false, ^(napi_env e) {
@@ -376,7 +380,7 @@ static napi_value Facts(napi_env env, napi_callback_info info) {
         for (NSString *key in row) {
           id field = row[key];
           napi_value converted = [field isKindOfClass:NSString.class] ? str(e, field) : [field isKindOfClass:NSArray.class] ? stringsValue(e, field)
-            : field == NSNull.null ? nullValue(e) : num(e, [field doubleValue]);
+            : field == NSNull.null ? nullValue(e) : field == (__bridge id)kCFBooleanTrue ? boolean(e, true) : num(e, [field doubleValue]);
           setProp(e, value, key.UTF8String, converted);
         }
         napi_set_element(e, array, (uint32_t)i, value);

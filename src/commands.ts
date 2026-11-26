@@ -1,4 +1,6 @@
 import type { BookMenuState } from './desktop';
+import { showsProperty } from './photo-view';
+import { propertySpec } from './source-properties';
 
 type Spec = { label: string | ((state: BookMenuState) => string); accelerator?: string; registerAccelerator?: boolean; contextLabel?: string;
   enabled: (state: BookMenuState) => boolean; checked?: (state: BookMenuState) => boolean };
@@ -6,6 +8,11 @@ const book = (s: BookMenuState) => s.document && !s.busy;
 const writable = (s: BookMenuState) => book(s) && s.writable;
 const spread = (id: keyof BookMenuState['enabled']) => (s: BookMenuState) => writable(s) && !s.editing && !!s.enabled[id];
 const interior = (s: BookMenuState) => s.document && s.view !== 'cover';
+// A mark of a provider's library on the thumbnails (ADR 0014): its spec names it and says whether it shows by default.
+const property = (id: string): Spec => {
+  const spec = propertySpec(id)!;
+  return { label: spec.viewLabel, enabled: book, checked: (s) => showsProperty(s.photoView, spec) };
+};
 export const commandRegistry = {
   undo: { label: s => s.history?.undo ? 'Undo ' + s.history.undo : 'Undo', accelerator: 'CmdOrCtrl+Z', enabled: s => writable(s) && !!s.history?.undo },
   redo: { label: s => s.history?.redo ? 'Redo ' + s.history.redo : 'Redo', accelerator: 'CmdOrCtrl+Shift+Z', enabled: s => writable(s) && !!s.history?.redo },
@@ -56,6 +63,10 @@ export const commandRegistry = {
   'photos-gap-custom': { label: 'Custom…', enabled: book },
   'photos-show-time': { label: 'Show Capture Time', enabled: book, checked: s => !!s.photoView?.showTime },
   'photos-show-source': { label: 'Show Source Indicators', enabled: book, checked: s => s.photoView?.showSource !== false },
+  'photos-show-lightroom-rating': property('lightroom:rating'),
+  'photos-show-lightroom-flag': property('lightroom:flag'),
+  'photos-show-lightroom-color': property('lightroom:color'),
+  'photos-show-photos-favorite': property('photos:favorite'),
   'change-layout': { label: 'Change Layout', enabled: writable },
   'asset-preview': { label: 'Quick Look', enabled: book, accelerator: 'Space', registerAccelerator: false },
   'asset-place': { label: s => s.view === 'cover' ? 'Place on Cover' : 'Place on Current Spread', enabled: writable },

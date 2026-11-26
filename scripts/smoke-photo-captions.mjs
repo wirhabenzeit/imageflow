@@ -47,7 +47,9 @@ try {
   await page.locator('.source-photo[data-id="aside"]').click();
   await page.locator('.source-inspector').getByText('Not placed').waitFor();
   await page.locator('.source-inspector').getByText('Set aside on').waitFor();
-  await popupAction(app, page, page.locator('.sources-bar .photo-view-menu button'), 'Unused only');
+  await page.locator('.sources-bar .photo-filter-trigger').click();
+  await page.getByRole('dialog', { name: 'Filter photos' }).getByRole('radio', { name: 'Unused' }).click();
+  await page.keyboard.press('Escape');
   await until(async () => await page.locator('.source-photo').count() === 2, 'Unused lists the photo set aside and the loose one');
   assert.deepEqual(await page.locator('.source-photo').evaluateAll((tiles) => tiles.map((tile) => tile.dataset.id).sort()), ['aside', 'loose']);
 

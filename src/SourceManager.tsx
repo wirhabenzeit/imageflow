@@ -6,8 +6,10 @@ import type { DesktopApi, LeftoverFile, ProjectSummary, SourceAction } from './d
 import { formatStorage } from './sync-storage-text';
 import { PhotoViewMenu } from './PhotoViewMenu';
 import type { PhotoViewControl } from './PhotoViewMenu';
-import { photoGroups, photoDate, captureLabel } from './photo-view';
+import { photoGroups, photoDate, captureLabel, shownMarks } from './photo-view';
 import { SourceBadge, sourceOrigin } from './SourceBadge';
+import { SourceMarks } from './SourceMarks';
+import { bookPhotoMarks, bookPhotoProviders } from './source-properties';
 import { TaskStatus, taskProgress } from './TaskStatus';
 import type { TaskProgress } from './desktop';
 import { sourceList } from './source-items';
@@ -18,7 +20,11 @@ import type { SourceRef } from './source-items';
 import type { SourceKind, SourceRepair } from './source-locations';
 import { assetMenu, assetMenuState, assetActions } from './asset-menu';
 import { asideText, assetPageLabels, assetUsage, shownAssetUsage } from './asset-usage';
-import { ActionMenu } from './ActionMenu';
+import { Choice, FilterChips, FilterPopover, chipItems } from './PhotoFilter';
+import type { ChipItem } from './PhotoFilter';
+import { fitFilter, orderedSources, shownProviders } from './photo-filter';
+import { photoFilterPredicate } from './source-properties';
+import type { PhotoFilter } from './source-properties';
 import { Icon } from './Icon';
 import { fileExtension, useFileIcons } from './file-icons';
 
@@ -29,7 +35,7 @@ const Glyph = ({ kind }: { kind: SourceKind }) => <span aria-hidden="true">{kind
 const DocumentIcon = ({ src, kind }: { src?: string; kind: SourceKind }) => src ? <img src={src} alt="" draggable={false} /> : <Glyph kind={kind} />;
 
 export function SourceManager({ view, api, summary, adopt, disabled = false, quickLook, embedded = false, tabs, importFiles, fileTypes = [] }: {
-  view: PhotoViewControl; api: DesktopApi; summary: ProjectSummary; adopt: (summary: ProjectSummary) => void; disabled?: boolean; quickLook?: (source: SourceRef) => void;
+  view: PhotoViewControl; api: DesktopApi; summary: ProjectSummary; adopt: (summary: ProjectSummary) => void; disabled?: boolean; quickLook?: (source: SourceRef, shown?: readonly string[]) => void;
   embedded?: boolean; tabs?: ReactNode;
   // Imports dropped files, or asks for files to import when none are given. The book window routes this through its own
   // import queue; the Assets window leaves it unset and imports through the asset actions.
@@ -41,6 +47,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   // What a long action of this window reports while it runs, such as Copy into Book rendering Lightroom originals.
   const [progress, setProgress] = useState<TaskProgress>();
   const busyRef = useRef(false);
+  const shownEntries = useRef<{ kind: string; id: string }[]>([]);
   useEffect(() => api.onProgress((value) => { if (busyRef.current) { const task = taskProgress(value); setProgress(task.text ? task : undefined); } }), [api]);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -48,9 +55,10 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const [notice, setNotice] = useState('');
   // The asset whose name is being edited in its row (Rename…).
   const [renaming, setRenaming] = useState<string>();
+  // The window's own filter (ADR 0014, section 5), not the strip's: placement, Source pills and the providers' marks as
+  // there, and Kind and Needs attention, which only this list has.
+  const [filter, setFilter] = useState<PhotoFilter>({});
   const [kind, setKind] = useState('all');
-  const [used, setUsed] = useState('all');
-  const [storage, setStorage] = useState('all');
   const [attention, setAttention] = useState(false);
   const [search, setSearch] = useState('');
   const raw = sourceEntries(summary);
@@ -106,6 +114,9 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
     if (importFiles) importFiles(files);
     else void act({ action: 'import', paths: files && api.pathsForFiles(files) });
   };
+  // Quick Look steps through the list as it is filtered here: the IDs of the shown assets of the opened one's kind.
+  const look = (item: { kind: string; id: string }) => quickLook?.({ kind: item.kind === 'photo' ? 'photo' : 'text', id: item.id },
+    shownEntries.current.filter((entry) => entry.kind === item.kind).map(({ id }) => id));
   async function menu(keys: string[]) {
     if (busy || disabled || !keys.length) return;
     const result = await api.showContextMenu(assetMenu(summary, keys, true), assetMenuState(busy || disabled));
@@ -113,17 +124,36 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
     if (result.command === 'asset-preview') {
       const item = sourceEntries(summary).find(({ key }) => key === keys[0]);
       if (item?.kind === 'file') await act({ action: 'preview', keys });
-      else if (item) quickLook?.({ kind: item.kind === 'photo' ? 'photo' : 'text', id: item.id });
+      else if (item) look(item);
     } else if (result.command === 'asset-rename') setRenaming(keys[0]);
     else if (result.command === 'asset-jump') await act({ action: 'jump', spread: result.value });
     else if (result.command in assetActions) await act({ action: assetActions[result.command as keyof typeof assetActions], keys });
   }
   const locked = busy || disabled;
+  // The Source pills are the sources of the list's assets; a source that left the book loses its pill and, for a
+  // provider, its filters (fitFilter). The marks' sections are there while the list can hold photos.
+  const sources = orderedSources(entries.map(sourceProvider));
+  const fitted = fitFilter(filter, sources);
+  useEffect(() => { if (fitted !== filter) setFilter(fitted); }, [fitted]);
+  const photoSources = kind === 'all' || kind === 'photo' ? orderedSources(entries.filter((entry) => entry.kind === 'photo').map(sourceProvider)) : [];
+  // The pills are the sources of what the chosen Kind lists: texts and files are never a provider's, and a book whose
+  // photos are all one provider's is not mixed for its photos. A pill of a source the Kind does not list rests, like
+  // a provider's filters while its pill is off: kept, and in effect again when the Kind lists it.
+  const pillSources = kind === 'all' ? sources : orderedSources(entries.filter((entry) => entry.kind === kind).map(sourceProvider));
+  const inEffect: typeof fitted = { ...fitted, sources: pillSources.length < 2 ? [] : (fitted.sources ?? []).filter((source) => pillSources.includes(source)) };
+  const passes = photoFilterPredicate(inEffect);
   const shown = entries.filter((entry) => (kind === 'all' || kind === entry.kind) &&
-    (used === 'all' || (used === 'used') === !!placements(entry).length) &&
-    // Linked: anything not stored in the book, whether a file elsewhere or a photo of another provider.
-    (storage === 'all' || (storage === 'linked') === (sourceReach(entry) !== 'book')) && (!attention || (unavailable(entry.key) && !summary.sources?.[entry.key]?.pending) || summary.sources?.[entry.key]?.outOfDate) &&
+    passes({ provider: sourceProvider(entry), extra: entry.kind === 'photo' ? summary.photoExtra?.[entry.id] : undefined, used: !!placements(entry).length }) &&
+    (!attention || (unavailable(entry.key) && !summary.sources?.[entry.key]?.pending) || summary.sources?.[entry.key]?.outOfDate) &&
     entry.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
+  shownEntries.current = shown;
+  const kinds = { photo: 'Photos', markdown: 'Markdown', file: 'Files' } as const;
+  const chips: ChipItem[] = [
+    ...(kind !== 'all' ? [{ key: 'kind', label: kinds[kind as keyof typeof kinds], title: 'Only ' + kinds[kind as keyof typeof kinds].toLowerCase() + (kind === 'markdown' ? ' texts' : ''), remove: () => setKind('all') }] : []),
+    ...chipItems(inEffect, (next) => setFilter({ ...next, sources: fitted.sources }), shownProviders(inEffect, photoSources), 'assets').map((chip) =>
+      chip.key === 'sources' ? { ...chip, remove: () => setFilter({ ...fitted, sources: (fitted.sources ?? []).filter((source) => !pillSources.includes(source)) }) } : chip),
+    ...(attention ? [{ key: 'attention', label: 'Needs attention', title: 'Only assets that need attention', remove: () => setAttention(false) }] : []),
+  ];
   const groups = photoGroups(summary, shown.filter((entry) => entry.kind === 'photo').map(({ id }) => id), view.value);
   const headers = new Map(groups.filter((group) => group.label).map((group) => [group.ids[0], group]));
   const list = useListSelection(shown.map(({ key }) => key), (key) => entries.find((entry) => entry.key === key)!.name);
@@ -138,7 +168,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const preview = () => {
     const item = entries.find(({ key }) => key === list.selected[0]);
     if (item?.kind === 'file') void act({ action: 'preview', key: item.key });
-    else if (item) quickLook?.({ kind: item.kind === 'photo' ? 'photo' : 'text', id: item.id });
+    else if (item) look(item);
   };
   return <section className={embedded ? 'sources source-manager source-manager-embedded' : 'source-manager'} aria-label={embedded ? 'Sources' : 'Assets'} aria-busy={busy || disabled}
     onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }}
@@ -149,24 +179,18 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
       {!embedded && <NewMarkdown api={api} disabled={locked} />}
       <button type="button" className="new-markdown" disabled={locked || (embedded && !fileTypes.length)} onClick={() => bring()}
         title={embedded ? fileTypes.length ? 'Import ' + fileTypes.join(', ') + ' files' : 'This template has no file parameters' : 'Import photos, texts and files for the template\'s file parameters'}><Icon name="down" /> Import…</button>
-      {!embedded && <PhotoViewMenu view={view.value} update={view.update} custom={view.custom} />}
-      <ActionMenu className="asset-filter" label={<>Filter <Icon name="chevron" /></>}>
-        {!embedded && <>{(['photo', 'markdown', 'file'] as const).map((value) => <button key={value} onClick={() => setKind(kind === value ? 'all' : value)}>{({ photo: 'Photos', markdown: 'Markdown', file: 'Files' })[value]}</button>)}
-        <hr /></>}
-        <button onClick={() => setUsed(used === 'unused' ? 'all' : 'unused')}>Unused</button>
-        <button onClick={() => setUsed(used === 'used' ? 'all' : 'used')}>Used</button>
-        <hr />
-        <button onClick={() => setStorage(storage === 'linked' ? 'all' : 'linked')}>Linked</button>
-        <button onClick={() => setStorage(storage === 'book' ? 'all' : 'book')}>In Book</button>
-        <button onClick={() => setAttention(!attention)}>Needs attention</button>
-      </ActionMenu>
+      {!embedded && <PhotoViewMenu view={view.value} update={view.update} custom={view.custom} providers={bookPhotoProviders(summary)} />}
+      {/* At the top of the Assets window the popover opens downwards; in the bottom panel upwards, as the strip's. The
+          bottom panel's list holds only files, so it has no Kind. */}
+      <FilterPopover filter={fitted} change={setFilter} sources={pillSources} providers={photoSources} noun="assets" direction={embedded ? 'up' : 'down'}
+        extraActive={kind !== 'all' || attention} clearExtra={() => { setKind('all'); setAttention(false); }}
+        lead={!embedded && <section className="pf-section" aria-label="Kind"><h3 className="pf-heading">Kind</h3>
+          <Choice label="Kind" value={kind} options={[['all', 'All'], ['photo', 'Photos'], ['markdown', 'Markdown'], ['file', 'Files']]} choose={setKind} /></section>}
+        tail={<section className="pf-section" aria-label="Needs attention">
+          <label className="pc-switch pf-toggle"><input type="checkbox" checked={attention} onChange={(event) => setAttention(event.target.checked)} />Needs attention only</label>
+          <p className="pf-note">Unavailable, or out of date in its source.</p></section>} />
     </header>
-    {(kind !== 'all' || used !== 'all' || storage !== 'all' || attention) && <div className="asset-filter-tokens" aria-label="Active filters">
-      {kind !== 'all' && <button onClick={() => setKind('all')} aria-label="Remove kind filter">Kind: {kind} ×</button>}
-      {used !== 'all' && <button onClick={() => setUsed('all')} aria-label="Remove usage filter">{used === 'unused' ? 'Unused' : 'Used'} ×</button>}
-      {storage !== 'all' && <button onClick={() => setStorage('all')} aria-label="Remove storage filter">{storage === 'linked' ? 'Linked' : 'In Book'} ×</button>}
-      {attention && <button onClick={() => setAttention(false)} aria-label="Remove attention filter">Needs attention ×</button>}
-    </div>}
+    <FilterChips chips={chips} className="filter-chips asset-filter-tokens" />
     <div className="source-manager-list" role="listbox" aria-label="Assets" aria-multiselectable="true" onKeyDown={(event) => {
       if (event.key === ' ') { event.preventDefault(); preview(); }
       else if (event.key === 'Backspace' || event.key === 'Delete') { event.preventDefault(); if (!locked && list.selected.length) void act({ action: 'remove', keys: list.selected }); }
@@ -215,7 +239,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
               }} />
             : <strong>{entry.name}</strong>}
             {(file?.linked || problem) && sourceFolderName(entry) && <span className="muted">{sourceFolderName(entry)}</span>}</span></span>
-          <span className="asset-status">{entry.kind === 'markdown' && <EditMarkdown api={api} id={entry.id} name={entry.name} disabled={locked || problem} failure={(message) => setError({ message })} />}{entry.kind === 'photo' && view.value.showTime && <span className="muted" title={photoDate(summary, entry.id)?.capturedEstimated ? 'Estimated from file modification time' : undefined}>{captureLabel(photoDate(summary, entry.id)?.captured, photoDate(summary, entry.id)?.capturedEstimated)}{photoDate(summary, entry.id)?.capturedEstimated ? ' ≈' : ''}</span>}<span className="muted" title={placements(entry).length ? undefined : aside(entry)}>{placements(entry).length ? placements(entry).length + '×' : aside(entry) ? 'Set aside' : 'Not used'}</span>{badge && <span className={'source-badge' + (status?.pending || status?.away ? '' : ' warning')} title={status?.outOfDate ? outOfDateNote(status) : status?.problem}>{badge}</span>}
+          <span className="asset-status">{entry.kind === 'markdown' && <EditMarkdown api={api} id={entry.id} name={entry.name} disabled={locked || problem} failure={(message) => setError({ message })} />}{entry.kind === 'photo' && view.value.showTime && <span className="muted" title={photoDate(summary, entry.id)?.capturedEstimated ? 'Estimated from file modification time' : undefined}>{captureLabel(photoDate(summary, entry.id)?.captured, photoDate(summary, entry.id)?.capturedEstimated)}{photoDate(summary, entry.id)?.capturedEstimated ? ' ≈' : ''}</span>}{entry.kind === 'photo' && <SourceMarks marks={shownMarks(view.value, bookPhotoMarks(summary, entry.id))} />}<span className="muted" title={placements(entry).length ? undefined : aside(entry)}>{placements(entry).length ? placements(entry).length + '×' : aside(entry) ? 'Set aside' : 'Not used'}</span>{badge && <span className={'source-badge' + (status?.pending || status?.away ? '' : ' warning')} title={status?.outOfDate ? outOfDateNote(status) : status?.problem}>{badge}</span>}
             {view.value.showSource ? <SourceBadge origin={sourceOrigin(entry)!} className="asset-origin" />
               : file?.linked && <span className="asset-linked" role="img" aria-label="Linked to original file" title="Linked to original file"><Icon name="link" size={16} /></span>}
           </span>

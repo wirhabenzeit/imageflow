@@ -13,6 +13,8 @@ import { fileName, metaText, words } from './source-items';
 import { splitFrontmatter } from './frontmatter';
 import type { SourceRef } from './source-items';
 import { captureFact, photoDate } from './photo-view';
+import { bookPhotoMarks } from './source-properties';
+import { MarkFacts } from './SourceMarks';
 
 const photoFields = [['title', 'Title'], ['caption', 'Caption'], ['credit', 'Credit'], ['altText', 'Alt text']] as const;
 
@@ -68,6 +70,8 @@ export function SourceInspector({ summary, source, template, render, usage, writ
     // What the photo's provider reports for each field (ADR 0011): shown while the book has no value of its own, which
     // Revert removes again.
     const provided = summary.photoProvided?.[source.id];
+    // The marks of its provider's library (ADR 0014), read-only and whatever the thumbnails show; none for an unmarked photo.
+    const marks = bookPhotoMarks(summary, source.id);
     return <div className="source-inspector">
       <div className="si-head">
         <p className="eyebrow">Photo</p>
@@ -81,10 +85,11 @@ export function SourceInspector({ summary, source, template, render, usage, writ
             <img src={renderOrigin + '/render/' + summary.id + '/photo/' + source.id} alt={photo.altText || photo.title || ''} />
           </button>
         : status?.pending ? null : <p className="error-text">{file ? 'The photo file is missing from photos/.' : 'No preview of this photo is on this Mac.'}</p>}
-      {(date || size) && <dl className="si-facts">
+      {(date || size || marks.length > 0) && <dl className="si-facts">
         {date && <><dt className={photoDate(summary, source.id)?.capturedEstimated ? 'muted' : undefined}>{date.label}</dt><dd title={date.title} className={photoDate(summary, source.id)?.capturedEstimated ? 'muted' : undefined}>{date.value}</dd></>}
         {size && <><dt>Size</dt><dd>{size.width} × {size.height} px · {(size.width * size.height / 1e6).toFixed(1)} MP</dd></>}
         {print && <><dt>Prints up to</dt><dd>{print} cm at {ppi} ppi</dd></>}
+        <MarkFacts marks={marks} />
       </dl>}
       <details open><summary>Placed on</summary>
         <Placements summary={summary} template={template} usage={usage} render={render} source={source} select={select} />

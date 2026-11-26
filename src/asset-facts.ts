@@ -38,7 +38,10 @@ export const assetFactSchema = object({
   revisions: object({ revision: z.string(), contentRevision: z.string().optional() }).optional(),
   /** For a photo without a file: its provider's title, caption, credit and alt text. */
   provided: providedSchema.optional(),
-  /** For a photo without a file: what its provider keeps with the fact for its own use. */
+  /**
+   * For a photo without a file: what its provider keeps with the fact. The host reads the keys the provider declares in
+   * src/source-properties.ts (its curation marks, ADR 0014), through those specs only; every other key is the provider's own.
+   */
   extra: z.record(z.string(), z.unknown()).optional(),
 });
 /** The `assets-meta.json` version this build reads and writes. A file with another one is never written over. */

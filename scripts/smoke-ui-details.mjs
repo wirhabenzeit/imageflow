@@ -122,11 +122,13 @@ try {
   assert.equal(await page.locator('.source-photo[aria-selected="true"]').count(), 2);
   assert.equal(await page.locator('.sources-bar').getByRole('button', { name: 'Assets…', exact: true }).count(), 0);
   assert.equal(await page.locator('.sources-bar .source-view').count(), 0);
-  await popup(undefined, 'Unused only');
-  await page.locator('.sources-bar .photo-view-menu button').click();
+  // Unused is the Filter's Placement (ADR 0014); a chip says so, and removing it shows every photo again.
+  await page.locator('.sources-bar .photo-filter-trigger').click();
+  await page.getByRole('dialog', { name: 'Filter photos' }).getByRole('radio', { name: 'Unused' }).click();
   await until(async () => await page.locator('.source-photo[data-id="late"]').count() === 0);
-  await popup(undefined, 'All assets');
-  await page.locator('.sources-bar .photo-view-menu button').click();
+  await page.keyboard.press('Escape');
+  await page.getByRole('dialog', { name: 'Filter photos' }).waitFor({ state: 'detached' });
+  await page.locator('.sources-bar').getByRole('button', { name: 'Remove filter: Only photos not placed in the book' }).click();
   await until(async () => await page.locator('.source-photo[data-id="late"]').count() === 1);
   const strip = page.locator('.source-items-photo');
   await divider.focus();

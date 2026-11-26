@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ProjectSummary } from '../src/desktop';
 import { projectSchema } from '../src/project';
-import { captureFact, captureLabel, captureWallTime, defaultPhotoView, orderedPhotos, photoGroups, photoViewChange, validPhotoView } from '../src/photo-view';
+import { captureFact, captureLabel, captureWallTime, defaultPhotoView, isPhotoViewCommand, orderedPhotos, photoGroups, photoViewChange, propertyCommand, propertyCommands, shownMarks, showsProperty, validPhotoView } from '../src/photo-view';
+import { propertySpec, readPhotoMarks, sourceProperties } from '../src/source-properties';
 import { sourceList } from '../src/source-items';
 const summary: ProjectSummary = { id: 'x', folder: 'Book', photos: {}, photoSizes: {}, texts: {},
   project: projectSchema.parse({ schemaVersion: 1, title: 'Book', template: { id: 't', version: '1' }, spreads: [] }),
@@ -48,4 +49,36 @@ test('time gaps can join an outing across midnight, and custom view options are 
   assert.equal(validPhotoView({ gapMinutes: -1 }).gapMinutes, 120);
   assert.equal(validPhotoView(null).sort, 'capture');
   assert.ok(captureLabel('2026-11-02T14:39:00-05:00').includes('14:39') || captureLabel('2026-11-02T14:39:00-05:00').includes('2:39'));
+});
+test('a view saved before the marks takes each property\'s default, and keeps only toggles of declared properties', () => {
+  const before = validPhotoView({ sort: 'name', group: 'none', gapMinutes: 120, showTime: true, showSource: true });
+  assert.equal('sourceProps' in before, false);
+  assert.equal(showsProperty(before, propertySpec('lightroom:rating')!), true);
+  assert.equal(showsProperty(before, propertySpec('lightroom:flag')!), true);
+  assert.equal(showsProperty(before, propertySpec('lightroom:color')!), false);
+  assert.equal(showsProperty(before, propertySpec('photos:favorite')!), true);
+  // A property a later build declares, or a value that is no boolean, is dropped.
+  const saved = validPhotoView({ sourceProps: { 'lightroom:rating': false, 'lightroom:color': true, 'lightroom:stacks': true, 'photos:favorite': 'yes' } });
+  assert.deepEqual(saved.sourceProps, { 'lightroom:rating': false, 'lightroom:color': true });
+  assert.equal(validPhotoView({ sourceProps: ['lightroom:rating'] }).sourceProps, undefined);
+  assert.equal(validPhotoView({ sourceProps: null }).sourceProps, undefined);
+});
+test('each declared property has a toggle command, which flips what is shown and keeps the other toggles', () => {
+  const specs = sourceProperties.flatMap(({ properties }) => properties);
+  assert.deepEqual(specs.map(({ id }) => propertyCommand(id)), [...propertyCommands]);
+  for (const id of propertyCommands) assert.ok(isPhotoViewCommand(id), id);
+  assert.deepEqual(photoViewChange('photos-show-lightroom-color', defaultPhotoView), { sourceProps: { 'lightroom:color': true } });
+  const view = validPhotoView({ ...defaultPhotoView, ...photoViewChange('photos-show-lightroom-rating', defaultPhotoView) });
+  assert.deepEqual(view.sourceProps, { 'lightroom:rating': false });
+  assert.deepEqual(photoViewChange('photos-show-photos-favorite', view), { sourceProps: { 'lightroom:rating': false, 'photos:favorite': false } });
+  assert.deepEqual(photoViewChange('photos-show-lightroom-rating', view), { sourceProps: { 'lightroom:rating': true } });
+  // The commands before the marks are as they were.
+  assert.deepEqual(photoViewChange('photos-show-source', defaultPhotoView), { showSource: false });
+  assert.deepEqual(photoViewChange('photos-show-time', defaultPhotoView), { showTime: true });
+});
+test('the thumbnails show the marks whose properties are toggled on', () => {
+  const marks = readPhotoMarks('lightroom', { rating: 3, flag: 'reject', color: 'blue' });
+  assert.deepEqual(shownMarks(defaultPhotoView, marks).map(({ spec }) => spec.id), ['lightroom:rating', 'lightroom:flag']);
+  assert.deepEqual(shownMarks({ ...defaultPhotoView, sourceProps: { 'lightroom:flag': false, 'lightroom:color': true } }, marks).map(({ spec }) => spec.id),
+    ['lightroom:rating', 'lightroom:color']);
 });

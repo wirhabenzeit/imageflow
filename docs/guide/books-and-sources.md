@@ -26,7 +26,7 @@ Linked files refresh after external saves, so a photo you re-export from Lightro
 
 ## Manage assets
 
-**Assets → Manage Assets…** lists the book's photos, texts and files, with filters and availability badges.
+**Assets → Manage Assets…** lists the book's photos, texts and files, with availability badges and a **Filter** of its own, set apart from the photo strip's. Besides what the strip offers (see [Marks and filters](#marks-and-filters)), it filters by **Kind** (photos, Markdown, files) and to **Needs attention only**: assets that are unavailable or out of date in their source.
 
 - Click, Shift-click or Command-click to select. Command-A selects the current filter.
 - Right-click or press Shift-F10 for actions. Space opens Quick Look, Return reveals files, and Delete removes assets with Undo.
@@ -35,6 +35,23 @@ Linked files refresh after external saves, so a photo you re-export from Lightro
 - **Import…** adds photos, Markdown and parameter files, and you can drop files from Finder onto the list. In the bottom panel's **Assets** tab, which lists only parameter files, it adds only those. Files other than photos and Markdown import only when a file parameter of the template accepts their type, such as `.gpx`; other files are skipped. New files follow **Copy Assets into Book**. A file the book already holds, linked or copied, found by its path or by its contents, is not added again; the status bar says how many were already in the book. **Edit → Undo** removes what an import added.
 - Removing a parameter file that is still assigned asks first and names where it is used. **Remove** clears those assignments and takes the file out of the book in one step; **Undo** restores the file and every assignment. Copied files stay in the package for Undo, and removing a link never touches the original.
 - Once neither the book nor anything you can undo needs a copied file, usually after the book was opened again, the Assets window says so below its list: **files the book no longer uses**. Open it to see them, show them in Finder, or move them to the Trash. Nothing is moved by itself.
+
+## Marks and filters
+
+Photos from Lightroom Classic and Apple Photos bring the marks you gave them there: Lightroom's star rating, Pick or Reject flag and colour label, and Apple Photos' favourite heart. They show on the photo's thumbnail, in its Manage Assets row and Quick Look, and as **Rating**, **Flag**, **Color label** and **Favorite** in the Inspector. A rejected photo's thumbnail is dimmed, so it stands out before you place it. Marks follow the library within a few seconds, and ImageFlow never changes them. A photo copied into the book leaves its marks behind. Lightroom Classic needs plugin 1.3.0 for marks; with an older one, the **View → Lightroom Classic** menu offers to update it.
+
+**Choose which marks show** in **View → Lightroom Classic** (**Show Stars**, **Show Flags**, **Show Color Labels**) and **View → Apple Photos** (**Show Favorites**), in the menu bar or the strip's **View** menu. Each menu is there while the book holds photos from that source. Colour labels are off at first; each book remembers your choice on this Mac.
+
+**Filter the strip** with **Filter** beside **View**. It stays open while you combine filters, and the strip follows as you go; click elsewhere or press Escape to close it.
+
+- **Placement:** **All**, **Unused** (not placed on a page; content set aside counts as unused) or **Used**.
+- **Source:** when the photos come from two or more sources, pills for **In Book**, **Linked**, **Lightroom Classic** and **Apple Photos**. With any selected, only photos from those sources show.
+- **Lightroom Classic photos:** a minimum rating (click a star; click it again for any rating), one flag choice (**Any**, **Picked**, **Not Rejected**, **Rejected**), and colour labels (any of those you select).
+- **Apple Photos photos:** **Favorites only**.
+
+**A source's filters apply to that source's photos only.** With four stars or more set, a Lightroom photo needs four stars, and every photo from Apple Photos, in the book or linked still shows; the section says so with *Photos from other sources stay visible.* To see only Lightroom's four-star photos, also select the **Lightroom Classic** source pill. Two sources' filters never hide each other's photos: four stars or more with **Favorites only** shows Lightroom's four-star photos and your Photos favourites together.
+
+Each filter shows as a chip beside the tabs; a source's chips start with its icon, and their tooltip names the photos they apply to. Click **×** on a chip to remove that filter, or **Clear Filters** to remove all. While a filter is set, the **Filter** button is highlighted and the tab counts what it shows, as in **Photos 14/42**, and Quick Look steps through those photos only. Deselecting a source's pill sets its filters aside without losing them; they apply again when you select it or clear the Source filter. The Texts tab has its own placement and source filter. Filters last until the book is closed.
 
 ## Photos from Lightroom Classic
 

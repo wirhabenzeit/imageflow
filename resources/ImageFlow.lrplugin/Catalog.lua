@@ -46,11 +46,23 @@ function Catalog.identity()
 end
 
 -- Raw keys the spike proved in Lightroom Classic 16.0.1, then keys that are probed once, each by itself, because one
--- unknown key fails a whole batch call.
+-- unknown key fails a whole batch call. The marks (`rating`, `pickStatus`, `colorNameForLabel`, `label`; ADR 0014) are
+-- probed too: a Lightroom that rejects one still answers with the others.
 local baseRaw = { 'uuid', 'lastEditTime', 'editCount', 'croppedDimensions', 'orientation', 'fileFormat' }
-local optionalRaw = { 'dateTimeOriginalISO8601', 'gps' }
-local optionalFormatted = { 'fileName', 'title', 'caption', 'copyright', 'creator', 'cameraMake', 'cameraModel', 'altTextAccessibility' }
+local optionalRaw = { 'dateTimeOriginalISO8601', 'gps', 'rating', 'pickStatus', 'colorNameForLabel' }
+local optionalFormatted = { 'fileName', 'title', 'caption', 'copyright', 'creator', 'cameraMake', 'cameraModel', 'altTextAccessibility', 'label' }
 local keys
+
+-- A photo's marks as Lightroom keeps them, each only when set: ImageFlow maps them (ADR 0014, section 2). Lightroom
+-- gives nil or 0 for no rating, 0 for no flag and 'none' or nothing for no colour label.
+local function marks(row, r, f)
+  local rating = tonumber(r.rating)
+  if rating and rating >= 1 and rating <= 5 and rating % 1 == 0 then row.rating = rating end
+  local pick = tonumber(r.pickStatus)
+  if pick == 1 or pick == -1 then row.pickStatus = pick end
+  if type(r.colorNameForLabel) == 'string' and r.colorNameForLabel ~= '' and r.colorNameForLabel ~= 'none' then row.colorNameForLabel = r.colorNameForLabel end
+  if type(f.label) == 'string' and f.label ~= '' then row.label = f.label end
+end
 
 local function probe(catalog, photo)
   local raw, formatted = {}, {}
@@ -117,6 +129,7 @@ function Catalog.metadata(items)
         if type(r.gps) == 'table' and tonumber(r.gps.latitude) and tonumber(r.gps.longitude) then
           row.gps = { latitude = tonumber(r.gps.latitude), longitude = tonumber(r.gps.longitude) }
         end
+        marks(row, r, f)
         if known[uuid] ~= revision then row.developHash = Catalog.developHash(photo) end
         rows[#rows + 1] = row
       else

@@ -46,7 +46,7 @@ import { AutomaticRuns, AutoSync, autoSyncTiming, SyncInterruptedError } from '.
 import { SettingsStore } from '../desktop/settings';
 import { syncPatchError, syncSetupPatch } from '../desktop/sync-settings';
 import type { FolderSyncBackend, S3SyncBackend, SyncBackend } from '../src/settings';
-import { blobKeyPattern, bookPrefix, commitKey, contentBlobKey, coverBlobKey, deletedMarkerKey, decideSync, readBookTombstone, readCommitHeader, readRemoteIdentity, NewerSyncFormatError, deriveTips, isUnlocatedPath, originalBlobKey, portableManifests,
+import { blobKeyPattern, bookPrefix, changedProperties, commitKey, contentBlobKey, coverBlobKey, deletedMarkerKey, decideSync, factsAhead, noProperties, readBookTombstone, readCommitHeader, readRemoteIdentity, NewerSyncFormatError, deriveTips, isUnlocatedPath, originalBlobKey, portableManifests,
   projectManifests, proxyBlobKey, stateBlobSchema, tombstoneKey } from '../src/sync-snapshot';
 import type { CommitHeader, StateBlob } from '../src/sync-snapshot';
 import type { ProjectFiles } from '../src/project';
@@ -64,7 +64,8 @@ import type { FakePhoto } from './lightroom-fake';
 import { registerProvider } from '../desktop/providers';
 import type { Materialized, MaterializeOptions, Observed, Revisions, SourceProvider, SourceRef, Unavailable } from '../desktop/source-provider';
 import { registerLocatorKind } from '../src/source-locator';
-import type { LocatorKind } from '../src/source-locator';
+import type { LocatorKind, PhotosLocator } from '../src/source-locator';
+import type { AssetFact } from '../src/asset-facts';
 
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const image = (path: string, color: string, width = 120, height = 80) =>
@@ -197,6 +198,28 @@ core('the decision table: fast-forward or keep both, and facts never diverge', (
   assert.equal(decide({ tips: [c2] }), 'fast-forward');
   assert.deepEqual(decideSync({ pullInProgress: false, tips: [c2], commits: [c1, c2], lastSynced: synced, localRevision: r1, factsChanged: true }), { action: 'fast-forward', tip: c2, thenPush: true });
   assert.equal(decide({ tips: [c2], localRevision: r3 }), 'diverged');
+});
+
+core('marks changed here: against what this Mac showed at the last sync, and once for a record from before marks synced', () => {
+  const [none, star, heart] = ['', '{"lightroom:rating":{"kind":"stars","value":3}}', '{"photos:favorite":{"kind":"heart"}}'].map((value) => sha(Buffer.from(value)));
+  assert.equal(none, noProperties, 'no marks is the digest of the empty string');
+  const props = { kept: star, starred: star, cleared: none, unrecorded: heart, plain: none };
+  const synced = { photoDigests: {}, localProps: { kept: star, starred: none, cleared: star, absent: star } };
+  assert.deepEqual([...changedProperties(props, synced)].sort(), ['cleared', 'starred', 'unrecorded'],
+    'a photo is changed where its marks differ from the record; one the record lacks only where it has a mark; one not read here never');
+  assert.deepEqual([...changedProperties(props, { localProps: undefined })].sort(), ['kept', 'starred', 'unrecorded'], 'without any record: every photo that has a mark');
+  assert.deepEqual([...changedProperties(props)].sort(), ['kept', 'starred', 'unrecorded']);
+  // A change of marks alone is a fact ahead, so it pushes; as every fact, it never makes a book diverge.
+  assert.equal(factsAhead({}, synced, {}, { kept: star }), false);
+  assert.equal(factsAhead({}, synced, {}, { kept: heart }), true);
+  assert.equal(factsAhead({}, { photoDigests: {} }, {}, { plain: none }), false);
+  const tip = { version: 2 as const, commitId: '00000000-0000-4000-8000-000000000001', bookId: '00000000-0000-4000-8000-000000000000', parents: [], bookStateRevision: '1'.repeat(64),
+    createdAt: '2026-11-21T10:00:00.000Z', title: 'Book', stateDigest: 'f'.repeat(64) };
+  const next = { ...tip, commitId: '00000000-0000-4000-8000-000000000002', parents: [tip.commitId] };
+  const lastSynced = { commitId: tip.commitId, bookStateRevision: tip.bookStateRevision };
+  assert.equal(decideSync({ pullInProgress: false, tips: [tip], lastSynced, localRevision: tip.bookStateRevision, factsChanged: true }).action, 'push');
+  assert.deepEqual(decideSync({ pullInProgress: false, tips: [next], commits: [tip, next], lastSynced, localRevision: tip.bookStateRevision, factsChanged: true }),
+    { action: 'fast-forward', tip: next, thenPush: true });
 });
 
 core('a snapshot carries linked paths as file names, and a pull keeps this Mac’s own paths', () => {
@@ -1123,6 +1146,234 @@ test('what a Mac saw of an online photo survives an interrupted pull and a pull 
   for (const mac of [desktop, laptop, desktop]) assert.deepEqual(await outcome(mac(), remote), { action: 'in-sync', pushed: 0 });
   assert.equal((await webFact(remote, a)).provided?.title, 'Harbour at night');
   assert.equal((await tips(remote, a)).length, 1);
+});
+
+// --- Marks of photos without a file (ADR 0014): favourites of a fake Apple Photos library -------------------------------
+// The library of the Mac in use (`library`), by cloud identifier: two Macs may show one photo at other versions or with
+// other marks (two copies of a library), and a Mac without access to Photos lays the book out from synced facts. A
+// favourite changes no revision, as in Photos.
+type LibraryPhoto = { revision: string; content: string; width: number; height: number; color: string; favorite?: boolean };
+class FakePhotos implements SourceProvider<PhotosLocator> {
+  readonly provider = 'photos' as const;
+  library?: Map<string, LibraryPhoto> = new Map();
+  /** No preview can be made (still downloading from iCloud): the photo then has no fact. */
+  noPreview = false;
+  private revisions = (photo: LibraryPhoto): Revisions => ({ revision: photo.revision, contentRevision: photo.content });
+  private unavailable = (cloud: string) => !this.library ? { state: 'denied' as const, problem: 'No access to Photos' }
+    : !this.library.get(cloud) ? { state: 'missing' as const, problem: 'No longer in Photos' } : undefined;
+  async observe(_book: string, refs: readonly SourceRef<PhotosLocator>[]): Promise<Observed[]> {
+    return refs.map(({ locator }) => {
+      const photo = this.library?.get(locator.cloud);
+      return this.unavailable(locator.cloud) ?? { state: 'available', revisions: this.revisions(photo!),
+        facts: { width: photo!.width, height: photo!.height, extra: { type: 'image', fileName: 'IMG_0001.HEIC', ...(photo!.favorite ? { favorite: true } : {}) } } };
+    });
+  }
+  async *preview(_book: string, refs: readonly SourceRef<PhotosLocator>[], { staging, signal }: MaterializeOptions): AsyncGenerator<Materialized> {
+    for (const { id, locator } of refs) {
+      if (signal.aborted) return;
+      const failure = this.unavailable(locator.cloud);
+      if (failure) { yield { id, ...failure }; continue; }
+      if (this.noPreview) { yield { id, state: 'unreadable', problem: 'Still downloading from iCloud' }; continue; }
+      const photo = this.library!.get(locator.cloud)!;
+      const file = join(staging, id + '-' + photo.content + '.jpg');
+      await image(file, photo.color, photo.width / 25, photo.height / 25);
+      yield { id, file, before: this.revisions(photo), after: this.revisions(photo) };
+    }
+  }
+  async *materialize(_book: string, refs: readonly SourceRef<PhotosLocator>[]): AsyncGenerator<Materialized> {
+    for (const { id } of refs) yield { id, state: 'unreadable', problem: 'This test never downloads an original.' };
+  }
+  watch() { return () => {}; }
+  repairs() { return []; }
+}
+function fakePhotos(t: { after: (fn: () => void) => void }) {
+  const photos = new FakePhotos();
+  const unregister = registerProvider(photos);
+  t.after(unregister);
+  return photos;
+}
+const cloud = (n: number) => 'AAAAAAAA-0000-4000-8000-00000000000' + n + ':001:AYQ';
+const libraryPhoto: LibraryPhoto = { revision: 'r1', content: 'c1', width: 3000, height: 2000, color: '#cc8844' };
+const marksOf = ({ extra }: AssetFact) => ({ favorite: extra?.favorite, fileName: extra?.fileName });
+const versionOf = ({ digest, width, height, revisions, verified }: AssetFact) => ({ digest, width, height, revisions, verified });
+
+coreEach('a favourite set in Photos syncs without a content change, and only the mark: a Mac without Photos shows it, and nothing diverges', async (t) => {
+  const { a, b, remote } = await world(t);
+  const photos = fakePhotos(t);
+  const desktopLibrary = new Map([[cloud(1), { ...libraryPhoto }]]);
+  const desktop = () => { photos.library = desktopLibrary; return a; };
+  // The laptop has no access to Photos: it lays out the photo from what syncs.
+  const laptop = () => { photos.library = undefined; return b; };
+  await edit(desktop(), (files) => { files.photoIndex.heart = { photos: { cloud: cloud(1) } } as never; });
+  await sync(desktop(), remote);
+  await copyBook(a, b);
+  assert.deepEqual(await outcome(laptop(), remote), { action: 'adopt', pushed: 0 });
+  const before = await webFactOf(remote, a, 'heart');
+  assert.deepEqual(marksOf(before), { favorite: undefined, fileName: 'IMG_0001.HEIC' });
+
+  // A favourite in Photos moves no revision, so the photo's content is unchanged. The mark alone is pushed.
+  desktopLibrary.get(cloud(1))!.favorite = true;
+  assert.deepEqual(await outcome(desktop(), remote), { action: 'push', pushed: 1 });
+  const after = await webFactOf(remote, a, 'heart');
+  assert.deepEqual(marksOf(after), { favorite: true, fileName: 'IMG_0001.HEIC' });
+  assert.deepEqual(versionOf(after), versionOf(before), 'digest, size, revisions and when it was verified are the snapshot’s');
+  assert.deepEqual(await outcome(desktop(), remote), { action: 'in-sync', pushed: 0 }, 'a mark that was pushed is no longer ahead');
+  // The laptop, without Photos, takes the mark into its own facts.
+  assert.deepEqual(await outcome(laptop(), remote), { action: 'fast-forward', pushed: 0 });
+  assert.equal((await readAssetFacts(b.folder)).heart.extra?.favorite, true);
+
+  // The laptop edits the book while the desktop clears the favourite: the desktop pulls the edit first, then pushes its
+  // mark over it. A change of marks never makes a book diverge.
+  await edit(laptop(), caption('shore', 'From the laptop'));
+  assert.deepEqual(await outcome(laptop(), remote), { action: 'push', pushed: 1 });
+  desktopLibrary.get(cloud(1))!.favorite = false;
+  assert.deepEqual(await outcome(desktop(), remote), { action: 'fast-forward', pushed: 1 });
+  assert.equal((await manifests(a)).photos.shore.caption, 'From the laptop');
+  assert.deepEqual(marksOf(await webFactOf(remote, a, 'heart')), { favorite: undefined, fileName: 'IMG_0001.HEIC' }, 'the cleared mark went up after the pull');
+  for (const mac of [laptop, desktop, laptop]) assert.equal((await sync(mac(), remote)).action === 'diverged', false);
+  assert.equal((await tips(remote, a)).length, 1);
+  assert.equal((await readAssetFacts(b.folder)).heart.extra?.favorite, undefined);
+  assert.deepEqual(await outcome(desktop(), remote), { action: 'in-sync', pushed: 0 });
+});
+
+test('marks from a Mac that shows another version of a photo replace only the marks, and a Mac whose library shows other marks does not push them back after a pull', async (t) => {
+  const { a, b, remote } = await world(t);
+  const photos = fakePhotos(t);
+  // Two copies of one library: the laptop's shows the photo edited otherwise, at another size.
+  const desktopLibrary = new Map([[cloud(1), { ...libraryPhoto }]]);
+  const laptopLibrary = new Map([[cloud(1), { ...libraryPhoto, revision: 'r9', content: 'c9', width: 2000, height: 3000, color: '#223366' }]]);
+  const desktop = () => { photos.library = desktopLibrary; return a; };
+  const laptop = () => { photos.library = laptopLibrary; return b; };
+  await edit(desktop(), (files) => { files.photoIndex.heart = { photos: { cloud: cloud(1) } } as never; });
+  await sync(desktop(), remote);
+  await copyBook(a, b);
+  assert.deepEqual(await outcome(laptop(), remote), { action: 'adopt', pushed: 0 }, 'the laptop’s other version is where it starts, not a change');
+  const before = await webFactOf(remote, a, 'heart');
+  assert.notEqual((await readAssetFacts(b.folder)).heart.digest, before.digest, 'the laptop draws its own version');
+
+  // The laptop marks the photo: the snapshot's version goes up with the laptop's mark, not the laptop's version.
+  laptopLibrary.get(cloud(1))!.favorite = true;
+  assert.deepEqual(await outcome(laptop(), remote), { action: 'push', pushed: 1 });
+  const after = await webFactOf(remote, a, 'heart');
+  assert.deepEqual(versionOf(after), versionOf(before));
+  assert.equal(after.extra?.favorite, true);
+  assert.deepEqual(await outcome(laptop(), remote), { action: 'in-sync', pushed: 0 });
+
+  // The desktop's library does not show the favourite. It takes the snapshot, and what it shows after the pull is no
+  // change made there: it never answers with its own marks, however often both sync.
+  assert.deepEqual(await outcome(desktop(), remote), { action: 'fast-forward', pushed: 0 });
+  const commits = await commitCount(remote);
+  for (const mac of [desktop, laptop, desktop, laptop]) assert.deepEqual(await outcome(mac(), remote), { action: 'in-sync', pushed: 0 });
+  assert.equal(await commitCount(remote), commits);
+  assert.equal((await webFactOf(remote, a, 'heart')).extra?.favorite, true, 'the remote keeps the laptop’s mark');
+  assert.equal((await readAssetFacts(a.folder)).heart.extra?.favorite, undefined, 'and the desktop shows what its own library has');
+  // A mark the desktop then sets itself is a change there, and goes up.
+  desktopLibrary.get(cloud(1))!.favorite = true;
+  assert.deepEqual(await outcome(desktop(), remote), { action: 'push', pushed: 1 });
+  desktopLibrary.get(cloud(1))!.favorite = false;
+  assert.deepEqual(await outcome(desktop(), remote), { action: 'push', pushed: 1 });
+  assert.equal((await webFactOf(remote, a, 'heart')).extra?.favorite, undefined);
+  assert.deepEqual(versionOf(await webFactOf(remote, a, 'heart')), versionOf(before));
+});
+
+test('a favourite set right before a sync, with the book not looked at again, is pushed from what Photos shows', async (t) => {
+  const { a, remote } = await world(t);
+  const photos = fakePhotos(t);
+  const library = new Map([[cloud(1), { ...libraryPhoto }]]);
+  photos.library = library;
+  await edit(a, (files) => { files.photoIndex.heart = { photos: { cloud: cloud(1) } } as never; });
+  await sync(a, remote);
+  // The book is open (loaded) before the favourite is set, and syncs without loading it again.
+  const result = await on(a, async (book) => {
+    library.get(cloud(1))!.favorite = true;
+    return syncBook({ remote, book });
+  });
+  assert.deepEqual([result.action, result.pushed.length], ['push', 1]);
+  assert.equal((await webFactOf(remote, a, 'heart')).extra?.favorite, true);
+  assert.deepEqual(await outcome(a, remote), { action: 'in-sync', pushed: 0 });
+});
+
+test('a sync record from before marks synced pushes them once where a photo has one, and not where none has', async (t) => {
+  const { a, remote } = await world(t);
+  const photos = fakePhotos(t);
+  const library = new Map([[cloud(1), { ...libraryPhoto, favorite: true }], [cloud(2), { ...libraryPhoto, revision: 'r2', content: 'c2' }]]);
+  photos.library = library;
+  await edit(a, (files) => { files.photoIndex.heart = { photos: { cloud: cloud(1) } } as never; files.photoIndex.plain = { photos: { cloud: cloud(2) } } as never; });
+  await sync(a, remote);
+  assert.deepEqual((await readSyncState(a.folder)).lastSynced?.localProps, { heart: sha(Buffer.from('{"photos:favorite":{"kind":"heart"}}')), plain: noProperties });
+  const forget = () => updateSyncState(a.folder, (state) => { const { localProps: _, ...lastSynced } = state.lastSynced!; return { ...state, lastSynced }; });
+
+  // A book synced before this build: the favourite goes up once, and is then where the Mac counts from.
+  await forget();
+  assert.equal((await readSyncState(a.folder)).lastSynced?.localProps, undefined);
+  assert.deepEqual(await outcome(a, remote), { action: 'push', pushed: 1 });
+  assert.deepEqual(Object.keys((await readSyncState(a.folder)).lastSynced?.localProps ?? {}).sort(), ['heart', 'plain']);
+  assert.deepEqual(await outcome(a, remote), { action: 'in-sync', pushed: 0 });
+
+  // Without a favourite anywhere, nothing goes up, and the photos are recorded as unmarked.
+  library.get(cloud(1))!.favorite = false;
+  assert.deepEqual(await outcome(a, remote), { action: 'push', pushed: 1 }, 'the cleared favourite is a change of a recorded mark');
+  await forget();
+  assert.deepEqual(await outcome(a, remote), { action: 'in-sync', pushed: 0 });
+  assert.deepEqual((await readSyncState(a.folder)).lastSynced?.localProps, { heart: noProperties, plain: noProperties });
+  // So a favourite set later is a change, and one removed later is too.
+  library.get(cloud(2))!.favorite = true;
+  assert.deepEqual(await outcome(a, remote), { action: 'push', pushed: 1 });
+  assert.equal((await webFactOf(remote, a, 'plain')).extra?.favorite, true);
+});
+
+test('a marked photo that has no fact yet pushes nothing for its mark, and the mark goes up once the photo has one', async (t) => {
+  const { a, remote } = await world(t);
+  const photos = fakePhotos(t);
+  photos.library = new Map([[cloud(1), { ...libraryPhoto, favorite: true }]]);
+  photos.noPreview = true;
+  await sync(a, remote);
+  await edit(a, (files) => { files.photoIndex.heart = { photos: { cloud: cloud(1) } } as never; });
+  assert.deepEqual(await outcome(a, remote), { action: 'push', pushed: 1 }, 'the photo itself is an edit');
+  assert.equal((await readAssetFacts(a.folder)).heart, undefined, 'without a preview there is no fact to carry the mark');
+  for (let n = 0; n < 2; n++) assert.deepEqual(await outcome(a, remote), { action: 'in-sync', pushed: 0 }, 'a mark that cannot go up is not a reason to push');
+  assert.equal((await readSyncState(a.folder)).lastSynced?.localProps?.heart, undefined);
+  photos.noPreview = false;
+  assert.deepEqual(await outcome(a, remote), { action: 'push', pushed: 1 });
+  assert.equal((await webFactOf(remote, a, 'heart')).extra?.favorite, true);
+  assert.deepEqual(await outcome(a, remote), { action: 'in-sync', pushed: 0 });
+});
+
+test('a marked photo another Mac added is pulled without pushing its mark back, on a Mac that shows the same library', async (t) => {
+  const { a, b, remote } = await world(t);
+  const photos = fakePhotos(t);
+  photos.library = new Map([[cloud(1), { ...libraryPhoto, favorite: true }]]);
+  await sync(a, remote);
+  await copyBook(a, b);
+  assert.deepEqual(await outcome(b, remote), { action: 'adopt', pushed: 0 });
+  await edit(b, (files) => { files.photoIndex.heart = { photos: { cloud: cloud(1) } } as never; });
+  assert.deepEqual(await outcome(b, remote), { action: 'push', pushed: 1 });
+  assert.deepEqual(await outcome(a, remote), { action: 'fast-forward', pushed: 0 }, 'the mark was pulled, not changed here');
+  assert.ok((await readSyncState(a.folder)).lastSynced?.localProps?.heart, 'and it counts from what this Mac shows now');
+  assert.deepEqual(await outcome(a, remote), { action: 'in-sync', pushed: 0 });
+  // Cleared here afterwards, it is a change made here.
+  photos.library.get(cloud(1))!.favorite = false;
+  assert.deepEqual(await outcome(a, remote), { action: 'push', pushed: 1 });
+  assert.equal((await webFactOf(remote, a, 'heart')).extra?.favorite, undefined);
+});
+
+test('the marks’ digests stay out of sync.json, which a build before them reads strictly, and are dropped when sync.json changes without them', async (t) => {
+  const { a, remote } = await world(t);
+  const photos = fakePhotos(t);
+  photos.library = new Map([[cloud(1), { ...libraryPhoto, favorite: true }]]);
+  await edit(a, (files) => { files.photoIndex.heart = { photos: { cloud: cloud(1) } } as never; });
+  await sync(a, remote);
+  const path = await syncPath(a);
+  const text = await readFile(path, 'utf8');
+  const record = JSON.parse(text);
+  assert.deepEqual(Object.keys(record.lastSynced).sort(), ['bookId', 'bookStateRevision', 'commitId', 'localDigests', 'localKeys', 'photoDigests', 'stateDigest'],
+    'sync.json has only what a build before marks reads');
+  assert.ok((await readSyncState(a.folder)).lastSynced?.localProps?.heart);
+  // Rewritten as an older build would after a sync of its own (here: the same record, written otherwise).
+  await writeFile(path, JSON.stringify(record, null, 1) + '\n');
+  assert.equal((await readSyncState(a.folder)).lastSynced?.localProps, undefined, 'the digests of another record are not taken for this one');
+  assert.deepEqual(await outcome(a, remote), { action: 'push', pushed: 1 }, 'and the favourite goes up once, as from a record before marks');
+  assert.deepEqual(await outcome(a, remote), { action: 'in-sync', pushed: 0 });
 });
 
 // --- Lightroom Classic (reach `mac`), through the fake plugin over the real bridge ------------------------------------

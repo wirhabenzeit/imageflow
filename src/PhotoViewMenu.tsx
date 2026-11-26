@@ -1,8 +1,9 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
-import { ActionMenu } from './ActionMenu';
+import { ActionMenu, Submenu } from './ActionMenu';
 import { Icon } from './Icon';
-import { defaultPhotoView, photoViewChange, validPhotoView } from './photo-view';
+import { defaultPhotoView, lightroomUpdateLabel, photoViewChange, showsProperty, toggleProperty, validPhotoView } from './photo-view';
+import { activeProvidersOf } from './source-properties';
 import type { PhotoView, PhotoViewCommand } from './photo-view';
 
 const storageKey = 'imageflow.photo-view.v1';
@@ -44,10 +45,32 @@ function TimeGapDialog({ minutes, save, close }: { minutes: number; save: (minut
     </form>
   </dialog>;
 }
+/**
+ * Whether the connected Lightroom Classic plugin is too old to report marks (ADR 0014), as the main process says: asked
+ * once per window, then kept up to date as Lightroom connects, quits or loads another plugin.
+ */
+let lightroomOutdated = false;
+let askedOutdated = false;
+const outdatedListeners = new Set<() => void>();
+function subscribeOutdated(listener: () => void) {
+  outdatedListeners.add(listener);
+  const api = typeof window !== 'undefined' ? window.imageflow : undefined;
+  if (!askedOutdated && api?.lightroomOutdated) {
+    askedOutdated = true;
+    const set = (outdated: boolean) => { lightroomOutdated = outdated === true; for (const notify of outdatedListeners) notify(); };
+    api.onLightroomOutdated(set);
+    void api.lightroomOutdated().then(set, () => {});
+  }
+  return () => { outdatedListeners.delete(listener); };
+}
+const useLightroomOutdated = () => useSyncExternalStore(subscribeOutdated, () => lightroomOutdated, () => false);
+
 export type PhotoViewControl = { value: PhotoView; update: (patch: Partial<PhotoView>) => void; custom: () => void };
-export function PhotoViewMenu({ view, update, custom, photos = true, children }: {
-  view: PhotoView; update: (patch: Partial<PhotoView>) => void; custom: () => void; photos?: boolean; children?: ReactNode;
+// `providers`: those of the book's photos (bookPhotoProviders); each that declares marks gets a submenu to toggle them.
+export function PhotoViewMenu({ view, update, custom, photos = true, providers = [], children }: {
+  view: PhotoView; update: (patch: Partial<PhotoView>) => void; custom: () => void; photos?: boolean; providers?: readonly string[]; children?: ReactNode;
 }) {
+  const outdated = useLightroomOutdated();
   return <ActionMenu className="photo-view-menu" label={<>View <Icon name="chevron" /></>}>
     {children}
     {photos && <>
@@ -65,5 +88,9 @@ export function PhotoViewMenu({ view, update, custom, photos = true, children }:
     </>}
     {!photos && <hr />}
     <button onClick={() => update({ showSource: !view.showSource })}>Show Source Indicators{view.showSource ? ' ✓' : ''}</button>
+    {photos && activeProvidersOf(providers).map(({ provider, label, properties }) => <Submenu key={provider} label={label}>
+      {properties.map((spec) => <button key={spec.id} onClick={() => update(toggleProperty(view, spec))}>{spec.viewLabel}{showsProperty(view, spec) ? ' ✓' : ''}</button>)}
+      {provider === 'lightroom' && outdated && <><hr /><button onClick={() => void window.imageflow?.showSettings('sources')}>{lightroomUpdateLabel}</button></>}
+    </Submenu>)}
   </ActionMenu>;
 }

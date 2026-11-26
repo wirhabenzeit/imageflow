@@ -2,6 +2,7 @@ import { lstat, mkdtemp, realpath } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { gte, valid } from 'semver';
 import type { LightroomLocator } from '../../src/source-locator';
+import { sourceColors } from '../../src/source-properties';
 import { within } from './files';
 import { LightroomOffline } from '../lightroom/bridge';
 import type { LightroomBridge, LightroomConnection } from '../lightroom/bridge';
@@ -59,6 +60,16 @@ export function captureTime(value: string | undefined): ProvidedFacts['captured'
 }
 
 const nonEmpty = (value: string | undefined) => value?.trim() ? value : undefined;
+const flags = { 1: 'pick', [-1]: 'reject' } as const;
+/**
+ * The marks of a photo as `extra` holds them (ADR 0014, section 2): a colour outside the five, as of a label set of the
+ * user's own, is left out with its label. src/source-properties.ts drops a label that only repeats the colour's name.
+ */
+function lightroomMarks(row: PhotoRow) {
+  const color = sourceColors.find((name) => name === row.colorNameForLabel), label = nonEmpty(row.label);
+  return { ...(row.rating ? { rating: row.rating } : {}), ...(row.pickStatus ? { flag: flags[row.pickStatus] } : {}),
+    ...(color ? { color, ...(label ? { colorLabel: label } : {}) } : {}) };
+}
 /** The facts of a photo as the plugin read them (ADR 0011, §1). */
 export function lightroomFacts(row: PhotoRow): ProvidedFacts {
   const captured = captureTime(row.captured);
@@ -72,7 +83,7 @@ export function lightroomFacts(row: PhotoRow): ProvidedFacts {
     ...(row.gps ? { location: row.gps } : {}),
     ...(make || model ? { camera: { ...(make ? { make } : {}), ...(model ? { model } : {}) } } : {}),
     ...(Object.keys(provided).length ? { provided } : {}),
-    extra: { ...(row.orientation ? { orientation: row.orientation } : {}), ...(row.fileName ? { fileName: row.fileName } : {}) },
+    extra: { ...(row.orientation ? { orientation: row.orientation } : {}), ...(row.fileName ? { fileName: row.fileName } : {}), ...lightroomMarks(row) },
   };
 }
 

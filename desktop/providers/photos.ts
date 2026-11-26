@@ -14,6 +14,8 @@ import type { Materialized, MaterializeOptions, Observed, ProvidedFacts, Repair,
  *   Photos renders an unchanged photo to the same bytes, so it keys previews.
  * - `revision` adds the caption, so a caption edit reaches the book. `modificationDate` is no revision: it moves for
  *   many things that are no edit, and on its own.
+ * - Neither holds the favourite, which goes into `extra` only: a heart tapped in Photos changes no picture, and must
+ *   not discard a full-resolution download from iCloud that `revision` keys in the source cache.
  * - Previews and originals are rendered by Photos as they are now, downloaded from iCloud where the photo is not on
  *   this Mac (with Optimize Mac Storage, most are not): about a second per preview, two to four per original.
  * - A photo is `denied` while ImageFlow may not read the library, `offline` while its library or iCloud cannot be
@@ -84,7 +86,7 @@ export function photosFacts(facts: PhotosFacts): ProvidedFacts {
     ...(captured ? { captured } : {}),
     ...(Number.isFinite(facts.latitude) && Number.isFinite(facts.longitude) ? { location: { latitude: facts.latitude!, longitude: facts.longitude! } } : {}),
     ...(caption ? { provided: { caption } } : {}),
-    extra: { ...(facts.type ? { type: facts.type } : {}), ...(facts.filename ? { fileName: facts.filename } : {}) },
+    extra: { ...(facts.type ? { type: facts.type } : {}), ...(facts.filename ? { fileName: facts.filename } : {}), ...(facts.favorite === true ? { favorite: true } : {}) },
   };
 }
 

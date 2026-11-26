@@ -11,9 +11,10 @@ import { captureMetadata } from '../src/photo-metadata';
 export const photoExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp']);
 type Rendition = 'thumb' | 'preview' | 'export';
 // `provided`: the title, caption, credit and alt text of a photo's provider (ADR 0011), which the book's own values in
-// photos.json override field by field.
+// photos.json override field by field. `extra`: what its provider keeps with the fact, of which the editor shows only the
+// curation marks the provider declares (ADR 0014). Neither reaches a template (`renderData` in desktop/project.ts).
 export type ProjectPhoto = Photo & { estimatedCapture?: string; original: string; cache: string; key: string; alpha: boolean; passthrough: boolean; problem?: string; observation?: string;
-  provided?: ProvidedMetadata };
+  provided?: ProvidedMetadata; extra?: Record<string, unknown> };
 // The same stamp as the source store's, because a photo's observation may come from either (src/file-stamp).
 const observation = fileStamp;
 

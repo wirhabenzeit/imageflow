@@ -5,6 +5,7 @@ import sharp from 'sharp';
 import { assetFactSchema } from '../src/asset-facts';
 import type { AssetFact } from '../src/asset-facts';
 import { canonicalJson } from '../src/canonical-json';
+import { declaredProperties } from '../src/source-properties';
 import type { Locator } from '../src/source-locator';
 import type { AssetFacts } from './asset-facts';
 import type { PreviewFailure } from './preview-requests';
@@ -94,8 +95,9 @@ export type ProvidedOutcome =
     /** The fact before, if there was one. */
     previous?: AssetFact;
     /**
-     * `unchanged`: the provider recorded nothing new. `metadata`: it did, but the pixels are the same, so nothing needs
-     * to be drawn again. `content`: the stored preview is another one.
+     * `unchanged`: the photo's revision did not move, so no render input changed; a curation mark recorded at the same
+     * revision (a favourite, ADR 0014) is still `unchanged`. `metadata`: the revision moved, but the pixels are the
+     * same, so nothing needs to be drawn again. `content`: the stored preview is another one.
      */
     change: 'unchanged' | 'metadata' | 'content';
     /**
@@ -402,12 +404,13 @@ async function reobserved(provider: SourceProvider<Locator>, folder: string, pen
 }
 
 /**
- * Whether a fact differs from the one before in what the book shows of it besides its pixels: its size, capture data
- * or provided titles. A change of anything else the provider records (a rating, say) moves only its revision.
+ * Whether a fact differs from the one before in what the book shows of it besides its pixels: its size, capture data,
+ * provided titles, or the curation marks its provider declares (ADR 0014), read through the provider's specs. Keys of
+ * `extra` no spec declares never count: a change of anything else the provider records moves only its revision.
  */
-const shown = ({ width, height, captured, location, camera, provided }: AssetFact) => canonicalJson(Object.fromEntries(
-  Object.entries({ width, height, captured, location, camera, provided }).filter(([, value]) => value !== undefined)));
-export const visibleChange = (before: AssetFact, after: AssetFact) => shown(before) !== shown(after);
+const shown = ({ width, height, captured, location, camera, provided, extra }: AssetFact, provider: string | undefined) => canonicalJson(Object.fromEntries(
+  Object.entries({ width, height, captured, location, camera, provided, marks: declaredProperties(provider, extra) || undefined }).filter(([, value]) => value !== undefined)));
+export const visibleChange = (before: AssetFact, after: AssetFact, provider: string | undefined) => shown(before, provider) !== shown(after, provider);
 
 /** Whether a photo's aspect ratio changed enough that a crop placed on it shows another part of it (ADR 0011, §3.8). */
 export const aspectChanged = (before: { width: number; height: number }, after: { width: number; height: number }) =>
@@ -431,17 +434,20 @@ export type ProvidedChangeOptions = Omit<RefreshOptions, 'previews' | 'settled'>
   /** The changes known so far, as each preview comes, with how many there are to come. */
   progress?: (id: string, changes: ProvidedChanges, done: number, total: number) => void;
 };
-const shownDifferently = (outcome: ProvidedOutcome, before: ShownPhoto) => {
+const shownDifferently = (outcome: ProvidedOutcome, before: ShownPhoto, provider: string) => {
   if (outcome.state !== 'available') return before.available || !!before.pending;
-  // A new preview, or new titles or capture data that templates and the Inspector show, are shown at once.
+  // A new preview, or new titles, capture data or marks that templates, the Inspector or the thumbnails show, are shown
+  // at once. A mark may change at an unchanged revision (a favourite in Apple Photos, ADR 0014), so what is shown is
+  // compared whatever `change` says; without a fact before, anything recorded anew is shown.
   return outcome.change === 'content' || !before.available || !!outcome.outOfDate !== !!before.outOfDate ||
-    (outcome.change === 'metadata' && (!outcome.previous || visibleChange(outcome.previous, outcome.fact)));
+    (outcome.previous ? visibleChange(outcome.previous, outcome.fact, provider) : outcome.change !== 'unchanged');
 };
 
 /**
  * Handles a provider's `watch` report for photos without a file (ADR 0011, §3): observes them again, compares the
  * content revision with the stored one, makes a new preview only where it moved, and reloads only where the stored
- * preview is another one. A metadata edit records the new revisions and provided values without a preview or reload.
+ * preview is another one or the book shows the photo differently. A metadata edit records the new revisions, provided
+ * values and marks without a preview, and reloads only for what the book shows (`visibleChange`).
  * `available` tells which photos the open book shows as available.
  */
 export async function providedChanges(folder: string, provider: SourceProvider<Locator>, refs: readonly SourceRef<Locator>[], facts: AssetFacts,
@@ -465,20 +471,20 @@ export async function providedChanges(folder: string, provider: SourceProvider<L
   // Told as they were before anything here changed them: a reload meanwhile shows the photos that have come so far.
   const before = new Map(refs.map(({ id }) => [id, shown(id)]));
   const outcomes = await refreshProvided(folder, provider, known, observed, facts, { ...options, settled: (id, outcome, done, total) => {
-    progress?.(id, changesOf([[id, outcome]], before), done, total);
+    progress?.(id, changesOf([[id, outcome]], before, provider.provider), done, total);
   } });
-  const all = changesOf(outcomes, before);
+  const all = changesOf(outcomes, before, provider.provider);
   changes.reload.push(...all.reload); changes.revised.push(...all.revised); changes.reshaped.push(...all.reshaped);
   return { ...changes, ...(all.problems ? { problems: all.problems } : {}) };
 }
 
-function changesOf(outcomes: Iterable<[string, ProvidedOutcome]>, shown: ReadonlyMap<string, ShownPhoto>): ProvidedChanges {
+function changesOf(outcomes: Iterable<[string, ProvidedOutcome]>, shown: ReadonlyMap<string, ShownPhoto>, provider: string): ProvidedChanges {
   const changes: ProvidedChanges = { reload: [], revised: [], reshaped: [] };
   for (const [id, outcome] of outcomes) {
     const before = shown.get(id)!;
     const problem = 'problem' in outcome ? outcome.problem : undefined;
     if (problem !== undefined) (changes.problems ??= new Map()).set(id, { state: outcome.state === 'pending' ? 'unreadable' : outcome.state, problem });
-    if (shownDifferently(outcome, before)) changes.reload.push(id);
+    if (shownDifferently(outcome, before, provider)) changes.reload.push(id);
     if (outcome.state !== 'available') {
       if (before.available) changes.revised.push(id);
       continue;

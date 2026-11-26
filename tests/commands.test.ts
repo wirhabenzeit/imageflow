@@ -40,3 +40,17 @@ test('Swap Pages requires one eligible page pair and protects editing states', (
     assert.equal(commandState('swap-pages', { ...pair, ...patch }).enabled, false);
   }
 });
+
+test('View shows each provider\'s marks as checkboxes that follow the book\'s view and the properties\' defaults', () => {
+  assert.equal(commandState('photos-show-lightroom-rating', book).label, 'Show Stars');
+  assert.equal(commandState('photos-show-lightroom-flag', book).label, 'Show Flags');
+  assert.equal(commandState('photos-show-lightroom-color', book).label, 'Show Color Labels');
+  assert.equal(commandState('photos-show-photos-favorite', book).label, 'Show Favorites');
+  assert.equal(commandState('photos-show-lightroom-rating', book).checked, true);
+  assert.equal(commandState('photos-show-lightroom-color', book).checked, false);
+  const view = { sort: 'capture', group: 'none', gapMinutes: 120, showTime: false, showSource: true, sourceProps: { 'lightroom:rating': false, 'lightroom:color': true } } as const;
+  assert.equal(commandState('photos-show-lightroom-rating', { ...book, photoView: view }).checked, false);
+  assert.equal(commandState('photos-show-lightroom-color', { ...book, photoView: view }).checked, true);
+  assert.equal(commandState('photos-show-photos-favorite', { ...book, photoView: view }).checked, true);
+  assert.equal(commandState('photos-show-photos-favorite', { ...book, busy: true }).enabled, false);
+});

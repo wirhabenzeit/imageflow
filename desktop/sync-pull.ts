@@ -24,8 +24,9 @@ import { captureBookStateRevision, ignoredName } from './revisions';
  * before the editor can edit a half-pulled book.
  */
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
+// `localProps` (ADR 0014) is never written into sync.json: see `marksFile`.
 const syncedSchema = z.object({ commitId: z.uuid(), bookId: z.uuid().optional(), bookStateRevision: sha256, stateDigest: sha256, photoDigests: z.record(z.string(), sha256),
-  localDigests: z.record(z.string(), sha256).optional(), localKeys: z.record(z.string(), sha256).optional() }).strict();
+  localDigests: z.record(z.string(), sha256).optional(), localKeys: z.record(z.string(), sha256).optional(), localProps: z.record(z.string(), sha256).optional() }).strict();
 const syncStateSchema = z.object({
   version: z.literal(1),
   // Where a book syncs is no longer its own (ADR 0012): the Mac has one backend (`AppSettings.sync`). A record keeps
@@ -47,12 +48,14 @@ const syncStateSchema = z.object({
   // that go (by path, with their stale digest), so the photo shows its new proxy until its new original is downloaded.
   // `keepLocal` are the photos whose original here changed since the last sync, so their local fact wins;
   // `localDigests` the originals' digests after the pull, `localKeys` what this Mac's providers showed of photos
-  // without a file (`SyncedCommit.localKeys`). `conflictCopy` is the copy Keep Both made before it.
+  // without a file (`SyncedCommit.localKeys`), and `localProps` of their marks (`SyncedCommit.localProps`, kept in
+  // `marksFile`). `conflictCopy` is the copy Keep Both made before it.
   // Owned originals never pass through a pull: they are downloaded after it, beside their target (`downloadOriginals`).
   pull: z.object({
     targetCommit: z.uuid(), previousCommit: z.uuid().optional(), stateDigest: sha256, bookStateRevision: sha256,
     templateChanged: z.boolean(), staleOriginals: z.record(z.string(), sha256).default({}), keepLocal: z.array(z.string()).default([]),
-    localDigests: z.record(z.string(), sha256).default({}), localKeys: z.record(z.string(), sha256).default({}), conflictCopy: z.string().max(4096).optional(),
+    localDigests: z.record(z.string(), sha256).default({}), localKeys: z.record(z.string(), sha256).default({}), localProps: z.record(z.string(), sha256).default({}),
+    conflictCopy: z.string().max(4096).optional(),
   }).strict().optional(),
   // A marked pull that could not be finished and was given up (`abandonPull`): what it pulled, why it failed, the
   // revision the half-pulled book had then (absent when it did not load), the copy Keep Both made before it, and
@@ -121,6 +124,27 @@ export async function stagingFolder(folder: string, fresh = false) {
   return path;
 }
 
+/**
+ * Where the marks' digests (`localProps` of `lastSynced` and of the pull marker, ADR 0014) are kept: a file beside
+ * sync.json, not in it. A build from before them reads sync.json strictly, and fails on any key it does not know with
+ * "This book's sync record is invalid" (`readSyncState`), which `resumeSyncPull` raises from `loadProject`: that build
+ * could neither sync the book nor even open it. It never reads this file. The file names the exact sync.json it belongs
+ * to by its SHA-256 (`record`), so after any write of sync.json without it (by such a build, or a crash between the two
+ * writes) it is ignored, and the record reads as one from before marks were synced: a photo with marks then pushes them
+ * once (`changedProperties`), and nothing else changes.
+ */
+const marksFile = 'sync-marks.json';
+const marksSchema = z.object({ version: z.literal(1), record: sha256,
+  lastSynced: z.record(z.string(), sha256).optional(), pull: z.record(z.string(), sha256).optional() }).strict();
+
+/** The marks' digests of the record whose sync.json is `text`, or undefined where none belong to it. */
+async function readMarks(path: string, text: string) {
+  try {
+    const parsed = marksSchema.safeParse(JSON.parse(await readFile(join(path, marksFile), 'utf8')));
+    return parsed.success && parsed.data.record === digest(Buffer.from(text, 'utf8')) ? parsed.data : undefined;
+  } catch { return undefined; }
+}
+
 export async function readSyncState(folder: string): Promise<SyncState> {
   const path = await syncFolder(folder, false);
   if (!path) return { version: 1 };
@@ -129,18 +153,34 @@ export async function readSyncState(folder: string): Promise<SyncState> {
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1 }; throw error; }
   const parsed = storedSyncStateSchema.safeParse(JSON.parse(text));
   if (!parsed.success) throw new Error('This book’s sync record is invalid. Preserve ' + join(path, 'sync.json') + ' and remove it to sync again from scratch.');
-  return parsed.data;
+  const state = parsed.data;
+  const marks = (state.lastSynced || state.pull) && await readMarks(path, text);
+  if (!marks) return state;
+  return { ...state, ...(state.lastSynced && marks.lastSynced ? { lastSynced: { ...state.lastSynced, localProps: marks.lastSynced } } : {}),
+    ...(state.pull && marks.pull ? { pull: { ...state.pull, localProps: marks.pull } } : {}) };
 }
 
-async function writeSyncState(folder: string, state: SyncState) {
-  const path = (await syncFolder(folder, true))!;
-  const bytes = JSON.stringify(syncStateSchema.parse(state)) + '\n';
+/** Writes a file of the sync folder in one piece, through a staging file beside it. */
+async function writeAtomically(path: string, name: string, bytes: string) {
   const staging = join(path, 'sync-' + randomUUID() + '.tmp');
   try {
     const handle = await open(staging, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     try { await handle.writeFile(bytes); await handle.sync(); } finally { await handle.close(); }
-    await rename(staging, join(path, 'sync.json'));
+    await rename(staging, join(path, name));
   } finally { await rm(staging, { force: true }); }
+}
+
+async function writeSyncState(folder: string, state: SyncState) {
+  const path = (await syncFolder(folder, true))!;
+  const parsed = syncStateSchema.parse(state);
+  // sync.json stays as a build before the marks wrote it; their digests go to `marksFile`, after it.
+  const { localProps: synced, ...lastSynced } = parsed.lastSynced ?? {} as Partial<NonNullable<SyncState['lastSynced']>>;
+  const { localProps: pulling, ...pull } = parsed.pull ?? {} as Partial<PullMarker>;
+  const bytes = JSON.stringify({ ...parsed, ...(parsed.lastSynced ? { lastSynced } : {}), ...(parsed.pull ? { pull } : {}) }) + '\n';
+  await writeAtomically(path, 'sync.json', bytes);
+  const marks = { ...(parsed.lastSynced && synced && Object.keys(synced).length ? { lastSynced: synced } : {}), ...(parsed.pull && pulling && Object.keys(pulling).length ? { pull: pulling } : {}) };
+  if (Object.keys(marks).length) await writeAtomically(path, marksFile, JSON.stringify(marksSchema.parse({ version: 1, record: digest(Buffer.from(bytes, 'utf8')), ...marks })) + '\n');
+  else await rm(join(path, marksFile), { force: true });
 }
 
 // Every change to a book's sync record is a read-modify-write; one at a time per book, so a status refresh, a link or
@@ -472,7 +512,8 @@ export async function applyStagedPull(folder: string, marker: PullMarker) {
   await updateSyncState(root, ({ abandoned: _, ...state }) => ({ ...state, pull: undefined,
     lastSynced: { commitId: marker.targetCommit, ...(project.bookId ? { bookId: project.bookId } : {}), bookStateRevision: marker.bookStateRevision, stateDigest: marker.stateDigest, photoDigests,
       localDigests: Object.fromEntries(Object.entries(marker.localDigests).filter(([id]) => photos[id])),
-      localKeys: Object.fromEntries(Object.entries(marker.localKeys).filter(([id]) => photos[id])) } }));
+      localKeys: Object.fromEntries(Object.entries(marker.localKeys).filter(([id]) => photos[id])),
+      localProps: Object.fromEntries(Object.entries(marker.localProps).filter(([id]) => photos[id])) } }));
   await rm(await stagingFolder(root), { recursive: true, force: true });
   return { blob, project, photos };
 }
