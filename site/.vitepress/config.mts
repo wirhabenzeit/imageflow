@@ -107,6 +107,7 @@ const sidebar: DefaultTheme.Sidebar = {
         { text: '0011 Lightroom Classic integration', link: '/decisions/0011-lightroom-classic' },
         { text: '0012 Sync backend and library', link: '/decisions/0012-sync-backend-and-library' },
         { text: '0013 Apple Photos', link: '/decisions/0013-apple-photos' },
+        { text: '0014 Source properties and filtering', link: '/decisions/0014-source-properties-and-filtering' },
       ],
     },
     {
