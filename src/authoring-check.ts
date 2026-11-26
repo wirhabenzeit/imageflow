@@ -68,5 +68,5 @@ export type FixtureReport = {
 };
 export type AuthoringDraftSummary = {
   applied: boolean; committed: false;
-  changes?: string[]; affectedSpreads?: string[]; affectedCover?: true; references?: Record<string, string>; reflow?: boolean;
+  changes?: string[]; affectedSpreads?: string[]; renumbered?: string; affectedCover?: true; references?: Record<string, string>; reflow?: boolean;
 };

@@ -435,7 +435,7 @@ export function createAuthoringService(hooks: Hooks) {
         book: drafted, preview: preview && target ? { ...preview, target } : undefined,
         inspect: inspect?.spread ? { ...inspect, spread: resolve(inspect.spread) } : inspect,
         summary: { applied: true, committed: false, changes: planned.changes, affectedSpreads: planned.affectedSpreads,
-          ...(planned.affectedCover ? { affectedCover: true } : {}), references: planned.references, reflow: planned.reflow },
+          ...(planned.renumbered ? { renumbered: planned.renumbered } : {}), ...(planned.affectedCover ? { affectedCover: true } : {}), references: planned.references, reflow: planned.reflow },
       };
     };
     const result = await checked(session, signal, { expectedRevision, ...(cover ? { cover } : {}),
@@ -1028,7 +1028,8 @@ export function createAuthoringService(hooks: Hooks) {
         throw error;
       }
       result = { state: 'ready', project: session.handle, revision: inputs.revision, changes: planned.changes,
-        affectedSpreads: planned.affectedSpreads, references: planned.references, reflow: planned.reflow,
+        affectedSpreads: planned.affectedSpreads, ...(planned.renumbered ? { renumbered: planned.renumbered } : {}),
+        references: planned.references, reflow: planned.reflow,
         ...(planned.affectedCover ? { affectedCover: true } : {}),
         committed: !args.dryRun, dryRun: !!args.dryRun };
       if (args.dryRun) return moved ? { ...result, ...moved.reply } : result;

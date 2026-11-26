@@ -111,6 +111,8 @@ Pass `cover: true` where a layout, box, or element operation would otherwise nam
 
 Spread and page inserts can supply initial `params`, `boxes` and `elements` by ID. In a page pair, omit a side to leave it blank. See [Page layouts](#page-layouts) and [Switching layouts](#switching-layouts) for compatible placements and saved content.
 
+The result's `affectedSpreads` lists the inserted, removed, moved or changed spreads in book order. The spreads after an insert, removal or move only change page numbers. They are counted in `renumbered`, such as `"41 spreads, now pages 5–86"`, and are not listed.
+
 ### Parameter and list operations
 
 Use `scope:"document"` with just a `key`, or `scope:"spread"` with a `spread` and `key`. Use `scope:"box"` or `scope:"element"` with the owning box or element ID in `owner`. Add `page:"left"` or `"right"` when addressing a split page. Omit `page` for unsplit units.

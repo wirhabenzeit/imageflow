@@ -5,7 +5,7 @@ import type { PrintFormat } from './format';
 import { newSpread, resolveEditPath, writeEdit } from './editing';
 import type { EditTarget } from './editing';
 import { describeLayoutChange, discardContent, editorLayoutChoices, editorLayoutTarget, keptOutside, layoutChoices, layoutFootprint, swapContent, swapPages, switchLayout } from './layouts';
-import { hasFacingPages, spanAllowedAt, spanFits, spanRequiredAt } from './format';
+import { hasFacingPages, pageNumbers, pageSequence, spanAllowedAt, spanFits, spanRequiredAt } from './format';
 import { isParameterValue, listProblems, newItemId, resolveValue, sameValue } from './parameters';
 import type { ListItem, Parameter, Parameters } from './parameters';
 import { boxBase, coverInstance, identifier, scopeState, storedBoxes } from './project';
@@ -154,7 +154,14 @@ export const projectOperationNames = projectOperationSchema.options.map((schema)
 export type ProjectOperation = z.input<typeof projectOperationSchema>;
 export type ProjectOperations = z.input<typeof projectOperationsSchema>;
 export type ProjectCommandResult = {
-  files: ProjectFiles; changes: string[]; affectedSpreads: string[]; affectedCover?: true; references: Record<string, string>; reflow: boolean;
+  files: ProjectFiles; changes: string[];
+  /** The spreads the batch inserted, removed, moved or changed, in book order. A removed spread stands where it was. */
+  affectedSpreads: string[]; affectedCover?: true; references: Record<string, string>; reflow: boolean;
+  /**
+   * Other spreads now on other pages, because spreads were inserted, removed or moved before them: how many, and the
+   * pages they span, as "41 spreads, now pages 5–86" (API-022).
+   */
+  renumbered?: string;
   /** The batch takes sources out of the book. */
   removedSources?: true;
 };
@@ -478,7 +485,7 @@ export function applyProjectCommands(
         checkInsertion(spread, operation.after);
         registerSpread(spread, operation.ref);
         insertAfter(spread, operation.after);
-        changed('Inserted spread ' + spread.id, allSpreads(), true);
+        changed('Inserted spread ' + spread.id, [spread.id], true);
         break;
       }
       case 'insert_page_pair': {
@@ -503,7 +510,7 @@ export function applyProjectCommands(
         checkInsertion(spread, operation.after);
         registerSpread(spread, operation.ref);
         insertAfter(spread, operation.after);
-        changed('Inserted page pair ' + spread.id, allSpreads(), true);
+        changed('Inserted page pair ' + spread.id, [spread.id], true);
         break;
       }
       case 'clear_page': {
@@ -536,7 +543,7 @@ export function applyProjectCommands(
         checkInsertion(spread, operation.after === undefined ? source.id : operation.after);
         registerSpread(spread, operation.ref);
         insertAfter(spread, operation.after === undefined ? source.id : operation.after);
-        changed('Duplicated spread ' + source.id + ' as ' + spread.id, allSpreads(), true);
+        changed('Duplicated spread ' + source.id + ' as ' + spread.id, [spread.id], true);
         break;
       }
       case 'move_spread': {
@@ -552,13 +559,13 @@ export function applyProjectCommands(
             'right page and close on a single left page, with full spreads between them. Spreads cannot move into or out of those ends.');
         }
         project.spreads = ordered;
-        changed('Moved spread ' + spread.id, allSpreads(), true);
+        changed('Moved spread ' + spread.id, [spread.id], true);
         break;
       }
       case 'remove_spread': {
         const spread = findSpread(operation.spread);
         project.spreads.splice(project.spreads.indexOf(spread), 1);
-        changed('Removed spread ' + spread.id, [spread.id, ...allSpreads()], true);
+        changed('Removed spread ' + spread.id, [spread.id], true);
         break;
       }
       case 'switch_layout': {
@@ -724,6 +731,43 @@ export function applyProjectCommands(
     }
     operationIndex++;
   }
-  return { files: next, changes, affectedSpreads: [...affected], ...(affectedCover ? { affectedCover: true as const } : {}),
+  const renumbered = renumberedSpreads(files.project.spreads, template.format, project.spreads, format, template.spreads, affected);
+  return { files: next, changes, affectedSpreads: inBookOrder(affected, files.project.spreads, project.spreads),
+    ...(renumbered ? { renumbered } : {}), ...(affectedCover ? { affectedCover: true as const } : {}),
     ...(removedSources ? { removedSources: true as const } : {}), references, reflow };
+}
+
+// Book order after the batch. A removed spread follows the nearest spread before it that is still in the book; a
+// spread both inserted and removed by the batch comes last.
+function inBookOrder(ids: ReadonlySet<string>, before: SpreadState[], after: SpreadState[]) {
+  const index = new Map(after.map(({ id }, at) => [id, at]));
+  const formerly = before.map(({ id }) => id);
+  const key = (id: string) => {
+    const now = index.get(id);
+    if (now !== undefined) return now;
+    const was = formerly.indexOf(id);
+    if (was < 0) return Infinity;
+    for (let at = was - 1; at >= 0; at--) {
+      const kept = index.get(formerly[at]);
+      if (kept !== undefined) return kept + 0.5;
+    }
+    return -0.5;
+  };
+  return [...ids].sort((a, b) => key(a) - key(b));
+}
+
+// The spreads kept by the batch whose page numbers changed while their content did not.
+function renumberedSpreads(before: SpreadState[], beforeFormat: Pick<PrintFormat, 'label' | 'structure'>, after: SpreadState[],
+  afterFormat: Pick<PrintFormat, 'label' | 'structure'>, layouts: TemplateInfo['spreads'], affected: ReadonlySet<string>) {
+  const pagesOf = (spreads: SpreadState[], format: Pick<PrintFormat, 'label' | 'structure'>) => {
+    const sequence = pageSequence(spreads.map((spread) => layoutFootprint(spread, layouts)), format).spreads;
+    return new Map(spreads.map(({ id }, at) => [id, pageNumbers(sequence[at].page)]));
+  };
+  const was = pagesOf(before, beforeFormat);
+  const moved = [...pagesOf(after, afterFormat)].filter(([id, pages]) =>
+    !affected.has(id) && was.has(id) && was.get(id)!.join() !== pages.join());
+  if (!moved.length) return undefined;
+  const numbers = moved.flatMap(([, pages]) => pages);
+  const first = Math.min(...numbers), last = Math.max(...numbers);
+  return moved.length + (moved.length === 1 ? ' spread, now ' : ' spreads, now ') + (first === last ? 'page ' + first : 'pages ' + first + '–' + last);
 }

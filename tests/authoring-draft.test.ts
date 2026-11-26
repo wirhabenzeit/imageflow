@@ -138,7 +138,7 @@ test('a draft renders an inserted layout by batch reference without saving or re
   const inserted = result.draft?.references?.chapter;
   assert.ok(inserted);
   assert.deepEqual({ ...result.draft, references: undefined, changes: undefined },
-    { applied: true, committed: false, affectedSpreads: ['one', inserted], reflow: true, references: undefined, changes: undefined });
+    { applied: true, committed: false, affectedSpreads: [inserted], reflow: true, references: undefined, changes: undefined });
   assert.equal(result.image?.draft, true);
   assert.ok(result.image && 'spread' in result.image);
   assert.equal(result.image.spread, inserted);
