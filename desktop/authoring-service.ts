@@ -23,6 +23,7 @@ import type { CheckDraft } from './check';
 import type { PreviewRequest } from '../src/preview';
 import { spreadByPrefix } from '../src/preview';
 import type { InspectionRequest } from '../src/inspection';
+import { inspectionPrints } from '../src/photo-resolution';
 import { photoExtensions } from './photos';
 import { heicAdvice, isHeic } from '../src/import-feedback';
 import { captureFields } from '../src/photo-metadata';
@@ -310,6 +311,10 @@ export const loadedPhoto = (book: OpenProject) => (id: string) => {
   const photo = book.photos.get(id) ?? book.unavailablePhotos?.[id];
   return photo && { width: photo.width, height: photo.height, caption: photo.provided?.caption };
 };
+
+/** A photo's size in pixels for the sources view, where it is known. */
+export const pixelsOf = (photo: { width?: number; height?: number } | undefined) =>
+  photo?.width && photo.height ? { width: photo.width, height: photo.height } : {};
 
 const contextGuide = 'Start with docs: ["authoring-workflow"]. Use docs for topics, includeExamples for examples and includeSource for files; ' +
   'such calls return just those, without declarations, unless includeTemplate is true. ' +
@@ -748,9 +753,12 @@ export function createAuthoringService(hooks: Hooks) {
             ...(args.inspect ? { inspect: args.inspect } : {}), ...(args.typescript !== undefined ? { typescript: args.typescript } : {}) }, true)
           : await movedDraftCheck();
       const diagnostics = compactDiagnostics(report.diagnostics, args.include?.includes('occurrences'));
-      if (args.includeTemplate) return { ...report, diagnostics };
+      // The photos of an inspected spread with their pixels and ppi; measured by the render, or estimated (API-021, 26 Nov).
+      const inspection = report.render?.inspection && inspectionPrints(report.render.inspection, loadedPhoto(session.book));
+      const { template: _template, render: rendered, ...rest } = report;
+      const render = rendered && inspection ? { ...rendered, inspection } : rendered;
+      if (args.includeTemplate) return { ...report, ...(render ? { render } : {}), diagnostics };
       // Keep full declarations in the internal check cache for planning and context, not in every agent reply.
-      const { template: _template, render, ...rest } = report;
       const full = { ...rest, diagnostics };
       const compact = full.fixtures ? { ...full, fixtures: compactFixtures(full.fixtures) } : full;
       if (!render) return compact;
@@ -760,7 +768,7 @@ export function createAuthoringService(hooks: Hooks) {
       const report = await checked(session, signal, { inspect: { spread: args.spread, cover: args.cover, page: args.page, box: args.box, element: args.element,
         offset: args.offset, limit: args.limit } });
       return { project: session.handle, revision: report.revision, ...(report.superseded ? { superseded: report.superseded } : {}), state: report.state, diagnostics: compactDiagnostics(report.diagnostics),
-        checks: report.checks, ...report.render?.inspection };
+        checks: report.checks, ...(report.render?.inspection && inspectionPrints(report.render.inspection, loadedPhoto(session.book))) };
     }
     if (name === 'get_authoring_context' || name === 'inspect_book') {
       const report = await checked(session, signal);
@@ -902,7 +910,9 @@ export function createAuthoringService(hooks: Hooks) {
         const inspected = project && args.spread ? spreadByPrefix(project.spreads.map(({ id }) => id), args.spread) : undefined;
         let records: Record<string, unknown>[] = view === 'sources' ? [
           // Capture time, location and camera come from the loaded photo file, next to what photos.json records.
-          ...Object.entries(photos ?? {}).map(([id, source]) => ({ kind: 'photo', id, ...source, ...captureOf(session.book.photos.get(id) ?? session.book.unavailablePhotos?.[id]), usage: sourcePlaces(usage.photo[id]) })),
+          ...Object.entries(photos ?? {}).map(([id, source]) => ({ kind: 'photo', id, ...source, ...captureOf(session.book.photos.get(id) ?? session.book.unavailablePhotos?.[id]),
+            // The original's size in pixels, where it is known (API-021, 26 Nov).
+            ...pixelsOf(session.book.photos.get(id) ?? session.book.unavailablePhotos?.[id]), usage: sourcePlaces(usage.photo[id]) })),
           ...Object.entries(project?.texts ?? {}).map(([id, path]) => ({ kind: 'text', id, path: sourcePath(path), linked: sourceLinked(path), usage: sourcePlaces(usage.text[id]) })),
           ...Object.entries(project?.files ?? {}).map(([id, path]) => ({ kind: 'file', id, path: sourcePath(path), linked: sourceLinked(path) })),
         ] : view === 'cover' ? (project?.cover ? [project.cover] : [])

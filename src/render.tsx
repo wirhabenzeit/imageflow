@@ -49,7 +49,9 @@ import { textEditorOwner } from './inline-text';
 import { inlineTextFrame } from './inline-text-frame';
 import { readEdit } from './editing';
 import { artworkTarget, parsePreviewRequest, PreviewError } from './preview';
-import { countResolution, newResolution } from './photo-resolution';
+import { countResolution, newResolution, renderedPrint } from './photo-resolution';
+import { placementIn } from './spread';
+import type { Dimensions } from './spread';
 import type { PhotoResolution } from './photo-resolution';
 import { previewAspectMismatch, trimAspect } from './template-preview';
 import type { PreviewFileReport } from './template-preview';
@@ -1074,6 +1076,12 @@ function measuredBounds(node: HTMLElement, sheet: HTMLElement, format: Pick<Reso
   return { x: (rect.left - outer.left) * scale, y: (rect.top - outer.top) * scale, width: rect.width * scale, height: rect.height * scale };
 }
 
+// A box's own size in mm, before any rotation, as its `data-ppi` measures it (CSS pixels at 96 per inch).
+function ownSizeMm(node: HTMLElement) {
+  const style = getComputedStyle(node);
+  return { width: parseFloat(style.width) * 25.4 / 96, height: parseFloat(style.height) * 25.4 / 96 };
+}
+
 function typographyOf(node: HTMLElement) {
   const style = getComputedStyle(node);
   const points = (value: string) => Math.round(parseFloat(value) * 72 / 96 * 100) / 100;
@@ -1082,7 +1090,7 @@ function typographyOf(node: HTMLElement) {
 }
 
 function inspectElements(sheet: HTMLElement, spread: SpreadState, template: Template, format: ResolvedFormat,
-  request: ReturnType<typeof inspectionSchema.parse>): ElementInspection {
+  request: ReturnType<typeof inspectionSchema.parse>, photos: Record<string, Dimensions>): ElementInspection {
   const nodes = request.box ? findDeclared(sheet, { box: request.box, page: request.page }) : request.element ? findDeclared(sheet, { element: request.element, page: request.page }) : declaredNodes(sheet).filter(node => !request.page || node.page === request.page);
   if ((request.box || request.element) && !nodes.length) throw new PreviewError('preview-target-not-found', 'The requested box or element is not rendered on spread ' + spread.id + '.');
   const items: ElementMeasurement[] = nodes.slice(request.offset, request.offset + request.limit).map(({ node, kind: declared, id, page }) => {
@@ -1094,9 +1102,11 @@ function inspectElements(sheet: HTMLElement, spread: SpreadState, template: Temp
     const prefix = (box ? 'boxes.' : 'elements.') + id + '.';
     const parameters = box ? definition.boxes[id].parameters : definition.elements[id].parameters;
     const source = box ? state.boxes[id]?.photo ?? state.boxes[id]?.text : undefined;
+    const photo = box && kind === 'photo' ? state.boxes[id]?.photo : undefined;
     return { spread: spread.id, id, ...onPage(page), kind, boundsMm: measuredBounds(node, sheet, format), upright: upright(node, sheet),
       typography: typographyOf(node),
-      editPaths: Object.keys(parameters).map((key) => prefix + key), ...(source ? { source } : {}) };
+      editPaths: Object.keys(parameters).map((key) => prefix + key), ...(source ? { source } : {}),
+      ...(photo ? { print: renderedPrint(node.dataset.ppi, photos[photo], placementIn(state.boxes[id], state.definition!), ownSizeMm(node)) } : {}) };
   });
   return { spread: spread.id, coordinateSpace: 'sheet-bleed-mm', items, total: nodes.length,
     nextOffset: request.offset + items.length < nodes.length ? request.offset + items.length : null };
@@ -2116,7 +2126,8 @@ async function renderPhysicalCover(root: HTMLElement, book: RenderProject, templ
       const prefix = (box ? 'boxes.' : 'elements.') + id + '.';
       return { cover: true, id, kind: box ? 'photo' : 'element', boundsMm: measuredBounds(node, sheet, { spreadWidth: geometry.sheet.width }),
         typography: typographyOf(node), upright: upright(node, sheet), editPaths: Object.keys(parameters).map((key) => prefix + key),
-        ...(box && state.boxes[id]?.photo ? { source: state.boxes[id].photo } : {}) };
+        ...(box && state.boxes[id]?.photo ? { source: state.boxes[id].photo,
+          print: renderedPrint(node.dataset.ppi, book.photos[state.boxes[id].photo!], placementIn(state.boxes[id], state.definition), ownSizeMm(node)) } : {}) };
     });
     inspection = { cover: true, coordinateSpace: 'sheet-bleed-mm', items, total: nodes.length,
       nextOffset: inspect.offset + items.length < nodes.length ? inspect.offset + items.length : null };
@@ -2623,7 +2634,7 @@ export async function startRender(root: HTMLElement) {
     if (inspect) {
       const index = spreads.findIndex(({ id }) => id === inspect.spread);
       if (index < 0) throw new PreviewError('preview-target-not-found', 'Spread ' + inspect.spread + ' does not exist in this book.');
-      inspection = inspectElements(sheets[index], spreads[index], template, format, inspect);
+      inspection = inspectElements(sheets[index], spreads[index], template, format, inspect, book.photos);
     }
     if (edit) {
       const laidOut = [...validated].map(([spread, { sheet }]) => ({ spread, sheet }));

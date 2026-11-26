@@ -484,7 +484,9 @@ test('replace_source swaps a photo in every box, set aside or not, and keeps cro
   assert.equal(project.cover!.boxes.front.photo, 'p2');
   assert.deepEqual(result.affectedSpreads, ['one', 'two', 'three', 'four'], 'also where the replacement stood, for its caption');
   assert.equal(result.affectedCover, true);
-  assert.deepEqual(result.changes, ['Replaced photo p1 with p2 in 2 boxes shown and 2 set aside; caption copied']);
+  // Each placement says what became of its crop (API-021, 26 Nov).
+  assert.deepEqual(result.changes, ['Replaced photo p1 with p2 in 2 boxes shown and 2 set aside; crop kept: one hero, two second (set aside); ' +
+    'no crop saved: three hero (set aside), cover front; caption copied']);
   assert.deepEqual(photoIndex.p1, original.photoIndex.p1);
   assert.deepEqual(photoIndex.p2, { ...original.photoIndex.p2, caption: 'Old caption' });
   // Another shape, and one that is not known, drop the crops; a caption of its own stays.
@@ -493,11 +495,25 @@ test('replace_source swaps a photo in every box, set aside or not, and keeps cro
     assert.equal(other.files.project.spreads[0].boxes.hero.crops, undefined);
     assert.equal(other.files.project.spreads[0].boxes.hero.focus, undefined);
     assert.deepEqual(other.files.project.spreads[0].boxes.hero.params, { caption: true });
-    assert.match(other.changes[0], p2 ? /crops of 2 boxes dropped, as the shapes differ$/ : /as the shapes are not known; caption copied$/);
+    assert.match(other.changes[0], p2 ? /; crop reset, as the shapes differ: one hero, two second \(set aside\); no crop saved: three hero \(set aside\), cover front$/
+      : /; crop reset, as the shapes are not known: one hero, two second \(set aside\); no crop saved: .*; caption copied$/);
     assert.equal(other.files.photoIndex.p2.caption, p2 ? undefined : 'Old caption');
   }
   assert.deepEqual(applyProjectCommands(book, template, [{ op: 'replace_source', source: 'p1', with: 'p1' }]).changes, []);
   failure([{ op: 'replace_source', source: 'p1', with: 'nope' }], 'SOURCE_NOT_FOUND');
+});
+
+test('replace_source names as many boxes as fit a checkpoint change and keeps its caption note (API-021, 26 Nov)', () => {
+  const { files: book, template } = placed();
+  const crop = { crops: { main: { centerX: .3, centerY: .3, zoom: 2 } } };
+  // Twenty spreads with long IDs, half with a crop: the names cannot all fit in 300 characters.
+  book.project = projectSchema.parse({ ...book.project, spreads: Array.from({ length: 20 }, (_, index) => ({
+    id: 'a-rather-long-spread-identifier-' + String(index).padStart(2, '0'), definition: 'main',
+    boxes: { hero: { photo: 'p1', params: {}, ...(index % 2 ? crop : {}) } } })) });
+  const sizes: Record<string, ReturnType<typeof size>> = { p1: size(6000, 4000), p2: size(3000, 2000) };
+  const [change] = applyProjectCommands(book, template, [{ op: 'replace_source', source: 'p1', with: 'p2' }], { photo: (id) => sizes[id] }).changes;
+  assert.ok(change.length <= 300, change.length + ' characters: ' + change);
+  assert.match(change, /^Replaced photo p1 with p2 in 21 boxes shown and 0 set aside; crop kept: a-rather-long-spread-identifier-01 hero.* and \d+ more; no crop saved: (.* and \d+ more|\d+ boxes); caption copied$/);
 });
 
 test('remove_sources clears every use and says how many boxes that is (API-011)', () => {
