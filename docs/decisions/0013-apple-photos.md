@@ -16,7 +16,7 @@ Make **Apple Photos the second provider without a file**, behind the contract of
 
 - The main app claims `com.apple.security.personal-information.photos-library` and describes its use in `NSPhotoLibraryUsageDescription`. Under hardened runtime, without the entitlement, access is refused without a prompt; without the usage description, macOS ends a process that asks. `scripts/verify-mac-signing.mjs` checks both.
 - ImageFlow asks the first time photos are dropped from Photos. Once refused, macOS does not ask again: ImageFlow offers System Settings (the drop dialog, **Allow Access to Photos…** in an asset's menu and in Manage Assets, and the Apple Photos card in **Settings → Sources**).
-- The addon reports a process without the usage description (a development Electron) and macOS before 15 as unsupported, and asks nothing there.
+- The addon reports a process without the usage description (a development Electron) and macOS before 15.2 as unsupported, and asks nothing there.
 
 ### Identity
 
@@ -49,17 +49,21 @@ The provider looks a photo up by `local` and falls back to `cloud` (about 0.3 ms
 
 A drop from Photos carries, for each photo, `com.apple.photos.object-reference.asset` (a dictionary with the `localIdentifier`), the small copy as `public.file-url`, and a file promise. Chromium passes on only the copy. The system drag pasteboard keeps the last drag, so the main process reads it when the editor imports files from inside a `.photoslibrary`:
 
-1. Paths inside a Photos library are matched to the drag pasteboard's items by their file. Each match becomes a `photos` locator, and the photos go in through `importProvidedPhotos`, like Lightroom photos; a photo box receives the first.
-2. Any other path imports as a file, as before.
-3. A path from inside a Photos library that the last drag does not name (a file picked in the Open dialog, or a drag that was another one) is refused with a hint, never imported as the copy.
+1. Paths inside a Photos library are matched to the drag pasteboard's items by their file. Each match becomes a `photos` locator; a photo box receives the first.
+2. Any other path imports as a file, as before, in the same save and undo step as the photos (`importIntoProject` with `provided`).
+3. A path from inside a Photos library that the last drag does not name (a file picked in the Open dialog, or a drag that was another one) is refused with a hint, never imported as the copy. So is one dropped on a text box or a file parameter, and a still image the system library does not have (dragged from another library, which PhotoKit cannot read) says so. A folder imported with a Photos library inside it skips the library.
 
 ### The picker
 
-**Import from Photos…** shows `PHPickerViewController` as a sheet on the book window, from the addon. It runs out of process; configured with the shared library, it names the photos picked by their local identifiers, in the order picked (`PHPickerConfigurationSelectionOrdered`), still photos only. Access is asked for first, since linking needs it anyway. The photos go in like dragged ones.
+**Import from Photos…** shows `PHPickerViewController` as a sheet on the book window, from the addon. However the sheet ends (picked, cancelled, its window closed) the call answers, and another picker may open. It runs out of process; configured with the shared library, it names the photos picked by their local identifiers, in the order picked (`PHPickerConfigurationSelectionOrdered`), still photos only. Access is asked for first, since linking needs it anyway. The photos go in like dragged ones.
+
+### Show in Photos
+
+Photos opens at a photo of its library by `photos://asset?identifier=<UUID>`, the UUID that starts its local identifier; the provider looks up this Mac's by the cloud identifier where the locator has none or another Mac's. One photo at a time. Nothing in the library changes.
 
 ### Sync and printing
 
-Reach `mac`, like Lightroom: facts, the caption and the preview sync; the original never does. A Mac with the same iCloud Photos library resolves `cloud` and can print the photo; any other shows it from its preview and exports a proof, as for Lightroom.
+Reach `mac`, like Lightroom: facts, the caption and the preview sync; the original never does. A Mac with the same iCloud Photos library resolves `cloud` and can print the photo; any other shows it from its preview and exports a proof, as for Lightroom. Book check names such photos, and those ImageFlow may not read here or cannot download now, in one note ("in Photos, but can't be read on this Mac now"), not one finding each. Giving access, from Settings or an asset, reads every open book's Photos photos again.
 
 ## Alternatives considered
 
@@ -71,5 +75,5 @@ Reach `mac`, like Lightroom: facts, the caption and the preview sync; the origin
 
 - Dragging photos from Photos links them; edits in Photos reach the book within a second or two; export prints them at full size, downloading from iCloud where needed.
 - HEIC and RAW photos from Photos work without ImageFlow decoding them: Photos renders JPEGs (compare #328 for HEIC files).
-- macOS 15 or later is needed; captions need macOS 27. Before 15, drops from Photos are refused with a hint to export.
+- macOS 15.2 or later is needed (archival cloud identifiers); captions need macOS 27. Before 15.2, drops from Photos are refused with a hint to export.
 - *Open:* behaviour with network access allowed on an offline Mac, several downloads at once, an iCloud-only photo dragged in, a second Mac resolving the same cloud identifier, edits synced in from an iPhone, and a library other than the system library open in Photos (its drags name photos PhotoKit cannot read, and are refused as unmatched).

@@ -67,9 +67,11 @@ Drag photos from the Photos app onto the photo strip, onto Manage Assets, or ont
 
 **iCloud Photos.** With **Optimize Mac Storage**, most photos are not on the Mac. ImageFlow downloads what it needs: a preview of each photo you add (about a second each), and at export the full-size photos you placed (a few seconds each). Without a connection those photos show as **Offline**, drawn from their last preview, and a PDF export marks them ORIGINAL UNAVAILABLE.
 
+**Show in Photos** in an asset's menu opens Photos at the photo.
+
 **Export** prints each placed photo as Photos renders it now, at full size, and reuses it until the photo changes. HEIC and RAW photos work, because Photos does the rendering. **Copy into Book** makes the photos you choose the book's own files; they no longer follow Photos.
 
-Apple Photos needs macOS 15 or later. Only still photos can be linked. A synced book shows its Photos photos from their previews on another Mac, and prints them there when that Mac has the same iCloud Photos library.
+Apple Photos needs macOS 15.2 or later. Only still photos can be linked. A synced book shows its Photos photos from their previews on another Mac, and prints them there when that Mac has the same iCloud Photos library.
 
 ## Save a copy
 

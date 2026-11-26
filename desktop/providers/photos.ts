@@ -31,13 +31,15 @@ const gone: Problem = { state: 'missing', problem: 'No longer in the Photos libr
 /** Why no photo of the library can be read now, or undefined when ImageFlow may read it. */
 export function accessProblem(access: PhotosAccess | undefined): Problem | undefined {
   if (access === 'authorized') return undefined;
-  if (access === 'unsupported-system') return { state: 'unreadable', problem: 'Photos from Apple Photos need macOS 15 or later.' };
+  if (access === 'unsupported-system') return { state: 'unreadable', problem: 'Photos from Apple Photos need macOS 15.2 or later.' };
   if (access === undefined || access === 'unsupported-build') return { state: 'unreadable', problem: 'This build of ImageFlow cannot read the Photos library.' };
   return denied;
 }
 /** A PhotoKit error as a photo's state. */
 export function photosFailure(error: unknown): Problem {
   const code = (error as { code?: unknown })?.code;
+  // A download from iCloud that failed for the network, wrapped in PhotoKit's own errors.
+  if (typeof (error as { underlying?: unknown })?.underlying === 'string') return { state: 'offline', problem: 'Not downloaded from iCloud, and iCloud cannot be reached now.' };
   const message = error instanceof Error ? error.message : String(error);
   switch (code) {
     case 'PHPhotosErrorDomain:3164': case 'PHPhotosErrorDomain:3169':

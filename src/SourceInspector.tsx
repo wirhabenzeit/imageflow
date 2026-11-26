@@ -73,7 +73,7 @@ export function SourceInspector({ summary, source, template, render, usage, writ
         <p className="eyebrow">Photo</p>
         <h2>{photoName(summary, source.id)}</h2>
         <p className="muted si-source">{origin && <SourceBadge origin={origin} labelled />}<span title={file?.path}>{photoSourceName(summary, source.id)}</span></p>
-        {status?.outOfDate && <p className="muted">{outOfDateNote}</p>}
+        {status?.outOfDate && <p className="muted">{outOfDateNote(status)}</p>}
         {status?.pending ? <p className="muted">{status.problem}</p> : summary.sources?.['photo:' + source.id]?.problem && <p className={status?.away ? 'muted' : 'error-text'}>{summary.sources['photo:' + source.id].problem}{summary.sources['photo:' + source.id].cached ? ' · Showing cached preview' : ''}</p>}
       </div>
       {summary.photos[source.id]

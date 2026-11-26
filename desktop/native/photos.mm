@@ -5,7 +5,7 @@
 // thread-safe function, as in cloudkit.mm. Pictures are written as 8-bit sRGB JPEGs: PhotoKit hands most of them over
 // in Display P3, some at 16 bit.
 //
-// The provider needs macOS 15 (`adjustmentTimestamp`, the revision of an edit); captions and keywords need macOS 27. A
+// The provider needs macOS 15.2 (archival cloud identifiers; `adjustmentTimestamp`, the revision of an edit, came in 15); captions and keywords need macOS 27. A
 // process without `NSPhotoLibraryUsageDescription` in its Info.plist is killed by TCC when it asks for access, so
 // `status()` reports such a process (a development Electron) as unsupported and nothing asks.
 #import <AppKit/AppKit.h>
@@ -16,6 +16,7 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include <node_api.h>
 #include <memory>
+#include <unordered_map>
 #include <mutex>
 #include <cstring>
 #include <string>
@@ -122,6 +123,12 @@ static napi_value errorValue(napi_env env, NSError *error) {
   napi_value result;
   napi_create_error(env, nullptr, str(env, error.localizedDescription ?: @"Photos could not answer."), &result);
   setProp(env, result, "code", str(env, [NSString stringWithFormat:@"%@:%ld", error.domain, (long)error.code]));
+  // PhotoKit wraps a failed download (no network: NSURLErrorDomain -1009) in errors of its own iCloud domains.
+  NSError *underlying = error.userInfo[NSUnderlyingErrorKey];
+  for (int depth = 0; [underlying isKindOfClass:NSError.class] && depth < 4; depth++) {
+    if ([underlying.domain isEqualToString:NSURLErrorDomain]) { setProp(env, result, "underlying", str(env, [NSString stringWithFormat:@"%@:%ld", underlying.domain, (long)underlying.code])); break; }
+    underlying = underlying.userInfo[NSUnderlyingErrorKey];
+  }
   return result;
 }
 static NSError *failure(NSInteger code, NSString *message) {
@@ -160,8 +167,9 @@ static napi_value stringsValue(napi_env env, NSArray *values) {
 
 // ---------- Access
 
+// macOS 15.2: archival cloud identifiers, which name a photo for good and on every Mac of the library.
 static bool supportedSystem() {
-  if (@available(macOS 15, *)) return true;
+  if (@available(macOS 15.2, *)) return true;
   return false;
 }
 static bool describesUsage() {
@@ -210,7 +218,8 @@ static napi_value RequestAccess(napi_env env, napi_callback_info) {
 /**
  * dragged(): the photos of the last drag on this Mac that came from Photos, from the system drag pasteboard, which
  * keeps the last drag until the next one. A web view's drop sees only a small JPEG Photos writes for each photo inside
- * its library; this names the photo itself. Each item: { localIdentifier, file } where `file` is the path of that JPEG.
+ * its library; this names the photo itself. Each item: { localIdentifier, file, library, mediaType } where `file` is
+ * the path of that JPEG, `library` the path of the library dragged from, and `mediaType` PhotoKit's (1: image, 2: video).
  */
 static napi_value Dragged(napi_env env, napi_callback_info) {
   NSPasteboard *board = [NSPasteboard pasteboardWithName:NSPasteboardNameDrag];
@@ -230,6 +239,8 @@ static napi_value Dragged(napi_env env, napi_callback_info) {
     id library = reference[@"libraryURL"];
     NSString *libraryPath = [library isKindOfClass:NSString.class] ? ([library hasPrefix:@"file:"] ? [NSURL URLWithString:library].path : library) : nil;
     setProp(env, entry, "library", libraryPath ? str(env, libraryPath) : nullValue(env));
+    id mediaType = reference[@"mediaType"];
+    setProp(env, entry, "mediaType", [mediaType isKindOfClass:NSNumber.class] ? num(env, [mediaType doubleValue]) : nullValue(env));
     napi_set_element(env, items, index++, entry);
   }
   napi_value result = object(env);
@@ -370,9 +381,16 @@ static napi_value Facts(napi_env env, napi_callback_info info) {
 
 // ---------- Pictures
 
-static NSMutableDictionary<NSNumber *, NSNumber *> *requests;   // our id → PHImageRequestID
-static NSMutableSet<NSNumber *> *cancelledBeforeStart;
+/**
+ * Image requests from the call of `image` until their result, by the caller's id: an entry exists exactly while a
+ * request may still be cancelled. `handle` is PhotoKit's once its request started; `cancelled` asks a request that has
+ * not started yet to stop when it would. PhotoKit may answer a request before it returns its handle (a picture it has
+ * at hand), and PhotoKit is never called under the lock: a cancel can answer at once, on the same thread.
+ */
+struct ImageRequest { PHImageRequestID handle = PHInvalidImageRequestID; bool cancelled = false; };
+static std::unordered_map<double, ImageRequest> requests;
 static std::mutex requestsLock;
+static void forgetRequest(double id_) { std::lock_guard<std::mutex> guard(requestsLock); requests.erase(id_); }
 
 /** An 8-bit sRGB JPEG of `image` at `path`. */
 static NSError *writeJpeg(CGImageRef image, NSString *path, double quality) {
@@ -420,13 +438,17 @@ static napi_value Image(napi_env env, napi_callback_info info) {
   napi_value promise;
   PendingRef pending = newPending(env, &promise, argc > 2 ? argv[2] : nullptr);
   if (!local || !file) { settle(pending, true, ^(napi_env e) { return errorValue(e, failure(1, @"Expected an identifier and a file.")); }); return promise; }
-  NSNumber *ours = @(requestId);
+  double ours = requestId;
+  { std::lock_guard<std::mutex> guard(requestsLock); requests[ours] = ImageRequest(); }
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ @autoreleasepool {
-    if (!authorized()) { settle(pending, true, ^(napi_env e) { return errorValue(e, failure(3311, @"ImageFlow may not read the Photos library.")); }); return; }
+    if (!authorized()) { forgetRequest(ours); settle(pending, true, ^(napi_env e) { return errorValue(e, failure(3311, @"ImageFlow may not read the Photos library.")); }); return; }
+    // A library on a disk that went away answers no photo at all: that is no photo gone from it.
+    NSError *unavailable = PHPhotoLibrary.sharedPhotoLibrary.unavailabilityReason;
+    if (unavailable) { forgetRequest(ours); settle(pending, true, ^(napi_env e) { return errorValue(e, unavailable); }); return; }
     PHFetchOptions *fetch = [PHFetchOptions new];
     fetch.includeHiddenAssets = YES;
     PHAsset *asset = [PHAsset fetchAssetsWithLocalIdentifiers:@[local] options:fetch].firstObject;
-    if (!asset) { settle(pending, true, ^(napi_env e) { return errorValue(e, [NSError errorWithDomain:PHPhotosErrorDomain code:3201 userInfo:@{NSLocalizedDescriptionKey: @"The photo is no longer in the Photos library."}]); }); return; }
+    if (!asset) { forgetRequest(ours); settle(pending, true, ^(napi_env e) { return errorValue(e, [NSError errorWithDomain:PHPhotosErrorDomain code:3201 userInfo:@{NSLocalizedDescriptionKey: @"The photo is no longer in the Photos library."}]); }); return; }
     PHImageRequestOptions *options = [PHImageRequestOptions new];
     options.version = PHImageRequestOptionsVersionCurrent;
     options.deliveryMode = PHImageRequestOptionsDeliveryModeHighQualityFormat;
@@ -436,8 +458,9 @@ static napi_value Image(napi_env env, napi_callback_info info) {
     CGSize target = full ? PHImageManagerMaximumSize : CGSizeMake(1400, 1400);
     {
       std::lock_guard<std::mutex> guard(requestsLock);
-      if ([cancelledBeforeStart containsObject:ours]) {
-        [cancelledBeforeStart removeObject:ours];
+      auto entry = requests.find(ours);
+      if (entry == requests.end() || entry->second.cancelled) {
+        requests.erase(ours);
         settle(pending, true, ^(napi_env e) { return errorValue(e, failure(3072, @"Cancelled.")); });
         return;
       }
@@ -445,7 +468,7 @@ static napi_value Image(napi_env env, napi_callback_info info) {
     PHImageRequestID handle = [PHImageManager.defaultManager requestImageForAsset:asset targetSize:target
         contentMode:full ? PHImageContentModeDefault : PHImageContentModeAspectFit options:options resultHandler:^(NSImage *image, NSDictionary *result) {
       if ([result[PHImageResultIsDegradedKey] boolValue]) return;
-      { std::lock_guard<std::mutex> guard(requestsLock); [requests removeObjectForKey:ours]; }
+      forgetRequest(ours);
       if ([result[PHImageCancelledKey] boolValue]) { settle(pending, true, ^(napi_env e) { return errorValue(e, failure(3072, @"Cancelled.")); }); return; }
       NSError *error = result[PHImageErrorKey];
       CGImageRef cg = image ? [image CGImageForProposedRect:nullptr context:nil hints:nil] : nullptr;
@@ -464,9 +487,14 @@ static napi_value Image(napi_env env, napi_callback_info info) {
         settle(pending, false, ^(napi_env e) { napi_value value = object(e); setProp(e, value, "width", num(e, width)); setProp(e, value, "height", num(e, height)); return value; });
       } });
     }];
-    std::lock_guard<std::mutex> guard(requestsLock);
-    if ([cancelledBeforeStart containsObject:ours]) { [cancelledBeforeStart removeObject:ours]; [PHImageManager.defaultManager cancelImageRequest:handle]; }
-    else requests[ours] = @(handle);
+    bool cancel = false;
+    {
+      std::lock_guard<std::mutex> guard(requestsLock);
+      auto entry = requests.find(ours);
+      // Answered already, before PhotoKit returned: nothing is left to cancel.
+      if (entry != requests.end()) { entry->second.handle = handle; cancel = entry->second.cancelled; }
+    }
+    if (cancel) [PHImageManager.defaultManager cancelImageRequest:handle];
   } });
   return promise;
 }
@@ -476,23 +504,40 @@ static napi_value Cancel(napi_env env, napi_callback_info info) {
   size_t argc = 1; napi_value argv[1]; double id_ = 0;
   CHECK(napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr));
   if (argc) napi_get_value_double(env, argv[0], &id_);
-  std::lock_guard<std::mutex> guard(requestsLock);
-  NSNumber *handle = requests[@(id_)];
-  if (handle) { [requests removeObjectForKey:@(id_)]; [PHImageManager.defaultManager cancelImageRequest:handle.intValue]; }
-  else [cancelledBeforeStart addObject:@(id_)];
+  PHImageRequestID handle = PHInvalidImageRequestID;
+  {
+    std::lock_guard<std::mutex> guard(requestsLock);
+    auto entry = requests.find(id_);
+    // A request that finished is gone: there is nothing to cancel, and nothing is remembered.
+    if (entry == requests.end()) return undefinedValue(env);
+    entry->second.cancelled = true;
+    handle = entry->second.handle;
+  }
+  if (handle != PHInvalidImageRequestID) [PHImageManager.defaultManager cancelImageRequest:handle];
   return undefinedValue(env);
 }
 
 // ---------- Changes
 
+// The function changes are reported to. PhotoKit's observer can fire while Node shuts down: Node's finalizer clears it
+// under the lock, and nothing is queued on it after that.
 static napi_threadsafe_function changes = nullptr;
+static std::mutex changesLock;
 static std::mutex trackedLock;
 static PHFetchResult<PHAsset *> *tracked;
+// `track` calls run one after another, in the order made: a later set of photos is never replaced by an earlier one.
+static dispatch_queue_t trackQueue;
 
 static void sendChanges(NSArray<NSString *> *ids) {
-  if (!changes || !ids.count) return;
+  if (!ids.count) return;
+  std::lock_guard<std::mutex> guard(changesLock);
+  if (!changes) return;
   NSArray *kept = [ids copy];
-  napi_call_threadsafe_function(changes, (__bridge_retained void *)kept, napi_tsfn_nonblocking);
+  if (napi_call_threadsafe_function(changes, (__bridge_retained void *)kept, napi_tsfn_nonblocking) != napi_ok) CFBridgingRelease((__bridge CFTypeRef)kept);
+}
+static void finishChanges(napi_env, void *, void *) {
+  std::lock_guard<std::mutex> guard(changesLock);
+  changes = nullptr;
 }
 
 static void callChanges(napi_env env, napi_value callback, void *, void *data) {
@@ -515,6 +560,8 @@ static void callChanges(napi_env env, napi_value callback, void *, void *data) {
     PHFetchResultChangeDetails *details = [change changeDetailsForFetchResult:tracked];
     if (!details) return;
     for (PHAsset *asset in details.changedObjects) [ids addObject:asset.localIdentifier];
+    // A photo back from Recently Deleted, say.
+    for (PHAsset *asset in details.insertedObjects) [ids addObject:asset.localIdentifier];
     for (PHAsset *asset in details.removedObjects) [ids addObject:asset.localIdentifier];
     tracked = details.fetchResultAfterChanges;
   }
@@ -528,10 +575,11 @@ static ImageFlowPhotosObserver *observer;
 static napi_value OnChanges(napi_env env, napi_callback_info info) {
   size_t argc = 1; napi_value argv[1];
   CHECK(napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr));
+  std::lock_guard<std::mutex> guard(changesLock);
   if (changes) return undefinedValue(env);
   napi_value name;
   napi_create_string_utf8(env, "photos-changes", NAPI_AUTO_LENGTH, &name);
-  CHECK(napi_create_threadsafe_function(env, argv[0], nullptr, name, 0, 1, nullptr, nullptr, nullptr, callChanges, &changes));
+  CHECK(napi_create_threadsafe_function(env, argv[0], nullptr, name, 0, 1, nullptr, finishChanges, nullptr, callChanges, &changes));
   // The process may quit while it is registered.
   napi_unref_threadsafe_function(env, changes);
   return undefinedValue(env);
@@ -543,7 +591,7 @@ static napi_value Track(napi_env env, napi_callback_info info) {
   CHECK(napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr));
   NSArray<NSString *> *locals = argc ? stringsArg(env, argv[0]) : nil;
   if (!locals || !authorized()) return undefinedValue(env);
-  dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ @autoreleasepool {
+  dispatch_async(trackQueue, ^{ @autoreleasepool {
     PHFetchOptions *options = [PHFetchOptions new];
     options.includeHiddenAssets = YES;
     PHFetchResult *result = locals.count ? [PHAsset fetchAssetsWithLocalIdentifiers:locals options:options] : nil;
@@ -575,12 +623,21 @@ static ImageFlowPhotosPicker *activePicker;
 - (void)picker:(PHPickerViewController *)picker didFinishPicking:(NSArray<PHPickerResult *> *)results {
   NSMutableArray *ids = [NSMutableArray new];
   for (PHPickerResult *result in results) if (result.assetIdentifier) [ids addObject:result.assetIdentifier];
+  // Settled first: ending the sheet settles it as cancelled, which then changes nothing.
+  settle(self.pending, false, ^(napi_env e) { return stringsValue(e, ids); });
   [self.parent endSheet:self.sheet];
-  PendingRef pending = self.pending;
-  settle(pending, false, ^(napi_env e) { return stringsValue(e, ids); });
-  activePicker = nil;
 }
 @end
+
+/** cancelPick(): closes the picker, which then answers []; for its window closing under it. */
+static napi_value CancelPick(napi_env env, napi_callback_info) {
+  ImageFlowPhotosPicker *picker = activePicker;
+  if (!picker) return undefinedValue(env);
+  activePicker = nil;
+  settle(picker.pending, false, ^(napi_env e) { return stringsValue(e, @[]); });
+  if (picker.sheet.sheetParent) [picker.sheet.sheetParent endSheet:picker.sheet];
+  return undefinedValue(env);
+}
 
 /** pick(nativeWindowHandle): shows the picker on that window; resolves to the local identifiers picked, [] on Cancel. */
 static napi_value Pick(napi_env env, napi_callback_info info) {
@@ -612,16 +669,21 @@ static napi_value Pick(napi_env env, napi_callback_info info) {
   [sheet setContentSize:NSMakeSize(MIN(980, MAX(640, frame.size.width - 120)), MIN(720, MAX(480, frame.size.height - 120)))];
   delegate.sheet = sheet;
   activePicker = delegate;
-  [parent beginSheet:sheet completionHandler:nil];
+  // However the sheet ends, picked, cancelled, or with its window closed under it, the call settles and another picker
+  // may open.
+  [parent beginSheet:sheet completionHandler:^(NSModalResponse) {
+    settle(delegate.pending, false, ^(napi_env e) { return stringsValue(e, @[]); });
+    if (activePicker == delegate) activePicker = nil;
+  }];
   return promise;
 }
 
 NAPI_MODULE_INIT() {
-  requests = [NSMutableDictionary new];
-  cancelledBeforeStart = [NSMutableSet new];
+  static dispatch_once_t queues;
+  dispatch_once(&queues, ^{ trackQueue = dispatch_queue_create("ch.wirhabenzeit.imageflow.photos.track", DISPATCH_QUEUE_SERIAL); });
   const struct { const char *name; napi_callback fn; } functions[] = {
     {"status", Status}, {"requestAccess", RequestAccess}, {"dragged", Dragged}, {"cloudIdentifiers", CloudIdentifiers},
-    {"localIdentifiers", LocalIdentifiers}, {"facts", Facts}, {"image", Image}, {"cancel", Cancel}, {"onChanges", OnChanges}, {"track", Track}, {"pick", Pick},
+    {"localIdentifiers", LocalIdentifiers}, {"facts", Facts}, {"image", Image}, {"cancel", Cancel}, {"onChanges", OnChanges}, {"track", Track}, {"pick", Pick}, {"cancelPick", CancelPick},
   };
   for (const auto &entry : functions) {
     napi_value fn;

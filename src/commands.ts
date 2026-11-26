@@ -72,6 +72,7 @@ export const commandRegistry = {
   'asset-retry': { label: 'Retry', enabled: book },
   'asset-refresh': { label: 'Refresh from Lightroom Classic', enabled: book },
   'asset-show-lightroom': { label: 'Show in Lightroom Classic', enabled: book },
+  'asset-show-photos': { label: 'Show in Photos', enabled: book },
   'asset-launch': { label: 'Open Lightroom Classic', enabled: book },
   'asset-allow': { label: 'Allow Access to Photos…', enabled: book },
   'box-replace-photo': { label: 'Replace Photo…', enabled: writable },

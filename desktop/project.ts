@@ -603,8 +603,12 @@ export type ImportProgress = { done: number; total: number; saving?: boolean };
 // holding many full-size images in memory (the same batch size as loading a book's sources).
 const importConcurrency = 8;
 
+/**
+ * Imports files, and photos of other providers by their locators (`provided`: Apple Photos photos dropped together with
+ * files, ADR 0013), in one save and one undo step. The provided photos come first.
+ */
 export async function importIntoProject(book: OpenProject, request: ImportRequest, paths: string[], progress?: (value: ImportProgress) => void,
-  checkpoint: SaveCheckpoint = { origin: 'app', label: 'Import sources' }) {
+  checkpoint: SaveCheckpoint = { origin: 'app', label: 'Import sources' }, provided: readonly PhotoLocator[] = []) {
   const project = structuredClone(book.project);
   const photoIndex: PhotoIndex = structuredClone(book.photoIndex);
   const mode = request.mode ?? book.project.importMode ?? 'copy';
@@ -678,6 +682,7 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
     }
   }
   try {
+    addProvided({ project, photoIndex }, provided, counts, imported);
     for (const [index, entry] of checked.entries()) {
       if (entry === 'skipped' || entry === 'failed') {
         counts[entry]++;
@@ -724,6 +729,27 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
   }
 }
 
+/**
+ * Adds photos that are not files to `files`, by their locators. A photo the book holds already, by its locator's key, is
+ * counted as existing and named again in `imported`; a new one gets no title, so it inherits its provider's.
+ */
+function addProvided({ project, photoIndex }: ProjectFiles, locators: readonly PhotoLocator[], counts: ImportCounts, imported: string[]) {
+  if (!locators.length) return;
+  const keyOf = (locator: PhotoLocator) => locator.provider + '\0' + locatorKindOf(locator).key(locator);
+  const held = new Map(sourceEntries({ project, photoIndex }).flatMap((entry) => entry.kind === 'photo' ? [[keyOf(entry.locator), entry.id] as const] : []));
+  for (const locator of locators) {
+    if (isFileLocator(locator)) { counts.skipped++; continue; }
+    const key = keyOf(locator);
+    const previous = held.get(key);
+    if (previous) { counts.existing = (counts.existing ?? 0) + 1; imported.push(previous); continue; }
+    const id = newSourceId('photo');
+    photoIndex[id] = locatorKindOf(locator).write(locator) as PhotoIndex[string];
+    held.set(key, id);
+    imported.push(id);
+    counts.photos++;
+  }
+}
+
 /** A new source ID: `ph-`, `tx-` or `fl-` and twelve hex digits. */
 const newSourceId = (kind: 'photo' | 'markdown' | 'file') => ({ photo: 'ph-', markdown: 'tx-', file: 'fl-' }[kind] + randomUUID().slice(0, 12));
 
@@ -762,19 +788,7 @@ export async function importProvidedPhotos(book: OpenProject, locators: readonly
   const photoIndex: PhotoIndex = structuredClone(book.photoIndex);
   const counts: ImportCounts = { photos: 0, texts: 0, files: 0, skipped: 0, failed: 0 };
   const imported: string[] = [];
-  const keyOf = (locator: PhotoLocator) => locator.provider + '\0' + locatorKindOf(locator).key(locator);
-  const held = new Map(sourceEntries({ project, photoIndex }).flatMap((entry) => entry.kind === 'photo' ? [[keyOf(entry.locator), entry.id] as const] : []));
-  for (const locator of locators) {
-    if (isFileLocator(locator)) { counts.skipped++; continue; }
-    const key = keyOf(locator);
-    const previous = held.get(key);
-    if (previous) { counts.existing = (counts.existing ?? 0) + 1; imported.push(previous); continue; }
-    const id = newSourceId('photo');
-    photoIndex[id] = locatorKindOf(locator).write(locator) as PhotoIndex[string];
-    held.set(key, id);
-    imported.push(id);
-    counts.photos++;
-  }
+  addProvided({ project, photoIndex }, locators, counts, imported);
   const next = await finishImport(book, { project, photoIndex }, { imported, counts }, { target, kind: 'photo' }, progress, checkpoint);
   return { book: next, imported, counts };
 }

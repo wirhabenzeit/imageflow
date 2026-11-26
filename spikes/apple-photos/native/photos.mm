@@ -205,7 +205,8 @@ static NSArray *pasteboardTypes(NSPasteboard *board) {
       id local = reference[@"localIdentifier"], library = reference[@"libraryURL"];
       entry[@"localIdentifierClass"] = NSStringFromClass([local classForCoder]); entry[@"libraryURLClass"] = NSStringFromClass([library classForCoder]);
       NSString *path = [library isKindOfClass:NSString.class] ? ([library hasPrefix:@"file:"] ? [NSURL URLWithString:library].path : library) : [library isKindOfClass:NSURL.class] ? [library path] : nil;
-      entry[@"libraryIsSystemLibrary"] = @([path.stringByStandardizingPath isEqual:@"/Volumes/Samsung T7/Photos Library.photoslibrary"]);
+      // Whether it names a library bundle; that it is the system library shows in `resolves` (PhotoKit reads only that one).
+      entry[@"libraryIsBundle"] = @([path.pathExtension isEqualToString:@"photoslibrary"]);
       if ([local isKindOfClass:NSString.class]) {
         PHAsset *asset = [PHAsset fetchAssetsWithLocalIdentifiers:@[local] options:nil].firstObject;
         entry[@"resolves"] = @(asset != nil);

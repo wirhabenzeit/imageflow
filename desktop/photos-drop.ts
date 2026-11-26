@@ -20,8 +20,8 @@ const same = (a: string, b: string) => resolve(a).normalize('NFC') === resolve(b
 
 /**
  * The dragged photo each path from inside a Photos library is the picture of, in order, or undefined for one no
- * dragged photo names. Only the last drag counts, and only a drag of exactly these pictures: a drag that held others
- * as well, or fewer, is another drag.
+ * dragged photo names. Only the last drag counts: a path it does not name came from somewhere else (the Open dialog,
+ * or a drag before it), and the caller refuses the drop rather than guess.
  */
 export function matchDragged(paths: readonly string[], dragged: readonly DraggedPhoto[]): (DraggedPhoto | undefined)[] {
   return paths.map((path) => dragged.find(({ file }) => !!file && same(file, path)));
@@ -43,14 +43,20 @@ export async function photosDrop(paths: readonly string[], library: PhotosLibrar
   const noun = fromPhotos.length === 1 ? 'This photo comes' : 'These photos come';
   const status = library?.status();
   if (!library || status === 'unsupported-build') throw new PhotosDropError(noun + ' from the Photos library, which this build of ImageFlow cannot read.' + exportHint);
-  if (status === 'unsupported-system') throw new PhotosDropError(noun + ' from the Photos library. Linking photos from Photos needs macOS 15 or later.' + exportHint);
+  if (status === 'unsupported-system') throw new PhotosDropError(noun + ' from the Photos library. Linking photos from Photos needs macOS 15.2 or later.' + exportHint);
   const matched = matchDragged(fromPhotos, library.dragged().items);
   if (matched.some((item) => !item)) {
     throw new PhotosDropError(noun + ' from inside the Photos library, as small copies Photos keeps for itself. Drag ' + (fromPhotos.length === 1 ? 'it' : 'them') + ' from the Photos app instead.');
   }
   await requireAccess(library, allow, fromPhotos.length === 1 ? 'this photo' : 'these photos');
   const locators = await photosLocators(library, matched.map((item) => item!.localIdentifier));
-  if (!locators.length) throw new PhotosDropError((fromPhotos.length === 1 ? 'This item' : 'These items') + ' from Photos cannot be linked: only still photos can.');
+  if (locators.length < new Set(matched.map((item) => item!.localIdentifier)).size) {
+    // A still image this library does not have was dragged from another Photos library than the system one, which
+    // PhotoKit cannot read; anything else is a video.
+    const elsewhere = matched.some((item) => item!.mediaType === 1) && !locators.length;
+    if (elsewhere) throw new PhotosDropError(noun + ' from a Photos library other than the System Photo Library, which ImageFlow cannot read. Open the System Photo Library in Photos, or export the photos (File → Export) and import the files.');
+    if (!locators.length) throw new PhotosDropError((fromPhotos.length === 1 ? 'This item' : 'These items') + ' from Photos cannot be linked: only still photos can.');
+  }
   return { locators, rest };
 }
 

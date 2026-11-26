@@ -12,7 +12,7 @@ function summary(access: PhotosAccessState): { tone: 'ok' | 'attention' | 'off';
     case 'notDetermined': return { tone: 'attention', text: 'Not asked yet', action: 'ask' };
     case 'denied': case 'limited': return { tone: 'attention', text: 'Not allowed to read the Photos library', action: 'settings' };
     case 'restricted': return { tone: 'off', text: 'Access is restricted on this Mac' };
-    case 'unsupported-system': return { tone: 'off', text: 'Needs macOS 15 or later' };
+    case 'unsupported-system': return { tone: 'off', text: 'Needs macOS 15.2 or later' };
     default: return { tone: 'off', text: 'Not available in this build' };
   }
 }

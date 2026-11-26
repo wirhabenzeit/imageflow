@@ -100,7 +100,8 @@ import { previewTypes } from '../src/template-preview';
 import { LightroomBridge } from './lightroom/bridge';
 import type { SentPhotos } from './lightroom/bridge';
 import { parseResult, selectionResultSchema } from './lightroom/protocol';
-import type { LightroomLocator } from '../src/source-locator';
+import type { LightroomLocator, PhotosLocator } from '../src/source-locator';
+import { showInPhotos } from './photos-show';
 import { launchLightroom } from './lightroom/launch';
 import { showInLightroom } from './lightroom/show';
 import { defaultModules, installMessage, installPlugin, lightroomRunning, pluginStatus } from './lightroom/plugin-install';
@@ -394,8 +395,8 @@ async function confirmCopy(owner: BrowserWindow, document: DocumentSession, entr
   // Where the copied assets come from, in the order a sentence names them: "Lightroom Classic, Photos or their original files".
   const origins = [lightroom ? 'Lightroom Classic' : '', photos ? 'Photos' : '', files ? (one ? 'its original file' : 'their original files') : ''].filter(Boolean);
   const cut = (one ? 'It no longer follows ' : 'They no longer follow ') + (origins.length > 1 ? origins.slice(0, -1).join(', ') + ' or ' + origins.at(-1) : origins[0]);
-  const rendered = lightroom ? ' Lightroom renders ' + (lightroom === 1 ? 'the photo' : 'each photo') + ' at full size first, which can take a while.'
-    : photos ? ' Photos hands over ' + (photos === 1 ? 'the photo' : 'each photo') + ' at full size first, downloading it from iCloud where needed.' : '';
+  const rendered = (lightroom ? ' Lightroom renders ' + (lightroom === 1 ? 'the photo' : 'each photo') + ' at full size first, which can take a while.' : '')
+    + (photos ? ' Photos hands over ' + (photos === 1 ? 'the photo' : 'each photo') + ' at full size first, downloading it from iCloud where needed.' : '');
   const answer = await dialog.showMessageBox(owner, { type: 'warning', buttons: ['Copy into Book', 'Cancel'], defaultId: 1, cancelId: 1,
     message: 'Copy ' + what + ' into the book?',
     detail: cut + ': later edits there won’t reach the book. The book grows by the size of the originals.' + rendered });
@@ -1940,6 +1941,18 @@ async function importLightroomPhotos(document: DocumentSession, { catalog, photo
 }
 
 /**
+ * Access to the Photos library was given (ADR 0013): every open book with photos from Photos reads them again, as
+ * Allow Access to Photos… does for one book. Photos does not report access it gives.
+ */
+function photosAccessGiven(except?: DocumentSession) {
+  for (const document of documents.values()) {
+    if (document === except || document.closing || !sourceEntries(document.book).some((entry) => entry.kind === 'photo' && entry.locator.provider === 'photos')) continue;
+    void document.run(async () => { document.retryPreviews(); return document.reload(); })
+      .then((result) => document.notify('error' in result ? { error: result.error } : { value: result.value }));
+  }
+}
+
+/**
  * Import from Photos… (ADR 0013): the system photo picker as a sheet on the book window. The photos picked are linked
  * like photos dragged in from Photos, in the order they were picked.
  */
@@ -1947,10 +1960,19 @@ async function importFromPhotos(document: DocumentSession) {
   const library = photosLibrary();
   const status = library?.status();
   if (!library || status === 'unsupported-build' || status === 'unsupported-system') {
-    throw new Error(status === 'unsupported-system' ? 'Photos from Apple Photos need macOS 15 or later.' : 'This build of ImageFlow cannot read the Photos library.');
+    throw new Error(status === 'unsupported-system' ? 'Photos from Apple Photos need macOS 15.2 or later.' : 'This build of ImageFlow cannot read the Photos library.');
   }
+  const before = library.status();
   await requireAccess(library, (access) => askForPhotosAccess(document.window, access), 'photos from it');
-  const picked = await library.pick(document.window.getNativeWindowHandle());
+  if (before !== 'authorized') photosAccessGiven();
+  // The window may have closed while access was asked for; while the picker is open, closing it closes the picker.
+  if (document.closing || document.window.isDestroyed()) return;
+  const close = () => library.cancelPick();
+  document.window.once('close', close);
+  let picked: string[];
+  try { picked = await library.pick(document.window.getNativeWindowHandle()); }
+  finally { if (!document.window.isDestroyed()) document.window.removeListener('close', close); }
+  if (document.closing || document.window.isDestroyed()) return;
   if (!picked.length) return;
   const locators = await photosLocators(library, picked);
   if (!locators.length) throw new Error('Only still photos can be linked from Photos.');
@@ -2661,6 +2683,10 @@ void app.whenReady().then(async () => {
       const locators = chosen.flatMap((entry) => entry.kind === 'photo' && entry.locator.provider === 'lightroom' ? [entry.locator as LightroomLocator] : []);
       return { summary: document.summary, message: await showInLightroom(lightroom, locators) };
     }
+    if (request.action === 'show-photos') {
+      const locators = chosen.flatMap((entry) => entry.kind === 'photo' && entry.locator.provider === 'photos' ? [entry.locator as PhotosLocator] : []);
+      return { summary: document.summary, message: await showInPhotos(photosLibrary(), locators, (url) => shell.openExternal(url)) };
+    }
     if (request.action === 'launch') {
       // Offered only where the photo's provider offers it (`SourceProvider.repairs`). Once the plugin connects, the
       // provider's watch reports the photos and the book observes them again: nothing waits here.
@@ -2677,6 +2703,7 @@ void app.whenReady().then(async () => {
       if (access === 'notDetermined') access = await library!.requestAccess();
       if (access && access !== 'authorized' && access !== 'unsupported-build' && access !== 'unsupported-system') access = await askForPhotosAccess(owner, access) === 'granted' ? 'authorized' : access;
       if (access !== 'authorized') return { summary: document.summary };
+      photosAccessGiven(document);
       document.retryPreviews();
       return { summary: activate(await document.reload()) };
     }
@@ -3011,7 +3038,8 @@ void app.whenReady().then(async () => {
     } catch (error) { return { error: errorMessage(error) }; }
   });
   // The icons of the apps photos come from, for asset badges and Settings' cards; each falls back to a drawn mark.
-  ipcMain.handle(channels.sourceIcons, async () => {
+  ipcMain.handle(channels.sourceIcons, async (event) => {
+    if (!(editorOwner(event) ?? assetsOwner(event) ?? settingsOwner(event))) return { error: 'Request is only available to ImageFlow windows.' };
     const [lightroom, photos] = await Promise.all([appIcon(lightroomAppPath), appIcon(photosAppPath)]);
     return { value: { ...(lightroom ? { lightroom } : {}), ...(photos ? { photos } : {}) } };
   });
@@ -3020,9 +3048,12 @@ void app.whenReady().then(async () => {
     if (!settingsOwner(event)) return { error: 'Request is only available to Settings.' };
     try {
       const library = photosLibrary();
-      if (request === 'ask' && library?.status() === 'notDetermined') await library.requestAccess();
+      const before = library?.status();
+      if (request === 'ask' && before === 'notDetermined') await library!.requestAccess();
       if (request === 'settings') await shell.openExternal(photosPrivacySettings);
-      return { value: library?.status() ?? 'unsupported-build' };
+      const after = library?.status() ?? 'unsupported-build';
+      if (after === 'authorized' && before !== 'authorized') photosAccessGiven();
+      return { value: after };
     } catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.handle(channels.lightroomLaunch, async (event) => {

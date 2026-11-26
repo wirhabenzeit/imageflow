@@ -259,7 +259,7 @@ export type SyncBook = { id: string; open?: true; view: SyncView | null };
  */
 export type LibraryAction = { action: 'download' | 'cancel-download' | 'delete' | 'update'; bookId: string } | { action: 'start' | 'stop' | 'keep-here' | 'sync-again' | 'delete'; id: string };
 
-export type SourceAction = { action: 'retry' | 'refresh' | 'show-lightroom' | 'launch' | 'allow' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump' | 'import' | 'rename' | 'reveal-leftovers' | 'trash-leftovers'; spread?: string; key?: string; keys?: string[]; accept?: string[]; paths?: string[]; name?: string };
+export type SourceAction = { action: 'retry' | 'refresh' | 'show-lightroom' | 'show-photos' | 'launch' | 'allow' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump' | 'import' | 'rename' | 'reveal-leftovers' | 'trash-leftovers'; spread?: string; key?: string; keys?: string[]; accept?: string[]; paths?: string[]; name?: string };
 
 /** A file in the package that the book no longer uses: its path in the package. */
 export type LeftoverFile = { path: string; size: number; modified: number };

@@ -28,7 +28,7 @@ import { TaskStatus, taskProgress } from './TaskStatus';
 import { bookName } from './book-name';
 import { sourceEntries, sourceProvider } from './source-locations';
 import type { ImportMode } from './source-locations';
-import { showsInLightroom } from './asset-menu';
+import { showsInLightroom, showsInPhotos } from './asset-menu';
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
 import { bookLayout, gridColumns, isRenderOrigin, renderOrigin, spreadCommands, thumbsOrigin } from './desktop';
@@ -1397,7 +1397,8 @@ export function App() {
     if (source && photo) items.push('box-edit-caption');
     const entry = source?.kind === 'photo' ? sourceEntries(summary).find(({ key }) => key === 'photo:' + source.id) : undefined;
     if (source) items.push({ type: 'separator' }, 'asset-preview', 'box-show-assets',
-      ...(entry && sourceProvider(entry) === 'lightroom' ? [{ command: 'asset-show-lightroom' as const, enabled: showsInLightroom(summary, entry) }] : []), photo ? 'box-remove-photo' : 'box-remove-text');
+      ...(entry && sourceProvider(entry) === 'lightroom' ? [{ command: 'asset-show-lightroom' as const, enabled: showsInLightroom(summary, entry) }] : []),
+      ...(entry && sourceProvider(entry) === 'photos' ? [{ command: 'asset-show-photos' as const, enabled: showsInPhotos(summary, entry) }] : []), photo ? 'box-remove-photo' : 'box-remove-text');
     const result = await api.showContextMenu(items, { ...menuState, editing: false });
     if (!result || current.current?.id !== summary.id) return;
     switch (result.command) {
@@ -1408,6 +1409,7 @@ export function App() {
       case 'box-edit-text': openOwner(sheet, { type: 'markdown', id: top.id, page: top.page }); break;
       case 'asset-preview': if (source) setQuick(source); break;
       case 'asset-show-lightroom': if (entry) void runSourceAction({ action: 'show-lightroom', keys: [entry.key] }); break;
+      case 'asset-show-photos': if (entry) void runSourceAction({ action: 'show-photos', keys: [entry.key] }); break;
       case 'box-show-assets': if (source) { choose(source); showPanel('bottom'); } break;
       case 'box-remove-photo': case 'box-remove-text': changeSpreadAt(sheet, (spread) => { spread.boxes[top.id] = boxBase(spread.boxes[top.id]); }, photo ? 'Photo removed' : 'Text removed', top.page); setCropping(undefined); break;
     }

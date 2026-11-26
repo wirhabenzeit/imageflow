@@ -7,6 +7,9 @@ import { accessProblem, capturedAt, photosFacts, photosFailure, photosProvider, 
 import type { PhotosPort } from '../desktop/providers/photos';
 import { matchDragged, photosDrop, PhotosDropError, photosLocators } from '../desktop/photos-drop';
 import { photosLibraryOf } from '../desktop/photos-library';
+import { photosAssetURL, showInPhotos } from '../desktop/photos-show';
+import { awayOriginal } from '../src/away-originals';
+import type { SourceStatus } from '../src/source-locations';
 import type { DraggedPhoto, PhotosAccess, PhotosFacts, PhotosLibrary } from '../desktop/photos-library';
 import type { Materialized, SourceRef } from '../desktop/source-provider';
 import type { PhotosLocator } from '../src/source-locator';
@@ -103,10 +106,12 @@ test('PhotoKit failures become states the host knows', () => {
   assert.equal(photosFailure(code('PHPhotosErrorDomain:3201')).state, 'missing');
   assert.equal(photosFailure(code('ImageFlowPhotos:3311')).state, 'denied');
   assert.equal(photosFailure(new Error('Odd')).problem, 'Original unavailable: Odd');
+  // A download that failed for the network, wrapped in PhotoKit's own iCloud errors.
+  assert.equal(photosFailure(Object.assign(new Error('x'), { code: 'CloudPhotoLibraryErrorDomain:1005', underlying: 'NSURLErrorDomain:-1009' })).state, 'offline');
   assert.equal(accessProblem('authorized'), undefined);
   assert.equal(accessProblem('denied')?.state, 'denied');
   assert.equal(accessProblem('notDetermined')?.state, 'denied');
-  assert.equal(accessProblem('unsupported-system')?.problem, 'Photos from Apple Photos need macOS 15 or later.');
+  assert.equal(accessProblem('unsupported-system')?.problem, 'Photos from Apple Photos need macOS 15.2 or later.');
   assert.equal(accessProblem(undefined)?.state, 'unreadable');
 });
 
@@ -252,7 +257,7 @@ test('a drop from Photos that cannot be linked is refused, never imported as the
   await assert.rejects(photosDrop([derivative(1)], asLibrary(library), async (access) => { asked = access; return 'denied'; }), /may not read the Photos library/);
   assert.equal(asked, 'denied');
   library.access = 'unsupported-system';
-  await assert.rejects(photosDrop([derivative(1)], asLibrary(library), allow), /needs macOS 15/);
+  await assert.rejects(photosDrop([derivative(1)], asLibrary(library), allow), /needs macOS 15.2/);
   await assert.rejects(photosDrop([derivative(1)], undefined, allow), /export them from Photos/);
   // A video dragged in: Photos reports no still photo for it.
   library.access = 'authorized';
@@ -264,4 +269,35 @@ test('photos picked become locators in the order picked, without videos or repea
   const library = new DragLibrary();
   library.add(1); library.add(2);
   assert.deepEqual((await photosLocators(asLibrary(library), [local(2), local(7), local(1), local(2)])).map(({ cloud: id }) => id), [cloud(2), cloud(1)]);
+});
+
+test('a still photo of another Photos library is refused as such, not as a video', async () => {
+  const library = new DragLibrary();
+  library.dragItems = [{ localIdentifier: local(5), file: derivative(5), library: '/Volumes/Other/Old.photoslibrary', mediaType: 1 }];
+  await assert.rejects(photosDrop([derivative(5)], asLibrary(library), async () => 'denied'), /other than the System Photo Library/);
+  library.dragItems = [{ localIdentifier: local(6), file: derivative(6), library: libraryPath, mediaType: 2 }];
+  await assert.rejects(photosDrop([derivative(6)], asLibrary(library), async () => 'denied'), /only still photos/);
+});
+
+test('Show in Photos opens Photos at the photo, by this Mac\'s identifier of it', async () => {
+  const library = new DragLibrary();
+  library.add(1);
+  const opened: string[] = [];
+  const open = async (url: string) => { opened.push(url); };
+  // The locator's local identifier is another Mac's: the cloud identifier finds this Mac's.
+  assert.equal(await showInPhotos(library, [{ provider: 'photos', cloud: cloud(1), local: local(9) }, { provider: 'photos', cloud: cloud(2) }], open),
+    'Photos shows one photo at a time: showing the first of 2.');
+  assert.deepEqual(opened, [photosAssetURL(local(1))]);
+  assert.equal(photosAssetURL(local(1)), 'photos://asset?identifier=' + local(1).split('/')[0]);
+  await assert.rejects(showInPhotos(library, [{ provider: 'photos', cloud: cloud(8) }], open), /not in the Photos library on this Mac/);
+  library.access = 'denied';
+  await assert.rejects(showInPhotos(library, [{ provider: 'photos', cloud: cloud(1) }], open), /may not read the Photos library/);
+});
+
+test('a photo of Photos that cannot be read here is away, not an error of its own', () => {
+  const status = (state: SourceStatus['state']) => ({ kind: 'photo', id: 'a', key: 'photo:a', locator: { provider: 'photos', cloud: cloud(1) }, state, cached: true }) as unknown as SourceStatus;
+  assert.equal(awayOriginal(status('missing')), 'photos');
+  assert.equal(awayOriginal(status('offline')), 'photos');
+  assert.equal(awayOriginal(status('denied')), 'photos');
+  assert.equal(awayOriginal(status('unreadable')), undefined);
 });

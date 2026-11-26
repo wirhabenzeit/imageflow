@@ -5,6 +5,12 @@ import type { SourceEntry, SourceRepair } from './source-locations';
 import { assetPageLabels, assetUsage, shownAssetUsage, usageLabel } from './asset-usage';
 import type { SourceUsage } from './editing';
 
+/** Whether Photos can show this source now: one of its photos that is neither gone nor out of ImageFlow's reach. */
+export function showsInPhotos(summary: ProjectSummary, entry: SourceEntry) {
+  const state = summary.sources?.[entry.key]?.state;
+  return sourceProvider(entry) === 'photos' && !!state && state !== 'missing' && state !== 'denied';
+}
+
 /** Whether Lightroom Classic can show this source now: one of its photos that is neither offline nor gone from the catalog. */
 export function showsInLightroom(summary: ProjectSummary, entry: SourceEntry) {
   const state = summary.sources?.[entry.key]?.state;
@@ -41,6 +47,9 @@ export function assetMenu(summary: ProjectSummary, keys: string[], place = false
     // A photo of Lightroom Classic is shown there instead, while its catalog can be reached and still holds it.
     ...(chosen.some((entry) => sourceProvider(entry) === 'lightroom') ? [{ command: 'asset-show-lightroom' as const,
       enabled: chosen.some((entry) => showsInLightroom(summary, entry)) }] : []),
+    // A photo of Photos is shown there, at the first one chosen.
+    ...(chosen.some((entry) => sourceProvider(entry) === 'photos') ? [{ command: 'asset-show-photos' as const,
+      enabled: chosen.some((entry) => showsInPhotos(summary, entry)) }] : []),
     ...(chosen.length === 1 && chosen[0].kind === 'markdown' ? [{ command: 'asset-open' as const, enabled: !missing }] : []),
     // Locate Folder… finds every missing asset in the folder chosen, whatever is selected (F-045).
     // Retry reads them again; it is the one repair for a photo whose app or server is not reachable now.
@@ -61,4 +70,4 @@ export function assetMenuState(busy: boolean): BookMenuState {
   return { ...emptyMenuState, document: true, writable: true, busy };
 }
 export const assetActions = { 'asset-reveal': 'reveal', 'asset-copy': 'copy', 'asset-remove': 'remove', 'asset-locate': 'locate',
-  'asset-locate-folder': 'locate-folder', 'asset-open': 'open', 'asset-place': 'place', 'asset-retry': 'retry', 'asset-refresh': 'refresh', 'asset-show-lightroom': 'show-lightroom', 'asset-launch': 'launch', 'asset-allow': 'allow' } as const;
+  'asset-locate-folder': 'locate-folder', 'asset-open': 'open', 'asset-place': 'place', 'asset-retry': 'retry', 'asset-refresh': 'refresh', 'asset-show-lightroom': 'show-lightroom', 'asset-show-photos': 'show-photos', 'asset-launch': 'launch', 'asset-allow': 'allow' } as const;
