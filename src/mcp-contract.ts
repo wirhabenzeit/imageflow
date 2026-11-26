@@ -86,7 +86,7 @@ export const mcpToolSchemas = {
     preview: makePreviewRequestSchema(spreadReference).optional()
       .describe('Render artwork of a page, spread, cover, box, element or contact sheet.'),
     inspect: makeInspectionSchema(spreadReference).optional()
-      .describe('Measure boxes and elements of one cover or spread.'),
+      .describe('Measure boxes and elements of one cover or spread. Photo boxes include print: original pixels and effective ppi, measured or estimated.'),
     typescript: z.boolean().optional()
       .describe('Check template types against the installed runtime.'),
     draft: z.strictObject({ operations: projectOperationsSchema }).optional()
@@ -162,7 +162,7 @@ export const mcpTools: { name: McpToolName; title: string; description: string; 
   { name: 'get_authoring_context', title: 'Get authoring context', readOnly: true,
     description: 'Read parsed declarations, template identity and files. Before editing a template, request reference topics, examples and source files: those calls return just what they request.' },
   { name: 'inspect_book', title: 'Inspect book', readOnly: true,
-    description: 'Read saved spreads, cover, sources or parameters, see photos that are not placed, or measure layout elements. Returns the revision for checks and commands.' },
+    description: 'Read saved spreads, cover, sources (photos with pixel width and height) or parameters, see photos that are not placed, or measure layout elements (photo boxes with ppi). Returns the revision for checks and commands.' },
   { name: 'check_book', title: 'Check book', readOnly: true,
     description: 'Check content or the exterior cover without saving. Supports previews, type checks, drafts and synthetic fixtures.' },
   { name: 'apply_project_changes', title: 'Apply changes', readOnly: false,

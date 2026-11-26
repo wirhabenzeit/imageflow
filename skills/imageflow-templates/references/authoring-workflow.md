@@ -29,7 +29,8 @@ How an agent edits an ImageFlow book through the MCP server. The template API to
 - Preview a new or unused layout before saving it: call `check_book` with `draft.operations` (an `insert_spread` with a `ref`) and target the preview at its `$ref`. Then apply the same operations with `apply_project_changes` to save them.
 - Use `preview.target.spreads` for a contact sheet of up to 12 spreads, and `box` or `element` targets for close-ups. `guides` and `labels` add trim, safe-area and box outlines.
 - Stress-test layouts with `check_book` `fixtures`: synthetic typical, long, empty, portrait-photo, valid-GPX and malformed-file content per format, with a coverage matrix and a bannered fixture contact sheet that is never the saved book. Coverage names the checks that did not run. `params` and `document` test settings at other values than their defaults, such as `{ "photoEdge": "bleed" }`.
-- To choose photos, call `inspect_book` with `view: "sources"`, `unplaced: true` or `captured: { from, to }`, and `sheet: {}`: an image of up to 48 photos, uncropped, with their IDs and capture times.
+- To choose photos, call `inspect_book` with `view: "sources"`, `unplaced: true` or `captured: { from, to }`, and `sheet: {}`: an image of up to 48 photos, uncropped, with their IDs and capture times. Photo records carry the original's `width` and `height` in pixels where they are known.
+- To see how sharp placed photos print, call `check_book` with `inspect: { spread }`: each photo box has `print` with the original's `widthPx` and `heightPx` and the `ppi` it prints at, `measured: true` where the render drew it, as `render.photoResolution` counts it, or estimated from the size its source reported where it was not drawn (`ppi: null` without a known size). Compare it after `replace_source`.
 
 ## Revisions
 

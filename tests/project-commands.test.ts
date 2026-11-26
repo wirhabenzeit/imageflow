@@ -449,7 +449,9 @@ test('replace_source swaps a photo in every box, set aside or not, and keeps cro
   assert.equal(project.cover!.boxes.front.photo, 'p2');
   assert.deepEqual(result.affectedSpreads, ['one', 'two', 'three', 'four'], 'also where the replacement stood, for its caption');
   assert.equal(result.affectedCover, true);
-  assert.deepEqual(result.changes, ['Replaced photo p1 with p2 in 2 boxes shown and 2 set aside; caption copied']);
+  // Each placement says what became of its crop (API-021).
+  assert.deepEqual(result.changes, ['Replaced photo p1 with p2 in 2 boxes shown and 2 set aside; crop kept: one hero, two second; ' +
+    'no crop saved: three hero (set aside), cover front; caption copied']);
   assert.deepEqual(photoIndex.p1, original.photoIndex.p1);
   assert.deepEqual(photoIndex.p2, { ...original.photoIndex.p2, caption: 'Old caption' });
   // Another shape, and one that is not known, drop the crops; a caption of its own stays.
@@ -458,7 +460,8 @@ test('replace_source swaps a photo in every box, set aside or not, and keeps cro
     assert.equal(other.files.project.spreads[0].boxes.hero.crops, undefined);
     assert.equal(other.files.project.spreads[0].boxes.hero.focus, undefined);
     assert.deepEqual(other.files.project.spreads[0].boxes.hero.params, { caption: true });
-    assert.match(other.changes[0], p2 ? /crops of 2 boxes dropped, as the shapes differ$/ : /as the shapes are not known; caption copied$/);
+    assert.match(other.changes[0], p2 ? /; crop reset, as the shapes differ: one hero, two second; no crop saved: three hero \(set aside\), cover front$/
+      : /; crop reset, as the shapes are not known: one hero, two second; no crop saved: .*; caption copied$/);
     assert.equal(other.files.photoIndex.p2.caption, p2 ? undefined : 'Old caption');
   }
   assert.deepEqual(applyProjectCommands(book, template, [{ op: 'replace_source', source: 'p1', with: 'p1' }]).changes, []);

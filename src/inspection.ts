@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { identifier } from './project';
 import type { PageSide } from './project';
+import type { PhotoPrint } from './photo-resolution';
 
 const id = identifier.refine((value) => value.length <= 256);
 export const makeInspectionSchema = (spread: z.ZodType<string, string>) => z.strictObject({
@@ -23,6 +24,8 @@ export type ElementMeasurement = {
   boundsMm: { x: number; y: number; width: number; height: number }; upright: boolean;
   typography: { fontFamily: string; fontSizePt: number; lineHeightPt: number | null; fontWeight: string; color: string };
   editPaths: string[]; source?: string;
+  // A photo box with a photo: the original's pixels and the ppi it prints at (API-021).
+  print?: PhotoPrint;
 };
 export type ElementInspection = {
   spread?: string; cover?: true; coordinateSpace: 'sheet-bleed-mm';

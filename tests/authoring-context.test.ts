@@ -8,7 +8,7 @@ import { checkedOutput } from './mcp-output-check';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import sharp from 'sharp';
-import { AuthoringError, compactDiagnostics, compactRender, createAuthoringService, isReferenceCall } from '../desktop/authoring-service';
+import { AuthoringError, compactDiagnostics, compactRender, createAuthoringService, isReferenceCall, pixelsOf } from '../desktop/authoring-service';
 import { checkProject } from '../desktop/check';
 import { importIntoProject, loadProject } from '../desktop/project';
 import { ProjectSession } from '../desktop/project-session';
@@ -1072,4 +1072,10 @@ test('photos that are not placed can be listed by capture time and seen uncroppe
   assert.throws(() => parseMcpArguments('inspect_book', { project: 'p', view: 'spreads', unplaced: true }), /requires the sources view/);
   assert.throws(() => parseMcpArguments('inspect_book', { project: 'p', view: 'sources', kind: 'text', sheet: {} }), /about photos/);
   assert.throws(() => parseMcpArguments('inspect_book', { project: 'p', view: 'sources', sheet: {}, limit: 60 }), /at most 48/);
+});
+
+test('the sources view gives a photo its pixel size where it is known (API-021)', () => {
+  assert.deepEqual(pixelsOf({ width: 6000, height: 4000 }), { width: 6000, height: 4000 });
+  assert.deepEqual(pixelsOf(undefined), {});
+  assert.deepEqual(pixelsOf({ width: 0, height: 4000 }), {});
 });

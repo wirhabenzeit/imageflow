@@ -131,7 +131,7 @@ export const projectOperationSchema = z.discriminatedUnion('op', [
     source: id.describe('Source ID from inspect_book sources or import_sources.') })
     .refine(validAddress, addressMessage).describe('Put a photo or Markdown text into a box.'),
   z.strictObject({ op: z.literal('replace_source'), source: id.describe('Photo to replace.'), with: id.describe('Photo that takes its place.') })
-    .describe('Swap a photo for another in every box, set aside or not. Crops stay if the shapes match.'),
+    .describe('Swap a photo for another in every box, set aside or not. Crops stay if the shapes match; the change names each box with crop kept, crop reset or no crop saved.'),
   z.strictObject({ op: z.literal('remove_sources'), kind: z.enum(['photo', 'text', 'file']).describe('Kind of all of them.'), sources: z.array(id).min(1).max(1000).describe('Source IDs.') })
     .describe('Remove sources from the book and clear every use. Their files stay; dryRun counts the uses.'),
   z.strictObject({ op: z.literal('clear_box'), ...boxTarget.shape }).refine(validAddress, addressMessage).describe('Remove the content of a box.'),
@@ -256,6 +256,9 @@ export function applyProjectCommands(
       return [{ id: layout.id, boxes, shown: boxes.length - aside, aside }];
     });
   }
+  // Boxes named in a change, the first few of them: `; crop kept: one hero, two left photo1 and 3 more`.
+  const listedPlaces = (what: string, places: string[]) => !places.length ? ''
+    : '; ' + what + ': ' + places.slice(0, 6).join(', ') + (places.length > 6 ? ' and ' + (places.length - 6) + ' more' : '');
   const counted = (places: ReturnType<typeof placesOf>) => {
     const shown = places.reduce((sum, place) => sum + place.shown, 0), aside = places.reduce((sum, place) => sum + place.aside, 0);
     return shown + (shown === 1 ? ' box' : ' boxes') + ' shown and ' + aside + ' set aside';
@@ -624,19 +627,23 @@ export function applyProjectCommands(
         const before = options.photo?.(operation.source), after = options.photo?.(operation.with);
         // A crop frames the same part of a photo of the same shape; of another one, or an unknown one, it is dropped.
         const sameShape = !!before && !!after && Math.abs(before.width / before.height - after.width / after.height) <= 0.01 * (before.width / before.height);
-        let dropped = 0;
-        for (const { boxes } of places) for (const { state } of boxes) {
+        // Each placement says what became of its crop (API-021): kept, reset to a centred fill, or none was saved.
+        const kept: string[] = [], reset: string[] = [], none: string[] = [];
+        for (const { id, boxes } of places) for (const { state, location, box, displaced } of boxes) {
           state.photo = operation.with;
-          if (sameShape || (!state.crops && !state.focus)) continue;
+          const where = (id === coverInstance ? 'cover' : id) + (location === 'spread' ? '' : ' ' + location) + ' ' + box + (displaced === undefined ? '' : ' (set aside)');
+          if (!state.crops && !state.focus) { none.push(where); continue; }
+          if (sameShape) { kept.push(where); continue; }
           delete state.crops; delete state.focus;
-          dropped++;
+          reset.push(where);
         }
         const caption = own(photoIndex, operation.source)!.caption, replacement = own(photoIndex, operation.with)!;
         const captioned = !!caption && replacement.caption === undefined && !after?.caption;
         if (captioned) replacement.caption = caption;
         if (!places.length && !captioned) break;
         changed('Replaced photo ' + operation.source + ' with ' + operation.with + ' in ' + counted(places) +
-          (dropped ? '; crops of ' + dropped + (dropped === 1 ? ' box' : ' boxes') + ' dropped, as the shapes ' + (before && after ? 'differ' : 'are not known') : '') +
+          listedPlaces('crop kept', kept) + listedPlaces('crop reset, as the shapes ' + (before && after ? 'differ' : 'are not known'), reset) +
+          listedPlaces('no crop saved', none) +
           (captioned ? '; caption copied' : ''), [...places.map((place) => place.id), ...(captioned ? usersOf(operation.with) : [])]);
         break;
       }
