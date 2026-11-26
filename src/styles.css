@@ -1135,6 +1135,11 @@ span.source-origin > img.source-origin-app { width: 16px; height: 16px; object-f
 /* Painted, not hidden, like the book view's candidate: a hidden frame showed nothing for a moment once promoted, and may
    not get its size (F-038). It must not take the overview's clicks meanwhile. */
 .presentation .book-frame-pending { pointer-events: none !important; }
+/* The artwork's layer, scaled from its corner while zoomed (UI-021); the presentation clips what extends past the screen. */
+.presentation { overflow: hidden; }
+.presentation-stage { position: absolute; inset: 0; transform-origin: 0 0; }
+.presentation-zoomed { cursor: grab; }
+.presentation-panning { cursor: grabbing; }
 .presentation-idle, .presentation-idle * { cursor: none; }
 .presentation-indicator { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 6px 12px;
   border-radius: 20px; background: #000b; color: #eee; font-size: 12px; opacity: 0; transition: opacity .25s; pointer-events: none; }
