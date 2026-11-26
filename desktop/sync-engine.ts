@@ -1417,6 +1417,7 @@ export async function cloneFromRemote({ remote, tip, destination, remoteId, prog
     // Folders are made one file after the other, so two downloads never make the same one; the files then come down
     // a few at once. A failed or cancelled download lets the others end before the staging folder goes, so none of
     // them writes into it afterwards.
+    signal?.throwIfAborted();
     const files: [target: string, digest: string][] = [];
     for (const [path, digest] of Object.entries(blob.content)) files.push([await bookPath(staging, path), digest]);
     await eachAtOnce(files, async ([target, digest]) => {

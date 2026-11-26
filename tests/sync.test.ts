@@ -3152,22 +3152,23 @@ coreEach('Download fetches a few files and previews at once, not one after anoth
   const [tip] = await tips(remote, a);
   await use(b);
   const destination = join(b.base, 'Book.imageflow');
-  // Each transfer waits a little, as a request to iCloud does, so transfers that run together overlap.
-  let running = 0, most = 0;
-  const slow = <T>(transfer: () => Promise<T>) => async () => {
-    running++;
-    most = Math.max(most, running);
-    try { await new Promise((resolve) => setTimeout(resolve, 20)); return await transfer(); } finally { running--; }
+  // Each transfer waits a little, as a request to iCloud does, so transfers that run together overlap. Files and
+  // previews are counted apart: the files all come down before the first preview does.
+  const counts = { files: { running: 0, most: 0 }, previews: { running: 0, most: 0 } };
+  const slow = async <T>(count: { running: number; most: number }, transfer: () => Promise<T>) => {
+    count.most = Math.max(count.most, ++count.running);
+    try { await new Promise((resolve) => setTimeout(resolve, 20)); return await transfer(); } finally { count.running--; }
   };
   const proxied = new Proxy(remote, { get(target, name, receiver) {
     const value = Reflect.get(target, name, receiver) as unknown;
-    if (name === 'downloadBlob') return (key: string, file: string, options?: { signal?: AbortSignal }) => slow(() => target.downloadBlob(key, file, options))();
-    if (name === 'getBlob') return (key: string, options?: { signal?: AbortSignal }) => slow(() => target.getBlob(key, options))();
+    if (name === 'downloadBlob') return (key: string, file: string, options?: { signal?: AbortSignal }) => slow(counts.files, () => target.downloadBlob(key, file, options));
+    if (name === 'getBlob') return (key: string, options?: { signal?: AbortSignal }) =>
+      key.includes('/proxies/') ? slow(counts.previews, () => target.getBlob(key, options)) : target.getBlob(key, options);
     return typeof value === 'function' ? value.bind(target) : value;
   } });
   await cloneFromRemote({ remote: proxied, tip, destination, remoteId: await remote.remoteId() });
-  assert.ok(most > 1, 'transfers overlapped: ' + most);
-  assert.ok(most <= 6, 'at most six at once: ' + most);
+  assert.equal(counts.files.most, 6, 'six files at once');
+  assert.equal(counts.previews.most, 6, 'six previews at once');
   assert.equal(await captureBookStateRevision(destination), tip.bookStateRevision);
 });
 
