@@ -993,7 +993,8 @@ export function PhotoBox({ id, className, style, rect, children, decorative, 'da
         <img ref={image} src={book.mode === 'edit' && !lazyPhotos ? photo.src : undefined}
           data-src={lazyPhotos ? photo.src : undefined} alt={photo.altText ?? photo.title ?? ''} />}
       {content}
-      {!photo && renderView(book) === 'canvas' && <span className="if-placeholder">{box?.photo ? 'Missing photo' : 'Drop a photo'}</span>}
+      {/* A photo whose preview its source is still handing over (Lightroom, Apple Photos) is loading, not missing. */}
+      {!photo && renderView(book) === 'canvas' && <span className="if-placeholder">{!box?.photo ? 'Drop a photo' : book.sources?.['photo:' + box.photo]?.pending ? 'Loading photo…' : 'Missing photo'}</span>}
       {!photo && renderView(book) === 'layout-preview' && <LayoutGlyph kind="photo" />}
     </div>
   );

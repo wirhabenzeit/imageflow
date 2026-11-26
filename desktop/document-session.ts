@@ -26,7 +26,7 @@ import type { FSWatcher } from 'node:fs';
 import { mkdtemp, realpath, readdir, rm, stat, mkdir, rename, rmdir } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
 import { channels, desktopScheme, issueText, renderOrigin, renderOrigins } from '../src/desktop';
-import type { AgentLeaseReply, BookMenuState, CanvasLayout, ImportRequest, Issue, ProjectChange, ProjectSummary, Result, TaskProgress } from '../src/desktop';
+import type { AgentLeaseReply, BookMenuState, CanvasLayout, ImportCounts, ImportRequest, Issue, ProjectChange, ProjectSummary, Result, TaskProgress } from '../src/desktop';
 import { coverInstance, identifier } from '../src/project';
 import { parseActiveEditor } from '../src/mcp-results';
 import type { RenderProject } from '../src/project';
@@ -38,6 +38,9 @@ import { importIntoProject, importProvidedPhotos, loadProject, projectSummary, r
 import type { ImportProgress } from './project';
 import type { OpenProject } from './project';
 import { photoExtensions } from './photos';
+import { photosDrop } from './photos-drop';
+import { photosLibrary } from './photos-library';
+import type { PhotosAccess } from './photos-library';
 import { bundledFontNames } from './fonts';
 import { captureBookStateRevision, isProjectInputPath } from './revisions';
 import type { ProjectInputIndex } from './revisions';
@@ -1605,6 +1608,17 @@ export class DocumentSession {
       if (choice.canceled) return null;
       paths = choice.filePaths;
     }
+    // Photos dragged from Apple Photos arrive as small copies inside its library: they are linked through the Apple
+    // Photos provider instead (ADR 0013), and the rest imports as files.
+    const fromPhotos = await photosDrop(paths, photosLibrary(), (access) => askForPhotosAccess(owner, access));
+    paths = fromPhotos.rest;
+    let withPhotos = book;
+    let linked: { imported: string[]; counts: ImportCounts } | undefined;
+    if (fromPhotos.locators.length) {
+      const result = await importProvidedPhotos(book, fromPhotos.locators, { target: request.kind === 'photo' ? request.target : undefined, checkpoint });
+      withPhotos = result.book;
+      linked = { imported: result.imported, counts: result.counts };
+    }
     const files: string[] = [];
     const collect = async (folder: string) => {
       for (const entry of await readdir(folder, { withFileTypes: true })) {
@@ -1624,7 +1638,12 @@ export class DocumentSession {
       owner.webContents.send(channels.progress, saving ? { text: 'Adding ' + total + ' ' + (total === 1 ? noun.slice(0, -1) : noun) + ' to the book…' }
         : total > 1 ? { text: 'Importing ' + noun, done, total } : { text: 'Importing ' + noun.slice(0, -1) + '…' });
     } : undefined;
-    const { book: next, imported, copied, createdDirectories, counts } = await importIntoProject(book, request, [...new Set(files)], progress, checkpoint);
+    const fileImport = files.length || !linked
+      ? await importIntoProject(withPhotos, linked ? { ...request, target: undefined } : request, [...new Set(files)], progress, checkpoint)
+      : { book: withPhotos, imported: [] as string[], copied: [] as string[], createdDirectories: [] as string[], counts: linked.counts };
+    const { book: next, copied, createdDirectories } = fileImport;
+    const imported = [...linked?.imported ?? [], ...fileImport.imported];
+    const counts = linked && files.length ? addCounts(linked.counts, fileImport.counts) : fileImport.counts;
     for (const file of [...createdDirectories, ...copied]) {
       const path = relative(book.folder, file);
       this.importedWrites.set(path, await fingerprint(file), this.observedChanges.has(path));
@@ -1917,4 +1936,23 @@ export class DocumentSession {
   }
 
 
+}
+
+const addCounts = (a: ImportCounts, b: ImportCounts): ImportCounts => ({ photos: a.photos + b.photos, texts: a.texts + b.texts, files: a.files + b.files,
+  skipped: a.skipped + b.skipped, failed: a.failed + b.failed, ...(a.existing || b.existing ? { existing: (a.existing ?? 0) + (b.existing ?? 0) } : {}) });
+
+/** The Photos privacy pane of System Settings. */
+export const photosPrivacySettings = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Photos';
+/**
+ * Asks the user to give ImageFlow access to the Photos library, where it was refused before: macOS asks only once,
+ * after that only System Settings can give it. Answers whether access is given now.
+ */
+export async function askForPhotosAccess(owner: BrowserWindow | undefined, access: PhotosAccess): Promise<'granted' | 'denied'> {
+  if (access === 'authorized') return 'granted';
+  const options = { type: 'info' as const, message: 'Allow ImageFlow to read your Photos library',
+    detail: access === 'restricted' ? 'Access to the Photos library is restricted on this Mac.' : 'ImageFlow links photos from Photos and reads them as they are when the book is shown or printed. It never changes them. Allow it in System Settings → Privacy & Security → Photos, then drop the photos again.',
+    buttons: access === 'restricted' ? ['OK'] : ['Open System Settings', 'Cancel'], defaultId: 0, cancelId: access === 'restricted' ? 0 : 1 };
+  const { response } = owner && !owner.isDestroyed() ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options);
+  if (access !== 'restricted' && response === 0) await shell.openExternal(photosPrivacySettings);
+  return photosLibrary()?.status() === 'authorized' ? 'granted' : 'denied';
 }

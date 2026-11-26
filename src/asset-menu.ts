@@ -36,6 +36,8 @@ export function assetMenu(summary: ProjectSummary, keys: string[], place = false
     ...(chosen.some((entry) => sourceProvider(entry) === 'lightroom' && summary.sources?.[entry.key]?.state === 'available') ? [{ command: 'asset-refresh' as const }] : []),
     // An app that is not running is opened; its photos come back once it connects (Lightroom Classic, ADR 0011).
     ...(offers('launch') ? [{ command: 'asset-launch' as const }] : []),
+    // A photo of a library ImageFlow may not read: access is asked for, or given in System Settings (Apple Photos, ADR 0013).
+    ...(offers('allow') ? [{ command: 'asset-allow' as const }] : []),
     ...(missing && !offers('locate') && !offers('locate-folder') ? [{ command: 'asset-retry' as const }] : []),
     ...(chosen.length === 1 && offers('locate') ? [{ command: 'asset-locate' as const }] : []),
     ...(offers('locate-folder') ? [{ command: 'asset-locate-folder' as const }] : []),
@@ -47,4 +49,4 @@ export function assetMenuState(busy: boolean): BookMenuState {
   return { ...emptyMenuState, document: true, writable: true, busy };
 }
 export const assetActions = { 'asset-reveal': 'reveal', 'asset-copy': 'copy', 'asset-remove': 'remove', 'asset-locate': 'locate',
-  'asset-locate-folder': 'locate-folder', 'asset-open': 'open', 'asset-place': 'place', 'asset-retry': 'retry', 'asset-refresh': 'refresh', 'asset-launch': 'launch' } as const;
+  'asset-locate-folder': 'locate-folder', 'asset-open': 'open', 'asset-place': 'place', 'asset-retry': 'retry', 'asset-refresh': 'refresh', 'asset-launch': 'launch', 'asset-allow': 'allow' } as const;

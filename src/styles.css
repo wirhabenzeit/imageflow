@@ -756,11 +756,18 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .studio .agent-settings textarea.settings-code { display: block; width: 100%; resize: none; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 /* A photo field's placeholder is the value its source provides (Lightroom's title, caption, credit): italic, as a default the book can override. */
 .source-inspector :is(input, textarea)::placeholder { font-style: italic; }
-/* Where an asset comes from: a book (in the book), a chain (linked file) or "Lr" (Lightroom Classic). */
+/* Where an asset comes from: a book (in the book), a chain (linked file), or the icon of the app a photo comes from ("Lr" or a flower where it is not installed). */
 .source-origin { display: inline-flex; align-items: center; gap: 5px; vertical-align: middle; }
 .source-origin-mark { display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 4px; background: var(--subtle-hover); color: var(--muted); font: 700 9px/1 var(--ui-font); letter-spacing: .02em; }
 .source-origin-lightroom .source-origin-mark { background: #001e36; color: #31a8ff; }
 .source-origin-linked .source-origin-mark { color: var(--accent); }
+.source-origin-photos .source-origin-mark { background: #3a3a3c; color: #fff; }
+/* The app's own icon, for a photo of Lightroom Classic or Photos. */
+.source-origin-app { width: 16px; height: 16px; flex: none; display: block; }
+/* Above the rules for the pictures of the tiles and rows it sits on (.source-photo img, .asset-icon img). */
+span.source-origin > img.source-origin-app { width: 16px; height: 16px; object-fit: contain; border-radius: 0; }
+.source-origin-tile img.source-origin-app { filter: drop-shadow(0 0 1px #0000004d); }
+.source-origin-tile.source-origin-photos .source-origin-mark { background: #3a3a3c; }
 .source-origin-tile { position: absolute; left: 4px; top: 4px; }
 .source-origin-tile .source-origin-mark { box-shadow: 0 0 0 1px #0000001f; background: var(--control-surface); }
 .source-origin-tile.source-origin-lightroom .source-origin-mark { background: #001e36; }

@@ -58,6 +58,8 @@ async function packageApp() {
       extendInfo: fixture ? {} : {
         // macOS 26 and later show the layered Icon Composer icon from Assets.car; earlier versions use ImageFlow.icns.
         CFBundleIconFile: 'ImageFlow.icns', CFBundleIconName: 'ImageFlow',
+        // Shown when ImageFlow first asks to read the Photos library (Apple Photos provider, ADR 0013).
+        NSPhotoLibraryUsageDescription: 'ImageFlow links photos you drag in from Photos and reads them to show and print your books. It never changes your library.',
         UTExportedTypeDeclarations: [{
           UTTypeIdentifier: 'ch.wirhabenzeit.imageflow.book',
           UTTypeDescription: 'ImageFlow Book',
@@ -80,7 +82,7 @@ async function packageApp() {
         }],
       },
       // Agents run the MCP bridge with ImageFlow's executable in Node mode; keep it a plain file outside app.asar.
-      asar: { unpackDir: 'node_modules/@img', unpack: '**/{mcp-bridge.cjs,mac-header.node,cloudkit.node}' },
+      asar: { unpackDir: 'node_modules/@img', unpack: '**/{mcp-bridge.cjs,mac-header.node,cloudkit.node,photos.node}' },
       // Document icons and the compiled Icon Composer app icon; the classic app icon comes from `icon` below.
       // Sources and generator: resources/brand/, npm run build:icons.
       // The Lightroom Classic plugin goes to Contents/Resources/ImageFlow.lrplugin, which Settings installs from (ADR 0011).

@@ -90,7 +90,8 @@ export type PreviewOptions = MaterializeOptions & { rendering?: PreviewRendering
 export type Previewed = (Materialized & { kept?: true }) | { id: string; deferred: true };
 
 /** What can be offered to the user for a photo the provider cannot read. Retry is always offered and re-observes. */
-export type Repair = 'locate' | 'locate-folder' | 'launch' | 'sign-in';
+/** `allow`: the provider needs a permission the user gives, such as access to the Photos library (ADR 0013). */
+export type Repair = 'locate' | 'locate-folder' | 'launch' | 'sign-in' | 'allow';
 
 export interface SourceProvider<L extends Locator> {
   provider: L['provider'];

@@ -37,7 +37,7 @@ export type SourceState = 'available' | 'missing' | 'unreadable' | 'denied' | 'u
  */
 export type SourceAway = 'other-mac' | 'catalog' | 'not-downloaded' | 'uploading';
 /** What can be offered for a source that cannot be read, as its provider answers (`SourceProvider.repairs`). */
-export type SourceRepair = 'locate' | 'locate-folder' | 'launch' | 'sign-in';
+export type SourceRepair = 'locate' | 'locate-folder' | 'launch' | 'sign-in' | 'allow';
 export type SourceStatus = SourceEntry & { state: SourceState; problem?: string; cached?: boolean; digest?: string;
   /** The repairs to offer while the source is unavailable; Retry is always offered. */
   repairs?: SourceRepair[];

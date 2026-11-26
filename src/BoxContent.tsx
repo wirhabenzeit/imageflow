@@ -75,7 +75,7 @@ export function PhotoContent({ summary, spread, box, label, change, inspect, adj
         ? <button type="button" className="box-photo-thumb" title="Show photo" disabled={!inspect} onClick={() => inspect?.({ kind: 'photo', id: assigned })}>
             <img src={summary.photos[assigned]} alt="" />
           </button>
-        : <span className="box-photo-empty">{assigned ? 'Missing' : 'Empty'}</span>}
+        : <span className="box-photo-empty">{!assigned ? 'Empty' : summary.sources?.['photo:' + assigned]?.pending ? 'Loading…' : 'Missing'}</span>}
       <div className="box-photo-info">
         <span className="box-photo-name">{assigned ? summary.photoIndex[assigned]?.title || assigned : 'No photo'}</span>
         {/* Choosing replaces the crop. */}

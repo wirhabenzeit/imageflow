@@ -327,7 +327,7 @@ export class ProjectInputIndex {
   /** Photos without a file changed in their source: no file did, so nothing is read again. */
   providedChanged() {
     if (this.state.closed) return;
-    this.changes.push({ at: Date.now(), path: '(photos from Lightroom Classic)' });
+    this.changes.push({ at: Date.now(), path: '(photos from Lightroom Classic or Apple Photos)' });
     if (this.changes.length > 64) this.changes.splice(0, this.changes.length - 64);
     this.state.generation.all++;
   }

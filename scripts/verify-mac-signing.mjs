@@ -140,10 +140,15 @@ export async function verifyMacSigning(app, identity, { icloud: expectICloud } =
     assert.equal(problem, undefined, problem);
     console.log('iCloud entitlements and the embedded Developer ID provisioning profile verified.');
   }
+  // Apple Photos (ADR 0013): without this entitlement, hardened runtime refuses access to the Photos library without
+  // asking, and without the usage description macOS ends the app when it asks.
+  assert.equal(mainEntitlements['com.apple.security.personal-information.photos-library'], true, 'The main app must claim access to the Photos library.');
+  const { stdout: usage } = await run('plutil', ['-extract', 'NSPhotoLibraryUsageDescription', 'raw', '-o', '-', join(app, 'Contents/Info.plist')]);
+  assert.ok(usage.trim(), 'The app must describe why it reads the Photos library.');
   const natives = await nativeFiles(join(app, 'Contents/Resources/app.asar.unpacked/node_modules/@img'));
   assert.ok(natives.some((path) => path.endsWith('.node')), 'sharp must be unpacked and signed.');
   assert.ok(natives.some((path) => path.endsWith('.dylib')), 'libvips must be unpacked and signed.');
-  for (const path of [join(app, 'Contents/Resources/esbuild'), join(app, 'Contents/Resources/app.asar.unpacked/native/mac-header.node'), join(app, 'Contents/Resources/app.asar.unpacked/native/cloudkit.node'), ...natives]) {
+  for (const path of [join(app, 'Contents/Resources/esbuild'), join(app, 'Contents/Resources/app.asar.unpacked/native/mac-header.node'), join(app, 'Contents/Resources/app.asar.unpacked/native/cloudkit.node'), join(app, 'Contents/Resources/app.asar.unpacked/native/photos.node'), ...natives]) {
     await run('codesign', ['--verify', '--strict', path]);
     assert.equal(/^TeamIdentifier=(.+)$/m.exec(await details(path))?.[1], team, 'Native binary must share the app Team ID: ' + path);
   }

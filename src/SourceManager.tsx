@@ -66,6 +66,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const offers = (key: string, repair: SourceRepair) => unavailable(key) && (summary.sources![key].repairs ?? ['locate', 'locate-folder']).includes(repair);
   const missing = entries.filter((entry) => offers(entry.key, 'locate-folder')).length;
   const launchable = entries.filter((entry) => offers(entry.key, 'launch'));
+  const allowable = entries.filter((entry) => offers(entry.key, 'allow'));
   // Photos edited in Lightroom of which it has no preview as they are now; a request takes up to 1000 assets.
   const outOfDate = entries.filter((entry) => summary.sources?.[entry.key]?.outOfDate).slice(0, 1000);
   const loading = entries.filter((entry) => summary.sources?.[entry.key]?.pending).length;
@@ -242,6 +243,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
       {outOfDate.length > 0 && <button disabled={locked} title={outOfDateNote} onClick={() => void act({ action: 'refresh', keys: outOfDate.map(({ key }) => key) })}>
         Refresh {outOfDate.length === 1 ? '1 Photo' : outOfDate.length + ' Photos'} from Lightroom</button>}
       {launchable.length > 0 && <button disabled={locked} onClick={() => void act({ action: 'launch', keys: launchable.map(({ key }) => key) })}>Open Lightroom Classic</button>}
+      {allowable.length > 0 && <button disabled={locked} onClick={() => void act({ action: 'allow', keys: allowable.map(({ key }) => key) })}>Allow Access to Photos…</button>}
       {linked > 0 && <button disabled={locked || (chosen.length > 0 && !copyCount)} onClick={() => void act({ action: 'collect', keys: copyKeys })}>
         {chosen.length ? 'Copy ' + copyCount + ' Selected into Book…' : 'Copy All ' + linked + ' into Book…'}</button>}
     </footer>
