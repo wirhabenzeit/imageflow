@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { readdir, readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { readdir, readFile, stat } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 // @ts-expect-error The docs generator is a plain ES module script without declarations.
 import { docsOutputs, readTopics, skillFolder } from '../scripts/docs-topics.mjs';
@@ -43,4 +43,16 @@ test('the skill maps every topic and example to its reference file', async () =>
   for (const [, target] of skill.matchAll(/\]\(((?:references|examples)\/[^)]+)\)/g)) {
     await assert.doesNotReject(readFile(resolve(skillFolder, target)), target);
   }
+});
+
+// The limits Claude Code gives for scanned skills from MCP servers.
+test('the skill fits the size limits of skills served over MCP', async () => {
+  const entries = await readdir(resolve(skillFolder), { recursive: true, withFileTypes: true });
+  let total = 0;
+  for (const entry of entries.filter((entry) => entry.isFile())) {
+    const { size } = await stat(join(entry.parentPath, entry.name));
+    assert.ok(size <= 100_000, entry.name + ' is ' + size + ' bytes; the limit per file is 100 KB.');
+    total += size;
+  }
+  assert.ok(total <= 400_000, 'The skill is ' + total + ' bytes; the limit is 400 KB.');
 });
