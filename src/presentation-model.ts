@@ -37,3 +37,24 @@ export function presentsCover(cover: CoverState | undefined, template: Pick<Temp
   return !!cover && !!template.coverFormats && Object.hasOwn(template.coverFormats, template.formatId) &&
     Object.hasOwn(coverLayoutsFor(template.coverLayouts, template.formatId), cover.definition);
 }
+
+// Presentation zoom (UI-021) enlarges what is drawn, no more: a scale of the whole screen and its offset, in pixels.
+export type PresentationZoom = { scale: number; x: number; y: number };
+export const presentationFit: PresentationZoom = { scale: 1, x: 0, y: 0 };
+export const presentationMaxZoom = 8;
+// The enlarged screen always covers the window, so panning stops at its edges rather than showing empty space.
+function coverWindow({ scale, x, y }: PresentationZoom, size: { width: number; height: number }): PresentationZoom {
+  return { scale, x: Math.min(0, Math.max(size.width * (1 - scale), x)), y: Math.min(0, Math.max(size.height * (1 - scale), y)) };
+}
+// Zoom around a point of the window, which stays under the pointer. Zooming out to (nearly) the whole spread snaps to
+// it, so a pinch never leaves the spread a few percent enlarged, nor smaller than the window.
+export function zoomPresentationAt(view: PresentationZoom, factor: number, point: { x: number; y: number }, size: { width: number; height: number }) {
+  const scale = Math.min(presentationMaxZoom, view.scale * factor);
+  if (!(scale >= 1.02)) return presentationFit;
+  const ratio = scale / view.scale;
+  return coverWindow({ scale, x: point.x - (point.x - view.x) * ratio, y: point.y - (point.y - view.y) * ratio }, size);
+}
+// Scroll deltas move the view over the enlarged spread: the artwork moves the other way.
+export function panPresentation(view: PresentationZoom, dx: number, dy: number, size: { width: number; height: number }) {
+  return view.scale > 1 ? coverWindow({ ...view, x: view.x - dx, y: view.y - dy }, size) : view;
+}

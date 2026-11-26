@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { presentationUnits, presentationPage, presentationPhotoSource, presentsCover } from '../src/presentation-model';
+import { panPresentation, presentationFit, presentationMaxZoom, presentationUnits, presentationPage, presentationPhotoSource, presentsCover, zoomPresentationAt } from '../src/presentation-model';
 import { commandState, emptyMenuState } from '../src/commands';
 import { mm, printFormat } from '../src/format';
 import { chooseFormat, templateInfo, templateSchema } from '../src/template';
@@ -56,4 +56,22 @@ test('the cover opens the presentation once it has a layout of the format, also 
   for (const id of ['presentation', 'presentation-start'] as const) {
     assert.equal(commandState(id, { ...emptyMenuState, document: true, view: 'cover' }).enabled, true);
   }
+});
+
+test('presentation zoom keeps the pinched point in place, clamps to 1x-8x and pans within the screen', () => {
+  const size = { width: 1000, height: 600 };
+  const zoomed = zoomPresentationAt(presentationFit, 2, { x: 250, y: 150 }, size);
+  assert.deepEqual(zoomed, { scale: 2, x: -250, y: -150 });
+  // The point under the pointer stays there: 250 = -250 + 2 * 250.
+  assert.equal(zoomed.x + zoomed.scale * 250, 250);
+  assert.equal(zoomPresentationAt(zoomed, 100, { x: 0, y: 0 }, size).scale, presentationMaxZoom);
+  // Zooming out to, or below, the whole spread snaps back to it.
+  assert.equal(zoomPresentationAt(zoomed, .4, { x: 500, y: 300 }, size), presentationFit);
+  assert.equal(zoomPresentationAt(zoomed, .505, { x: 500, y: 300 }, size), presentationFit);
+  // Zooming out near an edge keeps the screen covered rather than showing empty space.
+  assert.deepEqual(zoomPresentationAt({ scale: 4, x: 0, y: 0 }, .5, { x: 1000, y: 600 }, size), { scale: 2, x: 0, y: 0 });
+  // A scroll moves the view over the enlarged spread, never past its edges, and does nothing while it is whole.
+  assert.deepEqual(panPresentation(zoomed, 100, -40, size), { scale: 2, x: -350, y: -110 });
+  assert.deepEqual(panPresentation(zoomed, 5000, -5000, size), { scale: 2, x: -1000, y: 0 });
+  assert.equal(panPresentation(presentationFit, 100, 100, size), presentationFit);
 });

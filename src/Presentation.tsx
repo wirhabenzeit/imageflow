@@ -6,6 +6,7 @@ import { hasFacingPages } from './format';
 import { presentationPage, presentationUnits, presentsCover } from './presentation-model';
 import type { PresentationUnit } from './presentation-model';
 import { coverInstance } from './project';
+import { usePresentationZoom } from './usePresentationZoom';
 import type { CoverResolution } from './cover';
 
 export function Presentation({ summary, start, close }: {
@@ -46,6 +47,16 @@ export function Presentation({ summary, start, close }: {
     if (next) setSelected({ spread: next.spread, page: next.pages[0] ?? 0 });
     wake();
   }
+  // Zoom only enlarges the spread on screen, not the overview or behind the shortcuts, and never makes anything editable.
+  const zoom = usePresentationZoom({ host, enabled: ready && !!unit && !overview && !help && !error,
+    swipe: (direction) => choose(at + direction) });
+  // Each spread opens whole, as does the artwork after the overview, the shortcuts or another frame (bleed, single pages).
+  useLayoutEffect(() => { zoom.reset(); }, [unit?.spread, unit?.side, bleed, overview, help]);
+  const zoomKey = useEffectEvent((key: string) => {
+    wake();
+    if (key === '0') zoom.reset();
+    else if (!overview && !help) zoom.zoomBy(key === '-' ? 1 / 1.25 : 1.25);
+  });
   function focusPresentation() {
     const node = host.current;
     if (node && !node.contains(document.activeElement)) node.focus({ preventScroll: true });
@@ -61,7 +72,9 @@ export function Presentation({ summary, start, close }: {
     if (event.metaKey || event.ctrlKey) return;
     wake();
     if (event.key === 'Escape' || (event.shiftKey && event.key.toLowerCase() === 'w')) {
-      if (help) setHelp(false); else if (overview) setOverview(false); else close(unit?.spread ?? start);
+      // Escape returns an enlarged spread to the whole first; the next one ends the presentation as before.
+      if (help) setHelp(false); else if (overview) setOverview(false);
+      else if (event.key === 'Escape' && zoom.zoomed) zoom.reset(); else close(unit?.spread ?? start);
     } else if (/^\d$/.test(event.key)) setDigits((value) => (value + event.key).slice(-5));
     else if (event.key === 'Enter' && digits) {
       const index = presentationPage(units, Number(digits));
@@ -79,6 +92,10 @@ export function Presentation({ summary, start, close }: {
   });
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
+      // ⌘0 / ⌘+ / ⌘− zoom the presentation, as on the canvas; consumed so the editor's menu commands stay with the editor.
+      if (event.metaKey && !event.ctrlKey && !event.altKey && ['0', '=', '+', '-'].includes(event.key)) {
+        event.preventDefault(); event.stopImmediatePropagation(); zoomKey(event.key); return;
+      }
       // Preserve the system Close Window shortcut and other native commands.
       if (event.metaKey || event.ctrlKey) return;
       event.preventDefault(); event.stopImmediatePropagation(); key(event);
@@ -93,43 +110,46 @@ export function Presentation({ summary, start, close }: {
     window.addEventListener('keydown', listener, true); window.addEventListener('message', message);
     return () => { window.removeEventListener('keydown', listener, true); window.removeEventListener('message', message); };
   }, [units]);
-  const wheelAt = useRef(0);
-  return <div ref={host} className={'presentation' + (overview ? ' presentation-overview' : '') + (!active && !help && !overview ? ' presentation-idle' : '')} role="dialog" aria-modal="true" aria-label="Book presentation" tabIndex={-1}
+  return <div ref={host} className={'presentation' + (overview ? ' presentation-overview' : '') + (zoom.zoomed ? ' presentation-zoomed' : '') +
+    (zoom.panning ? ' presentation-panning' : '') + (!active && !help && !overview ? ' presentation-idle' : '')} role="dialog" aria-modal="true" aria-label="Book presentation" tabIndex={-1}
     onPointerMove={wake} onClick={(event) => {
-      if (help || overview || (event.target as HTMLElement).closest('button')) return;
+      // An enlarged spread takes clicks for panning, not for turning it by accident.
+      if (help || overview || zoom.zoomed || (event.target as HTMLElement).closest('button')) return;
       choose(at + (event.clientX < innerWidth / 2 ? -1 : 1));
-    }} onWheel={(event) => {
-      if (overview || help || Math.abs(event.deltaX) < 25 || performance.now() - wheelAt.current < 500) return;
-      wheelAt.current = performance.now(); choose(at + (event.deltaX > 0 ? 1 : -1));
     }}>
-    <BookFrame project={summary.id} view="present" query={query} title="Presentation artwork" presentation={view}
-      onGeometry={() => {}} onStatus={(status) => {
-        if (status.state === 'ready') { setReady(true); setError(''); setStale(''); setTemplate(status.template); }
-        else if (ready) setStale(status.message);
-        else setError(status.message);
-      }} />
-    {/* Above the spreads' frame, which stays ready for the first spread. */}
-    {cover && <div className={'presentation-cover' + (onCover ? '' : ' presentation-cover-hidden')} aria-hidden={!onCover || undefined}>
-      <div className="presentation-cover-sheet" style={sheet ? { aspectRatio: sheet.width / sheet.height,
-        width: 'min(100%, calc((100vh - 48px) * ' + sheet.width / sheet.height + '))' } : { width: '100%', height: '100%' }}>
-        <BookFrame project={summary.id} view="cover" title="Presentation cover artwork" onStatus={(status) => {
-          if (status.state === 'ready') { setCoverError(''); if (status.cover) setSheet(status.cover.geometry.sheet); }
-          else if (!sheet) setCoverError(status.message);
+    {/* The artwork, scaled as a whole while zoomed; the notices, indicator and shortcuts above it keep their size. */}
+    <div className="presentation-stage" style={{ transform: zoom.transform }}>
+      <BookFrame project={summary.id} view="present" query={query} title="Presentation artwork" presentation={view}
+        onGeometry={() => {}} onStatus={(status) => {
+          if (status.state === 'ready') { setReady(true); setError(''); setStale(''); setTemplate(status.template); }
+          else if (ready) setStale(status.message);
+          else setError(status.message);
         }} />
-      </div>
-    </div>}
+      {/* Above the spreads' frame, which stays ready for the first spread. */}
+      {cover && <div className={'presentation-cover' + (onCover ? '' : ' presentation-cover-hidden')} aria-hidden={!onCover || undefined}>
+        <div className="presentation-cover-sheet" style={sheet ? { aspectRatio: sheet.width / sheet.height,
+          width: 'min(100%, calc((100vh - 48px) * ' + sheet.width / sheet.height + '))' } : { width: '100%', height: '100%' }}>
+          <BookFrame project={summary.id} view="cover" title="Presentation cover artwork" onStatus={(status) => {
+            if (status.state === 'ready') { setCoverError(''); if (status.cover) setSheet(status.cover.geometry.sheet); }
+            else if (!sheet) setCoverError(status.message);
+          }} />
+        </div>
+      </div>}
+    </div>
     {!ready && !error && <p className="presentation-message" role="status">Preparing presentation…</p>}
     {((ready && !unit) || error) && <p className="presentation-message">{error || 'This book has no spreads yet.'}</p>}
     {onCover && coverError && !error && <p className="presentation-message">{coverError}</p>}
     {stale && <p className="presentation-notice" role="status" title={stale}>
       The latest changes could not be shown; this is the previous version. The book check lists the problem.</p>}
     <div className={'presentation-indicator' + (active || digits ? ' visible' : '')} aria-live="polite">
-      {digits ? 'Go to page ' + digits + ' ↵' : unit ? (!unit.pages.length ? unit.label : (unit.pages.length > 1 ? 'pp. ' : 'p. ') + unit.label) + ' · ' + (at + 1) + ' / ' + items.length : ''}
+      {digits ? 'Go to page ' + digits + ' ↵' : unit ? (!unit.pages.length ? unit.label : (unit.pages.length > 1 ? 'pp. ' : 'p. ') + unit.label) + ' · ' + (at + 1) + ' / ' + items.length +
+        (zoom.zoomed ? ' · ' + Math.round(zoom.scale * 100) + '%' : '') : ''}
     </div>
     {(help || (ready && !unit) || error) && <div className="presentation-help">
       <p>← / → · Space / Shift Space · Page Up / Down · Return: navigate</p>
       <p>Home / End: first / last · Page number + Return: go to page</p>
       {template && hasFacingPages(template.format) && <p>F: spreads / single pages</p>}
+      <p>Pinch or ⌘+ / ⌘−: zoom · Scroll or drag: pan · ⌘0, double-click or Esc: whole spread</p>
       <p>B: trim / bleed · G: overview · ?: shortcuts · Esc / Shift W: exit</p>
       <button onClick={() => close(unit?.spread ?? start)}>End Presentation</button>
     </div>}
