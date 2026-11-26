@@ -75,7 +75,42 @@ test('a batch inserts and references a spread before duplicating, moving, and re
   assert.equal(result.files.project.spreads[0].boxes.hero.photo, 'p2');
   assert.equal(result.changes.length, 5);
   assert.equal(result.reflow, true);
+  // The copy is new; one and two only moved two pages on. The spread inserted and removed again comes last.
+  assert.deepEqual(result.affectedSpreads, ['generated-2', 'generated-1']);
+  assert.deepEqual(result.renumbered, '2 spreads, now pages 3–6');
   assert.deepEqual(original, snapshot);
+});
+
+test('an insert reports the new spread, not every spread after it, which are counted as renumbered (API-022)', () => {
+  const book = files();
+  book.project = projectSchema.parse({ ...book.project, spreads: [...book.project.spreads, ...['three', 'four'].map((id) => ({ id, definition: 'main', boxes: {} }))] });
+  const inserted = applyProjectCommands(book, template, [{ op: 'insert_spread', definition: 'main', after: 'one' }], { generateId: () => 'new' });
+  assert.deepEqual(inserted.affectedSpreads, ['new']);
+  assert.deepEqual(inserted.renumbered, '3 spreads, now pages 5–10');
+  const pages: TemplateInfo = { ...template, spreads: { ...template.spreads, page: { ...template.spreads.main, span: 'page' } } };
+  const pair = applyProjectCommands(book, pages, [{ op: 'insert_page_pair', after: 'three', pages: { left: { definition: 'page' } } }], { generateId: () => 'pair' });
+  assert.deepEqual([pair.affectedSpreads, pair.renumbered], [['pair'], '1 spread, now pages 9–10']);
+  // At the end, nothing moves.
+  const last = applyProjectCommands(book, template, [{ op: 'insert_spread', definition: 'main', after: 'four' }], { generateId: () => 'last' });
+  assert.deepEqual([last.affectedSpreads, last.renumbered], [['last'], undefined]);
+  // A removed spread stands where it was, among edited ones in book order.
+  const removed = applyProjectCommands(book, template, [
+    { op: 'set_parameter', scope: 'spread', spread: 'four', key: 'heading', value: 'Four' },
+    { op: 'remove_spread', spread: 'two' },
+    { op: 'set_parameter', scope: 'spread', spread: 'one', key: 'heading', value: 'One' },
+  ]);
+  assert.deepEqual([removed.affectedSpreads, removed.renumbered], [['one', 'two', 'four'], '1 spread, now pages 3–4']);
+  // A moved spread is reported; those it passed are renumbered.
+  const moved = applyProjectCommands(book, template, [{ op: 'move_spread', spread: 'four', after: 'one' }]);
+  assert.deepEqual([moved.affectedSpreads, moved.renumbered], [['four'], '2 spreads, now pages 5–8']);
+  // Neighbours removed in reverse order still come in book order.
+  const both = applyProjectCommands(book, template, [{ op: 'remove_spread', spread: 'three' }, { op: 'remove_spread', spread: 'two' }]);
+  assert.deepEqual([both.affectedSpreads, both.renumbered], [['two', 'three'], '1 spread, now pages 3–4']);
+  // Renumbered spreads apart from each other are named by their own pages, not the range between them.
+  const six = files();
+  six.project = projectSchema.parse({ ...six.project, spreads: [...six.project.spreads, ...['three', 'four', 'five', 'six'].map((id) => ({ id, definition: 'main', boxes: {} }))] });
+  const apart = applyProjectCommands(six, template, [{ op: 'move_spread', spread: 'two', after: 'three' }, { op: 'move_spread', spread: 'five', after: 'six' }]);
+  assert.deepEqual([apart.affectedSpreads, apart.renumbered], [['two', 'five'], '2 spreads, now pages 3–4, 9–10']);
 });
 
 test('layout switches preserve hidden content, crops, and rejected parameter overrides', () => {
