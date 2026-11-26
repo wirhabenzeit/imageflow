@@ -1786,6 +1786,19 @@ export function App() {
     }, 'Crop updated');
     setCropping({ ...cropping, saved: summary.id });
   }
+  // Backspace or Delete on a selected photo (UI-020): the box is emptied as by Remove photo, and the selection ends. The
+  // photo stays in the book, unplaced; the caption stays with it.
+  function removeCroppedPhoto() {
+    if (!cropping || cropping.settling || !cropPhoto) return;
+    const { spread, box, layout, page } = cropping;
+    const photo = cropPhoto;
+    changeSpreadAt(spread, (state) => {
+      // As with a crop, the edit may apply after the book changed: only this photo, in this layout, is removed.
+      if (state.definition !== layout || state.boxes[box]?.photo !== photo) return;
+      state.boxes[box] = boxBase(state.boxes[box]);
+    }, 'Photo removed from ' + (cropBox?.label ?? box), page);
+    setCropping(undefined);
+  }
   function deselectPhoto() {
     setCropping((selection) => {
       if (!selection || selection.settling) return selection;
@@ -2472,7 +2485,7 @@ export function App() {
                 frame={cropFrame} photo={summary.photoSizes[cropPhoto]} src={renderOrigin + '/render/' + summary.id + '/photo/' + cropPhoto}
                 placement={cropPlacement} settling={!!cropping.settling}
                 inchesPerPixel={format && cropSheet ? format.spreadWidth / cropSheet.width / 25.4 : undefined}
-                resolution={template?.format.output.resolution} save={saveCrop} close={deselectPhoto}
+                resolution={template?.format.output.resolution} save={saveCrop} close={deselectPhoto} remove={cropPhoto ? removeCroppedPhoto : undefined}
                 custom={!!cropFrame.custom} preview={(placement) => setCropPreview(placement && { spread: cropping.spread, box: cropping.box, page: cropping.page, placement })}
                 toolbarHost={canvasWrap.current}>
                 {/* The box's photo and its own parameters (such as Show caption) sit with the selected photo. Replacing or

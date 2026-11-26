@@ -133,7 +133,8 @@ function CropPhotoActions({ summary, assigned, label, choose, remove, fields }: 
   return <div ref={root} className="crop-actions">
     <ActionMenu className="crop-more" label={<><Icon name="cog" size={16} /><span className="visually-hidden">More photo actions</span></>}>
       <button type="button" onClick={() => setOpen('photos')}>Replace photo…</button>
-      <button type="button" disabled={!assigned} onClick={remove}>Remove photo</button>
+      {/* Backspace and Delete do the same while the photo is selected (UI-020). */}
+      <button type="button" disabled={!assigned} onClick={remove} aria-keyshortcuts="Backspace">Remove photo</button>
       {fields && <button type="button" onClick={() => setOpen('values')}>Crop values…</button>}
     </ActionMenu>
     {open && <div ref={panel} className="crop-action-panel" role="dialog" aria-label={open === 'photos' ? 'Replace photo in ' + label : 'Crop values'}>

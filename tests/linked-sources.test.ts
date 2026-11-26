@@ -67,6 +67,36 @@ test('document default links all three source kinds while per-import copy remain
   assert.equal(sourceEntries(copied.book).filter((entry) => !!sourceFile(entry)?.linked).length, 3);
 });
 
+test('a HEIC photo is imported as a stored JPEG copy, also into a book that links its files (UI-013)', { skip: process.platform !== 'darwin' }, async (t) => {
+  const f = await fixture(t);
+  const policy = structuredClone({ project: f.book.project, photoIndex: f.book.photoIndex });
+  policy.project.importMode = 'link';
+  f.book = await updateProject(f.book, policy);
+  const jpeg = join(f.external, 'source.jpg');
+  await sharp({ create: { width: 120, height: 80, channels: 3, background: '#2060a0' } }).jpeg().toFile(jpeg);
+  const heic = join(f.external, 'IMG_0001.HEIC');
+  // macOS writes HEIC itself; the test makes one as an iPhone would hand it over.
+  const { execFileSync } = await import('node:child_process');
+  execFileSync('/usr/bin/sips', ['-s', 'format', 'heic', jpeg, '--out', heic], { stdio: 'ignore' });
+  const old = new Date('2024-05-01T10:00:00Z');
+  await utimes(heic, old, old);
+  const conversions = async () => (await readdir(tmpdir())).filter((name) => name.startsWith('imageflow-heic-')).sort();
+  const before = await conversions();
+  const result = await importIntoProject(f.book, { kind: 'photo' }, [heic]);
+  assert.equal(result.counts.photos, 1);
+  assert.equal(result.counts.converted, 1);
+  const entry = sourceEntries(result.book).find((item) => item.id === result.imported[0])!;
+  const file = sourceFile(entry)!;
+  assert.equal(file.linked, false);
+  assert.match(file.path, /^photos\/ph-[0-9a-f-]+-IMG_0001\.jpg$/);
+  assert.equal(result.book.photoIndex[entry.id].title, 'IMG_0001');
+  const stored = join(f.folder, file.path);
+  assert.equal((await sharp(stored).metadata()).format, 'jpeg');
+  assert.equal((await stat(stored)).mtime.getTime(), old.getTime());
+  // The JPEG made on the way is not left behind.
+  assert.deepEqual(await conversions(), before);
+});
+
 test('a large linked import checks photos concurrently, keeps the chosen order and reports progress', async (t) => {
   const f = await fixture(t);
   const paths: string[] = [];

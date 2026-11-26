@@ -259,7 +259,10 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .source-item { position: relative; flex: none; height: 114px; display: grid; border: 1px solid var(--control-border); border-radius: 6px; background: var(--control-surface); cursor: default; user-select: none; overflow: hidden; }
 .source-item:hover { border-color: var(--in-view); }
 .source-item[aria-selected="true"] { border-color: var(--accent); box-shadow: 0 0 0 1.5px var(--accent); background: var(--selection-surface); }
-.source-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* One ring per photo (UI-022): a selected photo with keyboard focus shows its selection only; one with focus but not
+   selected (after Command-click took it out) a thin dashed ring, which doesn't read as a second selection. */
+.source-item:focus-visible { outline: 1px dashed var(--accent); outline-offset: 2px; }
+.source-item[aria-selected="true"]:focus-visible { outline: none; }
 .source-photo { width: 118px; grid-template-rows: minmax(0, 1fr) 22px; }
 .source-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .source-photo .source-title { padding: 2px 6px; font-size: 11px; }

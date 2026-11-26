@@ -14,6 +14,8 @@ import { renderOrigin } from '../src/desktop';
 import type { ImportCounts, ImportRequest, ProjectSummary } from '../src/desktop';
 import { isHeic } from '../src/import-feedback';
 import { importPhotoDetails, photoDetails, photoExtensions } from './photos';
+import { convertHeic, importablePhotoExtensions } from './heic';
+import type { ConvertedHeic } from './heic';
 import { renditionCacheFor } from './rendition-cache';
 import { photoDate } from './capture-time';
 import type { ProjectPhoto } from './photos';
@@ -625,8 +627,11 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
     if (await realpath(destination) !== destination) throw new Error(folder + '/ must be a folder inside the project.');
   };
   // First check every file, several at a time, without changing anything; then add them in the chosen order.
-  type Checked = { file: string; kind: 'photo' | 'markdown' | 'file'; info: import('node:fs').Stats } | 'skipped' | 'failed';
+  // `converted`: a HEIC photo, imported as the JPEG `file` made of it (`original`), and stored as `name` (UI-013).
+  type Checked = { file: string; kind: 'photo' | 'markdown' | 'file'; info: import('node:fs').Stats; converted?: { original: import('node:fs').Stats; name: string } } | 'skipped' | 'failed';
   const checked: Checked[] = new Array(paths.length);
+  const conversions: ConvertedHeic[] = [];
+  const photoTypes = await importablePhotoExtensions(photoExtensions);
   let done = 0;
   let next = 0;
   progress?.({ done, total: paths.length });
@@ -636,9 +641,18 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
     const extension = extname(file).toLowerCase();
     // Without a kind, photos and Markdown are recognised by type. Other files are imported only when a file
     // parameter of the template accepts their extension; nothing else is guessed.
-    const kind = request.kind ?? (photoExtensions.has(extension) ? 'photo' : extension === '.md' ? 'markdown' : request.accept?.includes(extension) ? 'file' : undefined);
-    const extensions = kind === 'photo' ? photoExtensions : kind === 'file' ? new Set(request.accept) : new Set(['.md']);
+    const kind = request.kind ?? (photoTypes.has(extension) ? 'photo' : extension === '.md' ? 'markdown' : request.accept?.includes(extension) ? 'file' : undefined);
+    const extensions = kind === 'photo' ? photoTypes : kind === 'file' ? new Set(request.accept) : new Set(['.md']);
     if (!info.isFile() || !kind || !extensions.has(extension)) return 'skipped';
+    if (kind === 'photo' && isHeic(file)) {
+      try {
+        if (info.size > 50 * 1024 * 1024) return 'failed';
+        const converted = await convertHeic(file);
+        conversions.push(converted);
+        await importPhotoDetails(converted.file);
+        return { file: converted.file, kind, info: await stat(converted.file), converted: { original: info, name: converted.name } };
+      } catch { return 'failed'; }
+    }
     try {
       if (kind === 'photo') await importPhotoDetails(file);
       if (kind === 'markdown' && info.size > 5 * 1024 * 1024) throw new Error('Markdown files must be smaller than 5 MB.');
@@ -690,7 +704,7 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
         if (entry === 'skipped' && isHeic(paths[index])) counts.heic = (counts.heic ?? 0) + 1;
         continue;
       }
-      const { file, kind, info } = entry;
+      const { file, kind, info, converted } = entry;
       const folder = kind === 'photo' ? 'photos' : kind === 'file' ? 'files' : 'texts';
       const registry = kind === 'file' ? project.files : project.texts;
       const previous = await alreadyHeld(kind, file, await realpath(file), info.size);
@@ -701,16 +715,20 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
         continue;
       }
       const id = newSourceId(kind);
-      const name = storedFileName(basename(file));
+      const name = storedFileName(converted?.name ?? basename(file));
       const relativePath = folder + '/' + id + '-' + name;
       const path = join(book.folder, relativePath);
       const original = await realpath(file);
-      const linked = mode === 'link' && !isInside(book.folder, original);
+      // A converted HEIC is always stored: the link would name a file nothing here can draw.
+      const linked = mode === 'link' && !converted && !isInside(book.folder, original);
       if (linked) approvals.push({ key: kind + ':' + id, kind, path: original, linked });
       if (!linked) { await prepare(folder); await copyFile(original, path, constants.COPYFILE_EXCL); copied.push(path);
         // Keep the original's modification time: photo views estimate an undated photo's capture time from it.
-        await utimes(path, info.atime, info.mtime).catch(() => {}); }
-      if (kind === 'photo') photoIndex[id] = { path: linked ? original : relativePath, ...(linked ? { linked: true } : {}), title: basename(file, extname(file)) };
+        // Of a converted HEIC, the HEIC's.
+        const times = converted?.original ?? info;
+        await utimes(path, times.atime, times.mtime).catch(() => {}); }
+      if (converted) counts.converted = (counts.converted ?? 0) + 1;
+      if (kind === 'photo') photoIndex[id] = { path: linked ? original : relativePath, ...(linked ? { linked: true } : {}), title: basename(paths[index], extname(paths[index])) };
       else registry[id] = linked ? { path: original, linked: true } : relativePath;
       if (kind === 'photo') counts.photos++; else if (kind === 'markdown') counts.texts++; else counts.files++;
       imported.push(id);
@@ -727,6 +745,9 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
       for (const folder of [...createdDirectories].reverse()) await rmdir(folder).catch(() => {});
     }
     throw error;
+  } finally {
+    // The JPEGs made of HEIC photos were copied into the book, or are not needed.
+    await Promise.all(conversions.map(({ dispose }) => dispose().catch(() => {})));
   }
 }
 

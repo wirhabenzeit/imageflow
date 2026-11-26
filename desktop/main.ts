@@ -39,7 +39,7 @@ import { cp, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'nod
 import { basename, dirname, extname, join, isAbsolute, parse, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
-import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, renderOrigins, settingsURL, startURL, starterURL, assetsURL, syncURL, templatesURL } from '../src/desktop';
+import { channels, popupShortcuts, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, renderOrigins, settingsURL, startURL, starterURL, assetsURL, syncURL, templatesURL } from '../src/desktop';
 import type { AgentLeaseReply, BookMenuState, Command, ImportRequest, LibraryAction, LibraryBook, LibraryRemote, LightroomState, OpenAction, ProjectSummary, RecentDocument, Result, SyncBook, SyncStatus, MarkdownAction, McpClientTarget, McpSettings, SourceAction, SyncAction, TemplateInfo } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
 import { renderPolicy } from './csp';
@@ -2397,7 +2397,7 @@ void app.whenReady().then(async () => {
     if (!owner || !Array.isArray(items) || items.length > 80) return null;
     let selected: string | null = null;
     // A submenu, such as the texts a box can show, holds up to 500 items, one level deep.
-    type Item = { type?: unknown; label?: unknown; id?: unknown; enabled?: unknown; checked?: unknown; toolTip?: unknown; submenu?: unknown } | null;
+    type Item = { type?: unknown; label?: unknown; id?: unknown; enabled?: unknown; checked?: unknown; toolTip?: unknown; shortcut?: unknown; submenu?: unknown } | null;
     const build = (items: Item[], depth = 0): MenuItemConstructorOptions[] => items.slice(0, 500).flatMap<MenuItemConstructorOptions>((item) => {
       if (item?.type === 'separator') return [{ type: 'separator' as const }];
       if (typeof item?.label !== 'string') return [];
@@ -2408,6 +2408,8 @@ void app.whenReady().then(async () => {
       if (typeof id !== 'string') return [];
       return [{ label: item.label.slice(0, 160), enabled: item.enabled !== false,
         ...(typeof item.toolTip === 'string' ? { toolTip: item.toolTip.slice(0, 300) } : {}),
+        // Shown only: the page that opened the menu handles the key itself.
+        ...(typeof item.shortcut === 'string' && popupShortcuts.has(item.shortcut) ? { accelerator: item.shortcut, registerAccelerator: false } : {}),
         ...(typeof item.checked === 'boolean' ? { type: 'checkbox' as const, checked: item.checked } : {}), click: () => { selected = id; } }];
     });
     const entries = build(items as Item[]);

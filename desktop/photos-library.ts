@@ -11,8 +11,9 @@ export type PhotosAccess = 'authorized' | 'notDetermined' | 'denied' | 'restrict
 export type PhotosFacts = {
   width: number; height: number; created?: number; latitude?: number; longitude?: number;
   /**
-   * The UTC offset the photo was taken at, in minutes: its original's own (EXIF) once the addon has read it. Until
-   * then, and for an original that records none, this Mac's offset at that instant, and `offsetGuessed` is true.
+   * The UTC offset the photo was taken at, in minutes: its original's own (EXIF) once the addon has read it, or its
+   * place's where the original is not on this Mac or records none. Until then, and where neither tells, this Mac's
+   * offset at that instant, and `offsetGuessed` is true.
    */
   offsetMinutes?: number; offsetGuessed?: boolean;
   /** The last edit or revert, or null for a photo never edited; absent before macOS 15. */

@@ -139,7 +139,7 @@ export const mcpToolSchemas = {
   }),
   // One object, not a union by kind: clients that show only top-level properties would show none (API-016).
   import_sources: z.strictObject({ ...importFields,
-    kind: z.enum(['photo', 'markdown', 'file']).describe('photo: .jpg, .jpeg, .png or .webp. markdown: .md texts. file: for file parameters, such as GPX tracks.'),
+    kind: z.enum(['photo', 'markdown', 'file']).describe('photo: .jpg, .jpeg, .png, .webp; .heic is stored as JPEG. markdown: .md texts. file: for file parameters, such as GPX tracks.'),
     accept: extensions.optional(),
   }).superRefine(({ kind, accept }, context) => {
     if (kind === 'file' && !accept) context.addIssue({ code: 'custom', path: ['accept'], message: 'Name the extensions the file parameter accepts.' });

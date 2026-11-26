@@ -162,8 +162,9 @@ export type ProjectSummary = ProjectFiles & {
   sources?: Record<string, SourceStatus>;
 };
 // `existing`: files the book already holds, linked or copied, found by path or by content; they are not added again.
-// `heic`: how many of the skipped files are HEIC photos, which the notice names.
-export type ImportCounts = { photos: number; texts: number; files: number; skipped: number; failed: number; existing?: number; heic?: number };
+// `heic`: how many of the skipped files are HEIC photos, which the notice names (where they can't be converted).
+// `converted`: how many of the photos were HEIC photos, stored in the book as JPEGs (UI-013).
+export type ImportCounts = { photos: number; texts: number; files: number; skipped: number; failed: number; existing?: number; heic?: number; converted?: number };
 export type Result<T> = { value: T } | { error: string; code?: 'BOOK_BUSY' };
 /**
  * Settings → Sync (#281; `available` is always true since #283). The renderer sends an access key to the main
@@ -273,7 +274,10 @@ export type LeftoverFile = { path: string; size: number; modified: number };
 export type ContextMenuItem = import('./commands').RegisteredCommand | { command: import('./commands').RegisteredCommand; value?: string; label?: string; enabled?: boolean; checked?: boolean; items?: ContextMenuItem[] } | { type: 'separator' };
 export type ContextMenuResult = { command: import('./commands').RegisteredCommand; value?: string };
 export type SourceCommand = { action: 'place'; keys: string[] } | { action: 'jump'; spread: string };
-export type PopupItem = { id?: string; label?: string; type?: 'separator'; enabled?: boolean; checked?: boolean; toolTip?: string; submenu?: PopupItem[] };
+// `shortcut`: a key shown beside the item, such as `Backspace`, which the page handles itself (see `popupShortcuts`).
+export type PopupItem = { id?: string; label?: string; type?: 'separator'; enabled?: boolean; checked?: boolean; toolTip?: string; shortcut?: string; submenu?: PopupItem[] };
+/** The keys a popup menu item may show; the menu only shows them and registers none. */
+export const popupShortcuts = new Set(['Backspace', 'Delete']);
 export type MarkdownState = {
   id: string; name: string; path: string; external: boolean; text: string; version: number; basis: number;
   dirty: boolean; saving: boolean; closing?: boolean; error?: string; conflict?: string;

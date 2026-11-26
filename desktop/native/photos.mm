@@ -9,6 +9,7 @@
 // process without `NSPhotoLibraryUsageDescription` in its Info.plist is killed by TCC when it asks for access, so
 // `status()` reports such a process (a development Electron) as unsupported and nothing asks.
 #import <AppKit/AppKit.h>
+#import <CoreLocation/CoreLocation.h>
 #import <Foundation/Foundation.h>
 #import <ImageIO/ImageIO.h>
 #import <Photos/Photos.h>
@@ -324,8 +325,9 @@ static void readOffsets(NSArray<PHAsset *> *assets);
  * { width, height, created (ms since 1970), offsetMinutes (the UTC offset it was taken at), offsetGuessed?, latitude?,
  *   longitude?, adjusted (ms of the last edit or revert, or null), base ('raw' | 'compressed'), caption?, keywords?,
  *   filename?, type?, favorite? (true, or absent) }
- * `offsetMinutes` is the original's own (EXIF OffsetTimeOriginal) once it has been read (`readOffsets`). Until then,
- * and for an original that records none, it is this Mac's offset at that instant, and `offsetGuessed` is true.
+ * `offsetMinutes` is the original's own (EXIF OffsetTimeOriginal) once it has been read (`readOffsets`), or where the
+ * original is not on this Mac or records none, that of the time zone of the place it was taken. Until then, and for a
+ * photo neither tells, it is this Mac's offset at that instant, and `offsetGuessed` is true.
  */
 static napi_value Facts(napi_env env, napi_callback_info info) {
   size_t argc = 1; napi_value argv[1];
@@ -606,8 +608,8 @@ static ImageFlowPhotosObserver *observer;
  * Photos' Adjust Date & Time is not read), by local identifier: minutes, or NSNull for an original that records none. An
  * original never changes, so what was read holds for the process.
  *
- * They are read in the background, one photo after another, and only where the original is on this Mac: nothing is
- * downloaded from iCloud for them. Reading stops once ImageIO finds an offset, mostly in the first chunk of the file; that
+ * They are read in the background, one photo after another, and only where the original is on this Mac (else its place
+ * says, see `offsetByPlace`): nothing is downloaded from iCloud for them. Reading stops once ImageIO finds an offset, mostly in the first chunk of the file; that
  * the original records none is concluded from the whole file only. A photo whose offset turns out to differ from the
  * guess `facts` gave is reported as changed (`onChanges`), so a book that shows it observes it again and records the
  * right capture time: a few seconds after the first of them, so that many read at once reload a book once. A photo whose original is not on this Mac
@@ -727,6 +729,49 @@ static id readOffset(PHAsset *asset) {
   @synchronized (lock) { return found; }
 }
 
+// ---------- Time zones by place
+
+/*
+ * Where an original is not on this Mac (with Optimize Mac Storage, most are not), or records no offset, the place a
+ * photo was taken says its time zone (API-020): asked of Apple's geocoder, which needs the network but no download of
+ * the original and no location permission, once per cell of about 10 km, so a trip's photos ask a handful of times.
+ * Only from the offsets queue, one at a time: the geocoder throttles many requests at once. A failed lookup (offline,
+ * throttled) tells nothing and is not kept, so the photo is tried again with the others; a place with no time zone
+ * (open sea) is kept as such.
+ */
+static NSMutableDictionary<NSString *, id> *zones = [NSMutableDictionary new];
+static const int64_t zoneTimeout = 15 * NSEC_PER_SEC;
+
+/** The time zone at `location` (NSTimeZone), NSNull where the place has none, or nil where it could not be looked up now. */
+static id zoneAt(CLLocation *location) {
+  CLLocationCoordinate2D at = location.coordinate;
+  NSString *cell = [NSString stringWithFormat:@"%.1f,%.1f", round(at.latitude * 10) / 10, round(at.longitude * 10) / 10];
+  if (id known = zones[cell]) return known;
+  __block id found = nil;
+  dispatch_semaphore_t done = dispatch_semaphore_create(0);
+  CLGeocoder *geocoder = [CLGeocoder new];
+  [geocoder reverseGeocodeLocation:location completionHandler:^(NSArray<CLPlacemark *> *placemarks, NSError *error) {
+    if (!error) found = placemarks.firstObject.timeZone ?: (id)NSNull.null;
+    else if ([error.domain isEqualToString:kCLErrorDomain] && error.code == kCLErrorGeocodeFoundNoResult) found = NSNull.null;
+    dispatch_semaphore_signal(done);
+  }];
+  if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, zoneTimeout))) { [geocoder cancelGeocode]; return nil; }
+  if (found) zones[cell] = found;
+  return found;
+}
+
+/**
+ * What the place of `asset` says of its offset where its original said `own` (see `readOffset`): `own` when it is an
+ * offset; else the offset of the place's time zone at that instant, or what `own` was where the place tells nothing.
+ * Where the lookup failed, nil (try again later) rather than NSNull, so the place is asked again.
+ */
+static id offsetByPlace(PHAsset *asset, id own) {
+  if ([own isKindOfClass:NSNumber.class] || !asset.creationDate || !asset.location || !CLLocationCoordinate2DIsValid(asset.location.coordinate)) return own;
+  id zone = zoneAt(asset.location);
+  if ([zone isKindOfClass:NSTimeZone.class]) return @([(NSTimeZone *)zone secondsFromGMTForDate:asset.creationDate] / 60);
+  return zone ? own : nil;
+}
+
 // Photos whose offset was read and differs from the guess, not reported yet (under offsetsLock).
 static NSMutableArray<NSString *> *offsetsChanged = [NSMutableArray new];
 
@@ -758,7 +803,8 @@ static void readOffsets(NSArray<PHAsset *> *assets) {
   if (!todo.count) return;
   dispatch_async(queue, ^{
     for (PHAsset *asset in todo) { @autoreleasepool {
-      id own = readOffset(asset);
+      // The original's own offset, else its place's (API-020).
+      id own = offsetByPlace(asset, readOffset(asset));
       std::lock_guard<std::mutex> guard(offsetsLock);
       [offsetsQueued removeObject:asset.localIdentifier];
       if (!own) { offsetsTried[asset.localIdentifier] = [NSDate date]; continue; }
