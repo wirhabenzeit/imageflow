@@ -2362,8 +2362,15 @@ export async function startRender(root: HTMLElement) {
     if (declared.data.preview && (!edit || view === 'book')) warnings.push(...await templatePreviewWarnings(declared.data.preview, chooseFormat(declared.data).format));
     // A book without spreads is valid while it is being started, but there is nothing to print yet.
     const photos = { pending: (id: string) => !!book.sources?.['photo:' + id]?.pending, resolution: newResolution(template.format.output.resolution?.minimum) };
-    const errors: Issue[] = spreads.length ? sequence.issues.map((text) => ({ ...message(text), code: 'page-sequence',
-      suggestion: 'Insert, remove or move spreads, or switch layouts, so the page sequence fits the format.' })) : [{
+    // A growing book often has a page count or end pages the format does not take yet: while it is edited and checked,
+    // that is a to-do before export (a warning). Only the print export and the proof, which make the book, report it as
+    // an error (API-023).
+    const exporting = book.mode === 'export' && !present && !check && !artwork && !inspect;
+    const sequenceIssues: Issue[] = spreads.length ? sequence.issues.map((text, index) => ({ ...message(text), code: 'page-sequence',
+      ...(sequence.shortfall && index === sequence.issues.length - 1 ? { details: { pages: sequence.count, ...sequence.shortfall } } : {}),
+      suggestion: 'Insert, remove or move spreads, or switch layouts, so the page sequence fits the format before export.' })) : [];
+    if (!exporting) warnings.push(...sequenceIssues);
+    const errors: Issue[] = spreads.length ? exporting ? sequenceIssues : [] : [{
       ...message('The book has no spreads yet.'), code: 'book-empty', suggestion: 'Add a spread with insert_spread, or with Add Spread in the editor.' }];
     // The preview falls back to the default format, but printing at a size nobody chose is blocked.
     if (template.unknownChoice) {

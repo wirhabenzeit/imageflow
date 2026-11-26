@@ -4,7 +4,7 @@ import type { TemplateInfo } from '../src/desktop';
 import { declarationWarnings } from '../src/declaration-check';
 import type { Schema } from '../src/declaration-check';
 import { fixtureFits, planFixtures, fixtureRequestSchema } from '../src/fixtures';
-import { formatSchema, mm, pageLabel, pageSequence, pagesText, printFormat, resolveFormat, sheetPages, spanAllowedAt, trimBox } from '../src/format';
+import { formatSchema, mm, pageCountShortfall, pageLabel, pageSequence, pagesText, printFormat, resolveFormat, sheetPages, spanAllowedAt, trimBox } from '../src/format';
 import type { FacingFormat, ResolvedFormat, SinglePageFormat } from '../src/format';
 import { boundGeometry, design, lenientFormat, page, spread } from '../src/geometry';
 import { layoutChoices } from '../src/layouts';
@@ -84,7 +84,27 @@ test('without facing pages every unit is one page, numbered in project order', (
   // The page-count rule with a step of one page.
   const steps = withCount({ min: 3, max: 6, step: 1 });
   assert.deepEqual([2, 3, 4, 6, 7].map((n) => pageSequence(Array(n).fill('page'), steps).issues.length), [1, 0, 0, 0, 1]);
-  assert.match(pageSequence(['page'], calendar).issues[0], /^Page count is 1\. .* requires 13–13 pages\.$/);
+  assert.match(pageSequence(['page'], calendar).issues[0], /^Page count is 1\. .* requires 13–13 pages: 12 pages to fill before export\.$/);
+  assert.match(pageSequence(Array(7).fill('page'), steps).issues[0], /requires 3–6 pages: 1 page to remove before export\.$/);
+});
+
+test('a page count the format does not take names the pages to fill or remove before export (API-023)', () => {
+  const rule = { min: 28, max: 112, step: 4 as const };
+  assert.equal(pageCountShortfall(100, rule), undefined);
+  assert.deepEqual(pageCountShortfall(98, rule), { add: 2, remove: 2 });
+  assert.deepEqual(pageCountShortfall(97, rule), { add: 3, remove: 1 });
+  assert.deepEqual(pageCountShortfall(20, rule), { add: 8 });
+  assert.deepEqual(pageCountShortfall(118, rule), { remove: 6 });
+  // A maximum off the step: the last count reached in steps is the one to remove pages down to.
+  assert.deepEqual(pageCountShortfall(111, { min: 28, max: 110, step: 4 as const }), { remove: 3 });
+  assert.deepEqual(pageCountShortfall(107, { min: 28, max: 110, step: 4 as const }), { add: 1, remove: 3 });
+  const facing = { ...book, structure: { ...book.structure, ends: 'inside-covers' as const, pageCount: rule } };
+  const sequence = pageSequence(Array(49).fill('spread'), facing);
+  assert.equal(sequence.issues.length, 1);
+  assert.equal(sequence.count, 98);
+  assert.deepEqual(sequence.shortfall, { add: 2, remove: 2 });
+  assert.match(sequence.issues.at(-1)!, /^Page count is 98\. .* requires 28–112 pages in steps of 4: 2 pages to fill before export, or 2 pages to remove\.$/);
+  assert.equal(pageSequence(Array(50).fill('spread'), facing).shortfall, undefined);
 });
 
 test('layouts of the other kind are drawn and reported as page-sequence problems', () => {

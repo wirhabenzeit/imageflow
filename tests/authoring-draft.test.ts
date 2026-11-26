@@ -245,20 +245,21 @@ test('a draft can repair a saved book whose layout fails to render, and the repa
   assert.equal((await call('check_book') as AuthoringCheckResult).state, 'error');
 });
 
-test('a draft reports the book\'s page sequence as a warning, and the saved book as an error (API-006)', async (t) => {
-  const { call, revision, hooks } = await fixture(t);
+test('a page count the format does not take yet is reported as the check found it, and the change is saved (API-023)', async (t) => {
+  const { call, revision, hooks } = await fixture(t, saved, undefined, true);
   const original = hooks.check;
+  const message = 'Page count is 98. Photo Book requires 28–112 pages in steps of 4: 2 pages to fill before export, or 2 pages to remove.';
   hooks.check = async (...args) => {
     const result = await original(...args);
-    result.diagnostics.push({ code: 'page-sequence', stage: 'render', severity: 'error', message: 'Page count is 58.' });
+    result.diagnostics.push({ code: 'page-sequence', stage: 'render', severity: 'warning', message });
     return result;
   };
-  const saved = await call('check_book') as AuthoringCheckResult;
-  assert.equal(saved.diagnostics.find(({ code }) => code === 'page-sequence')?.severity, 'error');
-  const drafted = await call('check_book', { expectedRevision: await revision(), draft: { operations: [{ op: 'set_title', title: 'Draft title' }] } }) as AuthoringCheckResult;
-  const finding = drafted.diagnostics.find(({ code }) => code === 'page-sequence');
-  assert.equal(finding?.severity, 'warning');
-  assert.match(finding?.message ?? '', /^Page count is 58\. A draft reports this as a warning/);
+  const expectedRevision = await revision();
+  const drafted = await call('check_book', { expectedRevision, draft: { operations: [{ op: 'set_title', title: 'Draft title' }] } }) as AuthoringCheckResult;
+  assert.deepEqual(drafted.diagnostics.filter(({ code }) => code === 'page-sequence').map(({ severity, message }) => [severity, message]), [['warning', message]]);
+  const committed = await call('apply_project_changes', { expectedRevision, idempotencyKey: 'grow', label: 'Grow',
+    operations: [{ op: 'set_title', title: 'Draft title' }] });
+  assert.equal(committed.committed, true, JSON.stringify(committed));
 });
 
 test('a draft whose book is saved between the look and the check is planned at the revision it has then (API-007)', async (t) => {

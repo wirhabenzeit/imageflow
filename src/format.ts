@@ -321,10 +321,30 @@ export function pageSequence(spans: (Span | { span: Span; sides?: readonly ('lef
     issues.push('The book has only its opening page, but ' + format.label + " requires it to close on a single left page. Add a layout with span: 'left' at the end.");
   }
   const { min, max, step } = format.structure.pageCount;
-  if (!isAllowedPageCount(count, format.structure.pageCount)) {
-    issues.push('Page count is ' + count + '. ' + format.label + ' requires ' + min + '–' + max + ' pages' + (step > 1 ? ' in steps of ' + step : '') + '.');
+  const shortfall = pageCountShortfall(count, format.structure.pageCount);
+  if (shortfall) {
+    const pages = (n: number) => n + (n === 1 ? ' page' : ' pages');
+    const todo = shortfall.add !== undefined
+      ? pages(shortfall.add) + ' to fill before export' + (shortfall.remove !== undefined ? ', or ' + pages(shortfall.remove) + ' to remove' : '')
+      : pages(shortfall.remove!) + ' to remove before export';
+    issues.push('Page count is ' + count + '. ' + format.label + ' requires ' + min + '–' + max + ' pages' + (step > 1 ? ' in steps of ' + step : '') + ': ' + todo + '.');
   }
-  return { spreads, count, issues };
+  // The page-count finding, when there is one, is the last issue.
+  return { spreads, count, issues, ...(shortfall ? { shortfall } : {}) };
+}
+
+/**
+ * How far a page count is from one the format allows: the pages to add to reach the next allowed count, and the pages to
+ * remove to reach the one before, each only when that count exists. Undefined for an allowed count.
+ */
+export function pageCountShortfall(count: number, rule: PrintFormat['structure']['pageCount']): { add?: number; remove?: number } | undefined {
+  if (isAllowedPageCount(count, rule)) return undefined;
+  const { min, max, step } = rule;
+  if (count < min) return { add: min - count };
+  const last = max - (max - min) % step;
+  if (count > last) return { remove: count - last };
+  const over = (count - min) % step;
+  return { add: step - over, remove: over };
 }
 
 export function isAllowedPageCount(count: number, { min, max, step }: PrintFormat['structure']['pageCount']) {
