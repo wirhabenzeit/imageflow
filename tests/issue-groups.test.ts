@@ -26,13 +26,17 @@ test('one row per problem, what needs something done first and what is only good
   const warnings: Issue[] = [{ message: 'Text is smaller than the format minimum.', code: 'text-too-small', spread: 's3', box: 'a', details: { sizePt: 4.2, minimumPt: 6 } },
     { message: 'Photo z.jpg · Original missing: /z.jpg', code: 'project-input', source: 'z', sourceKind: 'photo', state: 'missing', problem: 'Original missing: /z.jpg' }];
   const rows = checkRows({ errors: [missing('a'), low('small1'), missing('b', { spread: 's4' }), low('small2'), unavailable('e', { spread: 's1', box: 'x' }), { message: 'Page count is 2.', code: 'page-sequence' }], warnings });
-  assert.deepEqual(rows.map(({ level, title, items }) => [level, title, items.length]), [['error', 'Low resolution', 2], ['error', 'Pages don’t fit the format', 1], ['error', 'Original missing', 2],
+  assert.deepEqual(rows.map(({ level, title, items }) => [level, title, items.length]), [['error', 'Low resolution', 2], ['error', 'Pages to fit the format before export', 1], ['error', 'Original missing', 2],
     ['warning', 'Text too small to print', 1], ['warning', 'Original missing (not placed)', 1], ['info', '1 original is on another Mac. Needed for printing.', 1]]);
   // Each place says only what is its own, from the finding's values; a sentence that is the same for all is said once.
   assert.deepEqual(rows[0].items.map((issue) => occurrenceText(rows[0], issue, plain)), ['170 ppi, needs 180', '170 ppi, needs 180']);
   assert.deepEqual(rowMessages(rows[0], plain), []);
   assert.deepEqual(rowMessages(rows[1], plain), ['Page count is 2.']);
   assert.equal(occurrenceText(rows[1], rows[1].items[0], plain), undefined);
+  // A layout that does not fit the format has its own row, apart from the pages to fit before export.
+  assert.deepEqual(checkRows({ errors: [{ message: 'Page 2 uses a spread layout, but Calendar has no facing pages.', code: 'layout-format-mismatch' }],
+    warnings: [{ message: 'Page count is 2.', code: 'page-sequence' }] }).map(({ level, title }) => [level, title]),
+  [['error', 'Layouts don’t fit the format'], ['warning', 'Pages to fit the format before export']]);
   assert.deepEqual(rows[2].items.map((issue) => occurrenceText(rows[2], issue, plain)), ['Original missing: /Photos/a.jpg', 'Original missing: /Photos/b.jpg']);
   assert.equal(occurrenceText(rows[3], rows[3].items[0], plain), '4.2 pt, needs 6');
 });

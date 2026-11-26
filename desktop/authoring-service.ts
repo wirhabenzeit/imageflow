@@ -448,10 +448,6 @@ export function createAuthoringService(hooks: Hooks) {
       result.checks.typescript = base.checks.typescript;
       result.diagnostics.unshift(...base.diagnostics.filter(({ code }) => code.startsWith('typescript-')));
     }
-    // A draft is often one inserted page pair, tried out: the page count that breaks is the expected result, so the
-    // book's page sequence is reported as a warning there (API-006). The saved book's check still reports an error.
-    result.diagnostics = result.diagnostics.map((diagnostic) => diagnostic.code === 'page-sequence' && diagnostic.severity === 'error'
-      ? { ...diagnostic, severity: 'warning' as const, message: diagnostic.message + ' A draft reports this as a warning; saving the change makes it an error.' } : diagnostic);
     return result;
   };
   // Renders layouts with synthetic content in fixture books, one per format, from the declarations of the saved
