@@ -282,3 +282,30 @@ test('the bridge serves the skills beside it, and the files an update puts there
   }
   assert.match(text, /Updated\.\nAgain\./);
 });
+
+test('a bridge from another version is told so where a conversation starts, and with arguments that do not fit (#232)', async (t) => {
+  const work = await mkdtemp(join(tmpdir(), 'if-mcp-test-'));
+  t.after(() => rm(work, { recursive: true, force: true }));
+  const descriptorPath = join(work, 'connection.json');
+  const connection = await createMcpConnection({ descriptorPath, version: '2.0.0', onCall: async () => ({ projects: [] }) });
+  t.after(() => connection.close());
+  const bridge = (version?: string) => {
+    const adopted: string[][] = [];
+    const client = new McpAppClient(descriptorPath, () => 'Version test', version === undefined ? undefined : { version, adopt: (tools) => adopted.push(tools.map(({ name }) => name)) });
+    t.after(() => client.close());
+    return { client, adopted };
+  };
+  const current = bridge('2.0.0');
+  assert.deepEqual(await current.client.call('list_projects', {}), { projects: [] });
+  await eventually(() => current.adopted.length === 1);
+  assert.deepEqual(current.adopted[0], mcpTools.map(({ name }) => name), 'the app’s own tools, with the first message');
+  await assert.rejects(current.client.call('import_sources', {}), /your client dropped them/);
+  await assert.rejects(current.client.call('import_sources', { kind: 'photo' }), (error: Error) => !/dropped/.test(error.message));
+
+  const older = bridge('1.9.0');
+  assert.match(String((await older.client.call('list_projects', {})).notice), /started by ImageFlow 1\.9\.0, and ImageFlow 2\.0\.0 is running/);
+  assert.equal((await older.client.call('list_templates', {})).notice, undefined, 'not with every reply');
+  await assert.rejects(older.client.call('import_sources', {}), /ImageFlow 1\.9\.0/);
+  // A bridge from before it named its version.
+  assert.match(String((await bridge().client.call('list_projects', {})).notice), /an earlier version of ImageFlow/);
+});

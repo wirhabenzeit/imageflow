@@ -168,16 +168,25 @@ export function fixtureFindings(diagnostics: AuthoringDiagnostic[], cells: Fixtu
  * three formats otherwise repeated each of its findings three times (beta finding, a 60 KB fixture response).
  */
 export function mergeFormatFindings(findings: FixtureReport['diagnostics']): FixtureReport['diagnostics'] {
-  const merged = new Map<string, FixtureReport['diagnostics'][number]>();
+  // Several findings of one format can have the same key, such as two of one code on different lines: each format is
+  // merged into the first of them that does not have it yet, so none is lost.
+  const merged = new Map<string, FixtureReport['diagnostics'][number][]>();
   for (const finding of findings) {
     const { fixture: { format, formats: _formats, ...fixture }, ...rest } = finding;
-    const key = JSON.stringify([fixture, rest]);
-    const known = merged.get(key);
-    if (!known) { merged.set(key, { ...finding, fixture: { ...finding.fixture } }); continue; }
-    const list = known.fixture.formats ?? [known.fixture.format];
-    if (!list.includes(format)) known.fixture.formats = [...list, format];
+    // What was measured, such as how many characters overflow, differs from format to format (API-005 of 25 November,
+    // evening): such findings are one, with the first format's values.
+    const { details, message, ...same } = rest;
+    const measured = Object.fromEntries(Object.entries(details ?? {}).map(([name, value]) => [name, typeof value === 'number' ? 0 : value]));
+    const key = JSON.stringify([fixture, same, message.replace(/\d+(\.\d+)?/g, '#'), measured]);
+    const bucket = merged.get(key) ?? merged.set(key, []).get(key)!;
+    const exact = JSON.stringify([message, details]);
+    // The same finding twice in one format is one.
+    if (bucket.some(({ fixture: listed, message: text, details: values }) => (listed.formats ?? [listed.format]).includes(format) && JSON.stringify([text, values]) === exact)) continue;
+    const known = bucket.find(({ fixture }) => !(fixture.formats ?? [fixture.format]).includes(format));
+    if (!known) { bucket.push({ ...finding, fixture: { ...finding.fixture } }); continue; }
+    known.fixture.formats = [...known.fixture.formats ?? [known.fixture.format], format];
   }
-  return [...merged.values()];
+  return [...merged.values()].flat();
 }
 
 export function cellReport(cell: FixtureCell, format: string, findings: FixtureReport['diagnostics']): FixtureCellReport {

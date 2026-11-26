@@ -1,6 +1,7 @@
 import { constants } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import fs, { link, lstat, mkdir, mkdtemp, open, readdir, realpath, rm, stat, unlink } from 'node:fs/promises';
+import type { PullChanges } from '../src/pull-summary';
 import type { FileHandle } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { z } from 'zod';
@@ -45,12 +46,16 @@ const checkpointRecordSchema = z.object({
     'photos.json': z.object({ before: sha256, after: sha256 }).strict(),
   }).strict(),
   mcp: checkpointMcpSchema.optional(),
+  // A sync pull (API-015): its changes to spreads, and the template, text and other files it wrote or removed. The files are
+  // named only: their contents are not recorded.
+  pull: z.object({ spreads: z.object({ added: z.int(), removed: z.int(), changed: z.int() }).strict(),
+    files: z.array(z.string().max(300)).max(50), truncated: z.literal(true).optional() }).strict().optional(),
 }).strict();
 export type CheckpointRecord = z.infer<typeof checkpointRecordSchema>;
 export type CheckpointMcp = z.infer<typeof checkpointMcpSchema>;
 /** What a save records about itself. persistProjectManifests sets `id` to the checkpoint ID once the save's
  * journal is published, so a caller can name the checkpoint even when finishing the save is interrupted. */
-export type SaveCheckpoint = { origin: 'app' | 'mcp'; label: string; mcp?: CheckpointMcp; id?: string };
+export type SaveCheckpoint = { origin: 'app' | 'mcp'; label: string; mcp?: CheckpointMcp; id?: string; pull?: PullChanges };
 const maximumCheckpointBytes = 64 * 1024;
 // The ledger is pruned to its newest records when an append would make it larger than `bytes`.
 export const ledgerLimits = { bytes: 4 * 1024 * 1024, retainedBytes: 2 * 1024 * 1024 };
@@ -238,6 +243,9 @@ function checkpointLine(transaction: string, checkpoint: SaveCheckpoint, before:
   const manifests = Object.fromEntries(names.map((name) => [name, { before: digest(before[name]), after: digest(after[name]) }]));
   const time = new Date().toISOString();
   const given = checkpoint.mcp;
+  const pulled = checkpoint.pull?.files.filter((path) => path.length <= 300) ?? [];
+  const pull = checkpoint.pull && { spreads: checkpoint.pull.spreads, files: pulled.slice(0, 50),
+    ...(checkpoint.pull.files.length > Math.min(50, pulled.length) ? { truncated: true as const } : {}) };
   const lists = given && {
     changes: given.changes?.slice(0, 200).map((change) => change.slice(0, 300)),
     affectedSpreads: given.affectedSpreads?.slice(0, 200),
@@ -250,7 +258,8 @@ function checkpointLine(transaction: string, checkpoint: SaveCheckpoint, before:
     const mcp = given && lists && { ...given, changes: lists.changes?.slice(0, keep), affectedSpreads: lists.affectedSpreads?.slice(0, keep),
       references: lists.references && Object.fromEntries(Object.entries(lists.references).slice(0, keep)), sources: lists.sources, ...(truncated ? { truncated: true as const } : {}) };
     const line = JSON.stringify({ version: 1, checkpoint: transaction, time, origin: checkpoint.origin,
-      label: checkpoint.label.slice(0, 160), manifests, ...(mcp ? { mcp } : {}) });
+      label: checkpoint.label.slice(0, 160), manifests, ...(mcp ? { mcp } : {}),
+      ...(pull ? { pull } : {}) });
     if (Buffer.byteLength(line) <= maximumCheckpointBytes && parseCheckpoint(line)) return line;
     if (!given || !keep) throw new Error('Could not record this save in the book history.');
     truncated = true;

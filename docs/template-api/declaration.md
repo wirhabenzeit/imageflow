@@ -40,7 +40,7 @@ export default defineTemplate({
         eyebrow: p.string({ label: 'Chapter label', default: '' }),
       },
       boxes: {
-        hero: box.photo('Main photograph', { showCaption: p.boolean({ label: 'Show caption', default: true }) }),
+        hero: box.photo('Main photograph', { showCaption: p.boolean({ label: 'Show caption', default: true, shows: 'caption' }) }),
         body: box.markdown('Story', { flowOrder: 1 }),
       },
       render: (ctx) => (

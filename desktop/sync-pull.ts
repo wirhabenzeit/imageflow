@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { AssetFact } from '../src/asset-facts';
 import { parseDocument, photoIndexSchema, projectSchema, withBookFormat } from '../src/project';
 import type { PhotoIndex, Project } from '../src/project';
+import { pullChanges, pullLabel } from '../src/pull-summary';
 import { entryReach, packagePath } from '../src/source-locator';
 import { originalBlobKey, projectManifests, stateBlobSchema } from '../src/sync-snapshot';
 import type { StateBlob } from '../src/sync-snapshot';
@@ -326,19 +327,22 @@ export async function bookPath(root: string, path: string, { checking = false } 
   return target;
 }
 
+/** Writes a file of the snapshot; whether it was not there as it is in the snapshot. */
 async function place(root: string, path: string, sha: string, bytes: () => Promise<Uint8Array>) {
   const target = await bookPath(root, path);
-  if (await digestOrUndefined(target) === sha) return;
+  if (await digestOrUndefined(target) === sha) return false;
   const staging = join(dirname(target), '.imageflow-write-' + randomUUID() + '.tmp');
   try {
     const handle = await open(staging, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o644);
     try { await handle.writeFile(await bytes()); await handle.sync(); } finally { await handle.close(); }
     await rename(staging, target);
   } finally { await rm(staging, { force: true }); }
+  return true;
 }
 
 /** Removes template files the snapshot does not have, and folders that end up empty. Ignored names stay. */
 async function pruneTemplate(root: string, keep: Set<string>) {
+  const removed: string[] = [];
   const walk = async (path: string): Promise<boolean> => {
     const absolute = join(root, path);
     const info = await lstat(absolute).catch(() => undefined);
@@ -346,6 +350,7 @@ async function pruneTemplate(root: string, keep: Set<string>) {
     if (!info.isDirectory() || info.isSymbolicLink()) {
       if (keep.has(path)) return false;
       await rm(absolute, { force: true });
+      removed.push(path);
       return true;
     }
     let empty = true;
@@ -357,6 +362,7 @@ async function pruneTemplate(root: string, keep: Set<string>) {
     return false;
   };
   await walk('template');
+  return removed;
 }
 
 /**
@@ -441,16 +447,20 @@ export async function finishPull(folder: string, marker: PullMarker, options: { 
 export async function applyStagedPull(folder: string, marker: PullMarker) {
   const root = await realpath(folder);
   const blob = await readStaged(root, marker);
-  for (const [path, sha] of Object.entries(blob.content)) await place(root, path, sha, () => stagedBlob(root, sha));
-  await pruneTemplate(root, new Set(Object.keys(blob.content).filter((path) => path.startsWith('template/'))));
+  // For the history's entry. A pull finished after an interruption names only what it still wrote.
+  const files: string[] = [];
+  for (const [path, sha] of Object.entries(blob.content)) if (await place(root, path, sha, () => stagedBlob(root, sha))) files.push(path);
+  files.push(...await pruneTemplate(root, new Set(Object.keys(blob.content).filter((path) => path.startsWith('template/')))));
   for (const [path, stale] of Object.entries(marker.staleOriginals)) {
     const target = await bookPath(root, path);
     if (await digestOrUndefined(target) === stale) await rm(target, { force: true });
   }
   const before = await manifests(root);
   const { project, photos, after } = projectedManifests(blob, before);
-  if (!after['project.json'].equals(before['project.json']) || !after['photos.json'].equals(before['photos.json'])) {
-    await persistProjectManifests(root, before, after, { origin: 'app', label: 'Sync pull' });
+  // A pull that only replaced files is recorded too: the history then says that the template changed (API-015).
+  if (files.length || !after['project.json'].equals(before['project.json']) || !after['photos.json'].equals(before['photos.json'])) {
+    const pull = pullChanges(parseDocument(projectSchema, JSON.parse(before['project.json'].toString('utf8')), 'project.json'), project, files);
+    await persistProjectManifests(root, before, after, { origin: 'app', label: pullLabel(pull), pull });
   }
   const facts = mergePulledFacts(photos, await readAssetFacts(root), blob.assetsMeta.assets, new Set(marker.keepLocal));
   await AssetFacts.adoptSynced(root, facts);

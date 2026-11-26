@@ -110,6 +110,13 @@ test('a committed agent batch is found and replayed by its key after the reply i
   assert.equal((await spreads(folder)).filter(({ definition }) => definition === 'chapter').length, 1);
 
   const all = await second.call('list_book_checkpoints');
+  // The list counts what an agent's save changed; its lists come with the key, or when asked for.
+  const inList = (all.checkpoints as { mcp?: Record<string, unknown> }[])[1].mcp!;
+  const asked = (await second.call('list_book_checkpoints', { include: ['changes'] })).checkpoints as { mcp?: Record<string, unknown[]> }[];
+  assert.deepEqual(asked[1].mcp!.changes, lost.changes);
+  assert.deepEqual([inList.changeCount, inList.affectedSpreadCount, inList.changes, inList.affectedSpreads],
+    [(lost.changes as string[]).length, asked[1].mcp!.affectedSpreads.length, undefined, undefined]);
+  assert.equal(record.mcp.changes.length, (lost.changes as string[]).length);
   const listed = all.checkpoints as { label: string; origin: string; mcp?: { idempotencyKey: string } }[];
   assert.deepEqual(listed.map(({ label, origin }) => [label, origin]), [['Rename book', 'app'], ['Add chapter', 'mcp']]);
   assert.equal(listed.filter(({ mcp }) => mcp?.idempotencyKey === 'add-chapter').length, 1);
