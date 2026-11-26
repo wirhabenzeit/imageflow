@@ -314,11 +314,18 @@ static napi_value LocalIdentifiers(napi_env env, napi_callback_info info) {
 
 // ---------- Facts
 
+/** This Mac's UTC offset at an instant, in minutes: the guess for a photo whose own is not known. */
+static NSInteger macOffset(NSDate *date) { return [NSTimeZone.systemTimeZone secondsFromGMTForDate:date] / 60; }
+static id knownOffset(NSString *local);
+static void readOffsets(NSArray<PHAsset *> *assets);
+
 /**
  * facts(locals): for each local identifier, null when the library has no such still photo, else
- * { width, height, created (ms since 1970), offsetMinutes (this Mac's UTC offset at that instant), latitude?, longitude?,
- *   adjusted (ms of the last edit or revert, or null), base ('raw' | 'compressed'), caption?, keywords?, filename?, type?,
- *   favorite? (true, or absent) }
+ * { width, height, created (ms since 1970), offsetMinutes (the UTC offset it was taken at), offsetGuessed?, latitude?,
+ *   longitude?, adjusted (ms of the last edit or revert, or null), base ('raw' | 'compressed'), caption?, keywords?,
+ *   filename?, type?, favorite? (true, or absent) }
+ * `offsetMinutes` is the original's own (EXIF OffsetTimeOriginal) once it has been read (`readOffsets`). Until then,
+ * and for an original that records none, it is this Mac's offset at that instant, and `offsetGuessed` is true.
  */
 static napi_value Facts(napi_env env, napi_callback_info info) {
   size_t argc = 1; napi_value argv[1];
@@ -338,13 +345,20 @@ static napi_value Facts(napi_env env, napi_callback_info info) {
     NSMutableDictionary<NSString *, PHAsset *> *byId = [NSMutableDictionary new];
     for (PHAsset *asset in [PHAsset fetchAssetsWithLocalIdentifiers:locals options:options]) byId[asset.localIdentifier] = asset;
     NSMutableArray *rows = [NSMutableArray new];
+    NSMutableArray<PHAsset *> *unread = [NSMutableArray new];
     for (NSString *local in locals) {
       PHAsset *asset = byId[local];
       if (!asset || asset.mediaType != PHAssetMediaTypeImage || !asset.pixelWidth || !asset.pixelHeight) { [rows addObject:NSNull.null]; continue; }
       NSMutableDictionary *row = [@{@"width": @(asset.pixelWidth), @"height": @(asset.pixelHeight)} mutableCopy];
       if (asset.creationDate) {
         row[@"created"] = @(round(asset.creationDate.timeIntervalSince1970 * 1000));
-        row[@"offsetMinutes"] = @([NSTimeZone.systemTimeZone secondsFromGMTForDate:asset.creationDate] / 60);
+        id own = knownOffset(asset.localIdentifier);
+        if ([own isKindOfClass:NSNumber.class]) row[@"offsetMinutes"] = own;
+        else {
+          row[@"offsetMinutes"] = @(macOffset(asset.creationDate));
+          row[@"offsetGuessed"] = @YES;
+          if (!own) [unread addObject:asset];
+        }
       }
       if (asset.location && CLLocationCoordinate2DIsValid(asset.location.coordinate)) {
         row[@"latitude"] = @(asset.location.coordinate.latitude); row[@"longitude"] = @(asset.location.coordinate.longitude);
@@ -370,6 +384,7 @@ static napi_value Facts(napi_env env, napi_callback_info info) {
       if (asset.isFavorite) row[@"favorite"] = @YES;
       [rows addObject:row];
     }
+    readOffsets(unread);
     settle(pending, false, ^(napi_env e) {
       napi_value array;
       napi_create_array_with_length(e, rows.count, &array);
@@ -582,6 +597,145 @@ static void callChanges(napi_env env, napi_value callback, void *, void *data) {
 - (void)photoLibraryDidBecomeUnavailable:(PHPhotoLibrary *)library { sendChanges(@[@"*"]); }
 @end
 static ImageFlowPhotosObserver *observer;
+
+// ---------- Capture offsets
+
+/*
+ * The UTC offset each photo was taken at, as its original records it (EXIF OffsetTimeOriginal, else OffsetTime;
+ * PhotoKit has no public time zone), by local identifier: minutes, or NSNull for an original that records none. An
+ * original never changes, so what was read holds for the process.
+ *
+ * They are read in the background, one photo after another, and only where the original is on this Mac: nothing is
+ * downloaded from iCloud for them. Reading stops once ImageIO finds the metadata, mostly in the first chunk of the file.
+ * A photo whose offset turns out to differ from the guess `facts` gave is reported as changed (`onChanges`), so a
+ * book that shows it observes it again and records the right capture time. A photo whose original is not on this Mac
+ * is tried again after a while, as it may have been downloaded meanwhile.
+ */
+static NSMutableDictionary<NSString *, id> *offsets = [NSMutableDictionary new];
+static NSMutableDictionary<NSString *, NSDate *> *offsetsTried = [NSMutableDictionary new];
+static NSMutableSet<NSString *> *offsetsQueued = [NSMutableSet new];
+static std::mutex offsetsLock;
+static const NSTimeInterval offsetRetry = 600;
+// Enough for the metadata of any original: one read this far without finding it is taken to record no offset.
+static const NSUInteger offsetReadLimit = 64 * 1024 * 1024;
+
+/** The original's own offset (NSNumber), NSNull for one known to record none, or nil when it is not known yet. */
+static id knownOffset(NSString *local) {
+  std::lock_guard<std::mutex> guard(offsetsLock);
+  return offsets[local];
+}
+
+/** Minutes of an EXIF offset such as `+06:00`, or nil for anything else. */
+static NSNumber *exifOffsetMinutes(id text) {
+  if (![text isKindOfClass:NSString.class]) return nil;
+  NSString *value = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+  if (value.length != 6 || [value characterAtIndex:3] != ':') return nil;
+  unichar sign = [value characterAtIndex:0];
+  if (sign != '+' && sign != '-') return nil;
+  NSCharacterSet *digits = NSCharacterSet.decimalDigitCharacterSet;
+  for (NSUInteger at : {1, 2, 4, 5}) if (![digits characterIsMember:[value characterAtIndex:at]]) return nil;
+  NSInteger hours = [[value substringWithRange:NSMakeRange(1, 2)] integerValue], minutes = [[value substringWithRange:NSMakeRange(4, 2)] integerValue];
+  NSInteger total = (sign == '-' ? -1 : 1) * (hours * 60 + minutes);
+  if (minutes > 59 || total < -12 * 60 || total > 14 * 60) return nil;
+  return @(total);
+}
+
+/**
+ * What the metadata in `data` says of the offset: NSNumber minutes, or NSNull when it records none. Of the start of a
+ * file only (`whole` false), NSNull needs the camera's EXIF (a capture time) without an offset, and nil means it is
+ * not known yet: ImageIO reports an EXIF dictionary of its own making for files without one.
+ */
+static id offsetInData(NSData *data, bool whole) {
+  CGImageSourceRef source = CGImageSourceCreateWithData((__bridge CFDataRef)data, (__bridge CFDictionaryRef)@{(id)kCGImageSourceShouldCache: @NO});
+  if (!source) return nil;
+  NSDictionary *properties = CGImageSourceGetCount(source) ? CFBridgingRelease(CGImageSourceCopyPropertiesAtIndex(source, 0, nullptr)) : nil;
+  CFRelease(source);
+  NSDictionary *exif = properties[(id)kCGImagePropertyExifDictionary];
+  if (![exif isKindOfClass:NSDictionary.class]) exif = nil;
+  NSNumber *own = exifOffsetMinutes(exif[(id)kCGImagePropertyExifOffsetTimeOriginal]) ?: exifOffsetMinutes(exif[(id)kCGImagePropertyExifOffsetTime]);
+  if (own) return own;
+  return whole || exif[(id)kCGImagePropertyExifDateTimeOriginal] || exif[(id)kCGImagePropertyExifDateTimeDigitized] ? NSNull.null : nil;
+}
+
+/** The offset the original of `asset` records (see `offsetInData`), or nil where it is not on this Mac or unreadable. */
+static id readOffset(PHAsset *asset) {
+  PHAssetResource *original = nil;
+  for (PHAssetResource *resource in [PHAssetResource assetResourcesForAsset:asset]) {
+    if (resource.type == PHAssetResourceTypePhoto) { original = resource; break; }
+    if (!original && resource.type == PHAssetResourceTypeAlternatePhoto) original = resource;
+  }
+  if (!original) return nil;
+  PHAssetResourceRequestOptions *options = [PHAssetResourceRequestOptions new];
+  options.networkAccessAllowed = NO;
+  NSMutableData *data = [NSMutableData new];
+  __block id found = nil;
+  __block bool done = false;
+  // Parsed again each time the data doubled: an original without EXIF is read to its end, and parsed a few times only.
+  __block NSUInteger parseAt = 0;
+  __block PHAssetResourceDataRequestID request = PHInvalidAssetResourceDataRequestID;
+  NSObject *lock = [NSObject new];
+  dispatch_semaphore_t finished = dispatch_semaphore_create(0);
+  PHAssetResourceManager *manager = PHAssetResourceManager.defaultManager;
+  request = [manager requestDataForAssetResource:original options:options dataReceivedHandler:^(NSData *chunk) {
+    bool stop = false;
+    @synchronized (lock) {
+      if (done) return;
+      [data appendData:chunk];
+      if (data.length >= parseAt) { found = offsetInData(data, false); parseAt = data.length * 2; }
+      // One this large records no offset where ImageIO could find it.
+      if (!found && data.length > offsetReadLimit) found = NSNull.null;
+      stop = found;
+      if (stop) done = true;
+    }
+    if (stop) { [manager cancelDataRequest:request]; dispatch_semaphore_signal(finished); }
+  } completionHandler:^(NSError *error) {
+    @synchronized (lock) {
+      if (done) return;
+      done = true;
+      // The whole file came without an offset: it records none. A failure (not on this Mac) tells nothing.
+      if (!error) found = offsetInData(data, true);
+    }
+    dispatch_semaphore_signal(finished);
+  }];
+  if (dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC))) {
+    @synchronized (lock) { done = true; }
+    [manager cancelDataRequest:request];
+    return nil;
+  }
+  @synchronized (lock) { return found; }
+}
+
+/** Reads the offsets of `assets` in the background (see above); those read or queued already are skipped. */
+static void readOffsets(NSArray<PHAsset *> *assets) {
+  static dispatch_queue_t queue = dispatch_queue_create("imageflow.photos.offsets", dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_UTILITY, 0));
+  NSMutableArray<PHAsset *> *todo = [NSMutableArray new];
+  {
+    std::lock_guard<std::mutex> guard(offsetsLock);
+    for (PHAsset *asset in assets) {
+      NSString *local = asset.localIdentifier;
+      NSDate *tried = offsetsTried[local];
+      if (offsets[local] || [offsetsQueued containsObject:local] || (tried && -tried.timeIntervalSinceNow < offsetRetry)) continue;
+      [offsetsQueued addObject:local];
+      [todo addObject:asset];
+    }
+  }
+  if (!todo.count) return;
+  dispatch_async(queue, ^{
+    NSMutableArray<NSString *> *changed = [NSMutableArray new];
+    for (PHAsset *asset in todo) { @autoreleasepool {
+      id own = readOffset(asset);
+      std::lock_guard<std::mutex> guard(offsetsLock);
+      [offsetsQueued removeObject:asset.localIdentifier];
+      if (!own) { offsetsTried[asset.localIdentifier] = [NSDate date]; continue; }
+      offsets[asset.localIdentifier] = own;
+      [offsetsTried removeObjectForKey:asset.localIdentifier];
+      if ([own isKindOfClass:NSNumber.class] && asset.creationDate && [own integerValue] != macOffset(asset.creationDate)) [changed addObject:asset.localIdentifier];
+    } }
+    sendChanges(changed);
+  });
+}
+
+// ---------- Change reports
 
 /** onChanges(callback): calls `callback(ids)` with local identifiers of tracked photos that changed; `['*']` for all. */
 static napi_value OnChanges(napi_env env, napi_callback_info info) {

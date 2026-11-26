@@ -30,7 +30,7 @@ The provider looks a photo up by `local` and falls back to `cloud` (about 0.3 ms
 
 ### Facts and revisions
 
-- Facts: the current (edited) size, the creation date, the place, and on macOS 27 the caption (`PHAsset.extendedMetadata`). PhotoKit has no title. The capture time is the creation date in this Mac's time zone, with that offset: PhotoKit does not expose the photo's own zone.
+- Facts: the current (edited) size, the creation date, the place, and on macOS 27 the caption (`PHAsset.extendedMetadata`). PhotoKit has no title. The capture time is the creation date at the photo's own UTC offset, with that offset: PhotoKit does not expose the photo's zone, so the addon reads EXIF OffsetTimeOriginal from the original in the background, only where it is on this Mac (no iCloud download), and reports the photo as changed once it has it. Until then, or where the original records none, the offset is this Mac's at that instant, marked `offsetGuessed` in the fact's `extra`.
 - **`contentRevision`** = `adjustmentTimestamp` (the last edit or revert, macOS 15+), size and RAW-or-JPEG base. Watched on a test photo, it moved on every visual edit and the revert, and on nothing else; a reverted photo rendered to the same bytes as before the edit.
 - **`revision`** = `contentRevision` plus a hash of the caption.
 - **`modificationDate` is not used.** It moved on 87 % of photos never edited, sometimes on its own, and in 736 edited photos it is older than the last edit.

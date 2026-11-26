@@ -99,6 +99,45 @@ test('capture times, facts and revisions follow what Photos reports', () => {
   assert.equal(photosRevisions({ ...facts, caption: undefined }).revision, base.contentRevision);
 });
 
+test('the capture time is at the offset the original records, and at this Mac\'s only as a marked guess', () => {
+  // An iPhone photo taken at 11:28:15 in Kyrgyzstan (+06:00), linked on a Mac in Central European Summer Time.
+  const created = Date.UTC(2026, 6, 14, 5, 28, 15);
+  const facts: PhotosFacts = { width: 4032, height: 3024, created, adjusted: null, filename: 'IMG_1.HEIC', type: 'public.heic' };
+  assert.deepEqual(capturedAt(created, 360), { dateTime: '2026-07-14T11:28:15', offset: '+06:00' });
+  const own = photosFacts({ ...facts, offsetMinutes: 360 });
+  assert.deepEqual(own.captured, { dateTime: '2026-07-14T11:28:15', offset: '+06:00' });
+  assert.deepEqual(own.extra, { type: 'public.heic', fileName: 'IMG_1.HEIC' });
+  // Before the original was read, or for one that records no offset: this Mac's, marked as a guess.
+  const guessed = photosFacts({ ...facts, offsetMinutes: 120, offsetGuessed: true });
+  assert.deepEqual(guessed.captured, { dateTime: '2026-07-14T07:28:15', offset: '+02:00' });
+  assert.deepEqual(guessed.extra, { type: 'public.heic', fileName: 'IMG_1.HEIC', offsetGuessed: true });
+  // The same instant either way, and no revision of the photo.
+  assert.equal(new Date(own.captured!.dateTime + own.captured!.offset).getTime(), new Date(guessed.captured!.dateTime + guessed.captured!.offset).getTime());
+  assert.deepEqual(photosRevisions({ ...facts, offsetMinutes: 360 }), photosRevisions({ ...facts, offsetMinutes: 120, offsetGuessed: true }));
+  // No creation date: no capture time, and no guess to mark.
+  assert.deepEqual(photosFacts({ ...facts, created: undefined, offsetGuessed: true }).extra, { type: 'public.heic', fileName: 'IMG_1.HEIC' });
+});
+
+test('a photo whose own offset was read is reported as changed and then observed at that offset', async () => {
+  const library = new FakeLibrary();
+  library.add(1, { created: Date.UTC(2026, 6, 14, 5, 28, 15), offsetMinutes: 120, offsetGuessed: true });
+  const provider = photosProvider(library);
+  const [before] = await provider.observe('/book', [ref('a', 1)]);
+  assert.deepEqual(before.state === 'available' && before.facts?.captured, { dateTime: '2026-07-14T07:28:15', offset: '+02:00' });
+  const reported: string[][] = [];
+  provider.watch('/book', [ref('a', 1)], (ids) => reported.push(ids));
+  while (!library.tracked.length) await new Promise((resolve) => setTimeout(resolve, 5));
+  // The addon read the original's EXIF in the background, and reports the photo as changed.
+  Object.assign(library.photos.get(local(1))!, { offsetMinutes: 360, offsetGuessed: undefined });
+  library.listener!([local(1)]);
+  assert.deepEqual(reported, [['a']]);
+  const [after] = await provider.observe('/book', [ref('a', 1)]);
+  assert.ok(after.state === 'available' && before.state === 'available');
+  assert.deepEqual(after.facts?.captured, { dateTime: '2026-07-14T11:28:15', offset: '+06:00' });
+  assert.equal(after.facts?.extra?.offsetGuessed, undefined);
+  assert.deepEqual(after.revisions, before.revisions, 'no new preview for it');
+});
+
 test('a favourite is a fact of the photo and no revision of it', () => {
   const facts: PhotosFacts = { width: 4032, height: 3024, adjusted: null, filename: 'IMG_1.HEIC', type: 'public.heic' };
   assert.deepEqual(photosFacts({ ...facts, favorite: true }).extra, { type: 'public.heic', fileName: 'IMG_1.HEIC', favorite: true });
