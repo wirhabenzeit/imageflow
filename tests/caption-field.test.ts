@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { captionEdit, captionSwitch } from '../src/CaptionField';
+import { captionEdit, captionSwitch, declaresCaptionBoxes, printsCaption } from '../src/CaptionField';
 import { p, parameterSchema } from '../src/parameters';
+import type { Parameters } from '../src/parameters';
 import { projectSchema } from '../src/project';
 
 const parameters = { frame: p.boolean({ label: 'Frame', default: false }), showCaption: p.boolean({ label: 'Show caption', default: false, shows: 'caption' }) };
@@ -38,4 +39,21 @@ test('a caption from the photo’s provider counts as one, and a box that holds 
   delete gone.photoIndex.photo;
   captionEdit(gone, 'photo', 'Late')(gone);
   assert.equal(gone.photoIndex.photo, undefined);
+});
+
+test('a template that says which boxes print captions offers Caption… only on those (UI-017)', () => {
+  const plain: Parameters = { frame: parameters.frame };
+  const layouts = (hero: Parameters, cover?: Parameters) => ({
+    spreads: { single: { boxes: { hero: { parameters: hero }, grid: { parameters: {} } } } },
+    ...(cover ? { coverLayouts: { front: { boxes: { photo: { parameters: cover } } } } } : {}),
+  });
+  assert.equal(declaresCaptionBoxes(undefined), false);
+  assert.equal(declaresCaptionBoxes(layouts(plain)), false, 'no box declares shows');
+  assert.equal(declaresCaptionBoxes(layouts(parameters)), true);
+  assert.equal(declaresCaptionBoxes(layouts(plain, parameters)), true, 'a cover box counts');
+  assert.equal(printsCaption(true, parameters), true);
+  assert.equal(printsCaption(true, plain), false, 'a box without the switch, in a template that has it elsewhere');
+  assert.equal(printsCaption(true, undefined), false);
+  assert.equal(printsCaption(false, plain), undefined, 'a template that never says: any box may print it');
+  assert.equal(printsCaption(false, undefined), undefined);
 });

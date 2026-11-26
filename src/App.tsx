@@ -55,7 +55,7 @@ import { FamilyChoice, HeldPicker, LayoutFamilyPicker } from './LayoutFamilyPick
 import { InlineTextEditor } from './InlineTextEditor';
 import { textEditorOwner, textFits } from './inline-text';
 import { PhotoContent, TextContent } from './BoxContent';
-import { CaptionButton, captionEdit } from './CaptionField';
+import { CaptionButton, captionEdit, declaresCaptionBoxes, printsCaption } from './CaptionField';
 import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
 import type { Placement } from './spread';
@@ -1672,6 +1672,10 @@ export function App() {
   useEffect(() => {
     if (captionRequest && (!editedBox || captionAsked(editedBox[0]!, editedBox[1]!, editedBox[2] as PageSide | undefined) === undefined)) setCaptionRequest(undefined);
   }, [JSON.stringify(editedBox), captionRequest]);
+  // Whether the template says which boxes print captions; where it does, only those offer Caption… (UI-017).
+  const captionBoxes = useMemo(() => declaresCaptionBoxes(template), [template]);
+  const captionPrinted = (layout: string | undefined, box: string) =>
+    printsCaption(captionBoxes, layout === undefined ? undefined : template?.spreads[layout]?.boxes[box]?.parameters);
   function openCaption(spread: string, box: string, page?: PageSide) {
     const ready = readyId.current === summary?.id;
     openOwner(spread, { type: 'photo', id: box, page });
@@ -2486,7 +2490,7 @@ export function App() {
                   }, cropBox.parameters[key].label + ' updated')} />
                 </div>}
                 {cropPhoto && summary.photoIndex[cropPhoto] && <CaptionButton key={cropPhoto} summary={summary} photo={cropPhoto} usage={usage}
-                  request={captionAsked(cropping.spread, cropping.box, cropping.page)}
+                  request={captionAsked(cropping.spread, cropping.box, cropping.page)} printed={captionPrinted(cropping.layout, cropping.box)}
                   save={(text) => saveCaption({ spread: cropping.spread, box: cropping.box, page: cropping.page, layout: cropping.layout }, cropPhoto, text)} />}
                 {cropAttached.length > 0 && <div className="crop-params">
                   <MarkedFields compact project={summary.project} spread={spreads.find(({ id }) => id === cropping.spread)!} page={cropping.page} template={template!}
@@ -2516,6 +2520,7 @@ export function App() {
                 {editing.owner?.type === 'photo' && <PhotoContent summary={summary} spread={scopeSpread(inline.spread, inline.target.page)!} box={editing.owner.id}
                   label={ownerLabel(inline.spread, editing.owner)} change={changeSpreadInline} inspect={choose} values={!!boxSource(editing.spread, editing.owner.id, inline.target.page)}
                   caption={{ usage, done: closeEditor, autoFocus: captionAsked(editing.spread, editing.owner.id, inline.target.page) !== undefined,
+                    printed: captionPrinted(scopeSpread(inline.spread, inline.target.page)?.definition, editing.owner.id),
                     save: (photo, text) => saveCaption({ spread: inline.spread.id, box: editing.owner!.id, page: inline.target.page,
                       layout: scopeSpread(inline.spread, inline.target.page)?.definition ?? '' }, photo, text) }}
                   adjustCrop={cropBlocked(editing.spread, editing.owner.id, inline.target.page) ? undefined : () => startCrop(editing.spread, editing.owner!.id, inline.target.page)} />}
@@ -2541,7 +2546,7 @@ export function App() {
       {summary && (!panels.rightHidden ? <PanelDivider side="right" size={panels.right} resize={resizePanel} onResizing={setResizing} /> : <div />)}
       <div className={'inspector-host' + (panels.rightHidden ? ' is-collapsed' : '')} inert={panels.rightHidden} aria-hidden={panels.rightHidden || !summary}>
         {summary && coverActive ? <CoverInspector focus={focusBox} summary={summary} cover={coverState} layouts={coverLayouts} writable={canChangeBook && canvasReady}
-          caption={{ usage, save: (box, photo, text) => {
+          caption={{ usage, printed: (box) => printsCaption(captionBoxes, coverDefinition?.boxes[box]?.parameters), save: (box, photo, text) => {
             const parameters = coverDefinition?.boxes[box]?.parameters, layout = coverState?.definition;
             void edit(captionEdit(summary, photo, text, parameters && { parameters,
               find: ({ project }) => project.cover?.definition === layout ? project.cover?.boxes[box] : undefined }), 'Caption updated');
