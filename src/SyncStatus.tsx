@@ -81,8 +81,9 @@ export function SyncStatus({ api, notice }: { api?: DesktopApi; notice: (message
   const notUploaded = failed && <span className="sync-download sync-full sync-upload-failed" role="status" title={failedText}>
     <span>{failedCount}</span></span>;
   return <>{download}{upload}{full}{notUploaded}<button type="button" className={'sync-status' + (status && !view.syncing ? ' sync-' + status.state : '')} title={title} aria-label={label + '. ' + title}
-    disabled={view.syncing} data-state={view.syncing ? 'syncing' : status?.state} data-uploading={left > 0 ? left : undefined} onContextMenu={menu}
-    onClick={() => void (settings ? api.showSettings('sync') : api.syncAction('sync').then((result) => { if ('error' in result) notice(result.error); }))}>
+    // aria-disabled, not disabled: a disabled button gets no right-click, and its menu is wanted during a sync too.
+    aria-disabled={view.syncing || undefined} data-state={view.syncing ? 'syncing' : status?.state} data-uploading={left > 0 ? left : undefined} onContextMenu={menu}
+    onClick={() => void (view.syncing ? undefined : settings ? api.showSettings('sync') : api.syncAction('sync').then((result) => { if ('error' in result) notice(result.error); }))}>
     {view.syncing && <span className="status-spinner" aria-hidden="true" />}{label}{!view.syncing && status?.pendingOriginals ? <span className="sync-pending" aria-hidden="true">·</span> : null}
   </button></>;
 }
