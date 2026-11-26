@@ -41,9 +41,10 @@ const denied: Problem = { state: 'denied', problem: 'ImageFlow may not read the 
 const gone: Problem = { state: 'missing', problem: 'No longer in the Photos library.' };
 const notHere: Problem = { state: 'missing', problem: notInPhotosHere };
 /**
- * A photo the library does not have: gone when its locator holds a local identifier, else not here. Only a guess: the
- * locator syncs with the book but its local identifier is the one of the Mac that added it, so a photo another Mac
- * added with one may say gone here, and one this Mac deleted says not here once it was added without one.
+ * A photo the library does not have: gone when its locator holds a local identifier, else not here. A sync leaves the
+ * local identifier out (`photosLocator.shared`) and keeps only one this Mac already had (`adopt`), so a photo another
+ * Mac added says not here. Only a guess the other way: a photo this Mac had but whose identifier it never kept, as in
+ * a book synced in before it was read here, also says not here once Photos lost it.
  */
 const absent = (locator: PhotosLocator): Problem => locator.local ? gone : notHere;
 /** Why no photo of the library can be read now, or undefined when ImageFlow may read it. */
