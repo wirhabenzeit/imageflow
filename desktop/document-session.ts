@@ -31,7 +31,8 @@ import { coverInstance, identifier } from '../src/project';
 import { parseActiveEditor } from '../src/mcp-results';
 import type { RenderProject } from '../src/project';
 import { printBook, printProof, savePdf } from './export';
-import { isProofDensity, proofDensities } from '../src/proof-sheet';
+import { showSavePanel } from './save-panel';
+import { proofDensities } from '../src/proof-sheet';
 import type { ProofDensity } from '../src/proof-sheet';
 import { approveNetwork, approvedNetwork, bookTrusted, distrustBook, trustBook } from './source-access';
 import { importIntoProject, importProvidedPhotos, loadProject, projectSummary, readProjectManifest } from './project';
@@ -298,7 +299,7 @@ export class DocumentSession {
   get book() { return this.projectSession.book; }
   get summary(): ProjectSummary {
     return { ...projectSummary(this.marked(this.book), this.active.id), handle: this.projectSession.handle, history: this.projectSession.history,
-      network: [...this.networkOrigins], pageLabels: this.menuState?.pageLabels, coverBoxIds: this.menuState?.coverBoxIds };
+      network: [...this.networkOrigins], pageLabels: this.menuState?.pageLabels, coverBoxIds: this.menuState?.coverBoxIds, layoutBoxes: this.menuState?.layoutBoxes };
   }
   notify(change: ProjectChange) {
     if (!this.closing && !this.window.isDestroyed()) this.window.webContents.send(channels.changed, change);
@@ -1736,20 +1737,16 @@ export class DocumentSession {
    */
   private async runProof(owner: BrowserWindow, job: AbortController) {
     const opened = this.book;
-    const { response } = await dialog.showMessageBox(owner, { type: 'question', message: 'Export Proof',
-      detail: 'A quick PDF of the spreads for reading and sharing, on A4 sheets. It uses screen-sized photos and is not for print.\n\nSpreads per sheet:',
-      buttons: [...proofDensities.map((n) => n + (n === 1 ? ' Spread' : ' Spreads')), 'Cancel'],
-      defaultId: proofDensities.indexOf(DocumentSession.proofDensity), cancelId: proofDensities.length });
-    const perPage = proofDensities[response];
-    if (!isProofDensity(perPage) || owner.isDestroyed() || job.signal.aborted) return null;
-    DocumentSession.proofDensity = perPage;
     const name = bookName(opened.folder).normalize('NFC');
     const fileName = name.replace(/[^\p{L}\p{M}\p{N} _-]/gu, '-').slice(0, 80) + ' - Proof.pdf';
-    const { canceled, filePath } = await dialog.showSaveDialog(owner, {
-      title: 'Export Proof', defaultPath: join(app.getPath('documents'), fileName), filters: [{ name: 'PDF', extensions: ['pdf'] }],
-    });
-    if (canceled || !filePath || owner.isDestroyed() || job.signal.aborted) return null;
-    // The book as it is now: an agent's save or a reload may have come in while the dialogs were open. It must not
+    const choice = await showSavePanel<ProofDensity>(owner, { title: 'Export Proof', buttonLabel: 'Export',
+      defaultPath: join(app.getPath('documents'), fileName), filter: { name: 'PDF', extension: 'pdf' } },
+    { label: 'Spreads per sheet', choices: proofDensities.map((value) => ({ label: String(value), value })), value: DocumentSession.proofDensity,
+      note: 'A quick PDF for reading and sharing, on A4 sheets. It uses screen-sized photos and is not for print.' });
+    if (!choice || owner.isDestroyed() || job.signal.aborted) return null;
+    const { filePath, value: perPage } = choice;
+    DocumentSession.proofDensity = perPage;
+    // The book as it is now: an agent's save or a reload may have come in while the save panel was open. It must not
     // change again until the proof is saved, or the proof would show a revision that no longer exists.
     const book = this.book;
     const before = await this.projectSession.inputs.capture();

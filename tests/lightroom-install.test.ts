@@ -18,29 +18,29 @@ async function setup(t: { after: (fn: () => Promise<void>) => void }) {
 const info = (version: string) => `return { LrSdkVersion = 13.0, VERSION = { major = ${version.split('.')[0]}, minor = ${version.split('.')[1]}, revision = ${version.split('.')[2]}, display = '${version}' } }\n`;
 
 test('the bundled plugin declares the version ImageFlow compares', async () => {
-  assert.equal(await pluginVersion(bundledPlugin), '1.1.0');
+  assert.equal(await pluginVersion(bundledPlugin), '1.2.0');
   const files = await readdir(bundledPlugin);
   for (const file of ['Info.lua', 'Init.lua', 'Bridge.lua', 'Catalog.lua', 'Json.lua', 'SendToImageFlow.lua']) assert.ok(files.includes(file), file);
 });
 
 test('a missing plugin is installed, an older one updated, and nothing is left beside it', async (t) => {
   const { locations } = await setup(t);
-  assert.deepEqual(await pluginStatus(locations), { state: 'missing', available: '1.1.0' });
+  assert.deepEqual(await pluginStatus(locations), { state: 'missing', available: '1.2.0' });
   const installed = await installPlugin(locations);
-  assert.deepEqual(installed, { state: 'current', installed: '1.1.0', available: '1.1.0' });
+  assert.deepEqual(installed, { state: 'current', installed: '1.2.0', available: '1.2.0' });
   assert.equal(await readFile(join(locations.modules, 'ImageFlow.lrplugin', 'Bridge.lua'), 'utf8'), await readFile(join(bundledPlugin, 'Bridge.lua'), 'utf8'));
   // An older copy, with a file the new version no longer has.
   const target = join(locations.modules, 'ImageFlow.lrplugin');
   await writeFile(join(target, 'Info.lua'), info('0.9.3'));
   await writeFile(join(target, 'Obsolete.lua'), '-- gone in 1.0');
   const outdated = await pluginStatus(locations);
-  assert.deepEqual(outdated, { state: 'outdated', installed: '0.9.3', available: '1.1.0' });
+  assert.deepEqual(outdated, { state: 'outdated', installed: '0.9.3', available: '1.2.0' });
   const updated = await installPlugin(locations);
   assert.equal(updated.state, 'current');
   assert.equal((await readdir(target)).includes('Obsolete.lua'), false, 'replaced whole, not merged');
   assert.deepEqual(await readdir(locations.modules), ['ImageFlow.lrplugin'], 'no staging or previous copy is left');
-  assert.equal(installMessage(outdated, updated, true), 'Updated the ImageFlow plugin to 1.1.0. Quit and reopen Lightroom Classic to load it.');
-  assert.match(installMessage({ state: 'missing', available: '1.1.0' }, updated, false), /^Installed the ImageFlow plugin 1\.1\.0\. It loads the next time you open Lightroom Classic; if File → Plug-in Manager/);
+  assert.equal(installMessage(outdated, updated, true), 'Updated the ImageFlow plugin to 1.2.0. Quit and reopen Lightroom Classic to load it.');
+  assert.match(installMessage({ state: 'missing', available: '1.2.0' }, updated, false), /^Installed the ImageFlow plugin 1\.2\.0\. It loads the next time you open Lightroom Classic; if File → Plug-in Manager/);
 });
 
 test('a newer, unreadable or linked plugin is reported, and a link or a file in its place is never replaced', async (t) => {
@@ -48,9 +48,9 @@ test('a newer, unreadable or linked plugin is reported, and a link or a file in 
   const target = join(locations.modules, 'ImageFlow.lrplugin');
   await mkdir(target, { recursive: true });
   await writeFile(join(target, 'Info.lua'), info('2.1.0'));
-  assert.deepEqual(await pluginStatus(locations), { state: 'newer', installed: '2.1.0', available: '1.1.0' });
+  assert.deepEqual(await pluginStatus(locations), { state: 'newer', installed: '2.1.0', available: '1.2.0' });
   await writeFile(join(target, 'Info.lua'), 'return {}');
-  assert.deepEqual(await pluginStatus(locations), { state: 'unknown', available: '1.1.0' });
+  assert.deepEqual(await pluginStatus(locations), { state: 'unknown', available: '1.2.0' });
   await rm(target, { recursive: true });
   // A developer's link to a working copy.
   const working = join(root, 'working.lrplugin');

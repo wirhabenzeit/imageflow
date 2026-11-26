@@ -19,11 +19,12 @@ try {
   await page.waitForFunction(() => window.imageflow.currentProject);
   await page.locator('.canvas iframe.book-frame-book[data-current][data-ready]').waitFor();
   const spreads = await page.evaluate(async () => (await window.imageflow.currentProject()).value.project.spreads.length);
-  const answer = async (filePath, response) => app.evaluate(({ dialog }, { filePath, response }) => {
+  // The save panel answers with `value` spreads per sheet, or is cancelled.
+  const answer = async (filePath, value, canceled = false) => app.evaluate(({ dialog }, { filePath, value, canceled }) => {
     globalThis.proofPrompts = [];
-    dialog.showSaveDialog = async (_owner, options) => { globalThis.proofPrompts.push(options); return { canceled: false, filePath }; };
-    dialog.showMessageBox = async (_owner, options) => { globalThis.proofPrompts.push(options); return { response }; };
-  }, { filePath, response });
+    dialog.showSaveDialog = async (_owner, options) => { globalThis.proofPrompts.push(options); return { canceled, filePath, value }; };
+    dialog.showMessageBox = async () => ({ response: 1 });
+  }, { filePath, value, canceled });
   const run = (surface) => page.evaluate(async (surface) => {
     const { value } = await window.imageflow.currentProject();
     const started = performance.now();
@@ -32,26 +33,29 @@ try {
   }, surface);
 
   const times = {};
-  for (const [index, perPage] of [1, 4, 12].entries()) {
+  for (const perPage of [1, 4, 12]) {
     const output = join(work, 'proof-' + perPage + '.pdf');
-    await answer(output, index);
+    await answer(output, perPage);
     const { result, ms } = await run('proof');
     times[perPage] = ms;
     assert.ok(result.value, JSON.stringify(result));
     assert.deepEqual(result.value.errors.filter(({ code }) => /photo/.test(code ?? '')), [], 'every photo loads at its proof size');
     const prompts = await app.evaluate(() => globalThis.proofPrompts);
-    assert.deepEqual(prompts[0].buttons, ['1 Spread', '4 Spreads', '12 Spreads', 'Cancel']);
-    assert.match(prompts[1].defaultPath, /Proof - Proof\.pdf$/);
+    assert.equal(prompts.length, 1, 'One panel asks for the density and the destination');
+    assert.deepEqual(prompts[0].control.choices.map(({ label }) => label), ['1', '4', '12']);
+    assert.match(prompts[0].defaultPath, /Proof - Proof\.pdf$/);
     const pdf = await PDFDocument.load(await readFile(output));
     assert.equal(pdf.getPageCount(), Math.ceil(spreads / perPage), 'spreads per sheet: ' + perPage);
     const { width, height } = pdf.getPage(0).getSize();
     assert.ok(Math.abs(Math.max(width, height) - 841.9) < 2 && Math.abs(Math.min(width, height) - 595.3) < 2, 'A4 sheets: ' + width + ' × ' + height);
     assert.match(pdf.getTitle() ?? '', /Proof/);
   }
-  // The density is remembered for the next proof.
-  await answer(join(work, 'cancel.pdf'), 3);
+  // The density is remembered for the next proof, and a cancelled panel does not change it.
+  await answer(join(work, 'cancel.pdf'), 1, true);
   assert.equal((await run('proof')).result.value, null, 'Cancel saves nothing');
-  assert.equal((await app.evaluate(() => globalThis.proofPrompts))[0].defaultId, 2);
+  assert.equal((await app.evaluate(() => globalThis.proofPrompts))[0].control.value, 12);
+  await run('proof');
+  assert.equal((await app.evaluate(() => globalThis.proofPrompts))[1].control.value, 12);
   await assert.rejects(readFile(join(work, 'cancel.pdf')), { code: 'ENOENT' });
 
   await answer(join(work, 'print.pdf'), 1);
@@ -78,7 +82,7 @@ try {
   const requested = [];
   const watch = (window) => window.on('request', (request) => { if (/\/(proof-)?photo\//.test(request.url())) requested.push(request.url()); });
   app.on('window', watch);
-  await answer(join(work, 'callback.pdf'), 0);
+  await answer(join(work, 'callback.pdf'), 1);
   const callback = await callbackPage.evaluate(async () => {
     const started = performance.now();
     const result = await window.imageflow.exportBook((await window.imageflow.currentProject()).value.id, 'proof');

@@ -1,10 +1,14 @@
 import { fromJsonSchema, McpServer } from '@modelcontextprotocol/server';
 import type { CallToolResult, JSONObject, JsonSchemaValidator, RegisteredTool } from '@modelcontextprotocol/server';
 import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { mcpCatalog, mcpLimits } from '../src/mcp-contract';
 import type { McpCatalogTool, McpToolName } from '../src/mcp-contract';
 import { McpAppClient, McpConnectionError } from './mcp-connection';
+import { bridgeSkills } from './mcp-skills';
+
+declare const __IMAGEFLOW_VERSION__: string | undefined;
+const version = typeof __IMAGEFLOW_VERSION__ === 'string' ? __IMAGEFLOW_VERSION__ : '0.0.0';
 
 function toolResult(result: Record<string, unknown>): CallToolResult {
   const { image, ...metadata } = result;
@@ -35,14 +39,16 @@ function errorResult(error: unknown): CallToolResult {
   } });
 }
 
-function start() {
+async function start() {
   const args = process.argv.slice(2);
   if (args.length !== 2 || args[0] !== '--connection' || !args[1]) {
     throw new Error('Usage: node mcp-bridge.cjs --connection <ImageFlow connection file>');
   }
   const descriptorPath = resolve(args[1]);
+  // The app's own skills, which desktop staging puts beside the bridge (outside app.asar in a package).
+  const skills = await bridgeSkills(join(__dirname, 'skills'));
   const handle = serveStdio(() => {
-    const server = new McpServer({ name: 'imageflow', version: '0.1.0' }, {
+    const server = new McpServer({ name: 'imageflow', version }, {
       instructions: 'ImageFlow edits photo books that are open in the ImageFlow app. Call list_projects for a book handle, then get_authoring_context; ' +
         'its topics list the template API reference, and docs: ["authoring-workflow"] explains the order of work. Edit template files with ' +
         'workspace tools, save project data with apply_project_changes, and verify every edit with check_book.',
@@ -84,11 +90,12 @@ function start() {
       }
       if (changed && server.isConnected()) server.sendToolListChanged();
     };
-    const refresh = () => { void app.catalog().then((tools) => { if (tools) adopt(tools); }, () => {}); };
-    const app = new McpAppClient(descriptorPath, () => server.server.getClientVersion()?.name ?? 'MCP client', refresh);
+    const app = new McpAppClient(descriptorPath, () => server.server.getClientVersion()?.name ?? 'MCP client',
+      { version, adopt: (tools) => { void skills?.reload(); adopt(tools); } });
     server.server.oninitialized = () => { void app.connect().catch(() => {}); };
     server.server.onclose = () => app.close();
     adopt(mcpCatalog());
+    skills?.attach(server);
     return server;
   }, {
     transport: new StdioServerTransport(process.stdin, process.stdout, { maxBufferSize: mcpLimits.requestBytes }),
@@ -98,8 +105,7 @@ function start() {
   process.once('SIGINT', () => { void handle.close(); });
 }
 
-try { start(); }
-catch (error) {
+start().catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : 'ImageFlow MCP bridge failed to start.');
   process.exitCode = 1;
-}
+});

@@ -78,6 +78,10 @@ try {
   await closeSettings(app);
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map(t=>t.name).sort(),['apply_project_changes','check_book','get_authoring_context','import_sources','inspect_book','list_book_checkpoints','list_projects','list_templates','read_library_template','rebuild_dependencies','rename_source','save_template_to_library'].sort());
+  // The skill comes with the connection, from the files beside the bridge (outside app.asar in a package).
+  assert.ok((await client.listResources()).resources.some(r=>r.uri==='skill://imageflow-templates/SKILL.md'));
+  const reference=await client.readResource({uri:'skill://imageflow-templates/references/authoring-workflow.md'});
+  assert.match(reference.contents[0].text,/^# Authoring workflow/);
   const call = async(name,args={}) => {
     const response=await client.callTool({name,arguments:args},{timeout:110000});
     return {response,data:response.structuredContent ?? JSON.parse(response.content.find(c=>c.type==='text').text)};
@@ -349,6 +353,13 @@ try {
   assert.equal(imported.sources.length,1);
   await ready();
   const photo=imported.sources[0].id;
+  // Not placed yet: a sheet shows it uncropped, drawn in the app from its preview (API-015).
+  const choosing=await call('inspect_book',{project,view:'sources',unplaced:true,sheet:{maxEdge:400,format:'png'}});
+  assert.ok(!choosing.response.isError,JSON.stringify(choosing.data));
+  assert.deepEqual(choosing.data.items.map(({id})=>id),[photo]);
+  assert.deepEqual([choosing.data.image.kind,choosing.data.image.cells[0].photo,choosing.data.image.cells[0].missing],['photo-sheet',photo,undefined]);
+  const sheet=await sharp(Buffer.from(choosing.response.content.find(c=>c.type==='image').data,'base64')).metadata();
+  assert.deepEqual([sheet.width,sheet.height],[choosing.data.image.width,choosing.data.image.height]);
   const assigned=await good('apply_project_changes',{project,expectedRevision:imported.revision,idempotencyKey:'assign-photo',label:'Place photo',operations:[{op:'assign_source',spread:'first',box:'hero',kind:'photo',source:photo}]});
   await ready();
   const spreads=await good('inspect_book',{project,view:'spreads',limit:1});

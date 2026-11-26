@@ -61,6 +61,7 @@ import { syncSetupPatch } from './sync-settings';
 import { cleanUp, cleanUpQuestion, cleanUpSummary, planCleanUp, unusedStorage } from './sync-sweep';
 import type { CleanUpPlan } from './sync-sweep';
 import { configureMacHeader, setToolbarDragRegions } from './mac-header';
+import { showSavePanel } from './save-panel';
 import type { RenderSessions } from './document-session';
 import { AssetFacts } from './asset-facts';
 import { createDocument, documentIdentity, documentPath, isDocument, RecentDocuments } from './documents';
@@ -101,6 +102,7 @@ import type { SentPhotos } from './lightroom/bridge';
 import { parseResult, selectionResultSchema } from './lightroom/protocol';
 import type { LightroomLocator } from '../src/source-locator';
 import { launchLightroom } from './lightroom/launch';
+import { showInLightroom } from './lightroom/show';
 import { defaultModules, installMessage, installPlugin, lightroomRunning, pluginStatus } from './lightroom/plugin-install';
 import { lightroomProvider } from './providers/lightroom';
 import { photosProvider } from './providers/photos';
@@ -2030,7 +2032,7 @@ async function disableMcp() {
 async function enableMcp() {
   if (quitting || preparingQuit) throw new Error('ImageFlow is closing.');
   const connection = await createMcpConnection({
-    descriptorPath: mcpDescriptorPath(),
+    descriptorPath: mcpDescriptorPath(), version: app.getVersion(),
     onClientsChanged: (clients) => { mcpClients = clients; publishMcpSettings(); },
     onCall: async (name, args, signal, client) => {
       try {
@@ -2654,6 +2656,11 @@ void app.whenReady().then(async () => {
       if (!count) throw new Error('Choose photos whose source is available now.');
       return { summary: document.summary, message: count === 1 ? 'Refreshing the preview from its source…' : 'Refreshing ' + count + ' previews from their source…' };
     }
+    if (request.action === 'show-lightroom') {
+      if (!lightroom) throw new Error('Lightroom Classic is not available.');
+      const locators = chosen.flatMap((entry) => entry.kind === 'photo' && entry.locator.provider === 'lightroom' ? [entry.locator as LightroomLocator] : []);
+      return { summary: document.summary, message: await showInLightroom(lightroom, locators) };
+    }
     if (request.action === 'launch') {
       // Offered only where the photo's provider offers it (`SourceProvider.repairs`). Once the plugin connects, the
       // provider's watch reports the photos and the book observes them again: nothing waits here.
@@ -2752,24 +2759,17 @@ void app.whenReady().then(async () => {
     if (!document || quitting) return { error: 'Request is only available to an open book.' };
     try { return { value: await document.leftovers(markdownWindows.paths(document)) }; } catch (error) { return { error: errorMessage(error) }; }
   });
-  ipcMain.handle(channels.saveCopy, (event, includeAssets?: boolean) => fromEditor(event, async (document) => {
-    if (includeAssets === undefined) {
-      const linked = sourceEntries(document.book).some((entry) => sourceReach(entry) !== 'book') ? 'Unchecked: linked files keep their full paths, and photos from other sources stay linked to them.' : undefined;
-      // iCloud cannot copy inside the store (#285): a copy of a synced book uploads its originals again when it syncs.
-      const icloud = syncService.kind === 'icloud' && !!(await readSyncState(document.book.folder).catch(() => undefined))?.lastSynced
-        ? 'The copy syncs as a new book. iCloud cannot copy its originals, so they are uploaded again and count toward your iCloud storage a second time.' : undefined;
-      const answer = await dialog.showMessageBox(document.window, { type: 'question', message: 'Duplicate this book?',
-        buttons: ['Duplicate', 'Cancel'], defaultId: 0, cancelId: 1, checkboxLabel: 'Include all files', checkboxChecked: true,
-        detail: [linked, icloud].filter(Boolean).join('\n\n') || undefined });
-      if (answer.response !== 0) return null;
-      includeAssets = answer.checkboxChecked;
-    }
-    if (typeof includeAssets !== 'boolean') throw new Error('Choose whether to include all files.');
-    const choice = await dialog.showSaveDialog(document.window, { title: 'Duplicate Book', buttonLabel: 'Duplicate',
-      defaultPath: join(app.getPath('documents'), bookName(document.book.folder) + ' Copy.imageflow'), filters: [{ name: 'ImageFlow Book', extensions: ['imageflow'] }] });
-    if (choice.canceled || !choice.filePath) return null;
+  ipcMain.handle(channels.saveCopy, (event) => fromEditor(event, async (document) => {
+    const linked = sourceEntries(document.book).some((entry) => sourceReach(entry) !== 'book') ? 'Unchecked: linked files keep their full paths, and photos from other sources stay linked to them.' : undefined;
+    // iCloud cannot copy inside the store (#285): a copy of a synced book uploads its originals again when it syncs.
+    const icloud = syncService.kind === 'icloud' && !!(await readSyncState(document.book.folder).catch(() => undefined))?.lastSynced
+      ? 'The copy syncs as a new book. iCloud cannot copy its originals, so they are uploaded again and count toward your iCloud storage a second time.' : undefined;
+    const choice = await showSavePanel<boolean>(document.window, { title: 'Duplicate Book', buttonLabel: 'Duplicate',
+      defaultPath: join(app.getPath('documents'), bookName(document.book.folder) + ' Copy.imageflow'), filter: { name: 'ImageFlow Book', extension: 'imageflow' } },
+    { label: 'Include all files', value: true, note: [linked, icloud].filter(Boolean).join('\n\n') || undefined });
+    if (!choice) return null;
     let folder: string;
-    try { folder = await document.copying(document.window, (options) => saveDocumentCopy(document.book, choice.filePath!, includeAssets!, undefined, false, options), 'Duplicating book'); }
+    try { folder = await document.copying(document.window, (options) => saveDocumentCopy(document.book, choice.filePath, choice.value, undefined, false, options), 'Duplicating book'); }
     catch (error) { if (error instanceof CopyCancelled) return null; throw error; }
     await openDocument(folder);
     return null;
@@ -3066,15 +3066,19 @@ void app.whenReady().then(async () => {
     const document = editorOwner(event);
     if (!document || !state || typeof state.enabled !== 'object' || !state.enabled ||
         typeof state.editing !== 'boolean' || typeof state.writable !== 'boolean' || typeof state.busy !== 'boolean') return;
-    const previousLabels = JSON.stringify([document.menuState?.pageLabels, document.menuState?.coverBoxIds]);
+    const previousLabels = JSON.stringify([document.menuState?.pageLabels, document.menuState?.coverBoxIds, document.menuState?.layoutBoxes]);
     const pageLabels = Object.fromEntries(document.book.project.spreads.flatMap(({ id }) => {
       const label = state.pageLabels?.[id];
       return typeof label === 'string' ? [[id, label.slice(0, 100)]] : [];
     }));
     const coverBoxIds = Array.isArray(state.coverBoxIds) ? state.coverBoxIds.filter((id) => typeof id === 'string') : undefined;
+    // The kind of each layout's boxes, as the editor last rendered the template: only what decides whether a box shows its content.
+    const layoutBoxes = state.layoutBoxes && typeof state.layoutBoxes === 'object' ? Object.fromEntries(Object.entries(state.layoutBoxes).flatMap(([id, layout]) =>
+      layout && typeof layout === 'object' && layout.boxes && typeof layout.boxes === 'object' ? [[id, { boxes: Object.fromEntries(Object.entries(layout.boxes)
+        .flatMap(([box, declared]) => declared?.type === 'photo' || declared?.type === 'markdown' ? [[box, { type: declared.type }]] : [])) }]] : [])) : undefined;
     document.menuState = { ...emptyMenuState, ...state,
-      pageLabels, coverBoxIds, enabled: Object.fromEntries(spreadCommands.map((id) => [id, state.enabled[id] === true])) as BookMenuState['enabled'] };
-    if (previousLabels !== JSON.stringify([pageLabels, coverBoxIds])) publishAssets(document);
+      pageLabels, coverBoxIds, layoutBoxes, enabled: Object.fromEntries(spreadCommands.map((id) => [id, state.enabled[id] === true])) as BookMenuState['enabled'] };
+    if (previousLabels !== JSON.stringify([pageLabels, coverBoxIds, layoutBoxes])) publishAssets(document);
     document.window.setDocumentEdited(state.saving === true);
     if (typeof state.sidebar === 'boolean') document.sidebar = state.sidebar;
     if (typeof state.inspector === 'boolean') document.inspector = state.inspector;

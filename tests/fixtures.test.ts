@@ -15,7 +15,7 @@ import { ProjectSession } from '../desktop/project-session';
 import { contactSheetLayout, fixtureBannerHeight } from '../src/authoring-artwork';
 import type { AuthoringCheckResult } from '../src/authoring-check';
 import type { RenderStatus, TemplateInfo } from '../src/desktop';
-import { fixtureFiles, fixtureMarkdown, fixtureProject, fixtureRequestSchema, planFixtures, sampleExtension } from '../src/fixtures';
+import { FixtureError, fixtureFiles, fixtureMarkdown, fixtureProject, fixtureRequestSchema, planFixtures, sampleExtension, valuesLabel } from '../src/fixtures';
 import type { FixtureSourceIds } from '../src/fixtures';
 import { mm } from '../src/format';
 import type { PrintFormat } from '../src/format';
@@ -37,7 +37,7 @@ const template: TemplateInfo = {
   spreads: {
     main: { label: 'Story', span: 'spread', parameters: { heading: p.string({ label: 'Heading', default: 'North', multiline: true, maxLength: 40 }) },
       boxes: { hero: { type: 'photo', label: 'Hero', parameters: {} }, story: { type: 'markdown', label: 'Story', parameters: {} } }, elements: {} },
-    chapter: { label: 'Divider', span: 'spread', parameters: {}, boxes: {}, elements: {} },
+    chapter: { label: 'Divider', span: 'spread', parameters: { rule: p.boolean({ label: 'Rule', default: false }) }, boxes: {}, elements: {} },
     map: { label: 'Map', span: 'spread', parameters: {}, boxes: {},
       elements: { route: { label: 'Route', parameters: { track: p.file({ label: 'Track', accept: ['.gpx'] }) } } } },
     cover: { label: 'Cover', span: 'right', parameters: { title: p.string({ label: 'Title', default: '', placeholder: 'Summer' }) }, boxes: {}, elements: {} },
@@ -394,4 +394,72 @@ test('a fixture finding found in several formats is listed once with its formats
   assert.equal(merged.length, 2);
   assert.deepEqual(merged[0].fixture, { layout: 'story', case: 'long-text', format: 'a4', formats: ['a4', 'square', 'letter'] });
   assert.deepEqual(merged[1].fixture, { layout: 'story', case: 'long-text', format: 'a4' }, 'a finding of one format keeps its shape');
+  const measured = (format: string, characters: number) => ({ ...finding(format, characters + ' characters overflow.'), details: { overflowCharacters: characters, box: 'body' } });
+  const overflow = mergeFormatFindings([measured('a4', 1200), measured('square', 310), { ...measured('letter', 5), details: { overflowCharacters: 5, box: 'note' } }]);
+  assert.deepEqual(overflow.map(({ message, fixture }) => [message, fixture.formats ?? fixture.format]), [['1200 characters overflow.', ['a4', 'square']], ['5 characters overflow.', 'letter']],
+    'what was measured differs per format; another box is another finding');
+  const lines = mergeFormatFindings([measured('a4', 3), measured('a4', 9), measured('square', 3), measured('square', 9), measured('letter', 4)]);
+  assert.deepEqual(lines.map(({ message, fixture }) => [message, fixture.formats ?? fixture.format]),
+    [['3 characters overflow.', ['a4', 'square', 'letter']], ['9 characters overflow.', ['a4', 'square']]], 'two findings of one format both stay');
+});
+
+test('fixtures test settings at the values a request gives, and choose the layouts that have them (API-021)', () => {
+  const settings: TemplateInfo = { ...template,
+    parameters: { dayHeads: p.boolean({ label: 'Day heads', default: true }), paper: p.enum({ label: 'Paper', options: ['white', 'cream'], default: 'white' }) },
+    spreads: { ...template.spreads,
+      grid: { label: 'Grid', span: 'spread', parameters: { cells: p.enum({ label: 'Cells', options: ['fit', 'fill'], default: 'fit' }) },
+        boxes: { one: { type: 'photo', label: 'One', parameters: { edge: p.enum({ label: 'Edge', options: ['margin', 'bleed'], default: 'margin' }) } } },
+        elements: { caption: { label: 'Caption', parameters: { size: p.integer({ label: 'Size', default: 9, min: 6, max: 14 }) } } } },
+    } };
+  const planned = (request: unknown) => planFixtures(settings, fixtureRequestSchema.parse(request));
+  const chosen = planned({ params: { cells: 'fill', edge: 'bleed', size: 12 }, cases: ['typical'] });
+  assert.deepEqual(chosen.layouts, ['grid'], 'without layouts, those with the settings');
+  assert.deepEqual(chosen.values, { params: { cells: 'fill', edge: 'bleed', size: 12 } });
+  const named = planned({ params: { cells: 'fill' }, layouts: ['grid', 'main'] });
+  assert.deepEqual(named.layouts, ['grid']);
+  assert.ok(named.skipped.some(({ layout, reason }) => layout === 'main' && /none of the settings/.test(reason)));
+  assert.deepEqual(planned({ params: { cells: 'fill' }, document: { paper: 'cream' }, layouts: ['grid', 'main'] }).layouts, ['grid', 'main'],
+    'a document setting is tested in every named layout');
+  assert.deepEqual(planned({ params: { cells: 'fill' }, document: {}, layouts: ['grid', 'main'] }).layouts, ['grid'],
+    'an empty document sets nothing, so a layout without the settings is still skipped');
+
+  const error = (request: unknown) => {
+    try { planned(request); } catch (caught) { return caught as FixtureError; }
+    assert.fail('expected an error');
+  };
+  assert.deepEqual([error({ params: { cell: 'fill' } }).code, error({ params: { cell: 'fill' } }).message],
+    ['PARAMETER_NOT_FOUND', 'No tested layout has a setting cell. Did you mean cells?']);
+  assert.match(error({ params: { dayHeads: false } }).message, /document setting: pass it in document/);
+  assert.match(error({ params: { cells: 'wide' } }).message, /^grid · cells cannot be "wide"; it takes one of fit, fill\.$/);
+  assert.match(error({ params: { size: 20 } }).message, /a whole number from 6 up to 14/);
+  assert.match(error({ params: { heading: 'North' } }).message, /the fixture cases fill it/);
+  assert.match(error({ document: { paper: 'blue' } }).message, /^Document · paper cannot be "blue"/);
+  assert.equal(error({ document: { papr: 'white' } }).code, 'PARAMETER_NOT_FOUND');
+
+  // The values reach every fixture's layout, boxes and elements, and the fixture book's document settings.
+  const { project } = fixtureProject({ schemaVersion: 1, title: 'Book', template: { id: 't', version: '1' }, format: 'square',
+    params: { dayHeads: true, paper: 'white' }, texts: {}, files: {}, spreads: [] }, settings, 'square', chosen.cells, ids,
+    { params: { cells: 'fill', edge: 'bleed', size: 12 }, document: { dayHeads: false } });
+  const spread = project.spreads[0];
+  assert.deepEqual([spread.params.cells, spread.boxes.one.params.edge, spread.elements.caption.params.size], ['fill', 'bleed', 12]);
+  assert.equal(spread.boxes.one.photo, 'land', 'the case still fills the content');
+  assert.deepEqual(project.params, { dayHeads: false, paper: 'white' });
+  assert.equal(valuesLabel({ params: { cells: 'fill' }, document: { dayHeads: false } }), 'dayHeads false, cells fill');
+  assert.equal(valuesLabel({ params: { theme: 'dark' }, document: { theme: 'light' } }), 'theme light, theme dark', 'one name in both is named twice');
+});
+
+test('fixture checks report the values they tested and mark the sheet with them (API-021)', async (t) => {
+  const { renders, call } = await service(t);
+  const result = await call('check_book', { fixtures: { params: { heading: 'x' } } }).catch((error) => error);
+  assert.equal(result.code, 'INVALID_PARAMETER_VALUE');
+  const tested = await call('check_book', { fixtures: { layouts: ['main'], cases: ['typical'], document: { theme: 'dark' }, preview: {} } }).catch((error) => error);
+  assert.equal(tested.code, 'PARAMETER_NOT_FOUND', 'the test template declares no document settings');
+  assert.equal(renders.filter(({ book }) => book.fixture).length, 0, 'a request with unknown settings renders no fixture');
+
+  const ruled = await call('check_book', { fixtures: { params: { rule: true }, preview: {} } }) as AuthoringCheckResult;
+  assert.deepEqual(ruled.fixtures!.matrix, { layouts: ['chapter'], formats: ['square'], cases: [...ruled.fixtures!.matrix.cases], params: { rule: true } });
+  const [book] = renders.filter(({ book }) => book.fixture).map(({ book }) => book);
+  assert.deepEqual(book.project.spreads.map(({ params }) => params.rule), [true]);
+  assert.equal(book.fixture!.banner, 'SYNTHETIC FIXTURES · Square · rule true · not the saved book');
+  assert.ok(ruled.fixtures!.notEvaluated.some((line) => /values in params and document/.test(line)));
 });

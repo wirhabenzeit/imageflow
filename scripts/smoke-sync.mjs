@@ -177,7 +177,7 @@ try {
   // without a question, and its originals follow the commit.
   await choosePaths({ save: duplicateBook });
   const beforeDuplicate = new Set(app.windows());
-  assert.deepEqual(await desktop.evaluate(() => window.imageflow.saveCopy(true)), { value: null });
+  assert.deepEqual(await desktop.evaluate(() => window.imageflow.saveCopy()), { value: null });
   let duplicate;
   for (let attempt = 0; !(duplicate = app.windows().find((page) => !beforeDuplicate.has(page) && page.url() === 'imageflow://editor/')); attempt++) {
     assert.ok(attempt < 400, 'the duplicate opens');

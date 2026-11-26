@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { contactSheetLayout } from '../src/authoring-artwork';
+import { contactSheetLayout, photoSheetLayout } from '../src/authoring-artwork';
+import { fitted } from '../desktop/photo-sheet';
 import { parseMcpArguments } from '../src/mcp-contract';
 import { artworkTarget, parsePreviewRequest, PreviewError } from '../src/preview';
 import { mm, pageSequence, printFormat } from '../src/format';
@@ -77,4 +78,28 @@ test('detail previews and element inspection accept explicit facing pages withou
       assert.equal(artworkTarget([{ id: 'one' }], pageSequence(['spread'], format), parsePreviewRequest(preview).target as typeof preview.target).side, page);
     }
   }
+});
+
+test('a photo sheet stays within its edge, with more columns when the rows would not fit (API-015)', () => {
+  const mixed = (index: number) => index % 3 ? { width: 3000, height: 2000 } : { width: 2000, height: 3000 };
+  const landscape = () => ({ width: 3000, height: 2000 }), wide = () => ({ width: 1920, height: 1080 });
+  // Rows of landscape photos only are a fraction of a cell high, rounded up per row.
+  for (const [count, maxEdge, columns, shape] of [[48, 400, 1, mixed], [48, 1600, 8, mixed], [7, 1600, 6, mixed], [1, 400, 6, mixed],
+    [6, 400, 2, landscape], [18, 400, 6, wide], [6, 600, 1, landscape], [48, 1600, 6, wide], [13, 977, 4, landscape]] as const) {
+    const sizes = Array.from({ length: count }, (_, index) => shape(index));
+    const grid = photoSheetLayout(sizes, maxEdge, columns);
+    assert.ok(grid.width <= maxEdge && grid.height <= maxEdge, count + ' photos in ' + grid.width + ' × ' + grid.height);
+    for (const [index, cell] of grid.cells.entries()) {
+      const { width, height } = sizes[index];
+      assert.ok(Math.abs(cell.width / cell.height - width / height) < 0.1, 'uncropped');
+      assert.ok(cell.label.y + cell.label.line * 2 <= grid.height);
+    }
+  }
+});
+
+test('a photo sheet fits each label to its cell, keeping the start and end of an ID', () => {
+  assert.equal(fitted('2024-06-01 18:20:30', 300, 11), '2024-06-01 18:20:30');
+  const short = fitted('2024-06-01 18:20:30', 40, 11);
+  assert.ok(short.length * 11 * 0.58 <= 40 + 11 && short.includes('…'), short);
+  assert.equal(fitted('a1b2c3d4-e5f6-7890-abcd-ef0123456789', 120, 11), 'a1b2c3d4-…23456789');
 });

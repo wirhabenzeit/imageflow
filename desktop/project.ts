@@ -12,6 +12,7 @@ import { boxBase, parseDocument, photoIndexSchema, projectSchema, unsupportedBoo
 import type { FixtureMarking, PhotoIndex, Project, ProjectFile, ProjectFiles, RenderProject } from '../src/project';
 import { renderOrigin } from '../src/desktop';
 import type { ImportCounts, ImportRequest, ProjectSummary } from '../src/desktop';
+import { isHeic } from '../src/import-feedback';
 import { importPhotoDetails, photoDetails, photoExtensions } from './photos';
 import { renditionCacheFor } from './rendition-cache';
 import { photoDate } from './capture-time';
@@ -677,8 +678,12 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
     }
   }
   try {
-    for (const entry of checked) {
-      if (entry === 'skipped' || entry === 'failed') { counts[entry]++; continue; }
+    for (const [index, entry] of checked.entries()) {
+      if (entry === 'skipped' || entry === 'failed') {
+        counts[entry]++;
+        if (entry === 'skipped' && isHeic(paths[index])) counts.heic = (counts.heic ?? 0) + 1;
+        continue;
+      }
       const { file, kind, info } = entry;
       const folder = kind === 'photo' ? 'photos' : kind === 'file' ? 'files' : 'texts';
       const registry = kind === 'file' ? project.files : project.texts;

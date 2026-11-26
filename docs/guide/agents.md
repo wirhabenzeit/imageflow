@@ -9,7 +9,7 @@ Open **ImageFlow → Settings… → Agents** and add each agent app once:
 - **Add to Claude Desktop:** opens its extension installer. Choose **Install**.
 - **Add to ChatGPT & Codex:** configures the ChatGPT desktop app, Codex CLI and Codex IDE extension. Start a new task to load the tools. ChatGPT on the web cannot reach ImageFlow on your Mac.
 - **Claude Code and other agents:** shows connection commands, Claude Code plugin installation commands and a generic MCP configuration.
-- **Save Template Skill:** saves a zip for Claude's **Settings → Capabilities → Skills**, or for extraction into `~/.claude/skills/`. New books already include it for Claude Code.
+- **Save Template Skill:** saves a zip for Claude's **Settings → Capabilities → Skills**, or for extraction into `~/.claude/skills/`. New books already include it for Claude Code. With the Claude Code command or plugin, Claude Code 2.1.331 or later can also [load it from the connection](../mcp.md#connect); the Claude Desktop extension does not provide it.
 
 No separate Node.js installation is needed. If you move ImageFlow.app, add it to your agent apps again.
 

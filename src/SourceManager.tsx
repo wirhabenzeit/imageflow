@@ -17,7 +17,7 @@ import { fileExtensionMime, fileMime, photoMime, textMime } from './source-items
 import type { SourceRef } from './source-items';
 import type { SourceKind, SourceRepair } from './source-locations';
 import { assetMenu, assetMenuState, assetActions } from './asset-menu';
-import { assetPageLabels, assetUsage } from './asset-usage';
+import { asideText, assetPageLabels, assetUsage, shownAssetUsage } from './asset-usage';
 import { ActionMenu } from './ActionMenu';
 import { Icon } from './Icon';
 import { fileExtension, useFileIcons } from './file-icons';
@@ -57,7 +57,10 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   // The bottom panel's Assets tab holds the files of file parameters; photos and texts have their own tabs there.
   const entries = embedded ? raw.filter((entry) => entry.kind === 'file')
     : [...sourceList(summary, 'photo', view.value).map(({ id }) => raw.find((entry) => entry.kind === 'photo' && entry.id === id)!), ...raw.filter((entry) => entry.kind !== 'photo')];
-  const usage = assetUsage(summary, assetPageLabels(summary));
+  const shownUsage = shownAssetUsage(summary);
+  // A file counts as used wherever it is assigned, as Remove from Book asks about it; content set aside is not placed (UI-016).
+  const usage = { ...shownUsage, file: assetUsage(summary, assetPageLabels(summary)).file };
+  const aside = (entry: typeof entries[number]) => entry.kind === 'file' ? undefined : asideText(shownUsage.aside?.[entry.kind === 'markdown' ? 'text' : 'photo'][entry.id]);
   const documentIcon = useFileIcons(embedded ? entries.map((entry) => fileExtension(entry.name)) : []);
   const placements = (entry: typeof entries[number]) => usage[entry.kind === 'markdown' ? 'text' : entry.kind][entry.id] ?? [];
   const unavailable = (key: string) => !!summary.sources?.[key] && summary.sources[key].state !== 'available';
@@ -212,7 +215,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
               }} />
             : <strong>{entry.name}</strong>}
             {(file?.linked || problem) && sourceFolderName(entry) && <span className="muted">{sourceFolderName(entry)}</span>}</span></span>
-          <span className="asset-status">{entry.kind === 'markdown' && <EditMarkdown api={api} id={entry.id} name={entry.name} disabled={locked || problem} failure={(message) => setError({ message })} />}{entry.kind === 'photo' && view.value.showTime && <span className="muted" title={photoDate(summary, entry.id)?.capturedEstimated ? 'Estimated from file modification time' : undefined}>{captureLabel(photoDate(summary, entry.id)?.captured, photoDate(summary, entry.id)?.capturedEstimated)}{photoDate(summary, entry.id)?.capturedEstimated ? ' ≈' : ''}</span>}<span className="muted">{placements(entry).length ? placements(entry).length + '×' : 'Not used'}</span>{badge && <span className={'source-badge' + (status?.pending || status?.away ? '' : ' warning')} title={status?.outOfDate ? outOfDateNote : status?.problem}>{badge}</span>}
+          <span className="asset-status">{entry.kind === 'markdown' && <EditMarkdown api={api} id={entry.id} name={entry.name} disabled={locked || problem} failure={(message) => setError({ message })} />}{entry.kind === 'photo' && view.value.showTime && <span className="muted" title={photoDate(summary, entry.id)?.capturedEstimated ? 'Estimated from file modification time' : undefined}>{captureLabel(photoDate(summary, entry.id)?.captured, photoDate(summary, entry.id)?.capturedEstimated)}{photoDate(summary, entry.id)?.capturedEstimated ? ' ≈' : ''}</span>}<span className="muted" title={placements(entry).length ? undefined : aside(entry)}>{placements(entry).length ? placements(entry).length + '×' : aside(entry) ? 'Set aside' : 'Not used'}</span>{badge && <span className={'source-badge' + (status?.pending || status?.away ? '' : ' warning')} title={status?.outOfDate ? outOfDateNote : status?.problem}>{badge}</span>}
             {view.value.showSource ? <SourceBadge origin={sourceOrigin(entry)!} className="asset-origin" />
               : file?.linked && <span className="asset-linked" role="img" aria-label="Linked to original file" title="Linked to original file"><Icon name="link" size={16} /></span>}
           </span>

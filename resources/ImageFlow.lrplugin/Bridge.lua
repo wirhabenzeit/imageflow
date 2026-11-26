@@ -86,6 +86,7 @@ end
 local jobs = {}
 function jobs.metadata(job) return Catalog.metadata(job.photos) end
 function jobs.selection() return Catalog.selection() end
+function jobs.show(job) return Catalog.show(job.uuids) end
 function jobs.watch(job) Bridge.setWatch(job.uuids); return {} end
 function jobs.thumbnails(job)
   local result = Catalog.thumbnails(job.photos, job.folder)

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, cp, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createConnection } from 'node:net';
 import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -10,6 +10,7 @@ import type { TestContext } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { build } from 'esbuild';
 import { Client } from '@modelcontextprotocol/client';
+import { SkillsClient } from '@modelcontextprotocol/client/ext/skills';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { createMcpConnection, McpAppClient } from '../desktop/mcp-connection';
 import { advertisedSchemas, mcpLimits, mcpTools, parseMcpArguments } from '../src/mcp-contract';
@@ -234,4 +235,77 @@ test('a bridge older than the app serves the app’s tools and arguments, and te
   const result = await client.callTool({ name: 'rebuild_dependencies', arguments: { project: 'book' } });
   assert.equal(result.isError, undefined, JSON.stringify(result));
   assert.equal((result.structuredContent as Record<string, unknown>)?.name, 'rebuild_dependencies');
+});
+
+test('the bridge serves the skills beside it, and the files an update puts there', async (t) => {
+  const { descriptorPath, work } = await fixture(t, async () => ({ state: 'ready', projects: [] }));
+  const bridge = join(work, 'bridge.cjs');
+  await build({ entryPoints: [resolve('desktop/mcp-bridge.ts')], outfile: bridge, bundle: true, platform: 'node', format: 'cjs', target: 'node22', logLevel: 'silent' });
+  await cp(resolve('skills'), join(work, 'skills'), { recursive: true });
+  const transport = new StdioClientTransport({ command: process.execPath, args: [bridge, '--connection', descriptorPath], stderr: 'pipe' });
+  // Skills need protocol revision 2026-07-28.
+  const client = new Client({ name: 'Skills test', version: '1' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
+  t.after(() => client.close());
+  await client.connect(transport);
+  const skills = new SkillsClient(client);
+  assert.ok(skills.supported);
+  const uri = 'skill://imageflow-templates/SKILL.md';
+  const listing = await skills.list();
+  assert.deepEqual(listing.skills.map((skill) => skill.uri), [uri]);
+  const [skill] = listing.skills;
+  const listed = (entry: typeof skill, file: string) => entry.resources !== 'dynamic' &&
+    entry.resources.find((resource) => resource.uri.endsWith('/' + file))?.digest;
+  // Every listed file reads back as the listing describes it, examples included.
+  for (const file of ['SKILL.md', 'references/authoring-workflow.md', 'examples/minimal.tsx']) await skills.read(skill, file);
+  assert.equal((await client.listTools()).tools.length, mcpTools.length);
+
+  // A new connection to the app, here the first tool call, follows files that changed.
+  const workflow = join(work, 'skills/imageflow-templates/references/authoring-workflow.md');
+  await appendFile(workflow, '\nUpdated.\n');
+  await client.callTool({ name: 'list_projects', arguments: {} });
+  let current = skill;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    current = (await skills.get(uri)).skill;
+    if (listed(current, 'authoring-workflow.md') !== listed(skill, 'authoring-workflow.md')) break;
+    await delay(20);
+  }
+  assert.notEqual(listed(current, 'authoring-workflow.md'), listed(skill, 'authoring-workflow.md'));
+
+  // Without a new connection, the first read of a changed file fails and reloads the skill.
+  await appendFile(workflow, 'Again.\n');
+  await assert.rejects(client.readResource({ uri: 'skill://imageflow-templates/references/authoring-workflow.md' }), /changed since/);
+  let text = '';
+  for (let attempt = 0; attempt < 100 && !text; attempt++) {
+    const read = await client.readResource({ uri: 'skill://imageflow-templates/references/authoring-workflow.md' }).catch(() => undefined);
+    text = read ? (read.contents[0] as { text: string }).text : '';
+    if (!text) await delay(20);
+  }
+  assert.match(text, /Updated\.\nAgain\./);
+});
+
+test('a bridge from another version is told so where a conversation starts, and with arguments that do not fit (#232)', async (t) => {
+  const work = await mkdtemp(join(tmpdir(), 'if-mcp-test-'));
+  t.after(() => rm(work, { recursive: true, force: true }));
+  const descriptorPath = join(work, 'connection.json');
+  const connection = await createMcpConnection({ descriptorPath, version: '2.0.0', onCall: async () => ({ projects: [] }) });
+  t.after(() => connection.close());
+  const bridge = (version?: string) => {
+    const adopted: string[][] = [];
+    const client = new McpAppClient(descriptorPath, () => 'Version test', version === undefined ? undefined : { version, adopt: (tools) => adopted.push(tools.map(({ name }) => name)) });
+    t.after(() => client.close());
+    return { client, adopted };
+  };
+  const current = bridge('2.0.0');
+  assert.deepEqual(await current.client.call('list_projects', {}), { projects: [] });
+  await eventually(() => current.adopted.length === 1);
+  assert.deepEqual(current.adopted[0], mcpTools.map(({ name }) => name), 'the app’s own tools, with the first message');
+  await assert.rejects(current.client.call('import_sources', {}), /your client dropped them/);
+  await assert.rejects(current.client.call('import_sources', { kind: 'photo' }), (error: Error) => !/dropped/.test(error.message));
+
+  const older = bridge('1.9.0');
+  assert.match(String((await older.client.call('list_projects', {})).notice), /started by ImageFlow 1\.9\.0, and ImageFlow 2\.0\.0 is running/);
+  assert.equal((await older.client.call('list_templates', {})).notice, undefined, 'not with every reply');
+  await assert.rejects(older.client.call('import_sources', {}), /ImageFlow 1\.9\.0/);
+  // A bridge from before it named its version.
+  assert.match(String((await bridge().client.call('list_projects', {})).notice), /an earlier version of ImageFlow/);
 });

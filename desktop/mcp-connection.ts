@@ -5,13 +5,20 @@ import { createConnection, createServer } from 'node:net';
 import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
-import { mcpCallSchema, mcpCancelSchema, mcpCatalog, mcpCatalogCall, mcpDescriptorSchema, mcpHelloSchema, mcpLimits, mcpReplySchema, parseMcpArguments } from '../src/mcp-contract';
+import { mcpCallSchema, mcpCancelSchema, mcpCatalog, mcpCatalogCall, mcpDescriptorSchema, mcpHelloSchema, mcpLimits, mcpReplySchema, mcpToolSchemas, parseMcpArguments } from '../src/mcp-contract';
 import type { McpCatalogTool, McpDescriptor, McpToolName } from '../src/mcp-contract';
 
 type WireError = { code: string; message: string };
 type Client = { name: string };
 // One attached stdio bridge, usually one agent session. Its ID groups that session's saves in the book history.
 export type McpClientSession = { name: string; session: string };
+/** What a reply says when the bridge that asks was started by another version of ImageFlow than the one running (#232). */
+export function bridgeNotice(bridge: string | undefined, app: string) {
+  if (bridge === app) return undefined;
+  return 'This conversation\'s ImageFlow connection was started by ' + (bridge ? 'ImageFlow ' + bridge : 'an earlier version of ImageFlow') + ', and ImageFlow ' + app +
+    ' is running now. Its tools and their parameters may be listed as they were then; start a new conversation, or reconnect the ImageFlow server, to get the current ones.';
+}
+const droppedArguments = 'If you did send arguments, your client dropped them because it holds an older list of ImageFlow\'s tools: start a new conversation, or reconnect the ImageFlow server.';
 type PendingCall = { controller: AbortController; timer: ReturnType<typeof setTimeout> };
 
 export class McpConnectionError extends Error {
@@ -96,6 +103,8 @@ export async function createMcpConnection(options: {
   descriptorPath: string;
   onCall: (name: McpToolName, args: Record<string, unknown>, signal: AbortSignal, client: McpClientSession) => Promise<Record<string, unknown>>;
   onClientsChanged?: (clients: Client[]) => void;
+  /** The app's version, which the bridges' own are compared with. */
+  version?: string;
 }) {
   if (process.platform === 'win32') throw new McpConnectionError('connection-unsupported', 'The local ImageFlow bridge currently requires a Unix socket.');
   const directory = await realpath(await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'if-mcp-')));
@@ -109,6 +118,10 @@ export async function createMcpConnection(options: {
     socket.setNoDelay(true);
     const pending = new Map<string, PendingCall>();
     const session = randomUUID();
+    // The version the bridge was built with, which it names with its first message after the handshake; one from before
+    // it did never does.
+    let bridge: string | undefined;
+    const notice = () => options.version === undefined ? undefined : bridgeNotice(bridge, options.version);
     const handshake = setTimeout(() => socket.destroy(), mcpLimits.handshakeMs);
     const replyError = (error: WireError, id?: string) => {
       try { send(socket, { type: 'error', ...(id ? { id } : {}), error }, mcpLimits.responseBytes); }
@@ -152,13 +165,21 @@ export async function createMcpConnection(options: {
       if (pending.has(id)) { replyError({ code: 'duplicate-request', message: 'This request is already running.' }, id); return; }
       if (pending.size >= mcpLimits.callsPerClient) { replyError({ code: 'connection-busy', message: 'Too many ImageFlow requests are running. Wait for an earlier request to finish.' }, id); return; }
       if (call.data.name === mcpCatalogCall) {
+        const named = (call.data.args as { bridge?: unknown } | null)?.bridge;
+        if (typeof named === 'string') bridge = named.slice(0, 60);
         try { send(socket, { type: 'result', id, result: { tools: mcpCatalog() } }, mcpLimits.responseBytes); }
         catch (error) { replyError(wireError(error), id); }
         return;
       }
       let parsed;
       try { parsed = parseMcpArguments(call.data.name, call.data.args); }
-      catch (error) { replyError({ code: 'invalid-tool-arguments', message: error instanceof Error ? error.message : 'Invalid tool arguments.' }, id); return; }
+      catch (error) {
+        // No arguments at all for a tool that needs some is how an outdated tool list shows (API-018 of 25 November, evening).
+        const empty = !call.data.args || typeof call.data.args !== 'object' || !Object.keys(call.data.args).length;
+        replyError({ code: 'invalid-tool-arguments', message: [error instanceof Error ? error.message : 'Invalid tool arguments.',
+          notice() ?? (empty && Object.hasOwn(mcpToolSchemas, call.data.name) ? droppedArguments : undefined)].filter(Boolean).join('\n') }, id);
+        return;
+      }
       const controller = new AbortController();
       const timer = setTimeout(() => {
         const running = finishCall(id);
@@ -170,6 +191,9 @@ export async function createMcpConnection(options: {
       pending.set(id, { controller, timer });
       void Promise.resolve().then(() => options.onCall(parsed.name, parsed.args, controller.signal, { name: clients.get(socket)!.name, session })).then((result) => {
         if (!finishCall(id)) return;
+        // Said where a conversation starts, not with every reply.
+        const note = parsed.name === 'list_projects' || parsed.name === 'get_authoring_context' ? notice() : undefined;
+        if (note) result = { ...result, notice: [note, result.notice].filter(Boolean).join(' ') };
         try { send(socket, { type: 'result', id, result }, mcpLimits.responseBytes); }
         catch (error) { replyError(wireError(error), id); }
       }, (error: unknown) => {
@@ -243,8 +267,20 @@ export class McpAppClient {
   private connecting?: Promise<void>;
   private pending = new Map<string, Awaiting>();
 
-  /** `connected` runs after each new connection is ready, such as after ImageFlow restarted or updated. */
-  constructor(private readonly descriptorPath: string, private readonly clientName: () => string, private readonly connected?: () => void) {}
+  /** `adopt` gets the tools the app serves after each new connection, such as after ImageFlow restarted or updated. */
+  constructor(private readonly descriptorPath: string, private readonly clientName: () => string,
+    private readonly bridge?: { version: string; adopt: (tools: McpCatalogTool[]) => void }) {}
+
+  // The first message of a connection: which version this bridge is, and the tools the app serves now. An app that
+  // predates the catalog answers with an error, and the bridge keeps its own copy.
+  private announce(socket: Socket) {
+    if (!this.bridge) return;
+    const { version, adopt } = this.bridge;
+    const id = randomUUID();
+    this.pending.set(id, { resolve: ({ tools }) => { if (Array.isArray(tools)) adopt(tools as McpCatalogTool[]); }, reject: () => {} });
+    try { send(socket, { type: 'call', id, name: mcpCatalogCall, args: { bridge: version } }, mcpLimits.requestBytes); }
+    catch { this.pending.delete(id); }
+  }
 
   async connect() {
     const descriptor = await readDescriptor(this.descriptorPath);
@@ -267,7 +303,7 @@ export class McpAppClient {
         const parsed = mcpReplySchema.safeParse(message);
         if (!parsed.success) { fail(new McpConnectionError('invalid-response', 'ImageFlow returned an invalid connection message.')); return; }
         const frame = parsed.data;
-        if (frame.type === 'ready') { clearTimeout(timer); resolve(); return; }
+        if (frame.type === 'ready') { clearTimeout(timer); this.announce(socket); resolve(); return; }
         if (frame.type === 'error' && !frame.id) {
           fail(new McpConnectionError(frame.error?.code ?? 'connection-closed', frame.error?.message ?? 'The ImageFlow connection closed.'));
           return;
@@ -292,18 +328,6 @@ export class McpAppClient {
     });
     this.connecting = connecting;
     await connecting;
-    this.connected?.();
-  }
-
-  /** The tools the app serves now, or undefined from an app that predates the catalog. */
-  async catalog(signal?: AbortSignal): Promise<McpCatalogTool[] | undefined> {
-    try {
-      const result = await this.call(mcpCatalogCall as McpToolName, {}, signal);
-      return Array.isArray(result.tools) ? result.tools as McpCatalogTool[] : undefined;
-    } catch (error) {
-      if (error instanceof McpConnectionError && error.code === 'invalid-tool-arguments') return undefined;
-      throw error;
-    }
   }
 
   async call(name: McpToolName, args: Record<string, unknown>, signal?: AbortSignal) {

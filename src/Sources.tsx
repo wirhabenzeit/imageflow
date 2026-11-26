@@ -13,16 +13,17 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, KeyboardEvent } from 'react';
 import { renderOrigin } from './desktop';
 import type { ProjectSummary, SourceAction } from './desktop';
-import type { SourceUsage } from './editing';
+import type { SourcePlace, SourceUsage } from './editing';
 import { markdownToHtml } from './markdown';
 import { excerpt, fileName, photosMime, photoMime, sourceList, textMime, words } from './source-items';
 import type { SourceKind, SourceRef, SourcesTab } from './source-items';
 import { SourceManager } from './SourceManager';
 import { outOfDateNote, photoSourceName, sourceEntries, sourceFile } from './source-locations';
-import { assetPageLabels, assetUsage } from './asset-usage';
+import { asideText } from './asset-usage';
 
-function pagesText(list: { pages: string; cover?: true }[] | undefined) {
-  if (!list?.length) return 'Not placed';
+// Content that a layout change set aside is not placed, but has a place to go back to (UI-016).
+function pagesText(list: SourcePlace[] | undefined, aside?: SourcePlace[]) {
+  if (!list?.length) return ['Not placed', asideText(aside)].filter(Boolean).join(' · ');
   const interior = list.filter(({ cover }) => !cover);
   const cover = interior.length < list.length;
   if (!interior.length) return 'Cover';
@@ -77,9 +78,8 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
   const items = useMemo(() => {
     const sources = sourceList(summary, tab, view.value);
     if (!unused) return sources;
-    const retained = assetUsage(summary, assetPageLabels(summary));
-    return sources.filter(({ id }) => !retained[tab][id]?.length);
-  }, [summary, tab, unused, view.value]);
+    return sources.filter(({ id }) => !usage[tab][id]?.length);
+  }, [summary, tab, unused, usage, view.value]);
   useFilmstripAnchor(list, tab === 'photo', JSON.stringify([view.value.group, view.value.gapMinutes, items.map(({ id }) => id)]));
   const current = selected[tab];
   const visibleCurrent = items.some(({ id }) => id === current) ? current : undefined;
@@ -149,7 +149,7 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
     const common = {
       'data-id': id, role: 'option', 'aria-selected': selection.selected.includes(id),
       tabIndex: visibleCurrent === id || (!visibleCurrent && id === items[0]?.id) ? 0 : -1,
-      title: title + ' · ' + pagesText(placed) + (sourceLabel ? ' · ' + (sourceState?.outOfDate ? outOfDateNote : sourceState?.problem ?? sourceLabel) : ''),
+      title: title + ' · ' + pagesText(placed, usage.aside?.[tab][id]) + (sourceLabel ? ' · ' + (sourceState?.outOfDate ? outOfDateNote : sourceState?.problem ?? sourceLabel) : ''),
       onClick: (event: React.MouseEvent) => { selection.choose(id, event); choose({ kind: tab, id }); },
       onContextMenu: (event: React.MouseEvent<HTMLElement>) => { const ids = selection.context(id, event); choose({ kind: tab, id }); void context(ids); },
       onDoubleClick: () => quickLook({ kind: tab, id }),
@@ -183,7 +183,7 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
         {heading && <strong>{heading} </strong>}{body}
       </span>}
       {sourceLabel && <small className="source-storage">{sourceLabel}</small>}
-      <span className="source-meta">{source !== undefined && words(source) + ' words · '}{pagesText(placed)}</span>
+      <span className="source-meta">{source !== undefined && words(source) + ' words · '}{pagesText(placed, usage.aside?.[tab][id])}</span>
     </div>;
   }
   const tiles = new Map(items.map((item) => [item.id, renderItem(item)]));
@@ -292,7 +292,7 @@ export function QuickLook({ view, summary, source, usage, navigate, close, jump 
         <span>{details.filter(Boolean).join(' · ')}</span>
         <span className="ql-usage">{placed.length ? <>Placed on {placed.map(({ spread, pages }) =>
           jump && spread ? <button key={spread} className="link" onClick={() => { dialog.current?.close(); jump(spread); }}>{pages}</button>
-            : <span key={spread}>{pages}</span>)}</> : 'Not placed'}</span>
+            : <span key={spread}>{pages}</span>)}</> : pagesText(undefined, usage.aside?.[source.kind][source.id])}</span>
       </footer>
     </div>
   </dialog>;

@@ -3,6 +3,7 @@ import { makePreviewRequestSchema, previewTargets } from './preview';
 import { projectOperationNames, projectOperationsSchema, spreadReference } from './project-commands';
 import { makeInspectionSchema } from './inspection';
 import { fixtureRequestSchema } from './fixtures';
+import { capturedSchema, maxSheetPhotos, photoSheetSchema } from './photo-sheet';
 import { docTopicIds } from './doc-topics';
 import { mcpOutputSchemas } from './mcp-results';
 export { mcpOutputSchemas };
@@ -47,15 +48,25 @@ export const mcpToolSchemas = {
     view: z.enum(['summary', 'spreads', 'cover', 'sources', 'parameters', 'elements'])
       .describe('summary: book details and the spread count, without the spreads. spreads and cover: saved layout state; split sheets give restoreDefinition, not definition. sources: registry, usage and counts per kind. parameters: saved values and declarations. elements: bounds, typography and edit paths.'),
     offset: z.int().min(0).default(0).describe('Index of the first item to return, for paging.'),
-    limit: z.int().min(1).max(100).default(30).describe('Number of items to return. Continue from nextOffset.'),
+    limit: z.int().min(1).max(100).optional().describe('Number of items to return, by default 30, or every named photo. Continue from nextOffset.'),
     spread: z.string().min(1).max(256).optional().describe('Spread ID for element measurements or to filter spreads and parameters.'),
     cover: z.literal(true).optional().describe('Elements view only: measure the exterior cover.'),
     page: z.enum(['left', 'right']).optional().describe('Elements view only: facing page of a split sheet.'),
     box: z.string().min(1).max(256).optional().describe('Elements view only: measure just this box.'),
     element: z.string().min(1).max(256).optional().describe('Elements view only: measure just this element.'),
     kind: z.enum(['photo', 'text', 'file']).optional().describe('Sources view only: list just photos, texts or files. The counts per kind are always returned.'),
+    photos: z.array(z.string().min(1).max(256)).min(1).max(maxSheetPhotos).optional().describe('Sources view: just these photos, in order.'),
+    unplaced: z.literal(true).optional().describe('Sources view: just photos no page or cover shows, by capture time.'),
+    captured: capturedSchema.optional().describe('Sources view: just photos taken in this camera-local time range, by capture time.'),
+    sheet: photoSheetSchema.optional().describe('Sources view: also an image of the listed photos, uncropped, with ID and capture time. At most ' + maxSheetPhotos + '.'),
   }).superRefine((request, context) => {
     if (request.kind && request.view !== 'sources') context.addIssue({ code: 'custom', path: ['kind'], message: 'Kind filtering requires the sources view.' });
+    for (const option of ['photos', 'unplaced', 'captured', 'sheet'] as const) {
+      if (request[option] === undefined) continue;
+      if (request.view !== 'sources') context.addIssue({ code: 'custom', path: [option], message: option + ' requires the sources view.' });
+      else if (request.kind && request.kind !== 'photo') context.addIssue({ code: 'custom', path: [option], message: option + ' is about photos; use kind photo or omit it.' });
+    }
+    if (request.sheet && request.limit !== undefined && request.limit > maxSheetPhotos) context.addIssue({ code: 'custom', path: ['limit'], message: 'A sheet shows at most ' + maxSheetPhotos + ' photos.' });
     if (request.page && request.view !== 'elements') context.addIssue({ code: 'custom', message: 'Page filtering requires the elements view.' });
     if (request.view === 'elements' && (request.cover ? !!request.spread || !!request.page : !request.spread)) {
       context.addIssue({ code: 'custom', message: 'Element inspection requires one spread or cover: true.' });
@@ -111,6 +122,8 @@ export const mcpToolSchemas = {
       .describe('Only checkpoints committed with this key, such as a request whose reply was lost.'),
     cursor: z.string().uuid().optional().describe('nextCursor from the previous page.'),
     limit: z.int().min(1).max(100).default(20).describe('Number of checkpoints to return, newest first.'),
+    include: z.array(z.enum(['changes'])).max(1).optional()
+      .describe('changes: each agent checkpoint\'s full lists of changes, affected spreads, references and sources, instead of their counts.'),
   }),
   rebuild_dependencies: z.strictObject({ project }),
   list_templates: z.strictObject({}),
@@ -149,7 +162,7 @@ export const mcpTools: { name: McpToolName; title: string; description: string; 
   { name: 'get_authoring_context', title: 'Get authoring context', readOnly: true,
     description: 'Read parsed declarations, template identity and files. Before editing a template, request reference topics, examples and source files: those calls return just what they request.' },
   { name: 'inspect_book', title: 'Inspect book', readOnly: true,
-    description: 'Read saved spreads, cover, sources or parameters, or measure layout elements. Returns the revision for checks and commands.' },
+    description: 'Read saved spreads, cover, sources or parameters, see photos that are not placed, or measure layout elements. Returns the revision for checks and commands.' },
   { name: 'check_book', title: 'Check book', readOnly: true,
     description: 'Check content or the exterior cover without saving. Supports previews, type checks, drafts and synthetic fixtures.' },
   { name: 'apply_project_changes', title: 'Apply changes', readOnly: false,

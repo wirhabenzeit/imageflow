@@ -2,7 +2,6 @@
 // and sharing, not for print: trim only, screen-sized photos, and none of the print format's checks.
 export const proofDensities = [1, 4, 12] as const;
 export type ProofDensity = (typeof proofDensities)[number];
-export const isProofDensity = (value: unknown): value is ProofDensity => proofDensities.includes(value as ProofDensity);
 
 // Millimetres. The header carries the book's name, the label under each spread its pages and problems.
 export const proofSheet = { a4: { width: 297, height: 210 }, margin: 10, header: 9, label: 5, gapX: 6, gapY: 4 };

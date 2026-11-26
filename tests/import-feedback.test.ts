@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { importFeedback } from '../src/import-feedback';
+import { heicAdvice, importFeedback, isHeic } from '../src/import-feedback';
 const empty = { photos: 0, texts: 0, files: 0, skipped: 0, failed: 0 };
 test('every completed import reports useful pluralized feedback, including parameter files', () => {
   assert.equal(importFeedback(1, { ...empty, photos: 1 }), 'Imported 1 photo.');
@@ -9,6 +9,9 @@ test('every completed import reports useful pluralized feedback, including param
 });
 test('unsupported, unreadable, and empty selections have distinct explanations', () => {
   assert.equal(importFeedback(0, { ...empty, skipped: 7 }), 'No supported files were selected. 7 unsupported files skipped.');
+  assert.equal(importFeedback(0, { ...empty, skipped: 1, heic: 1 }), 'ImageFlow cannot read HEIC photos. 1 HEIC photo skipped. ' + heicAdvice);
+  assert.equal(importFeedback(1, { ...empty, photos: 1, skipped: 3, heic: 2 }), 'Imported 1 photo. 2 HEIC photos skipped. ' + heicAdvice + ' 1 unsupported file skipped.');
+  assert.ok(isHeic('/photos/IMG_0001.HEIC') && isHeic('a.heif') && !isHeic('heic.jpg'));
   assert.equal(importFeedback(0, { ...empty, failed: 1 }), 'No files imported. 1 unreadable or invalid file skipped.');
   assert.match(importFeedback(0, empty), /No files found.*hidden files are ignored/);
 });

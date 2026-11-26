@@ -167,7 +167,9 @@ type Common = {
   description?: string;
 };
 type Numeric = { min?: number; max?: number; step?: number; unit?: string };
-export type BooleanParameter = Common & { type: 'boolean'; default: boolean };
+export type BooleanParameter = Common & { type: 'boolean'; default: boolean;
+  /** On a photo box: whether the box prints its photo's caption. The app then offers the caption beside it, and switches it on for a photo's first caption. */
+  shows?: 'caption' };
 /**
  * A string. `markdown: 'inline'` lets its value carry inline formatting: `**bold**`, `*italic*` and `~~strikethrough~~`
  * (escape a literal marker with a backslash, `\*`). `ctx.Text` then shows it as `<strong>`, `<em>` and `<s>`, which

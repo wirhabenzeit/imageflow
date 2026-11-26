@@ -3,6 +3,7 @@ import type { AuthoringDiagnostic } from './authoring';
 import type { AuthoringCheckResult } from './authoring-check';
 import type { HistoryState } from './desktop';
 import type { LibraryEntry } from './library';
+import type { PhotoSheetMetadata } from './photo-sheet';
 import type { PreviewMetadata } from './preview';
 import { pageSides } from './project';
 import type { ActiveBookEditor } from './desktop';
@@ -94,6 +95,12 @@ export const imageSchema = z.union([
   }),
 ]).describe('Metadata of the returned image.');
 
+// Its cells also have pixel rectangles (x, y, width, height), as docs/mcp.md says: the output list has a size budget.
+export const photoSheetImageSchema = z.looseObject({
+  kind: z.literal('photo-sheet'), width: z.number(), height: z.number(), mimeType: imageFlags.mimeType,
+  cells: z.array(z.looseObject({ photo: z.string(), missing: z.string().optional() })),
+});
+
 const state = z.enum(['ready', 'error']);
 const superseded = z.looseObject({ revision: z.string() }).optional()
   .describe('Saved again during the check; this is the revision now.');
@@ -143,13 +150,14 @@ export const mcpOutputSchemas = {
       title: z.string(), folder: z.string(), writable: z.boolean(), revision, history,
     })),
     scope: z.string().optional(),
+    notice: z.string().optional(),
   }),
   get_authoring_context: z.looseObject({
     project: z.string(), root: z.string().describe('The book folder.'), guide: z.string(),
     revision: reportFields.revision.optional(),
     diagnostics: reportFields.diagnostics.optional(), checks: reportFields.checks.optional(), checkedRevision,
     template: z.looseObject({}).optional().describe('Parsed template declarations: the active format, every format in full (printFormats), parameters, layouts with their boxes and elements, layout families and opening spreads.'),
-    templateIdentity: templateIdentitySchema.optional(),
+    templateIdentity: templateIdentitySchema.optional(), notice: z.string().optional(),
     sources: z.record(z.string(), z.looseObject({ text: z.string(), sha256: z.string(), truncated: z.boolean() })).optional().describe('Requested includeSource files.'),
     templateFiles: z.array(z.string()).optional().describe('Files under template/. Generated folders are listed once, ending in /. Like template, topics and capabilities, left out when only docs, examples or sources were requested.'),
     topics: z.array(z.looseObject({ id: z.string(), title: z.string(), summary: z.string(), bytes: z.number() })).optional()
@@ -165,6 +173,7 @@ export const mcpOutputSchemas = {
     templateIdentity: templateIdentitySchema.optional(),
     cover: z.looseObject({}).optional().describe('Cover availability, saved artwork and resolved geometry for the active format.'),
     items: z.array(z.looseObject({})).optional(), total: z.number().optional(), nextOffset: z.number().nullable().optional(),
+    image: photoSheetImageSchema.optional(),
   }),
   check_book: z.looseObject({
     state, ...reportFields, superseded,
@@ -187,7 +196,8 @@ export const mcpOutputSchemas = {
   list_book_checkpoints: z.looseObject({
     project: z.string(),
     checkpoints: z.array(z.looseObject({
-      checkpointId: z.string(), time: z.string(), origin: z.enum(['app', 'mcp']), label: z.string(), changed: z.array(z.string()),
+      checkpointId: z.string(), time: z.string(), origin: z.enum(['app', 'mcp']), label: z.string(),
+      changed: z.array(z.string()).describe('Manifests, and files a sync pull wrote.'),
       changedOutsideBefore: z.array(z.string()).optional().describe('Manifests changed outside ImageFlow since the previous checkpoint.'),
       mcp: z.looseObject({ tool: z.string(), idempotencyKey: z.string(), requestFingerprint: z.string(), session: z.string() }).optional(),
     })).describe('Newest first.'),
@@ -244,7 +254,8 @@ const accepts: [
   Accepts<typeof diagnosticSchema, AuthoringDiagnostic>,
   Accepts<typeof checksSchema, AuthoringCheckResult['checks']>,
   Accepts<typeof imageSchema, PreviewMetadata & Pick<NonNullable<AuthoringCheckResult['image']>, 'mimeType' | 'draft' | 'fixture'>>,
+  Accepts<typeof photoSheetImageSchema, PhotoSheetMetadata & Pick<NonNullable<AuthoringCheckResult['image']>, 'mimeType'>>,
   Accepts<typeof history, HistoryState>,
   Accepts<typeof libraryEntry, LibraryEntry>,
-] = [true, true, true, true, true];
+] = [true, true, true, true, true, true];
 void accepts;

@@ -75,6 +75,8 @@ Put one of these objects in `check_book.preview.target`. Page-number targets and
 | Page by its positive book page number | `{"page":3}` |
 | Box close-up, optionally on a split page | `{"spread":"$pair","page":"right","box":"hero"}` |
 | Element close-up, optionally on a split page | `{"spread":"$pair","page":"left","element":"map"}` |
+| A layout family's picker, as the settings show it; `"page"` on a split sheet, and `"choose"` clicks the control with that label | `{"spread":"arrival","picker":true}` |
+| The exterior cover, or one of its boxes or elements | `{"cover":true}`, `{"cover":true,"box":"hero"}` |
 | Contact sheet of up to 12 spreads | `{"spreads":["arrival","$pair"],"columns":2}` |
 
 Use `side:"page"` for a format without facing pages. Close-ups and `inspect_book` element requests use `page:"left"` or `"right"` to locate a box or element on a split sheet. Contact sheets need a `preview.maxEdge` of at least 128 pixels.

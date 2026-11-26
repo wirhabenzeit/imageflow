@@ -261,7 +261,9 @@ export function pickerFamily(layouts: Layouts, id: string, families: LayoutFamil
 type Kind = 'photo' | 'text';
 type BoxState = SpreadState['boxes'][string];
 const kindOf = (box: BoxState | undefined): Kind | undefined => box?.photo ? 'photo' : box?.text ? 'text' : undefined;
-const boxKind = (layout: Layout | undefined, id: string): Kind | undefined => {
+// What a layout says of its boxes, all that deciding whether one shows its content takes.
+export type LayoutBoxes = { boxes: Record<string, { type: 'photo' | 'markdown' }> };
+const boxKind = (layout: LayoutBoxes | undefined, id: string): Kind | undefined => {
   const box = layout && own(layout.boxes, id);
   return box ? (box.type === 'photo' ? 'photo' : 'text') : undefined;
 };
@@ -274,7 +276,7 @@ export const blankPage: Layout = { label: 'Blank page', span: 'page', parameters
 export const stateLayout = (layouts: Layouts, definition: string | undefined) => definition === undefined ? blankPage : own(layouts, definition);
 
 // Box IDs whose content a layout shows.
-export function shownBoxes(state: Pick<LayoutState, 'boxes'>, layout: Layout | undefined) {
+export function shownBoxes(state: Pick<LayoutState, 'boxes'>, layout: LayoutBoxes | undefined) {
   return Object.entries(state.boxes).filter(([id, box]) => kindOf(box) && kindOf(box) === boxKind(layout, id)).map(([id]) => id);
 }
 

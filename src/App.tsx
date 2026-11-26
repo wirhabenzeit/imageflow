@@ -26,7 +26,9 @@ import { commandState } from './commands';
 import type { ActiveBookEditor, BookMenuState, TaskProgress } from './desktop';
 import { TaskStatus, taskProgress } from './TaskStatus';
 import { bookName } from './book-name';
+import { sourceEntries, sourceProvider } from './source-locations';
 import type { ImportMode } from './source-locations';
+import { showsInLightroom } from './asset-menu';
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
 import { bookLayout, gridColumns, isRenderOrigin, renderOrigin, spreadCommands, thumbsOrigin } from './desktop';
@@ -52,6 +54,7 @@ import { FamilyChoice, HeldPicker, LayoutFamilyPicker } from './LayoutFamilyPick
 import { InlineTextEditor } from './InlineTextEditor';
 import { textEditorOwner, textFits } from './inline-text';
 import { PhotoContent, TextContent } from './BoxContent';
+import { CaptionButton, captionEdit } from './CaptionField';
 import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
 import type { Placement } from './spread';
@@ -1335,7 +1338,7 @@ export function App() {
       const insert = insertionAfter(spread, project.spreads);
       if (insertionProblem(project.spreads, insert, layoutFootprint(next, template.spreads).span, template, layoutFootprint(next, template.spreads).sides)) return false;
       project.spreads.splice(insert, 0, next);
-    }, undefined, next.id);
+    }, duplicate ? 'Spread duplicated' : 'Spread added', next.id);
   }
 
   function deleteSelected(ids: string[]) {
@@ -1391,15 +1394,20 @@ export function App() {
     const photo = top.type === 'photo';
     const items: import('./desktop').ContextMenuItem[] = photo ? ['box-replace-photo',
       { command: 'box-adjust-crop', enabled: !!source && !cropBlocked(sheet, top.id, top.page) }, { command: 'box-reset-crop', enabled: !!source }] : ['box-edit-text', 'box-replace-text'];
-    if (source) items.push({ type: 'separator' }, 'asset-preview', 'box-show-assets', photo ? 'box-remove-photo' : 'box-remove-text');
+    if (source && photo) items.push('box-edit-caption');
+    const entry = source?.kind === 'photo' ? sourceEntries(summary).find(({ key }) => key === 'photo:' + source.id) : undefined;
+    if (source) items.push({ type: 'separator' }, 'asset-preview', 'box-show-assets',
+      ...(entry && sourceProvider(entry) === 'lightroom' ? [{ command: 'asset-show-lightroom' as const, enabled: showsInLightroom(summary, entry) }] : []), photo ? 'box-remove-photo' : 'box-remove-text');
     const result = await api.showContextMenu(items, { ...menuState, editing: false });
     if (!result || current.current?.id !== summary.id) return;
     switch (result.command) {
       case 'box-replace-photo': case 'box-replace-text': importFiles({ kind: photo ? 'photo' : 'markdown', target: { spread: sheet, box: top.id, page: top.page } }); break;
       case 'box-adjust-crop': startCrop(sheet, top.id, top.page); break;
       case 'box-reset-crop': changeSpreadAt(sheet, (spread) => { const box = spread.boxes[top.id]; if (box?.photo) setPlacement(box, spread.definition, centered); }, 'Crop reset', top.page); break;
+      case 'box-edit-caption': openCaption(sheet, top.id, top.page); break;
       case 'box-edit-text': openOwner(sheet, { type: 'markdown', id: top.id, page: top.page }); break;
       case 'asset-preview': if (source) setQuick(source); break;
+      case 'asset-show-lightroom': if (entry) void runSourceAction({ action: 'show-lightroom', keys: [entry.key] }); break;
       case 'box-show-assets': if (source) { choose(source); showPanel('bottom'); } break;
       case 'box-remove-photo': case 'box-remove-text': changeSpreadAt(sheet, (spread) => { spread.boxes[top.id] = boxBase(spread.boxes[top.id]); }, photo ? 'Photo removed' : 'Text removed', top.page); setCropping(undefined); break;
     }
@@ -1643,6 +1651,31 @@ export function App() {
     deselectPhoto();
     select(spread, false, owner.page);
     openEditing({ spread, key: ownerKey(spread, owner.id, owner.page), owner });
+  }
+  // Edit Caption… opens the box's own editor with its caption field in focus: the selected photo's toolbar, or the
+  // popover where the photo cannot be selected (UI-014).
+  const [captionRequest, setCaptionRequest] = useState<{ spread: string; box: string; page?: PageSide; at: number }>();
+  const captionAsked = (spread: string, box: string, page?: PageSide) =>
+    captionRequest && captionRequest.spread === spread && captionRequest.box === box && captionRequest.page === page ? captionRequest.at : undefined;
+  // A request belongs to the editor it opened: once another box or nothing is edited, a later return to the box opens
+  // its caption only when asked again.
+  const editedBox = cropping ? [cropping.spread, cropping.box, cropping.page] : editing?.owner?.type === 'photo' ? [editing.spread, editing.owner.id, editing.page] : undefined;
+  useEffect(() => {
+    if (captionRequest && (!editedBox || captionAsked(editedBox[0]!, editedBox[1]!, editedBox[2] as PageSide | undefined) === undefined)) setCaptionRequest(undefined);
+  }, [JSON.stringify(editedBox), captionRequest]);
+  function openCaption(spread: string, box: string, page?: PageSide) {
+    const ready = readyId.current === summary?.id;
+    openOwner(spread, { type: 'photo', id: box, page });
+    if (ready) setCaptionRequest((last) => ({ spread, box, page, at: (last?.at ?? 0) + 1 }));
+  }
+  // Saves the caption of the photo in a box. `layout` is the one the box was shown in: another has other settings.
+  function saveCaption(at: { spread: string; box: string; page?: PageSide; layout: string }, photo: string, caption: string) {
+    if (!summary) return;
+    const parameters = template?.spreads[at.layout]?.boxes[at.box]?.parameters;
+    void edit(captionEdit(summary, photo, caption, parameters && { parameters, find: ({ project }) => {
+      const state = editableSpread(project.spreads.find(({ id }) => id === at.spread), at.page);
+      return state?.definition === at.layout ? state.boxes[at.box] : undefined;
+    } }), 'Caption updated');
   }
   // Opens the popover of a node the template marked, such as a ctx.Text heading, from the sidebar's list.
   function openTarget(target: Target, panel = false) {
@@ -1988,8 +2021,10 @@ export function App() {
   }
 
   const coverBoxIds = useMemo(() => coverGeometry && coverDefinition ? Object.keys(coverDefinition.boxes) : undefined, [coverGeometry, coverDefinition]);
-  const usage = useMemo(() => summary ? assetUsage(summary, pageLabels, coverBoxIds ?? null) : { photo: {}, text: {} },
-    [summary, pageLabels.join(), coverBoxIds]);
+  const usage = useMemo(() => summary ? assetUsage(summary, pageLabels, coverBoxIds ?? null, template?.spreads) : { photo: {}, text: {} },
+    [summary, pageLabels.join(), coverBoxIds, template?.spreads]);
+  const layoutBoxes = useMemo(() => template && Object.fromEntries(Object.entries(template.spreads).map(([id, { boxes }]) =>
+    [id, { boxes: Object.fromEntries(Object.entries(boxes).map(([box, { type }]) => [box, { type }])) }])), [template?.spreads]);
   // The box a Book check finding is about stays outlined while it is looked at.
   const foundBox = found && found.spread === spread?.id ? geometry?.boxes.find(({ spread: owner, id, page }) => owner === found.spread && id === found.box && page === found.page) : undefined;
   const activeBox = dropTarget ? geometry?.boxes.find(({ spread, id, page }) => spread + ':' + (page ? page + ':' : '') + id === dropTarget) :
@@ -2030,7 +2065,7 @@ export function App() {
     writable, busy: !!busy || exporting || !!reload || !!agentWorking, history: summary?.history,
     canExport, canProof, canSwapPages: !coverActive && !!spread && !!template && hasFacingPages(template.format) && sequence?.spreads[index]?.span === 'spread' && canSwapPages(spread, template.spreads),
     sidebar: !panels.leftHidden, inspector: !panels.rightHidden, sources: !panels.bottomHidden, guides: showGuides, layout, zoom, selectedSpread: spreadId, photoView: photoView.value, selectionCount: selectedSpreads.length,
-    saving, activeEditor, view: coverGeometry ? (coverActive ? 'cover' : 'content') : undefined, coverBoxIds,
+    saving, activeEditor, view: coverGeometry ? (coverActive ? 'cover' : 'content') : undefined, coverBoxIds, layoutBoxes,
     pageLabels: Object.fromEntries(spreads.map(({ id }, i) => [id, pageLabels[i]])) };
   const menuKey = JSON.stringify(menuState);
   useEffect(() => { void api?.setBookMenuState(menuState); }, [api, menuKey]);
@@ -2147,6 +2182,7 @@ export function App() {
     if (action === 'preview') setQuick(source);
     else { choose(source); showPanel('bottom'); }
   });
+  const editInspectorCaption = useLiveCallback((box: string) => { if (spread) { reveal(spread.id); openCaption(spread.id, box, selectedPage); } });
   const targetsKey = JSON.stringify(inspectorTargets(geometry?.targets ?? [], spread?.id, selectedPage));
   const panelTargets: InspectorTarget[] = useMemo(() => JSON.parse(targetsKey), [targetsKey]);
   const targetsStale = !!spread && shownLayouts.current[spread.id] !== layoutOf(spread);
@@ -2160,7 +2196,7 @@ export function App() {
         usage={usage} quickLook={quickSource} focus={focusBox}
         targets={panelTargets}
         open={openInspectorOwner}
-        openTarget={openInspectorTarget} place={placeInspector} chooseLayout={chooseInspectorLayout} showSource={showInspectorSource}
+        openTarget={openInspectorTarget} place={placeInspector} chooseLayout={chooseInspectorLayout} showSource={showInspectorSource} editCaption={editInspectorCaption}
         holdPreviews={!render && !!lastReady} targetsStale={targetsStale}
         familyPicker={template && layoutFamily && (template.layoutFamilies?.[layoutFamily]?.picker?.choice
           ? <FamilyChoice template={template} spread={spread} page={selectedPage} family={layoutFamily} readOnly={!writable}
@@ -2433,6 +2469,9 @@ export function App() {
                     state.boxes[cropping.box].params[key] = value;
                   }, cropBox.parameters[key].label + ' updated')} />
                 </div>}
+                {cropPhoto && summary.photoIndex[cropPhoto] && <CaptionButton key={cropPhoto} summary={summary} photo={cropPhoto} usage={usage}
+                  request={captionAsked(cropping.spread, cropping.box, cropping.page)}
+                  save={(text) => saveCaption({ spread: cropping.spread, box: cropping.box, page: cropping.page, layout: cropping.layout }, cropPhoto, text)} />}
                 {cropAttached.length > 0 && <div className="crop-params">
                   <MarkedFields compact project={summary.project} spread={spreads.find(({ id }) => id === cropping.spread)!} page={cropping.page} template={template!}
                     edits={cropAttached} edit={(change, notice) => edit((files) => {
@@ -2460,6 +2499,9 @@ export function App() {
 
                 {editing.owner?.type === 'photo' && <PhotoContent summary={summary} spread={scopeSpread(inline.spread, inline.target.page)!} box={editing.owner.id}
                   label={ownerLabel(inline.spread, editing.owner)} change={changeSpreadInline} inspect={choose} values={!!boxSource(editing.spread, editing.owner.id, inline.target.page)}
+                  caption={{ usage, done: closeEditor, autoFocus: captionAsked(editing.spread, editing.owner.id, inline.target.page) !== undefined,
+                    save: (photo, text) => saveCaption({ spread: inline.spread.id, box: editing.owner!.id, page: inline.target.page,
+                      layout: scopeSpread(inline.spread, inline.target.page)?.definition ?? '' }, photo, text) }}
                   adjustCrop={cropBlocked(editing.spread, editing.owner.id, inline.target.page) ? undefined : () => startCrop(editing.spread, editing.owner!.id, inline.target.page)} />}
                 {editing.owner?.type === 'markdown' && <TextContent compact quickLook={setQuick} failure={setError} summary={summary} spread={scopeSpread(inline.spread, inline.target.page)!} box={editing.owner.id}
                   label={ownerLabel(inline.spread, editing.owner)} change={changeSpreadInline} inspect={choose}
@@ -2483,6 +2525,11 @@ export function App() {
       {summary && (!panels.rightHidden ? <PanelDivider side="right" size={panels.right} resize={resizePanel} onResizing={setResizing} /> : <div />)}
       <div className={'inspector-host' + (panels.rightHidden ? ' is-collapsed' : '')} inert={panels.rightHidden} aria-hidden={panels.rightHidden || !summary}>
         {summary && coverActive ? <CoverInspector focus={focusBox} summary={summary} cover={coverState} layouts={coverLayouts} writable={canChangeBook && canvasReady}
+          caption={{ usage, save: (box, photo, text) => {
+            const parameters = coverDefinition?.boxes[box]?.parameters, layout = coverState?.definition;
+            void edit(captionEdit(summary, photo, text, parameters && { parameters,
+              find: ({ project }) => project.cover?.definition === layout ? project.cover?.boxes[box] : undefined }), 'Caption updated');
+          } }}
           choose={(definition) => {
             if (!Object.hasOwn(coverLayouts, definition)) return;
             void edit(({ project }) => {
