@@ -192,6 +192,15 @@ try {
   await rerendered(() => replace.click());
   assert.deepEqual((await settlements()).boxes.hero, { photo: replacement, params: {} });
   await w.waitForFunction(() => !document.querySelector('.crop-editor'));
+  // Backspace on the selected photo removes it as Remove photo does, in one Undo step (UI-020).
+  await openBox('Right photo');
+  const kept2 = (await settlements()).boxes.second.photo;
+  await rerendered(() => w.keyboard.press('Backspace'));
+  await w.waitForFunction(() => !document.querySelector('.crop-editor'));
+  assert.equal((await settlements()).boxes.second.photo, undefined);
+  assert.equal((await settlements()).definition, 'pair');
+  await rerendered(() => button('Undo').click());
+  assert.equal((await settlements()).boxes.second.photo, kept2);
   await openBox('Right photo');
   await rerendered(() => popupAction(app, w, w.locator('.crop-more .action-menu-trigger'), 'Remove photo'));
 

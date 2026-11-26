@@ -137,6 +137,19 @@ export function CropEditor({ frame, photo, src, placement: saved, inchesPerPixel
     // The nested menu or action panel handles Escape first, before it can end crop editing.
     if (event.key === 'Escape' && toolbar.current?.querySelector('.crop-actions [role="dialog"], .crop-actions details[open]')) return;
     const control = (event.target as HTMLElement).closest?.('button, summary, input, select, textarea, a[href], [role="radio"], [role="option"], [contenteditable]');
+    // A button has no use for Backspace or Delete: they remove the photo from a button that selected it too, such as
+    // the Inspector's Edit button (UI-020). Text fields, lists and menus keep them.
+    const removing = (event.key === 'Backspace' || event.key === 'Delete') && remove && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
+    if (removing && (!control || control.matches('button, summary')) && !control?.closest('[role="dialog"], [role="menu"], [role="listbox"]')) {
+      // A crop change still waiting to be saved is dropped rather than saved first: the removal is one Undo step, and
+      // undoing it brings back the crop the box had.
+      clearTimeout(pending.current);
+      pending.current = undefined;
+      event.preventDefault();
+      event.stopPropagation();
+      remove!();
+      return;
+    }
     if (control) {
       if (event.key === 'Escape' && toolbar.current?.contains(control)) {
         event.preventDefault();
@@ -148,13 +161,7 @@ export function CropEditor({ frame, photo, src, placement: saved, inchesPerPixel
     const step = event.shiftKey ? 0.05 : 0.01;
     const nudge = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[event.key];
     if (event.key === 'Escape' || event.key === 'Enter') finish();
-    else if ((event.key === 'Backspace' || event.key === 'Delete') && remove && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
-      // A crop change still waiting to be saved is dropped rather than saved first: the removal is one Undo step, and
-      // undoing it brings back the crop the box had.
-      clearTimeout(pending.current);
-      pending.current = undefined;
-      remove();
-    } else if (event.key === '+' || event.key === '=') {
+    else if (event.key === '+' || event.key === '=') {
       zoomAround(1.1);
       commitSoon();
     } else if (event.key === '-') {
