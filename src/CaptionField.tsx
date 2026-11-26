@@ -17,13 +17,16 @@ export type CaptionEditing = { edit: (change: Edit, notice?: string) => void; us
 export const captionSwitch = (parameters: Parameters | undefined) =>
   Object.keys(parameters ?? {}).find((key) => { const param = parameters![key]; return param.type === 'boolean' && param.shows === 'caption'; });
 
-type CaptionLayouts = { spreads: Record<string, { boxes: Record<string, { parameters?: Parameters }> }>;
-  coverLayouts?: Record<string, { boxes: Record<string, { parameters?: Parameters }> }> };
+type CaptionBoxes = { boxes: Record<string, { type?: string; parameters?: Parameters }> };
+type CaptionLayouts = { spreads: Record<string, CaptionBoxes>; coverLayouts?: Record<string, CaptionBoxes> };
 
-/** Whether a template says which photo boxes print captions: it does once any box, spread or cover, declares `shows: 'caption'`. */
+/**
+ * Whether a template says which photo boxes print captions: it does once any photo box, spread or cover, declares
+ * `shows: 'caption'`. The same declaration on a text box says nothing about photos.
+ */
 export const declaresCaptionBoxes = (template: CaptionLayouts | undefined) => !!template &&
   [...Object.values(template.spreads), ...Object.values(template.coverLayouts ?? {})]
-    .some(({ boxes }) => Object.values(boxes).some(({ parameters }) => captionSwitch(parameters) !== undefined));
+    .some(({ boxes }) => Object.values(boxes).some(({ type, parameters }) => type !== 'markdown' && captionSwitch(parameters) !== undefined));
 
 /**
  * Whether a photo box prints its photo's caption (UI-017): true or false in a template that says so for its boxes
@@ -107,7 +110,13 @@ export function CaptionButton({ summary, photo, usage, save, request, printed }:
 }) {
   const root = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(request !== undefined);
-  const close = () => { setOpen(false); root.current?.querySelector('button')?.focus(); };
+  // Focus goes back to Caption…, or, at a box without one, to the toolbar's first other control, as the panel goes away.
+  const close = () => {
+    const own = root.current?.querySelector<HTMLElement>('button[aria-expanded]');
+    const other = [...root.current?.parentElement?.querySelectorAll<HTMLElement>('button') ?? []].find((button) => !root.current!.contains(button));
+    setOpen(false);
+    (own ?? other)?.focus();
+  };
   useEffect(() => { if (request !== undefined) setOpen(true); }, [request]);
   useEffect(() => {
     if (!open) return;

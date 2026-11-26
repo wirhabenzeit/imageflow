@@ -51,6 +51,8 @@ test('a template that says which boxes print captions offers Caption… only on 
   assert.equal(declaresCaptionBoxes(layouts(plain)), false, 'no box declares shows');
   assert.equal(declaresCaptionBoxes(layouts(parameters)), true);
   assert.equal(declaresCaptionBoxes(layouts(plain, parameters)), true, 'a cover box counts');
+  assert.equal(declaresCaptionBoxes({ spreads: { story: { boxes: { text: { type: 'markdown', parameters } } } } }), false,
+    'shows on a text box says nothing about photos');
   assert.equal(printsCaption(true, parameters), true);
   assert.equal(printsCaption(true, plain), false, 'a box without the switch, in a template that has it elsewhere');
   assert.equal(printsCaption(true, undefined), false);
