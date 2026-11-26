@@ -35,7 +35,7 @@ const Glyph = ({ kind }: { kind: SourceKind }) => <span aria-hidden="true">{kind
 const DocumentIcon = ({ src, kind }: { src?: string; kind: SourceKind }) => src ? <img src={src} alt="" draggable={false} /> : <Glyph kind={kind} />;
 
 export function SourceManager({ view, api, summary, adopt, disabled = false, quickLook, embedded = false, tabs, importFiles, fileTypes = [] }: {
-  view: PhotoViewControl; api: DesktopApi; summary: ProjectSummary; adopt: (summary: ProjectSummary) => void; disabled?: boolean; quickLook?: (source: SourceRef) => void;
+  view: PhotoViewControl; api: DesktopApi; summary: ProjectSummary; adopt: (summary: ProjectSummary) => void; disabled?: boolean; quickLook?: (source: SourceRef, shown?: readonly string[]) => void;
   embedded?: boolean; tabs?: ReactNode;
   // Imports dropped files, or asks for files to import when none are given. The book window routes this through its own
   // import queue; the Assets window leaves it unset and imports through the asset actions.
@@ -47,6 +47,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   // What a long action of this window reports while it runs, such as Copy into Book rendering Lightroom originals.
   const [progress, setProgress] = useState<TaskProgress>();
   const busyRef = useRef(false);
+  const shownEntries = useRef<{ kind: string; id: string }[]>([]);
   useEffect(() => api.onProgress((value) => { if (busyRef.current) { const task = taskProgress(value); setProgress(task.text ? task : undefined); } }), [api]);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -113,6 +114,9 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
     if (importFiles) importFiles(files);
     else void act({ action: 'import', paths: files && api.pathsForFiles(files) });
   };
+  // Quick Look steps through the list as it is filtered here: the IDs of the shown assets of the opened one's kind.
+  const look = (item: { kind: string; id: string }) => quickLook?.({ kind: item.kind === 'photo' ? 'photo' : 'text', id: item.id },
+    shownEntries.current.filter((entry) => entry.kind === item.kind).map(({ id }) => id));
   async function menu(keys: string[]) {
     if (busy || disabled || !keys.length) return;
     const result = await api.showContextMenu(assetMenu(summary, keys, true), assetMenuState(busy || disabled));
@@ -120,7 +124,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
     if (result.command === 'asset-preview') {
       const item = sourceEntries(summary).find(({ key }) => key === keys[0]);
       if (item?.kind === 'file') await act({ action: 'preview', keys });
-      else if (item) quickLook?.({ kind: item.kind === 'photo' ? 'photo' : 'text', id: item.id });
+      else if (item) look(item);
     } else if (result.command === 'asset-rename') setRenaming(keys[0]);
     else if (result.command === 'asset-jump') await act({ action: 'jump', spread: result.value });
     else if (result.command in assetActions) await act({ action: assetActions[result.command as keyof typeof assetActions], keys });
@@ -132,15 +136,22 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const fitted = fitFilter(filter, sources);
   useEffect(() => { if (fitted !== filter) setFilter(fitted); }, [fitted]);
   const photoSources = kind === 'all' || kind === 'photo' ? orderedSources(entries.filter((entry) => entry.kind === 'photo').map(sourceProvider)) : [];
-  const passes = photoFilterPredicate(fitted);
+  // The pills are the sources of what the chosen Kind lists: texts and files are never a provider's, and a book whose
+  // photos are all one provider's is not mixed for its photos. A pill of a source the Kind does not list rests, like
+  // a provider's filters while its pill is off: kept, and in effect again when the Kind lists it.
+  const pillSources = kind === 'all' ? sources : orderedSources(entries.filter((entry) => entry.kind === kind).map(sourceProvider));
+  const inEffect: typeof fitted = { ...fitted, sources: pillSources.length < 2 ? [] : (fitted.sources ?? []).filter((source) => pillSources.includes(source)) };
+  const passes = photoFilterPredicate(inEffect);
   const shown = entries.filter((entry) => (kind === 'all' || kind === entry.kind) &&
     passes({ provider: sourceProvider(entry), extra: entry.kind === 'photo' ? summary.photoExtra?.[entry.id] : undefined, used: !!placements(entry).length }) &&
     (!attention || (unavailable(entry.key) && !summary.sources?.[entry.key]?.pending) || summary.sources?.[entry.key]?.outOfDate) &&
     entry.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
+  shownEntries.current = shown;
   const kinds = { photo: 'Photos', markdown: 'Markdown', file: 'Files' } as const;
   const chips: ChipItem[] = [
     ...(kind !== 'all' ? [{ key: 'kind', label: kinds[kind as keyof typeof kinds], title: 'Only ' + kinds[kind as keyof typeof kinds].toLowerCase() + (kind === 'markdown' ? ' texts' : ''), remove: () => setKind('all') }] : []),
-    ...chipItems(fitted, setFilter, shownProviders(fitted, photoSources), 'assets'),
+    ...chipItems(inEffect, (next) => setFilter({ ...next, sources: fitted.sources }), shownProviders(inEffect, photoSources), 'assets').map((chip) =>
+      chip.key === 'sources' ? { ...chip, remove: () => setFilter({ ...fitted, sources: (fitted.sources ?? []).filter((source) => !pillSources.includes(source)) }) } : chip),
     ...(attention ? [{ key: 'attention', label: 'Needs attention', title: 'Only assets that need attention', remove: () => setAttention(false) }] : []),
   ];
   const groups = photoGroups(summary, shown.filter((entry) => entry.kind === 'photo').map(({ id }) => id), view.value);
@@ -157,7 +168,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const preview = () => {
     const item = entries.find(({ key }) => key === list.selected[0]);
     if (item?.kind === 'file') void act({ action: 'preview', key: item.key });
-    else if (item) quickLook?.({ kind: item.kind === 'photo' ? 'photo' : 'text', id: item.id });
+    else if (item) look(item);
   };
   return <section className={embedded ? 'sources source-manager source-manager-embedded' : 'source-manager'} aria-label={embedded ? 'Sources' : 'Assets'} aria-busy={busy || disabled}
     onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }}
@@ -171,7 +182,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
       {!embedded && <PhotoViewMenu view={view.value} update={view.update} custom={view.custom} providers={bookPhotoProviders(summary)} />}
       {/* At the top of the Assets window the popover opens downwards; in the bottom panel upwards, as the strip's. The
           bottom panel's list holds only files, so it has no Kind. */}
-      <FilterPopover filter={fitted} change={setFilter} sources={sources} providers={photoSources} noun="assets" direction={embedded ? 'up' : 'down'}
+      <FilterPopover filter={fitted} change={setFilter} sources={pillSources} providers={photoSources} noun="assets" direction={embedded ? 'up' : 'down'}
         extraActive={kind !== 'all' || attention} clearExtra={() => { setKind('all'); setAttention(false); }}
         lead={!embedded && <section className="pf-section" aria-label="Kind"><h3 className="pf-heading">Kind</h3>
           <Choice label="Kind" value={kind} options={[['all', 'All'], ['photo', 'Photos'], ['markdown', 'Markdown'], ['file', 'Files']]} choose={setKind} /></section>}

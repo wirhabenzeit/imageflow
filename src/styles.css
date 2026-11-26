@@ -1338,6 +1338,11 @@ span.source-origin > img.source-origin-app { width: 16px; height: 16px; object-f
 .photo-filter-popover { position: absolute; right: 0; z-index: 40; width: 340px; max-width: calc(100vw - 24px); max-height: min(70vh, 520px); overflow: auto; box-sizing: border-box;
   padding: 4px 12px 10px; border: 1px solid var(--control-border); border-radius: 9px; background: var(--popup-surface); color: var(--text);
   box-shadow: 0 8px 28px #00000026, 0 1px 3px var(--subtle-hover); white-space: normal; text-align: left; font: 12px/1.4 var(--ui-font); }
+/* In the strip Filter is not the last button, so its popover hangs from the bar's end, not the button's: in a narrow
+   strip it then has the bar's whole width before it reaches the left edge. */
+.sources-bar { position: relative; }
+.sources-bar > .photo-filter { position: static; }
+.sources-bar .photo-filter-popover { right: 12px; max-width: calc(100% - 24px); }
 /* The strip is under the canvas, so the popover opens upwards over it; at the top of the Assets window downwards. */
 .photo-filter-up { bottom: calc(100% + 6px); }
 .photo-filter-down { top: calc(100% + 6px); }

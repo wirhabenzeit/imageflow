@@ -7,7 +7,7 @@ import type { PhotoViewControl } from './PhotoViewMenu';
 import { photoGroups, photoDate, captureLabel, captureFact, shownMarks } from './photo-view';
 import { bookPhotoMarks, bookPhotoProviders } from './source-properties';
 import type { PhotoFilter } from './source-properties';
-import { filterActive, filteredSourceList, quickLookList, shownProviders, stripSources } from './photo-filter';
+import { filterActive, filterChips, filteredSourceList, quickLookList, shownProviders, stripSources } from './photo-filter';
 import type { StripFilters } from './photo-filter';
 import { FilterChips, FilterPopover, chipItems } from './PhotoFilter';
 import { SourceMarks, rejectedMark } from './SourceMarks';
@@ -95,7 +95,8 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
   const items = useMemo(() => filteredSourceList(summary, tab, view.value, filter, usage), [summary, tab, filter, usage, view.value]);
   const counts = useMemo(() => filteredCounts(summary, filters, usage), [summary, filters, usage]);
   const sources = useMemo(() => stripSources(summary, tab), [summary, tab]);
-  const unused = filter.placement === 'unused';
+  // Groups count `unused` only while that is all the filter asks: with a rating besides, what is shown is fewer than the unused.
+  const unused = filter.placement === 'unused' && filterChips(filter, shownProviders(filter, stripSources(summary, tab))).length === 1;
   useFilmstripAnchor(list, tab === 'photo', JSON.stringify([view.value.group, view.value.gapMinutes, items.map(({ id }) => id)]));
   const current = selected[tab];
   const visibleCurrent = items.some(({ id }) => id === current) ? current : undefined;

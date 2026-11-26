@@ -91,6 +91,9 @@ export function useFilmstripListAnchor(ref: RefObject<HTMLDivElement | null>, en
         node.scrollLeft = photo ? left(photo) + (id === before.center.id ? before.center.fraction : .5) * photo.offsetWidth - node.clientWidth / 2 : 0;
       }
     }
+    // A list without photos (a filter nothing passes) keeps what was seen before it, so the strip is back where it was
+    // when the filter is relaxed.
+    if (!ids.length) return;
     const remember = () => {
       const middle = node.scrollLeft + node.clientWidth / 2;
       let center: { id: string; fraction: number } | undefined, nearest = Infinity;

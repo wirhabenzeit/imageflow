@@ -15,6 +15,8 @@ export function AssetsWindow({ api }: { api?: DesktopApi }) {
   const onCommand = useEffectEvent((id: string) => { if (isPhotoViewCommand(id)) photoView.command(id); });
   useEffect(() => api?.onCommand(onCommand), [api]);
   const [quick, setQuick] = useState<SourceRef>();
+  // The assets Manage Assets showed under its filter when Quick Look opened: what it steps through.
+  const [quickIds, setQuickIds] = useState<readonly string[]>();
   const [error, setError] = useState('');
   useEffect(() => { if (summary) document.title = 'Assets — ' + bookName(summary.folder); }, [summary?.folder]);
   const [refreshing, setRefreshing] = useState(false);
@@ -49,11 +51,12 @@ export function AssetsWindow({ api }: { api?: DesktopApi }) {
     window.addEventListener('focus', onFocus);
     return () => { active = false; stop(); window.removeEventListener('focus', onFocus); };
   }, [api]);
+  const quickList = (source: SourceRef) => { const all = summary ? sourceList(summary, source.kind, photoView.value) : []; return quickIds?.includes(source.id) ? all.filter(({ id }) => quickIds.includes(id)) : all; };
   return <main className="studio assets-window">
-    {summary && api ? <SourceManager view={photoView} api={api} summary={summary} adopt={setSummary} disabled={refreshing} quickLook={setQuick} /> : !error && <p className="muted">Loading assets…</p>}
-    {summary && quick && <QuickLook view={photoView.value} summary={summary} source={quick} usage={shownAssetUsage(summary)}
+    {summary && api ? <SourceManager view={photoView} api={api} summary={summary} adopt={setSummary} disabled={refreshing} quickLook={(source, shown) => { setQuick(source); setQuickIds(shown); }} /> : !error && <p className="muted">Loading assets…</p>}
+    {summary && quick && <QuickLook view={photoView.value} summary={summary} source={quick} list={quickList(quick)} usage={shownAssetUsage(summary)}
       close={() => setQuick(undefined)} navigate={(step) => {
-        const ids = sourceList(summary, quick.kind, photoView.value).map(({ id }) => id);
+        const ids = quickList(quick).map(({ id }) => id);
         const next = ids[ids.indexOf(quick.id) + step]; if (next) setQuick({ ...quick, id: next });
       }} />}
     {photoView.dialog}
