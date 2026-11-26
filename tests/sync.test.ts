@@ -3146,6 +3146,31 @@ coreEach('Download counts the files and previews it brings, and one that is canc
   assert.deepEqual(seen, Array.from({ length: total + 1 }, (_, done) => [done, total]));
 });
 
+coreEach('Download fetches a few files and previews at once, not one after another (#304)', async (t) => {
+  const { a, b, remote } = await world(t);
+  await sync(a, remote);
+  const [tip] = await tips(remote, a);
+  await use(b);
+  const destination = join(b.base, 'Book.imageflow');
+  // Each transfer waits a little, as a request to iCloud does, so transfers that run together overlap.
+  let running = 0, most = 0;
+  const slow = <T>(transfer: () => Promise<T>) => async () => {
+    running++;
+    most = Math.max(most, running);
+    try { await new Promise((resolve) => setTimeout(resolve, 20)); return await transfer(); } finally { running--; }
+  };
+  const proxied = new Proxy(remote, { get(target, name, receiver) {
+    const value = Reflect.get(target, name, receiver) as unknown;
+    if (name === 'downloadBlob') return (key: string, file: string, options?: { signal?: AbortSignal }) => slow(() => target.downloadBlob(key, file, options))();
+    if (name === 'getBlob') return (key: string, options?: { signal?: AbortSignal }) => slow(() => target.getBlob(key, options))();
+    return typeof value === 'function' ? value.bind(target) : value;
+  } });
+  await cloneFromRemote({ remote: proxied, tip, destination, remoteId: await remote.remoteId() });
+  assert.ok(most > 1, 'transfers overlapped: ' + most);
+  assert.ok(most <= 6, 'at most six at once: ' + most);
+  assert.equal(await captureBookStateRevision(destination), tip.bookStateRevision);
+});
+
 test('downloads run one at a time, are cancelled before or during their turn, and end with the app', async () => {
   let changes = 0;
   const downloads = new BookDownloads(() => { changes++; }, 0);
