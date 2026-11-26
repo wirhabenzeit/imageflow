@@ -111,15 +111,15 @@ export type UploadedPreviews = Map<string, { sha256: string; ext: '.jpg' | '.png
 export const aheadKey = (bookId: string, digest: string) => bookId + '/' + digest;
 
 /**
- * How many blobs go up at once. Each iCloud upload has over a second of fixed cost, so one at a time the previews of a
- * book of 1200 photos took more than half an hour, hardly any of it spent sending.
+ * How many blobs go up or come down at once. Each iCloud request has over a second of fixed cost, so one at a time the
+ * previews of a book of 1200 photos took more than half an hour to upload, hardly any of it spent sending (#304).
  */
-const uploadsAtOnce = 6;
+const transfersAtOnce = 6;
 /** Runs `task` for every item, a few at once. After a failure no further one starts; it rejects once those running ended. */
 async function eachAtOnce<T>(items: readonly T[], task: (item: T) => Promise<void>) {
   let next = 0;
   let failure: { error: unknown } | undefined;
-  await Promise.all(Array.from({ length: Math.min(uploadsAtOnce, items.length) }, async () => {
+  await Promise.all(Array.from({ length: Math.min(transfersAtOnce, items.length) }, async () => {
     while (!failure && next < items.length) {
       const item = items[next++];
       try { await task(item); } catch (error) { failure ??= { error }; }
@@ -282,16 +282,21 @@ async function missingProxies(blob: StateBlob, photos: PhotoIndex, here: Record<
   return [...missing];
 }
 
-/** Downloads proxies and checks each against its own SHA-256 before any is stored; `each` is told after every one. */
+/**
+ * Downloads proxies, a few at once, and checks each against its own SHA-256 before any is stored; `each` is told after
+ * every one.
+ */
 async function fetchProxies(remote: SyncRemote, bookId: string, wanted: Awaited<ReturnType<typeof missingProxies>>, { signal, each }: { signal?: AbortSignal; each?: () => void } = {}) {
   const fetched: { digest: string; bytes: Uint8Array }[] = [];
-  for (const [digest, entry] of wanted) {
+  await eachAtOnce(wanted, async ([digest, entry]) => {
     signal?.throwIfAborted();
     const bytes = await remote.getBlob(proxyBlobKey(bookId, digest, entry.ext), { signal });
     if (!bytes || sha(bytes) !== entry.sha256) throw new RemoteSyncingError('a photo preview has not fully arrived yet.');
+    // One that ends after a cancel is not counted: the count stops where it was cancelled.
+    signal?.throwIfAborted();
     fetched.push({ digest, bytes });
     each?.();
-  }
+  });
   return fetched;
 }
 async function storeProxies(fetched: { digest: string; bytes: Uint8Array }[]) {
@@ -1409,15 +1414,20 @@ export async function cloneFromRemote({ remote, tip, destination, remoteId, prog
   try {
     await mkdir(staging);
     await mkdir(join(staging, 'photos'));
-    for (const [path, digest] of Object.entries(blob.content)) {
+    // Folders are made one file after the other, so two downloads never make the same one; the files then come down
+    // a few at once. A failed or cancelled download lets the others end before the staging folder goes, so none of
+    // them writes into it afterwards.
+    signal?.throwIfAborted();
+    const files: [target: string, digest: string][] = [];
+    for (const [path, digest] of Object.entries(blob.content)) files.push([await bookPath(staging, path), digest]);
+    await eachAtOnce(files, async ([target, digest]) => {
       signal?.throwIfAborted();
-      const target = await bookPath(staging, path);
-      // The transfer itself is waited for, also when it is cancelled, so it writes nothing once the staging folder goes.
       if (!await remote.downloadBlob(contentBlobKey(tip.bookId, digest), target, { signal }) || await fileDigest(target) !== digest) {
         throw new RemoteSyncingError('a file of this book has not fully arrived yet.');
       }
+      signal?.throwIfAborted();
       each();
-    }
+    });
     await writeFile(join(staging, 'project.json'), JSON.stringify(project, null, 2) + '\n', { flag: 'wx' });
     await writeFile(join(staging, 'photos.json'), JSON.stringify(photos, null, 2) + '\n', { flag: 'wx' });
     facts = photoFacts(blob.assetsMeta.assets, photos);
