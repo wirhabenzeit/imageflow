@@ -35,7 +35,7 @@ These flows can be tested in the editor now. Page-level MCP mutation commands ar
 - **Import:** use **Assets → Import…**, the Sources strip's **Import** menu, or drop JPEG, PNG or WebP files onto the strip or a photo box. HEIC photos, as iPhones take them, cannot be imported: export them as JPEG first (in Photos, **File → Export**), or bring them in through Lightroom Classic.
 - **Place:** drag a photo from the strip onto a photo box. Drag an unselected placed photo onto another box to swap them.
 - **Crop:** click a placed photo, then drag to reposition it. Pinch, Control-scroll or use the toolbar slider to zoom. Each gesture is one undoable edit.
-- **Caption:** select a placed photo and choose **Caption…**, or right-click it and choose **Edit Caption…**. The caption belongs to the photo, wherever it is placed; whether a page prints it is a setting of the template.
+- **Caption:** click a caption printed on the page to type it there (an empty one shows "Add caption" while **Show caption** is on), select a placed photo and choose **Caption…**, or right-click it and choose **Edit Caption…**. Typing on the page works in templates whose pages mark their captions, such as the starter. The caption belongs to the photo, wherever it is placed; whether a page prints it is a setting of the template.
 - **Check resolution:** the crop toolbar compares print resolution with the template's minimum and target.
 - **Replace or remove:** use **More photo actions** for **Replace photo…**, **Remove photo** and **Crop values…**. Empty boxes offer **Choose photo…**.
 

@@ -693,6 +693,15 @@ export type TextTag = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'p' | 'span' | '
  * as an editor's `presentation`. Without it, or with `'dialog'`, the node opens the parameter panel. Multiline inline strings default to preserving line breaks; template CSS and `style` take precedence.
  */
 export type TextProps<Path extends string = string> = Styling & Placement & IssueMarker & Decorative & { parameter: Path; as?: TextTag; presentation?: EditorPresentation; placeholder?: string; fallback?: string; fallbackLabel?: string; hidden?: boolean };
+/**
+ * Props of `ctx.Caption`. It shows the caption of the photo in photo box `box` in an `as` tag (default `p`) and marks
+ * it, so clicking it in the editor types the caption on the page. The caption is the photo's, saved with it and shown
+ * wherever it is placed, exactly as Edit Caption… saves it. It renders nothing while the box is empty or while the box's
+ * own `shows: 'caption'` switch is off. Empty, the interactive canvas shows `placeholder` (default "Add caption");
+ * thumbnails, previews, checks, presentation and export show an empty node. Line breaks show as typed
+ * (`white-space: pre-wrap`); template CSS and `style` take precedence.
+ */
+export type CaptionProps<Box extends string = string> = Styling & Placement & IssueMarker & Decorative & { box: Box; as?: TextTag; placeholder?: string };
 
 /** In page layouts, page() is local to ctx.side and spread() throws. Otherwise the format is applied: `ctx.geometry.page('left', 'bleed')`. */
 export type BoundGeometry = {
@@ -773,6 +782,11 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
    * Use `ctx.edit` for nodes that combine several parameters or show more than the value.
    */
   Text(props: TextProps<TextPath<S, D>>): ImageFlowElement;
+  /**
+   * Shows the caption of a photo box's photo and makes it editable by clicking it, limited to this layout's photo box
+   * IDs: `<ctx.Caption box="hero" as="figcaption" rect={...} />`.
+   */
+  Caption(props: CaptionProps<BoxIds<S, 'photo'>>): ImageFlowElement;
 };
 
 /** The render context of a spread declared as a plain object, without the `spread` builder. */
@@ -796,6 +810,7 @@ export type UntypedRenderContext = {
   MarkdownBox: typeof MarkdownBox;
   Element: typeof Element;
   Text(props: TextProps): ImageFlowElement;
+  Caption(props: CaptionProps): ImageFlowElement;
 };
 
 /**
@@ -832,13 +847,13 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
   'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'page-layouts' | 'editor-context' | 'document-editors' |
-  'editor-network' | 'rendered-images' | 'rendered-vectors' | 'font-coverage' | 'book-credits' | 'inline-editors' | 'inline-text' | 'list-parameters' | 'template-preview' | 'photo-render' |
+  'editor-network' | 'rendered-images' | 'rendered-vectors' | 'font-coverage' | 'book-credits' | 'inline-editors' | 'inline-text' | 'inline-caption' | 'list-parameters' | 'template-preview' | 'photo-render' |
   'formatted-text' | 'app-controls' | 'text-metadata' | 'text-composition' | 'template-lineage' | 'physical-covers';
 /** All features this app provides, including the contract-1 baseline and any later extensions. */
 export const capabilities: readonly Capability[];
 
 export type CoverRenderContext = Pick<UntypedRenderContext, 'params' | 'document' | 'boxes' | 'elements' | 'formatId' |
-  'layout' | 'mode' | 'view' | 'PhotoBox' | 'Text' | 'Element'> & { cover: ResolvedCover; interiorPages: number };
+  'layout' | 'mode' | 'view' | 'PhotoBox' | 'Text' | 'Caption' | 'Element'> & { cover: ResolvedCover; interiorPages: number };
 export type CoverLayout = {
   label: string;
   /** Format IDs this layout supports. Omit to offer it for every cover format in the template. */

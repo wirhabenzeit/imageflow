@@ -5,12 +5,12 @@ import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { closeApp, popupAction, testBook } from './ui-actions.mjs';
+import { clickPage, closeApp, popupAction, testBook } from './ui-actions.mjs';
 
 // The 25 November evening beta findings in the app: a photo only set aside is not marked used (UI-016), a choice too
 // wide for the Inspector becomes a menu instead of scrolling it sideways (UI-015), and a placed photo's caption is
 // edited where the photo is, switching on the box setting that shows it (UI-014), and only boxes that print a caption
-// offer Caption… in their toolbar (UI-017).
+// offer Caption… in their toolbar (UI-017); the caption ctx.Caption prints is typed on the page (UI-019).
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build/photo-captions-'));
 const folder = join(work, 'Captions.imageflow');
@@ -19,8 +19,7 @@ const variants = { bleed: 'Full bleed', margins: 'In the margins', landscape: 'L
 await writeFile(join(folder, 'template/index.tsx'), `import {defineTemplate,mm,p,printFormat,box,Spread} from 'imageflow';
 const caption = p.boolean({label:'Show caption',default:false,shows:'caption'});
 const single = (style: string, label: string) => ({label, family:'single', variant:{style}, boxes:{hero:box.photo('Photo',{caption})},
-  render:(ctx: any)=><Spread><ctx.PhotoBox id="hero" rect={ctx.geometry.page('left','safe')}/>{ctx.boxes.hero.params.caption && ctx.boxes.hero.photo?.caption
-    ? <p className="caption" style={ctx.geometry.css({x:mm(120),y:mm(20),width:mm(60),height:mm(20)})}>{ctx.boxes.hero.photo.caption}</p> : null}</Spread>});
+  render:(ctx: any)=><Spread><ctx.PhotoBox id="hero" rect={ctx.geometry.page('left','safe')}/><ctx.Caption box="hero" className="caption" rect={{x:120,y:20,width:60,height:20}}/></Spread>});
 export default defineTemplate({id:'captions',version:'1',contract:1,
 format:printFormat({label:'Book',trim:{width:mm(100),height:mm(120)},bleed:{all:mm(3),binding:mm(0)},safe:mm(8),ends:'inside-covers',pageCount:{min:2,max:100,step:2}}),
 layoutFamilies:{single:{label:'Single photo',picker:{label:'Single photo',choice:{tag:'style',options:${JSON.stringify(variants)}}}}},
@@ -93,10 +92,35 @@ try {
   await toolbar.getByRole('button', { name: 'Caption…' }).waitFor();
   assert.equal(await field.count(), 0, 'the caption stays closed');
 
-  // UI-017: Three photos has no Show caption, so its photo offers no Caption…; Edit Caption… still opens the field,
-  // which says the layout doesn't print it.
+  // UI-019: the caption ctx.Caption prints is typed where it prints and saved with the photo; Escape keeps it.
   await toolbar.getByRole('button', { name: 'Done', exact: true }).click();
   await toolbar.waitFor({ state: 'detached' });
+  const ready = '.canvas .book-frame-book[data-current][data-ready]';
+  const printed = page.frameLocator(ready).locator('[data-spread="one"] [data-caption="hero"]');
+  const typing = page.frameLocator('.inline-text-editor iframe').getByRole('textbox');
+  const openCaption = async () => {
+    await page.locator(ready).waitFor();
+    const at = await printed.boundingBox();
+    await clickPage(page, at.x + at.width / 2, at.y + at.height / 2);
+    await typing.waitFor();
+    await page.locator('.inline-text-editor.showing').waitFor();
+  };
+  assert.equal(await printed.innerText(), 'At the pass');
+  await openCaption();
+  assert.equal(await typing.innerText(), 'At the pass', 'typing starts from the printed caption');
+  await typing.fill('Discarded');
+  await typing.evaluate((node) => node.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  await page.locator('.inline-text-editor').waitFor({ state: 'detached' });
+  assert.equal((await current(page)).photoIndex.shown.caption, 'At the pass', 'Escape keeps the saved caption');
+  await openCaption();
+  await typing.fill('Over the pass');
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await page.locator('.inline-text-editor').waitFor({ state: 'detached' });
+  await until(async () => (await current(page)).photoIndex.shown.caption === 'Over the pass', 'Done saves the caption with the photo');
+  await until(async () => await printed.innerText() === 'Over the pass', 'the page prints the new caption');
+
+  // UI-017: Three photos has no Show caption, so its photo offers no Caption…; Edit Caption… still opens the field,
+  // which says the layout doesn't print it.
   await page.locator('.spread-thumb[data-spread="two"]').click();
   await page.locator('.canvas .book-frame-book[data-current][data-ready]').waitFor();
   await page.getByRole('button', { name: 'Edit Photo', exact: true }).click();

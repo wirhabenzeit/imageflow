@@ -7,7 +7,7 @@ import type { PrintFormat, printFormat, ResolvedFormat } from './format';
 import type { BoundGeometry } from './geometry';
 import type { Parameter } from './parameters';
 import type { Photo } from './project';
-import type { Anchor, AnchorContext, AnchorDeclaration, BookContext, BookText, BookTextPlacement, DocumentEditorProps, EditorContext, Element, ElementEditorProps, IssueMarker, LayoutPickerProps, LayoutVariant, MarkdownBox, Page, PhotoBox, RenderContext, runtime, Spread, TemplateIssue,
+import type { Anchor, AnchorContext, AnchorDeclaration, BookContext, Caption, BookText, BookTextPlacement, DocumentEditorProps, EditorContext, Element, ElementEditorProps, IssueMarker, LayoutPickerProps, LayoutVariant, MarkdownBox, Page, PhotoBox, RenderContext, runtime, Spread, TemplateIssue,
   TemplateDeclaration, Text, TextBlock, TextComposition, TextTag } from './template';
 import type { Capability, runtimeExports } from './runtime-exports';
 
@@ -44,6 +44,7 @@ export const declaredTypesMatchRuntime: [
   Same<keyof Declared.RenderTarget, keyof RenderTarget>,
   Same<keyof Declared.TextProps, keyof Parameters<typeof Text>[0]>,
   Same<Declared.TextTag, TextTag>,
+  Same<keyof Declared.CaptionProps, keyof Parameters<typeof Caption>[0]>,
   Same<keyof Declared.BoundGeometry, keyof BoundGeometry>,
   Same<keyof Parameters<typeof Declared.printFormat>[0], keyof Parameters<typeof printFormat>[0]>,
   Assignable<ReturnType<typeof Declared.printFormat>, PrintFormat>,
@@ -59,4 +60,4 @@ export const declaredTypesMatchRuntime: [
   Assignable<Declared.OpeningSpread, NonNullable<TemplateDeclaration['openingSpreads']>[number]>,
   Same<keyof Declared.TextBlock, keyof TextBlock>,
   Same<keyof Declared.TextComposition, keyof TextComposition>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

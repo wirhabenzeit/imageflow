@@ -24,11 +24,11 @@
   {"id":"file-parameters","title":"File parameters","summary":"p.file, file() and imported assets."},
   {"id":"template-findings","title":"Template findings","summary":"Report input problems with issue()."},
   {"id":"geometry","title":"Geometry helpers","summary":"Insets, grids and design coordinates."},
-  {"id":"platform-components","title":"Platform components","summary":"Spread, boxes, Element and Text."},
+  {"id":"platform-components","title":"Platform components","summary":"Spread, boxes, Element, Text and Caption."},
   {"id":"css-contract","title":"CSS contract","summary":"Fonts, CSS variables and print styling."},
   {"id":"validation","title":"Validation","summary":"Template load and render checks."},
   {"id":"stored-data","title":"Stored project data","summary":"Saved layouts, crops and parameters."},
   {"id":"compatibility","title":"Authoring and compatibility details","summary":"SDK types, enum maps and preview limits."},
-  {"id":"inline-text","title":"Inline plain text (`inline-text`)","summary":"Edit strings on the page with ctx.Text."},
+  {"id":"inline-text","title":"Inline plain text (`inline-text`)","summary":"Edit strings with ctx.Text, and photo captions with ctx.Caption, on the page."},
   {"id":"formatted-text","title":"Formatted text (`formatted-text`)","summary":"Inline Markdown and FormattedText."}
 ]

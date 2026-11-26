@@ -383,6 +383,17 @@ defineTemplate({ id: 'inline-text', version: '1', contract: 1, format,
       <ctx.Text parameter="heading" presentation="popover" />
     </Spread> }) }) });
 
+// A photo's caption is marked by its photo box (UI-019): only this layout's photo boxes are accepted.
+defineTemplate({ id: 'inline-caption', version: '1', contract: 1, format,
+  spreads: ({ spread }) => ({ photo: spread({ label: 'Photo', boxes: { hero: box.photo('Hero'), story: box.markdown('Story') },
+    render: (ctx) => <Spread>
+      <ctx.Caption box="hero" as="figcaption" placeholder="Where was this?" className="caption" />
+      {/* @ts-expect-error photo boxes only */}
+      <ctx.Caption box="story" />
+      {/* @ts-expect-error boxes this layout declares */}
+      <ctx.Caption box="other" />
+    </Spread> }) }) });
+
 // List parameters (#115): `render` reads an array of items with their `id` and every field typed.
 const tracks = p.list({ label: 'Tracks', max: 12, item: {
   track: p.file({ label: 'GPX track', accept: ['.gpx'] }),

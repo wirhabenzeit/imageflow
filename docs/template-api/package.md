@@ -72,6 +72,7 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, … })
 | `font-coverage` | `fonts`: the bundled faces and the characters they can set, for text the template draws itself ([Fonts and output](css-contract.md#fonts-and-output)). |
 | `inline-editors` | `presentation: 'inline'` on element and document editors: editing on the page, in the frame of what the editor was opened from ([Editing on the page](editing-on-the-page.md#editing-on-the-page)). |
 | `inline-text` | `ctx.Text presentation="inline"` for plain-string typing in template typography, with existing parameter scopes and Undo. |
+| `inline-caption` | `ctx.Caption`: a photo box's caption, typed on the page and saved with the photo as Edit Caption… saves it ([Photo captions on the page](inline-text.md#photo-captions-on-the-page-inline-caption)). |
 | `list-parameters` | `p.list` of flat items with stable IDs, the generated list control, `Control` for one item's field, and item-level project commands ([List parameters](list-parameters.md#list-parameters)). |
 | `template-preview` | `preview`: the template's own image for New Book instead of a render of its opening spread ([Template previews](template-library.md#template-previews)). |
 | `photo-render` | `PhotoBox` children: a render callback that draws the box's photo from its crop, such as through an SVG mask ([PhotoBox render callbacks](platform-components.md#photobox-render-callbacks)). |

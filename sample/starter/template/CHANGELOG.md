@@ -5,6 +5,12 @@ an earlier version can bring over what it wants. A book's template is its own co
 it. Compare the two with the `read_library_template` agent tool, port the parts you want by hand, and then raise
 `basedOn.version` in your template.
 
+## 0.13.4
+
+- Photo captions use `<ctx.Caption box="hero" />` instead of a helper of their own: clicking a caption on the page
+  types it there, saved with the photo as **Edit Caption…** saves it. With **Show caption** on and no caption yet, the
+  editor shows "Add caption" where it will print; thumbnails and export do not.
+
 ## 0.13.3
 
 - **Show caption** declares `shows: 'caption'`: entering the first caption of a photo switches it on. Its description

@@ -174,6 +174,10 @@ export function resolveParams(schema: Parameters, values: Values): Values {
   return Object.fromEntries(Object.entries(schema).map(([id, param]) => [id, resolveValue(param, own(values, id))]));
 }
 
+/** The box parameter that says whether the photo's caption shows (`p.boolean({ shows: 'caption' })`), if one does. */
+export const captionSwitch = (parameters: Parameters | undefined) =>
+  Object.keys(parameters ?? {}).find((key) => { const param = parameters![key]; return param.type === 'boolean' && param.shows === 'caption'; });
+
 /** Whether two parameter values are the same, comparing lists by content. */
 export function sameValue(a: unknown, b: unknown) {
   return a === b || (Array.isArray(a) && Array.isArray(b) && JSON.stringify(a) === JSON.stringify(b));

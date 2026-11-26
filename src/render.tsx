@@ -43,9 +43,9 @@ import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
 import { declaredInTemplate, editorLayoutPreviews, editorLayoutTarget, familyLayouts } from './layouts';
 import type { VariantTags } from './layouts';
-import { numberOccurrences } from './edit-targets';
+import { markedEdits, markedNodes, numberOccurrences } from './edit-targets';
 import { declaredName, declaredNode, declaredNodes, findDeclared, onPage, ownerOf, ownTarget, pageAttribute, pageOf } from './page-scope';
-import { textEditorOwner } from './inline-text';
+import { captionKey, captionParameter, textEditorOwner } from './inline-text';
 import { inlineTextFrame } from './inline-text-frame';
 import { readEdit } from './editing';
 import { artworkTarget, parsePreviewRequest, PreviewError } from './preview';
@@ -636,10 +636,11 @@ function layoutBook(root: HTMLElement, initialSheets: { spread: string; sheet: H
       }),
       // Nodes that edit the same fields on a sheet, such as a heading shown twice, are told apart by occurrence. Every
       // target names its page, whether or not it is a box or element: two pages' `ctx.edit('heading')` are different
-      // targets that edit different saved values.
-      targets: sheets.flatMap(({ spread, sheet }) => numberOccurrences([...sheet.querySelectorAll<HTMLElement>('[data-edit]')].map((node) => ({
-        spread, ...onPage(pageOf(node)), edits: node.dataset.edit!.split(' ').filter(Boolean), ...relative(node), upright: upright(node, sheet),
+      // targets that edit different saved values. A photo's caption (ctx.Caption) is a target that edits no parameter.
+      targets: sheets.flatMap(({ spread, sheet }) => numberOccurrences([...sheet.querySelectorAll<HTMLElement>(markedNodes)].map((node) => ({
+        spread, ...onPage(pageOf(node)), edits: markedEdits(node), ...relative(node), upright: upright(node, sheet),
         ...(node.hasAttribute('data-inline-text') ? { inlineText: true } : {}),
+        ...(node.dataset.caption ? { caption: node.dataset.caption, inlineText: true } : {}),
         ...(/^(vertical|sideways)/.test(getComputedStyle(node).writingMode) ? { vertical: true } : {}),
         ...(node.dataset.textFallback ? { textFallback: { parameter: node.dataset.edit!, text: node.dataset.textFallback,
           label: node.dataset.textFallbackLabel ?? 'inherited text' } } : {}),
@@ -666,10 +667,10 @@ function layoutBook(root: HTMLElement, initialSheets: { spread: string; sheet: H
       if (typeof element === 'string') {
         hidden = findDeclared(sheet, { element, page: page === 'left' || page === 'right' ? page : undefined }).map(({ node }) => node);
       } else if (typeof edits === 'string') {
-        // Occurrences are counted per page, as the geometry numbers them.
-        const marked = [...sheet.querySelectorAll<HTMLElement>('[data-edit]')]
+        // Occurrences are counted per page, as the geometry numbers them; captions, with no fields, among themselves.
+        const marked = [...sheet.querySelectorAll<HTMLElement>(markedNodes)]
           .filter((node) => pageOf(node) === (page === 'left' || page === 'right' ? page : undefined))
-          .filter((node) => node.dataset.edit!.split(' ').filter(Boolean).join(' ') === edits)[Number(occurrence) || 0];
+          .filter((node) => markedEdits(node).join(' ') === edits)[Number(occurrence) || 0];
         if (marked) hidden = [marked];
       }
       for (const node of hidden) node.setAttribute('data-if-editing', '');
@@ -2326,6 +2327,18 @@ export async function startRender(root: HTMLElement) {
       const path = query.get('parameter') ?? '';
       const side = query.get('page') === 'left' ? 'left' : query.get('page') === 'right' ? 'right' : undefined;
       const state = scopeSpread(spread, side);
+      // A photo's caption (ctx.Caption) is typed in the same way. Its node is found among the page's caption nodes, as
+      // the geometry numbers them, and it starts from the caption the template printed.
+      const box = query.get('caption');
+      if (box !== null) {
+        const node = [...root.querySelectorAll<HTMLElement>(markedNodes)].filter((node) => !markedEdits(node).length && pageOf(node) === side)[Number(query.get('occurrence')) || 0];
+        const photo = state && Object.hasOwn(state.boxes, box) ? state.boxes[box].photo : undefined;
+        if (!spread || node?.dataset.caption !== box || !photo || !book.photos[photo] || query.has('readonly')) {
+          throw new Error('This caption is not available for inline editing. Use Edit Caption….');
+        }
+        inlineTextFrame(root, node, captionParameter, book.photos[photo].caption ?? '', post, editorURL.slice(0, -1), captionKey);
+        return;
+      }
       const field = state && resolveEditPath(info!, state.definition, path, side);
       const nodes = [...root.querySelectorAll<HTMLElement>('[data-edit]')].filter((node) => node.dataset.edit === path && pageOf(node) === side);
       const node = nodes[Number(query.get('occurrence')) || 0];

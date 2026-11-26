@@ -11,6 +11,12 @@ type EditTarget = BookGeometry['targets'][number];
 export const targetKey = (target: { spread: string; page?: PageSide; edits: string[]; occurrence?: number }) =>
   target.spread + (target.page ? '@' + target.page : '') + '|' + target.edits.join(' ') + '|' + (target.occurrence ?? 0);
 
+// The nodes that are edit targets: those a template marked with fields (`ctx.edit`, ctx.Text, boxes and elements), and
+// photo captions (ctx.Caption), which edit the photo rather than a field and so list none. The geometry, the book
+// view's hiding of an edited occurrence and the text editor's frame all count occurrences over these, in this order.
+export const markedNodes = '[data-edit], [data-caption]';
+export const markedEdits = (node: HTMLElement) => (node.dataset.edit ?? '').split(' ').filter(Boolean);
+
 // Where an open editor is anchored: the centre of the node it was last shown at, as a fraction of its sheet's width
 // and height, so that resizing or scrolling the canvas, which moves and scales sheets, does not move the anchor.
 export type TargetAnchor = { spread: string; page?: PageSide; edits: string; x: number; y: number };
