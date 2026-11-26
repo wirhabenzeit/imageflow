@@ -33,7 +33,7 @@ Pass `cover: true` where a layout, box, or element operation would otherwise nam
 
 Spread and page inserts can supply initial `params`, `boxes` and `elements` by ID. In a page pair, omit a side to leave it blank. See [Page layouts](page-layouts.md) and [Switching layouts](switching-layouts.md) for compatible placements and saved content.
 
-The result's `affectedSpreads` lists the inserted, removed, moved or changed spreads in book order. The spreads after an insert, removal or move only change page numbers. They are counted in `renumbered`, such as `"41 spreads, now pages 5–86"`, and are not listed.
+The result's `affectedSpreads` lists the inserted, removed, moved or changed spreads in book order. The spreads after an insert, removal or move only change page numbers. They are counted in `renumbered`, such as `"41 spreads, now pages 5–86"`, and are not listed. A layout that prints other spreads' page numbers, such as a contents page, can change without being listed: check it when `renumbered` is present. A replayed request (same `idempotencyKey`) leaves `renumbered` out.
 
 ## Parameter and list operations
 

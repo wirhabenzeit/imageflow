@@ -103,6 +103,14 @@ test('an insert reports the new spread, not every spread after it, which are cou
   // A moved spread is reported; those it passed are renumbered.
   const moved = applyProjectCommands(book, template, [{ op: 'move_spread', spread: 'four', after: 'one' }]);
   assert.deepEqual([moved.affectedSpreads, moved.renumbered], [['four'], '2 spreads, now pages 5–8']);
+  // Neighbours removed in reverse order still come in book order.
+  const both = applyProjectCommands(book, template, [{ op: 'remove_spread', spread: 'three' }, { op: 'remove_spread', spread: 'two' }]);
+  assert.deepEqual([both.affectedSpreads, both.renumbered], [['two', 'three'], '1 spread, now pages 3–4']);
+  // Renumbered spreads apart from each other are named by their own pages, not the range between them.
+  const six = files();
+  six.project = projectSchema.parse({ ...six.project, spreads: [...six.project.spreads, ...['three', 'four', 'five', 'six'].map((id) => ({ id, definition: 'main', boxes: {} }))] });
+  const apart = applyProjectCommands(six, template, [{ op: 'move_spread', spread: 'two', after: 'three' }, { op: 'move_spread', spread: 'five', after: 'six' }]);
+  assert.deepEqual([apart.affectedSpreads, apart.renumbered], [['two', 'five'], '2 spreads, now pages 3–4, 9–10']);
 });
 
 test('layout switches preserve hidden content, crops, and rejected parameter overrides', () => {

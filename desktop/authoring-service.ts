@@ -78,7 +78,8 @@ export function compactRender(render: NonNullable<AuthoringCheckResult['render']
   const addressed = new Set([image?.spread, ...image?.cells?.map(({ spread }) => spread) ?? [],
     // The spread that was inspected, however the request named it: by the start of its ID, or as a draft's $ref.
     render.inspection?.spread,
-    ...(affected && !everywhere ? affected : [])].filter((id): id is string => !!id && !id.startsWith('$')));
+    // A removed spread has no units left to list.
+    ...(affected && !everywhere ? affected.filter((id) => units.some(({ spread }) => spread === id)) : [])].filter((id): id is string => !!id && !id.startsWith('$')));
   const include = new Set<string>(args.include ?? []);
   const listed = (list: RenderList) => include.has(list) || addressed.size > 0;
   const flowSpread = (key: string) => key.split(':', 1)[0];

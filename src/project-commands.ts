@@ -737,8 +737,8 @@ export function applyProjectCommands(
     ...(removedSources ? { removedSources: true as const } : {}), references, reflow };
 }
 
-// Book order after the batch. A removed spread follows the nearest spread before it that is still in the book; a
-// spread both inserted and removed by the batch comes last.
+// Book order after the batch. A removed spread follows the nearest spread before it that is still in the book, and
+// removed neighbours keep their former order; a spread both inserted and removed by the batch comes last.
 function inBookOrder(ids: ReadonlySet<string>, before: SpreadState[], after: SpreadState[]) {
   const index = new Map(after.map(({ id }, at) => [id, at]));
   const formerly = before.map(({ id }) => id);
@@ -749,9 +749,9 @@ function inBookOrder(ids: ReadonlySet<string>, before: SpreadState[], after: Spr
     if (was < 0) return Infinity;
     for (let at = was - 1; at >= 0; at--) {
       const kept = index.get(formerly[at]);
-      if (kept !== undefined) return kept + 0.5;
+      if (kept !== undefined) return kept + 0.5 + was / (formerly.length + 1) / 2;
     }
-    return -0.5;
+    return -0.5 + was / (formerly.length + 1) / 2;
   };
   return [...ids].sort((a, b) => key(a) - key(b));
 }
@@ -767,7 +767,13 @@ function renumberedSpreads(before: SpreadState[], beforeFormat: Pick<PrintFormat
   const moved = [...pagesOf(after, afterFormat)].filter(([id, pages]) =>
     !affected.has(id) && was.has(id) && was.get(id)!.join() !== pages.join());
   if (!moved.length) return undefined;
-  const numbers = moved.flatMap(([, pages]) => pages);
-  const first = Math.min(...numbers), last = Math.max(...numbers);
-  return moved.length + (moved.length === 1 ? ' spread, now ' : ' spreads, now ') + (first === last ? 'page ' + first : 'pages ' + first + '–' + last);
+  // Runs of consecutive pages, so spreads that kept their numbers between two moved ones are not counted in.
+  const numbers = [...new Set(moved.flatMap(([, pages]) => pages))].sort((a, b) => a - b);
+  const runs: [number, number][] = [];
+  for (const page of numbers) {
+    const last = runs.at(-1);
+    if (last && page === last[1] + 1) last[1] = page; else runs.push([page, page]);
+  }
+  const shown = runs.slice(0, 4).map(([first, last]) => first === last ? String(first) : first + '–' + last).join(', ') + (runs.length > 4 ? ', …' : '');
+  return moved.length + (moved.length === 1 ? ' spread, now ' : ' spreads, now ') + (numbers.length === 1 ? 'page ' : 'pages ') + shown;
 }
