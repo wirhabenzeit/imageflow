@@ -20,6 +20,8 @@ const fixture = values['upgrade-fixture'] ? JSON.parse(await readFile(values['up
 if (fixture && values.release) throw new Error('Upgrade fixtures cannot be release builds.');
 if (fixture && (!resolve(fixture.output).startsWith(join(root, '.build/upgrade-test/')) || !resolve(fixture.profile).startsWith(join(root, '.build/upgrade-test/')) ||
     !/^https:\/\/127\.0\.0\.1:\d+\/updates$/.test(fixture.baseURL) || !/^9\.9\.(?:9(?:-beta\.[12])?|10)$/.test(fixture.version) || !resolve(fixture.book).startsWith(join(root, '.build/upgrade-test/')) || !Number.isInteger(fixture.debugPort) || fixture.debugPort < 1024 || fixture.debugPort > 65535)) throw new Error('Invalid isolated upgrade fixture.');
+// Shown when ImageFlow first asks to read the Photos library (Apple Photos provider, ADR 0013).
+const photosUsage = 'ImageFlow links photos you drag in from Photos and reads them to show and print your books. It never changes your library.';
 const options = macBuildOptions({ arch: values.arch, release: values.release });
 async function packageApp() {
   // The app ships each starter's template and the project.json its example spreads come from, but no sample photos,
@@ -55,9 +57,12 @@ async function packageApp() {
       download: { cacheRoot: join(root, '.build', 'electron-cache'), checksums: electronChecksums },
       appBundleId: fixture ? 'ch.wirhabenzeit.imageflow.upgrade-test' : 'ch.wirhabenzeit.imageflow',
       appCategoryType: 'public.app-category.photography',
-      extendInfo: fixture ? {} : {
+      // Every build that is signed has the Photos entitlement and so needs the usage description, fixtures too
+      // (scripts/verify-mac-signing.mjs); unlike the document types, it claims nothing of the real app's.
+      extendInfo: fixture ? { NSPhotoLibraryUsageDescription: photosUsage } : {
         // macOS 26 and later show the layered Icon Composer icon from Assets.car; earlier versions use ImageFlow.icns.
         CFBundleIconFile: 'ImageFlow.icns', CFBundleIconName: 'ImageFlow',
+        NSPhotoLibraryUsageDescription: photosUsage,
         UTExportedTypeDeclarations: [{
           UTTypeIdentifier: 'ch.wirhabenzeit.imageflow.book',
           UTTypeDescription: 'ImageFlow Book',
@@ -81,7 +86,7 @@ async function packageApp() {
       },
       // Agents run the MCP bridge with ImageFlow's executable in Node mode; keep it a plain file outside app.asar. The
       // skills it serves stay outside too: a bridge that outlives an update would read the new archive with its old index.
-      asar: { unpackDir: '{node_modules/@img,skills}', unpack: '**/{mcp-bridge.cjs,mac-header.node,cloudkit.node}' },
+      asar: { unpackDir: '{node_modules/@img,skills}', unpack: '**/{mcp-bridge.cjs,mac-header.node,cloudkit.node,photos.node}' },
       // Document icons and the compiled Icon Composer app icon; the classic app icon comes from `icon` below.
       // Sources and generator: resources/brand/, npm run build:icons.
       // The Lightroom Classic plugin goes to Contents/Resources/ImageFlow.lrplugin, which Settings installs from (ADR 0011).

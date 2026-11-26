@@ -128,6 +128,39 @@ export const lightroomLocator: LocatorKind<LightroomLocator> = {
   name: ({ name }) => name,
 };
 
+/**
+ * A photo in the Photos library of this Mac (ADR 0013), read through PhotoKit. `cloud` is the photo's archival cloud
+ * identifier (`PHCloudIdentifier`): the same on every Mac of one iCloud Photos library, and also meaningful in a
+ * library without iCloud. `local` is this Mac's own `localIdentifier`, which is quicker to look up but may change and
+ * means nothing on another Mac, so it never syncs. `name` is the photo's original file name, a hint for a photo without
+ * a title.
+ */
+export type PhotosLocator = { provider: 'photos'; cloud: string; local?: string; name?: string };
+// Archival cloud identifiers are three parts separated by colons, local identifiers a UUID and a path; both are
+// letters, digits and a few separators. Anything else is refused where it enters.
+const photosIdentifier = /^[A-Za-z0-9][A-Za-z0-9:/+=_.-]{7,199}$/;
+export const isPhotosIdentifier = (value: unknown): value is string => typeof value === 'string' && photosIdentifier.test(value);
+export const photosLocator: LocatorKind<PhotosLocator> = {
+  provider: 'photos',
+  // The library is on this Mac: another Mac prints the photo only where its own Photos library has it too.
+  reach: 'mac',
+  fields: ['photos'],
+  read: (entry) => {
+    const value = entry.photos as Partial<Record<keyof PhotosLocator, unknown>> | null | undefined;
+    if (!value || typeof value !== 'object' || !isPhotosIdentifier(value.cloud)) return undefined;
+    const name = lightroomName(value.name);
+    return { provider: 'photos', cloud: value.cloud, ...(isPhotosIdentifier(value.local) ? { local: value.local } : {}), ...(name ? { name } : {}) };
+  },
+  write: ({ cloud, local, name }) => ({ photos: { cloud, ...(local ? { local } : {}), ...(name ? { name } : {}) } }),
+  portable: ({ cloud }) => ({ photos: { cloud } }),
+  // The local identifier is this Mac's.
+  shared: ({ local: _local, ...shared }) => shared,
+  // This Mac's local identifier, where it has one for the same photo.
+  adopt: (shared, here) => here?.cloud === shared.cloud && here.local ? { ...shared, local: here.local } : shared,
+  key: ({ cloud }) => cloud,
+  name: ({ name }) => name,
+};
+
 /** A photo that is a file on this Mac: the two locators the host reads in place. */
 export type FileLocator = PackageLocator | LinkedLocator;
 export const isFileLocator = (locator: Locator): locator is FileLocator => locator.provider === 'package' || locator.provider === 'linked';
@@ -139,10 +172,10 @@ export type PhotoLocator = Locator;
 
 // The kinds this build reads, in the order they are asked. Method parameters are bivariant, so each kind stands in
 // this list for every locator; each function below hands a kind only the locator that kind itself read or that names it.
-const locatorKinds: LocatorKind<Locator>[] = [packageLocator, linkedLocator, lightroomLocator] as LocatorKind<Locator>[];
+const locatorKinds: LocatorKind<Locator>[] = [packageLocator, linkedLocator, lightroomLocator, photosLocator] as LocatorKind<Locator>[];
 /**
  * Adds a kind of locator this build reads, and returns a function that removes it again. The kinds this build ships
- * (Lightroom Classic, ADR 0011) are in the list above, so the renderer, sync and the MCP bridge read them too; tests
+ * (Lightroom Classic, ADR 0011; Apple Photos, ADR 0013) are in the list above, so the renderer, sync and the MCP bridge read them too; tests
  * register a provider that exists in memory only.
  */
 export function registerLocatorKind<L extends Locator>(kind: LocatorKind<L>): () => void {

@@ -27,3 +27,5 @@ export async function buildNativeAddon(name, frameworks, destination) {
 export const buildMacHeader = (destination) => buildNativeAddon('mac-header', ['AppKit', 'UniformTypeIdentifiers'], destination);
 /** The CloudKit bridge of the iCloud sync store (#292). It loads in every build and uses CloudKit only when entitled. */
 export const buildCloudKit = (destination) => buildNativeAddon('cloudkit', ['Foundation', 'CloudKit', 'Security'], destination);
+/** PhotoKit for the Apple Photos provider (ADR 0013). It loads in every build and asks for access only where it may. */
+export const buildPhotos = (destination) => buildNativeAddon('photos', ['Foundation', 'AppKit', 'Photos', 'PhotosUI', 'ImageIO', 'CoreLocation', 'UniformTypeIdentifiers'], destination);

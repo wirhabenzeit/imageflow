@@ -39,6 +39,9 @@ import { importIntoProject, importProvidedPhotos, loadProject, projectSummary, r
 import type { ImportProgress } from './project';
 import type { OpenProject } from './project';
 import { photoExtensions } from './photos';
+import { photosDrop } from './photos-drop';
+import { photosLibrary, photosLibraryOf } from './photos-library';
+import type { PhotosAccess } from './photos-library';
 import { bundledFontNames } from './fonts';
 import { captureBookStateRevision, isProjectInputPath } from './revisions';
 import type { ProjectInputIndex } from './revisions';
@@ -1606,10 +1609,18 @@ export class DocumentSession {
       if (choice.canceled) return null;
       paths = choice.filePaths;
     }
+    // Photos dragged from Apple Photos arrive as small copies inside its library: they are linked through the Apple
+    // Photos provider instead (ADR 0013), together with the other files, in one save. Only photos can be.
+    if (request.kind === 'markdown' || request.kind === 'file') {
+      if (paths.some((path) => photosLibraryOf(path))) throw new Error('Photos from the Photos library can only be placed as photos.');
+    }
+    const fromPhotos = await photosDrop(paths, photosLibrary(), (access) => askForPhotosAccess(owner, access));
+    paths = fromPhotos.rest;
     const files: string[] = [];
     const collect = async (folder: string) => {
       for (const entry of await readdir(folder, { withFileTypes: true })) {
-        if (entry.name.startsWith('.')) continue;
+        // A Photos library inside a folder is Photos' own: its files are small copies, never photos to import.
+        if (entry.name.startsWith('.') || (entry.isDirectory() && photosLibraryOf(entry.name))) continue;
         const path = join(folder, entry.name);
         if (entry.isDirectory()) await collect(path);
         else if (entry.isFile()) files.push(path);
@@ -1625,7 +1636,7 @@ export class DocumentSession {
       owner.webContents.send(channels.progress, saving ? { text: 'Adding ' + total + ' ' + (total === 1 ? noun.slice(0, -1) : noun) + ' to the book…' }
         : total > 1 ? { text: 'Importing ' + noun, done, total } : { text: 'Importing ' + noun.slice(0, -1) + '…' });
     } : undefined;
-    const { book: next, imported, copied, createdDirectories, counts } = await importIntoProject(book, request, [...new Set(files)], progress, checkpoint);
+    const { book: next, imported, copied, createdDirectories, counts } = await importIntoProject(book, request, [...new Set(files)], progress, checkpoint, fromPhotos.locators);
     for (const file of [...createdDirectories, ...copied]) {
       const path = relative(book.folder, file);
       this.importedWrites.set(path, await fingerprint(file), this.observedChanges.has(path));
@@ -1914,4 +1925,20 @@ export class DocumentSession {
   }
 
 
+}
+
+/** The Photos privacy pane of System Settings. */
+export const photosPrivacySettings = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Photos';
+/**
+ * Asks the user to give ImageFlow access to the Photos library, where it was refused before: macOS asks only once,
+ * after that only System Settings can give it. Answers whether access is given now.
+ */
+export async function askForPhotosAccess(owner: BrowserWindow | undefined, access: PhotosAccess): Promise<'granted' | 'denied'> {
+  if (access === 'authorized') return 'granted';
+  const options = { type: 'info' as const, message: 'Allow ImageFlow to read your Photos library',
+    detail: access === 'restricted' ? 'Access to the Photos library is restricted on this Mac.' : 'ImageFlow links photos from Photos and reads them as they are when the book is shown or printed. It never changes them. Allow it in System Settings → Privacy & Security → Photos, then drop the photos again.',
+    buttons: access === 'restricted' ? ['OK'] : ['Open System Settings', 'Cancel'], defaultId: 0, cancelId: access === 'restricted' ? 0 : 1 };
+  const { response } = owner && !owner.isDestroyed() ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options);
+  if (access !== 'restricted' && response === 0) await shell.openExternal(photosPrivacySettings);
+  return photosLibrary()?.status() === 'authorized' ? 'granted' : 'denied';
 }

@@ -53,6 +53,7 @@ export const channels = {
   syncState: 'project:sync-state', syncChanged: 'project:sync-changed', syncAction: 'project:sync-action',
   chooseSyncFolder: 'app:choose-sync-folder',
   lightroom: 'lightroom:state', lightroomChanged: 'lightroom:changed', lightroomInstall: 'lightroom:install', lightroomLaunch: 'lightroom:launch',
+  photosAccess: 'photos:access', sourceIcons: 'sources:icons',
   syncBackend: 'sync:backend', saveSyncBackend: 'sync:save-backend', testSyncConnection: 'sync:test-connection', showSync: 'sync:show', syncBooks: 'sync:books', syncBooksChanged: 'sync:books-changed', syncBookStatus: 'sync:book-status', syncBookSize: 'sync:book-size', syncBookUnused: 'sync:book-unused', manageSyncStorage: 'sync:manage-storage', syncCleanUpPlan: 'sync:clean-up-plan', syncCleanUp: 'sync:clean-up',
 } as const;
 
@@ -207,6 +208,8 @@ export type LightroomPluginStatus = { state: 'missing' | 'current' | 'outdated' 
  * What Settings shows for Lightroom Classic: the plugin, whether the app is on this Mac and running (with its icon as a
  * data URL), and the catalog and plugin version of a connected Lightroom.
  */
+/** Whether ImageFlow may read the Photos library (ADR 0013), as desktop/photos-library.ts reports it. */
+export type PhotosAccessState = 'authorized' | 'notDetermined' | 'denied' | 'restricted' | 'limited' | 'unsupported-system' | 'unsupported-build';
 export type LightroomState = { plugin: LightroomPluginStatus; app: { installed: boolean; running: boolean; icon?: string };
   connection?: { catalog?: string; plugin: string } };
 // `file` imports into the files/ registry for file parameters, offering the parameter's `accept` extensions. Without a
@@ -256,7 +259,7 @@ export type SyncBook = { id: string; open?: true; view: SyncView | null };
  */
 export type LibraryAction = { action: 'download' | 'cancel-download' | 'delete' | 'update'; bookId: string } | { action: 'start' | 'stop' | 'keep-here' | 'sync-again' | 'delete'; id: string };
 
-export type SourceAction = { action: 'retry' | 'refresh' | 'show-lightroom' | 'launch' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump' | 'import' | 'rename' | 'reveal-leftovers' | 'trash-leftovers'; spread?: string; key?: string; keys?: string[]; accept?: string[]; paths?: string[]; name?: string };
+export type SourceAction = { action: 'retry' | 'refresh' | 'show-lightroom' | 'show-photos' | 'launch' | 'allow' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump' | 'import' | 'rename' | 'reveal-leftovers' | 'trash-leftovers'; spread?: string; key?: string; keys?: string[]; accept?: string[]; paths?: string[]; name?: string };
 
 /** A file in the package that the book no longer uses: its path in the package. */
 export type LeftoverFile = { path: string; size: number; modified: number };
@@ -384,6 +387,11 @@ export type DesktopApi = {
   onLightroomChanged(listener: (state: LightroomState) => void): () => void;
   installLightroomPlugin(): Promise<Result<{ state: LightroomState; message: string }>>;
   launchLightroom(): Promise<Result<void>>;
+  // Apple Photos (ADR 0013): whether ImageFlow may read the Photos library; `ask` shows the system question where it was
+  // never asked, `settings` opens the Photos pane of System Settings.
+  photosAccess(request?: 'ask' | 'settings'): Promise<Result<PhotosAccessState>>;
+  /** The icons, as data URLs, of the apps on this Mac that photos come from: Lightroom Classic and Photos. */
+  sourceIcons(): Promise<Result<{ lightroom?: string; photos?: string }>>;
   // `footprint`: the layouts the agent's save changes, or the whole book (agent-footprint.ts).
   onAgentLease(listener: (id: string, footprint?: import('./agent-footprint').AgentFootprint) => AgentLeaseReply): () => void;
   onAgentRelease(listener: () => void): () => void;

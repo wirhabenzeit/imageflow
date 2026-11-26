@@ -35,9 +35,9 @@ export type SourceState = 'available' | 'missing' | 'unreadable' | 'denied' | 'u
  * Where an original is that is not on this Mac and need not be (#308, `awayOriginal`): on the Mac the photo was linked
  * on, in a Lightroom catalog that cannot be reached now, in the sync remote, or still uploading from another Mac.
  */
-export type SourceAway = 'other-mac' | 'catalog' | 'not-downloaded' | 'uploading';
+export type SourceAway = 'other-mac' | 'catalog' | 'photos' | 'not-downloaded' | 'uploading';
 /** What can be offered for a source that cannot be read, as its provider answers (`SourceProvider.repairs`). */
-export type SourceRepair = 'locate' | 'locate-folder' | 'launch' | 'sign-in';
+export type SourceRepair = 'locate' | 'locate-folder' | 'launch' | 'sign-in' | 'allow';
 export type SourceStatus = SourceEntry & { state: SourceState; problem?: string; cached?: boolean; digest?: string;
   /** The repairs to offer while the source is unavailable; Retry is always offered. */
   repairs?: SourceRepair[];
@@ -62,7 +62,13 @@ export const cachedPreviewNote = '. Showing a cached preview; the original is re
 /** A Book check error's text for an unavailable original, on a spread or the cover: its cause, which may end with a full stop of its own, and the note. */
 export const cachedPreviewText = (problem: string) => problem.replace(/\.+$/, '') + cachedPreviewNote;
 /** What an out-of-date photo is marked with (`SourceStatus.outOfDate`). */
-export const outOfDateNote = 'Edited in Lightroom Classic since this preview. It updates when you are back in Lightroom’s Library; export prints the photo as it is now.';
+const lightroomOutOfDate = 'Edited in Lightroom Classic since this preview. It updates when you are back in Lightroom’s Library; export prints the photo as it is now.';
+/**
+ * What a preview from before its photo's latest edit says: Lightroom hands one over once you are back in its Library;
+ * another source (Apple Photos) when it can, after a download from iCloud say.
+ */
+export const outOfDateNote = (source?: { kind?: string; locator?: { provider: string } }) => !source || source.locator?.provider === 'lightroom' ? lightroomOutOfDate
+  : 'Changed in its source since this preview, which updates once the source hands over a new one; export prints the photo as it is now.';
 /**
  * Why print cannot use a source's original here, or undefined when it can: it is drawn from a cached preview, or only
  * its provider's preview is on this Mac (ADR 0011). Print marks such a page ORIGINAL UNAVAILABLE and is a proof only.

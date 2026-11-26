@@ -59,6 +59,20 @@ Videos are left out. A photo the book holds already is not added again, and **Ed
 
 The plugin and ImageFlow talk only on this Mac: ImageFlow listens on the loopback address with a key that only your user account can read, and nothing else on the network reaches it.
 
+## Photos from Apple Photos
+
+Drag photos from the Photos app onto the photo strip, onto Manage Assets, or onto a photo box, or choose **Assets → Import from Photos…** and pick them in the photo picker (it searches, and keeps the order you pick in). ImageFlow links them: it does not copy them, and edits you make in Photos, a crop or an adjustment or **Revert to Original**, show in the book within a second or two. A caption you write in Photos becomes the photo's caption (macOS 27 and later); whatever you type in the Inspector wins.
+
+**The first time**, macOS asks whether ImageFlow may read your Photos library. ImageFlow never changes the library. If you declined, choose **Allow Access to Photos…** in the asset's menu, at the bottom of **Assets → Manage Assets…**, or on the Apple Photos card in **Settings → Sources**: macOS asks only once, so these open **System Settings → Privacy & Security → Photos**.
+
+**iCloud Photos.** With **Optimize Mac Storage**, most photos are not on the Mac. ImageFlow downloads what it needs: a preview of each photo you add (about a second each), and at export the full-size photos you placed (a few seconds each). Without a connection those photos show as **Offline**, drawn from their last preview, and a PDF export marks them ORIGINAL UNAVAILABLE.
+
+**Show in Photos** in an asset's menu opens Photos at the photo.
+
+**Export** prints each placed photo as Photos renders it now, at full size, and reuses it until the photo changes. HEIC and RAW photos work, because Photos does the rendering. **Copy into Book** makes the photos you choose the book's own files; they no longer follow Photos.
+
+Apple Photos needs macOS 15.2 or later. Only still photos can be linked. A synced book shows its Photos photos from their previews on another Mac, and prints them there when that Mac has the same iCloud Photos library.
+
 ## Save a copy
 
 **File → Duplicate…** creates a copy. **Include all files** in the save panel, checked by default, copies linked files into it for portability. Uncheck it to preserve links. Missing originals are reported.

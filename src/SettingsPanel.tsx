@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AgentSettings } from './AgentSettings';
 import { LightroomSettings } from './LightroomSettings';
+import { PhotosSettings } from './PhotosSettings';
 import { SyncSettings } from './SyncSettings';
 import { Icon } from './Icon';
 import type { UpdateChannel } from './update-feed';
@@ -130,7 +131,7 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
           </div>
           {error && <p role="alert" className="error-text settings-control">{error}</p>}
         </div>}
-        {pane === 'sources' && <div className="source-cards"><LightroomSettings api={api} /></div>}
+        {pane === 'sources' && <div className="source-cards"><LightroomSettings api={api} /><PhotosSettings api={api} /></div>}
         {pane === 'sync' && <SyncSettings api={api} settings={settings} choose={choose} />}
         {pane === 'agents' && <AgentSettings api={api} />}
       </div>}

@@ -1,7 +1,7 @@
 import type { ImportCounts } from './desktop';
 
 /** What to do with a HEIC photo, which neither Chromium nor the app's image library decodes (UI-013 of 25 November, evening). */
-export const heicAdvice = 'Export HEIC photos as JPEG first, for example from Photos (File → Export) or Preview, or import them from Lightroom Classic.';
+export const heicAdvice = 'If they are in Photos or Lightroom Classic, add them from there instead (drag them in from Photos, or import them from Lightroom), which renders them; or export them as JPEG first, for example from Preview.';
 export const isHeic = (path: string) => /\.(heic|heif)$/i.test(path);
 
 const amount = (count: number, singular: string) => count + ' ' + singular + (count === 1 ? '' : 's');

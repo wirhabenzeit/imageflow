@@ -143,13 +143,13 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
   function renderItem({ id, title }: typeof items[number]) {
     const placed = usage[tab][id];
     const sourceState = summary.sources?.[(tab === 'photo' ? 'photo:' : 'markdown:') + id];
-    const sourceLabel = sourceState?.pending ? 'Loading' : sourceState?.outOfDate ? 'Out of date' : sourceState?.state !== 'available' && sourceState?.problem ? sourceState.away ? awayBadge[sourceState.away] : (sourceState.cached ? sourceState.state === 'offline' ? 'Cached · Offline' : 'Cached · Missing' : sourceState.state === 'offline' ? 'Offline' : 'Unavailable')
+    const sourceLabel = sourceState?.pending ? 'Loading' : sourceState?.outOfDate ? 'Out of date' : sourceState?.state !== 'available' && sourceState?.problem ? sourceState.away ? awayBadge[sourceState.away] : (sourceState.cached ? sourceState.state === 'offline' ? 'Cached · Offline' : sourceState.state === 'denied' ? 'Cached · No access' : 'Cached · Missing' : sourceState.state === 'offline' ? 'Offline' : sourceState.state === 'denied' ? 'No access' : 'Unavailable')
       : sourceState && sourceFile(sourceState)?.linked && !view.value.showSource ? 'Linked' : undefined;
     const origin = view.value.showSource ? sourceOrigin(sourceState) : undefined;
     const common = {
       'data-id': id, role: 'option', 'aria-selected': selection.selected.includes(id),
       tabIndex: visibleCurrent === id || (!visibleCurrent && id === items[0]?.id) ? 0 : -1,
-      title: title + ' · ' + pagesText(placed, usage.aside?.[tab][id]) + (sourceLabel ? ' · ' + (sourceState?.outOfDate ? outOfDateNote : sourceState?.problem ?? sourceLabel) : ''),
+      title: title + ' · ' + pagesText(placed, usage.aside?.[tab][id]) + (sourceLabel ? ' · ' + (sourceState?.outOfDate ? outOfDateNote(sourceState) : sourceState?.problem ?? sourceLabel) : ''),
       onClick: (event: React.MouseEvent) => { selection.choose(id, event); choose({ kind: tab, id }); },
       onContextMenu: (event: React.MouseEvent<HTMLElement>) => { const ids = selection.context(id, event); choose({ kind: tab, id }); void context(ids); },
       onDoubleClick: () => quickLook({ kind: tab, id }),

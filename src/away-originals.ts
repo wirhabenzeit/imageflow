@@ -19,6 +19,8 @@ import type { SyncedCommit } from './sync-snapshot';
  *   path of any other kind that is not approved may well be a file here, so it keeps asking for its approval, whatever
  *   the manifest says and whether or not a preview is at hand;
  * - a Lightroom photo whose catalog cannot be reached now;
+ * - a photo of Apple Photos that this Mac's Photos library does not have (another Mac's library), that ImageFlow may
+ *   not read here, or that cannot be downloaded from iCloud now (ADR 0013);
  * - a photo of the book that this Mac's own sync record names and that this Mac never had in the version it names. One
  *   it had, and that is gone, went missing here.
  * Without a preview the photo is missing from the page, whatever the reason, and stays a finding of its own.
@@ -28,6 +30,7 @@ export function awayOriginal(status: SourceStatus, synced?: Pick<SyncedCommit, '
   const { id, locator, state, digest } = status;
   if (locator.provider === 'linked') return state === 'unapproved' && isUnlocatedPath((locator as { path?: string }).path ?? '') ? 'other-mac' : undefined;
   if (locator.provider === 'lightroom') return state === 'offline' ? 'catalog' : undefined;
+  if (locator.provider === 'photos') return state === 'offline' || state === 'missing' || state === 'denied' ? 'photos' : undefined;
   if (locator.provider !== 'package' || state !== 'missing') return undefined;
   const named = synced?.photoDigests[id];
   return named !== undefined && synced?.localDigests && synced.localDigests[id] === undefined && digest !== named ? 'not-downloaded' : undefined;
@@ -36,11 +39,11 @@ export function awayOriginal(status: SourceStatus, synced?: Pick<SyncedCommit, '
 export const awayProblem = (away: SourceAway, problem: string | undefined) =>
   away === 'other-mac' ? 'Original on another Mac' : away === 'not-downloaded' ? 'Original not downloaded yet' : problem;
 /** The same in a word or two, for an asset's badge. */
-export const awayBadge: Record<SourceAway, string> = { 'other-mac': 'On another Mac', catalog: 'Offline', 'not-downloaded': 'Not downloaded', uploading: 'Uploading' };
+export const awayBadge: Record<SourceAway, string> = { 'other-mac': 'On another Mac', catalog: 'Offline', photos: 'Not in Photos here', 'not-downloaded': 'Not downloaded', uploading: 'Uploading' };
 
 /** The originals that are elsewhere for one reason: the photos, placed or not, and the boxes print needs them for. */
 export type AwayNote = { away: SourceAway; sources: string[]; placed: Issue[] };
-const order: SourceAway[] = ['other-mac', 'catalog', 'not-downloaded', 'uploading'];
+const order: SourceAway[] = ['other-mac', 'catalog', 'photos', 'not-downloaded', 'uploading'];
 type Findings = { errors: readonly Issue[]; warnings: readonly Issue[] };
 
 /** Findings without those of originals that are elsewhere, which become one note per reason. */
@@ -60,12 +63,13 @@ export function takeAway({ errors, warnings }: Findings): { errors: Issue[]; war
 export function awayText({ away, sources }: Pick<AwayNote, 'away' | 'sources'>) {
   const one = sources.length === 1;
   const subject = sources.length + (one ? ' original is ' : ' originals are ');
-  return subject + { 'other-mac': 'on another Mac', catalog: 'in a Lightroom catalog that can’t be reached now', 'not-downloaded': 'not downloaded yet',
+  return subject + { 'other-mac': 'on another Mac', catalog: 'in a Lightroom catalog that can’t be reached now', photos: 'in Photos, but can’t be read on this Mac now', 'not-downloaded': 'not downloaded yet',
     uploading: 'still uploading from another Mac' }[away] + '. Needed for printing.';
 }
 const suggestions: Record<SourceAway, string> = {
   'other-mac': 'Nothing needs to be done to edit the book. Print it on the Mac that has the originals, or have the user choose Locate Folder… in Book check if they are here too.',
   catalog: 'Nothing needs to be done to edit the book. To print it, have the user open the photos’ catalog in Lightroom Classic with the ImageFlow plugin connected.',
+  photos: 'Nothing needs to be done to edit the book. To print it, use a Mac whose Photos library has the photos (the same iCloud Photos library), with ImageFlow allowed to read it in Settings → Sources and iCloud reachable.',
   'not-downloaded': 'Nothing needs to be done to edit the book. To print it, have the user choose File → Sync → Download Originals.',
   uploading: 'Nothing needs to be done to edit the book. Print it once the other Mac has uploaded the originals.',
 };
