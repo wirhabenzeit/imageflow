@@ -37,6 +37,11 @@ export function textEditorOwner(template: Parameters<typeof resolveEditPath>[0],
   }
 }
 
+// A photo's caption (ctx.Caption, UI-019) is typed with the same editor. It is no parameter: the frame reports it under
+// `captionKey`, and it is typed as plain text that keeps its line breaks, as the Caption field does.
+export const captionKey = 'caption';
+export const captionParameter: Extract<Parameter, { type: 'string' }> = { type: 'string', label: 'Caption', default: '', multiline: true };
+
 export function plainText(value: string, multiline: boolean) {
   const normalized = value.replace(/\r\n?/g, '\n');
   return multiline ? normalized : normalized.replace(/\n/g, ' ');

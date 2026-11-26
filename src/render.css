@@ -161,7 +161,7 @@ html:has(.if-artwork), html:has(.if-print-page), .if-sheet { color-scheme: only 
 /* Preview-frame gutters stay transparent so the host's selection and label layers remain visible. */
 html:has(.if-book) { color-scheme: light dark; }
 html:has(.if-book), html:has(.if-book) body { background: transparent; }
-/* An empty ctx.Text in the editor: the placeholder takes the template's own type, dimmed. */
+/* An empty ctx.Text or ctx.Caption in the editor: the placeholder takes the template's own type, dimmed. */
 .if-text-placeholder { opacity: .45; }
 /* The text editor uses a full template spread with only its activated occurrence visible. */
 html:has(.if-inline-text-frame), html:has(.if-inline-text-frame) body { overflow: hidden; background: transparent; }
@@ -220,6 +220,8 @@ html:has(.if-layout-settings) { background: transparent; }
 
 /* A zero-specificity fallback: authored classes, inherited typography rules on the node and inline styles win. */
 :where([data-inline-text][data-multiline]) { white-space: pre-wrap; }
+/* A photo's caption (ctx.Caption) is multiline text, so its line breaks show as they were typed. */
+:where([data-caption]) { white-space: pre-wrap; }
 html:has(.if-presentation), html:has(.if-presentation) body { overflow: hidden; background: #111; color-scheme: only light; }
 .if-presentation { position: absolute; inset: 0; background: #111; }
 .if-presentation.overview { overflow: auto; }

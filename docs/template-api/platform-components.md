@@ -8,6 +8,7 @@
 | `<MarkdownBox id>` | Receives the flowed fragment of the assigned Markdown source. Its element is the box's geometry and drop zone: for Markdown files, texts from the strip and a text dragged from another Markdown box, which swaps the two (as `swap_content` does). `rects` draws one box over several rectangles ([One box over several rectangles](boxes-and-elements.md#one-box-over-several-rectangles)). |
 | `<Element id>` | Wraps generated artwork so the editor can highlight it, and opens its parameters when clicked; an element can supply its own editor (see Element editors). |
 | `<ctx.Text parameter>` | Shows a string parameter and makes it editable by clicking it (see Click-to-edit). Only on the render context, because it reads the layout's values. |
+| `<ctx.Caption box>` | Shows the caption of a photo box's photo and makes it editable by clicking it, typed on the page and saved with the photo (see [Photo captions on the page](inline-text.md#photo-captions-on-the-page-inline-caption)). Only on the render context. |
 | `asset(path)` | Resolves a file in `template/assets/` for use in `src` or CSS. |
 
 Rules:

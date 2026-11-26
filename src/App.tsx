@@ -95,7 +95,7 @@ function inlineValues({ project, spread, template, target }: InlineContext) {
   return JSON.stringify([spread.split, scopeSpread(spread, target.page)?.definition, target.edits.map((path) => {
     const field = resolveEditPath(template, scopeSpread(spread, target.page)?.definition ?? '', path, target.page);
     return [field, field && readEdit(project, spread, field)];
-  })]);
+  }), target.caption !== undefined && scopeSpread(spread, target.page)?.boxes[target.caption]?.photo]);
 }
 
 const isGridColumns = (command: Command): command is `grid-columns-${typeof gridColumns[number]}` =>
@@ -251,6 +251,9 @@ export function App() {
     if (target?.inlineText && openTextOwner(target)) return;
     const state = summary?.project.spreads.find(({ id }) => id === next.spread);
     const text = !!(!next.owner && !next.panel && canvasReady && readyId.current === summary?.id && target && textFits(target));
+    // A photo's caption (ctx.Caption) has no parameter for the popover: where it cannot be typed on the page, because
+    // it is too small, rotated or the book is read-only, it opens Edit Caption… instead (UI-019).
+    if (target?.caption !== undefined && (!text || !writable)) { openCaption(target.spread, target.caption, target.page); return; }
     setEditing({ ...next, page: next.page ?? next.owner?.page ?? target?.page, session: ++editorSessions.current, text,
       ...(text && summary && template && state && target ? { held: { project: summary.project, spread: state, template, target } } : {}) });
   };
@@ -1672,10 +1675,12 @@ export function App() {
   useEffect(() => {
     if (captionRequest && (!editedBox || captionAsked(editedBox[0]!, editedBox[1]!, editedBox[2] as PageSide | undefined) === undefined)) setCaptionRequest(undefined);
   }, [JSON.stringify(editedBox), captionRequest]);
-  // Whether the template says which boxes print captions; where it does, only those offer Caption… (UI-017).
+  // Whether the template says which boxes print captions; where it does, only those offer Caption… (UI-017). A box that
+  // prints its caption with ctx.Caption on the page does, with or without a switch of its own (UI-019).
   const captionBoxes = useMemo(() => declaresCaptionBoxes(template), [template]);
-  const captionPrinted = (layout: string | undefined, box: string) =>
-    printsCaption(captionBoxes, layout === undefined ? undefined : template?.spreads[layout]?.boxes[box]?.parameters);
+  const captionPrinted = (layout: string | undefined, box: string, spread: string, page?: PageSide) =>
+    geometry?.targets.some((target) => target.caption === box && target.spread === spread && target.page === page)
+      || printsCaption(captionBoxes, layout === undefined ? undefined : template?.spreads[layout]?.boxes[box]?.parameters);
   function openCaption(spread: string, box: string, page?: PageSide) {
     const ready = readyId.current === summary?.id;
     openOwner(spread, { type: 'photo', id: box, page });
@@ -2503,7 +2508,7 @@ export function App() {
                   }, cropBox.parameters[key].label + ' updated')} />
                 </div>}
                 {cropPhoto && summary.photoIndex[cropPhoto] && <CaptionButton key={cropPhoto} summary={summary} photo={cropPhoto} usage={usage}
-                  request={captionAsked(cropping.spread, cropping.box, cropping.page)} printed={captionPrinted(cropping.layout, cropping.box)}
+                  request={captionAsked(cropping.spread, cropping.box, cropping.page)} printed={captionPrinted(cropping.layout, cropping.box, cropping.spread, cropping.page)}
                   save={(text) => saveCaption({ spread: cropping.spread, box: cropping.box, page: cropping.page, layout: cropping.layout }, cropPhoto, text)} />}
                 {cropAttached.length > 0 && <div className="crop-params">
                   <MarkedFields compact project={summary.project} spread={spreads.find(({ id }) => id === cropping.spread)!} page={cropping.page} template={template!}
@@ -2515,7 +2520,7 @@ export function App() {
               {editing && inline && summary && textInline && <InlineTextEditor key={editing.session}
                 projectId={summary.id} project={summary.project} spread={editSpread ?? { ...inline.spread, definition: '' }} template={template ?? inline.template} target={inline.target}
                 zoom={editSheet?.zoom ?? 1} host={canvasWrap.current} canvasReady={canvasReady} blocked={blockedInline || undefined}
-                edit={edit} close={closeEditor} step={stepEditor} shown={setTextShown} notice={setNotice} />}
+                edit={edit} close={closeEditor} step={stepEditor} shown={setTextShown} notice={setNotice} caption={{ summary, usage }} />}
               {editing && inline && summary && !textInline && <EditPopover key={editing.session}
                 compact={editing.owner?.type === 'markdown'} anchor={() => {
                   const stageRect = stage.current?.getBoundingClientRect(), host = canvasWrap.current?.getBoundingClientRect();
@@ -2533,7 +2538,7 @@ export function App() {
                 {editing.owner?.type === 'photo' && <PhotoContent summary={summary} spread={scopeSpread(inline.spread, inline.target.page)!} box={editing.owner.id}
                   label={ownerLabel(inline.spread, editing.owner)} change={changeSpreadInline} inspect={choose} values={!!boxSource(editing.spread, editing.owner.id, inline.target.page)}
                   caption={{ usage, done: closeEditor, autoFocus: captionAsked(editing.spread, editing.owner.id, inline.target.page) !== undefined,
-                    printed: captionPrinted(scopeSpread(inline.spread, inline.target.page)?.definition, editing.owner.id),
+                    printed: captionPrinted(scopeSpread(inline.spread, inline.target.page)?.definition, editing.owner.id, editing.spread, inline.target.page),
                     save: (photo, text) => saveCaption({ spread: inline.spread.id, box: editing.owner!.id, page: inline.target.page,
                       layout: scopeSpread(inline.spread, inline.target.page)?.definition ?? '' }, photo, text) }}
                   adjustCrop={cropBlocked(editing.spread, editing.owner.id, inline.target.page) ? undefined : () => startCrop(editing.spread, editing.owner!.id, inline.target.page)} />}

@@ -495,6 +495,8 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .inline-text-format .format-bold { font-weight: 700; }
 .inline-text-format .format-italic { font-style: italic; }
 .inline-text-format .format-strike { text-decoration: line-through; }
+/* Where else a caption typed on the page shows, as it belongs to the photo (UI-019). */
+.inline-caption-elsewhere { flex: none; color: var(--muted); font-size: 12px; white-space: nowrap; }
 /* On a narrow canvas the fields wrap onto a second row, so nothing overlaps; the width only follows the canvas. */
 .inline-editor-fields { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0; padding: 0 0 0 10px;
   border-width: 0 0 0 1px; min-width: 0; }

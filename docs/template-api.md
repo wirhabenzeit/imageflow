@@ -31,12 +31,12 @@ This page is generated from the topic files in [`template-api/`](template-api), 
 - [File parameters](#file-parameters): p.file, file() and imported assets.
 - [Template findings](#template-findings): Report input problems with issue().
 - [Geometry helpers](#geometry-helpers): Insets, grids and design coordinates.
-- [Platform components](#platform-components): Spread, boxes, Element and Text.
+- [Platform components](#platform-components): Spread, boxes, Element, Text and Caption.
 - [CSS contract](#css-contract): Fonts, CSS variables and print styling.
 - [Validation](#validation): Template load and render checks.
 - [Stored project data](#stored-project-data): Saved layouts, crops and parameters.
 - [Authoring and compatibility details](#authoring-and-compatibility-details): SDK types, enum maps and preview limits.
-- [Inline plain text (`inline-text`)](#inline-plain-text-inline-text): Edit strings on the page with ctx.Text.
+- [Inline plain text (`inline-text`)](#inline-plain-text-inline-text): Edit strings with ctx.Text, and photo captions with ctx.Caption, on the page.
 - [Formatted text (`formatted-text`)](#formatted-text-formatted-text): Inline Markdown and FormattedText.
 
 ## Authoring workflow
@@ -236,6 +236,7 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, … })
 | `font-coverage` | `fonts`: the bundled faces and the characters they can set, for text the template draws itself ([Fonts and output](#fonts-and-output)). |
 | `inline-editors` | `presentation: 'inline'` on element and document editors: editing on the page, in the frame of what the editor was opened from ([Editing on the page](#editing-on-the-page)). |
 | `inline-text` | `ctx.Text presentation="inline"` for plain-string typing in template typography, with existing parameter scopes and Undo. |
+| `inline-caption` | `ctx.Caption`: a photo box's caption, typed on the page and saved with the photo as Edit Caption… saves it ([Photo captions on the page](#photo-captions-on-the-page-inline-caption)). |
 | `list-parameters` | `p.list` of flat items with stable IDs, the generated list control, `Control` for one item's field, and item-level project commands ([List parameters](#list-parameters)). |
 | `template-preview` | `preview`: the template's own image for New Book instead of a render of its opening spread ([Template previews](#template-previews)). |
 | `photo-render` | `PhotoBox` children: a render callback that draws the box's photo from its crop, such as through an SVG mask ([PhotoBox render callbacks](#photobox-render-callbacks)). |
@@ -300,9 +301,7 @@ export default defineTemplate({
       render: (ctx) => (
         <Spread className="story">
           <ctx.PhotoBox id="hero" rect={ctx.geometry.page('left', 'bleed')} />
-          {ctx.boxes.hero.params.showCaption && ctx.boxes.hero.photo?.caption && (
-            <p className="caption">{ctx.boxes.hero.photo.caption}</p>
-          )}
+          <ctx.Caption box="hero" className="caption" />
           <ctx.Text parameter="eyebrow" className="eyebrow" />
           <ctx.Text parameter="heading" as="h1" className="heading" style={{ color: ctx.document.accent }} />
           <ctx.MarkdownBox id="body" className="body editorial" />
@@ -453,9 +452,9 @@ A yes/no parameter of a photo box that prints the photo's caption says so with `
 hero: box.photo('Main photograph', { showCaption: p.boolean({ label: 'Show caption', default: false, shows: 'caption' }) }),
 ```
 
-Any placed photo's caption can be edited from the page (**Caption…** beside the box's settings, **Edit Caption…** in its context menu). With `shows`, entering the first caption of a photo also switches the parameter on, as a caption would otherwise be saved and not printed. Changing a caption, or removing it, leaves the parameter alone. `shows` has no effect elsewhere, and ImageFlow 1.0.0-beta.24 and earlier ignore it.
+Print the caption with `<ctx.Caption box="hero" />`: it shows only while this parameter is on, and clicking it types the caption on the page ([Photo captions on the page](#photo-captions-on-the-page-inline-caption)). Any placed photo's caption can also be edited from the page (**Caption…** beside the box's settings, **Edit Caption…** in its context menu). With `shows`, entering the first caption of a photo also switches the parameter on, as a caption would otherwise be saved and not printed. Changing a caption, or removing it, leaves the parameter alone. `shows` has no effect elsewhere, and ImageFlow 1.0.0-beta.24 and earlier ignore it.
 
-Once any photo box of a template, on a spread or the cover, declares `shows: 'caption'`, ImageFlow takes the template at its word: **Caption…** appears in the photo toolbar only on boxes with such a parameter, as a caption typed at a box that never prints it would look like a failed edit. **Edit Caption…** stays on every placed photo, since the caption belongs to the photo and may print elsewhere; at a box without the parameter its field says "This layout doesn't print captions." A template that never declares `shows` offers **Caption…** on every placed photo, as ImageFlow cannot tell which boxes print one. ImageFlow 1.0.0-beta.25 and earlier offer it everywhere.
+Once any photo box of a template, on a spread or the cover, declares `shows: 'caption'`, ImageFlow takes the template at its word: **Caption…** appears in the photo toolbar only on boxes with such a parameter or that render `ctx.Caption`, as a caption typed at a box that never prints it would look like a failed edit. **Edit Caption…** stays on every placed photo, since the caption belongs to the photo and may print elsewhere; at a box without the parameter its field says "This layout doesn't print captions." A template that never declares `shows` offers **Caption…** on every placed photo, as ImageFlow cannot tell which boxes print one. ImageFlow 1.0.0-beta.25 and earlier offer it everywhere.
 
 Descriptions appear with the parameter's type, range, `step`, `unit` and options in `get_authoring_context` (under `template`) and in `inspect_book`'s parameter view. In the editor, a field shows its parameter's description only as its hover tooltip, so the settings stay uncluttered; write it for agents first. A `description` on a `controls` entry is shown under the field instead and replaces it there; control descriptions have the same limits. Descriptions never change defaults, allowed values or saved data. Put units in `unit`, not in the description.
 
@@ -1098,6 +1097,8 @@ Prefer `presentation="inline"` for a single user-written string printed on the p
 
 `parameter` takes the same paths as `ctx.edit`, limited to string parameters. `as` is one of `h1`–`h6`, `p` (default), `span`, `div`, `blockquote` or `figcaption`; `className`, `style`, `rect` and `issue()` markers work as on the platform components. When the value is empty, the editing canvas shows a dimmed placeholder in the template's own type (`placeholder`, else the parameter's `placeholder`, else its label) and marks the node `data-empty`; the exported book shows the empty node. The value is rendered as text, never as HTML, and newlines follow the node's CSS `white-space`. `fallback` displays inherited text when the saved value is empty or whitespace-only, without saving it. Set `fallbackLabel` to name its source: inherited text has a dotted underline on the canvas and the popover explains what clearing the override does. `hidden` suppresses the node explicitly; whitespace never means hidden. A template can bind it to a separate visibility parameter, as the calendar does with `showPlace`. Use `ctx.edit` for nodes that combine several parameters or show more than the value.
 
+A photo's caption is the photo's, not a parameter: print it with `<ctx.Caption box="hero" />`, which reads it from the box's photo and marks it, so clicking it types the caption on the page ([Photo captions on the page](#photo-captions-on-the-page-inline-caption)).
+
 Templates read photo metadata (for captions) and page numbers through the context; they never receive file paths or image data, and they cannot change project data. Of a Markdown source they receive its header fields and, in a composition, its blocks ([Composing a text](#composing-a-text)).
 
 ## Anchors
@@ -1442,6 +1443,7 @@ Use `page` and `spread` for physical layouts that keep margins in millimetres on
 | `<MarkdownBox id>` | Receives the flowed fragment of the assigned Markdown source. Its element is the box's geometry and drop zone: for Markdown files, texts from the strip and a text dragged from another Markdown box, which swaps the two (as `swap_content` does). `rects` draws one box over several rectangles ([One box over several rectangles](#one-box-over-several-rectangles)). |
 | `<Element id>` | Wraps generated artwork so the editor can highlight it, and opens its parameters when clicked; an element can supply its own editor (see Element editors). |
 | `<ctx.Text parameter>` | Shows a string parameter and makes it editable by clicking it (see Click-to-edit). Only on the render context, because it reads the layout's values. |
+| `<ctx.Caption box>` | Shows the caption of a photo box's photo and makes it editable by clicking it, typed on the page and saved with the photo (see [Photo captions on the page](#photo-captions-on-the-page-inline-caption)). Only on the render context. |
 | `asset(path)` | Resolves a file in `template/assets/` for use in `src` or CSS. |
 
 Rules:
@@ -1636,7 +1638,7 @@ export const story = spread({
 // index.tsx: defineTemplate({ …, parameters: documentParameters, spreads: { story } })
 ```
 
-Helpers shared between layouts can take a slice of the typed context, such as `Pick<RenderContext<{ label: string }, typeof documentParameters>, 'document' | 'geometry'>`, as the starter's `Paper` and `Caption` do. `mm`, `pt`, and `inch` produce structured lengths for the print-format declaration; use CSS strings such as `'30mm'` in React styles. They are not CSS values.
+Helpers shared between layouts can take a slice of the typed context, such as `Pick<RenderContext<{ label: string }, typeof documentParameters>, 'document' | 'geometry'>`, as the starter's `Paper` and `PagePaper` do. `mm`, `pt`, and `inch` produce structured lengths for the print-format declaration; use CSS strings such as `'30mm'` in React styles. They are not CSS values.
 
 `MarkdownBox` accepts `columns` (default 1, rounded and clamped to 1–6). Use `style={{ columnGap: '5mm' }}` for the gap. Text continues down each column, then through the next assigned box in spread/flow order. Expose a box parameter and pass its resolved value to `columns` if users should control it. Column layout remains platform-owned; avoid overriding its flow machinery with CSS. `rects` draws one box over several rectangles, such as both pages of a spread; `alignHeads` starts their columns level below a head that opens the box (see [One box over several rectangles](#one-box-over-several-rectangles)).
 
@@ -1689,6 +1691,21 @@ Typing is pending until Done, leaving the field, or Enter for a single line. For
 Application validates the complete string (including `maxLength`), checks the original parameter declaration, layout and saved value again when the shared edit queue runs, and uses the normal revision-checked project save service. Failed saves, invalid text and external conflicts keep the editor and its pending text, with a selectable copy of the draft in the error area. Conflicting typing is never silently applied over newer saved values. Recovery instructions explicitly say to fix the text, retry Done, or copy the draft and choose Discard before continuing. Discard and reopen to resolve an external conflict. Outside pointer presses cannot start canvas gestures before applying the text. Normal clicks are performed after a successful apply; browser actions requiring trusted user activation (links, file inputs and controls marked `data-requires-user-activation`) instead show “Text saved. Click again to continue.” and require a new real click. Ordinary zoom/scroll/resize follows the same editor without remounting it. If the layout changes or the occurrence disappears, the pending draft remains recoverable rather than moving to another saved parameter.
 
 The Inspector's marked-text action opens the existing parameter control, including from the keyboard. Targets under 48 × 12 screen pixels, rotated/skewed targets and read-only projects use the existing panel; an inline session keeps its draft if the page later becomes smaller. Whole-spread views often make headings that small: they are then edited in the panel, and on the page once the view is zoomed in far enough. Keep the printed type its intended size rather than enlarging it to stay above the threshold. Thumbnails, MCP artwork captures and PDF exports use only confirmed render output, without editable nodes, draft text or editor chrome.
+
+### Photo captions on the page (`inline-caption`)
+
+A photo's caption belongs to the photo: it is saved with the photo and printed wherever the photo is placed. `<ctx.Caption box="hero" as="figcaption" />` prints the caption of the photo in photo box `hero` and marks it, so clicking it in the editor types the caption where it prints, in the template's own type, as an inline string is typed. Finishing saves it exactly as **Edit Caption…** does: one Undo step, the first caption of a photo switches its **Show caption** parameter on, and the new text shows at every place the photo is. While the photo is placed elsewhere too, the editor's toolbar says where ("Also on p. 12"). Captions are plain text and may have several lines: Enter inserts a line break, ⌘/Ctrl+Enter, Done or a click elsewhere finishes, and Escape or Discard drops the typing. The node keeps its line breaks (`white-space: pre-wrap`); template CSS and `style` take precedence. Inline captions are included in the contract-1 baseline and need no `requires` entry.
+
+```tsx
+hero: box.photo('Photo', { showCaption: p.boolean({ label: 'Show caption', default: false, shows: 'caption' }) }),
+// ...
+<ctx.PhotoBox id="hero" rect={at.page(30, 44, 230, 190)} />
+<ctx.Caption box="hero" className="caption" rect={at.page(30, 240, 230, 20)} />
+```
+
+`box` is one of the layout's photo boxes (type-checked with the `spread` builder). `as` takes the same tags as `ctx.Text` (default `p`); `className`, `style`, `rect`, `decorative` and `issue()` markers work as on the platform components. The mark renders nothing while the box is empty, as there is no photo to own a caption, and nothing while the box's `shows: 'caption'` parameter is off, so the switch and the page always agree and there is nothing to click; **Caption…** in the photo toolbar still edits it. A box that renders `ctx.Caption` counts as printing captions for **Caption…** ([parameters](#parameters)), with or without such a parameter. With the switch on and no caption yet, the editing canvas shows `placeholder` (default "Add caption") dimmed in the template's own type and marks the node `data-empty`; thumbnails, layout previews, the Book check, MCP artwork, presentation, proofs and export show an empty node. The node carries `data-caption` with the box ID in every view, as `ctx.Text` keeps `data-edit`.
+
+The caption node edits no parameter, so it is not listed with the Inspector's marked text and `ctx.edit` cannot name it. Where it cannot be typed on the page (a target under 48 × 12 screen pixels, rotated or skewed template CSS, or a read-only book), clicking it opens **Edit Caption…** instead. Cover layouts have `ctx.Caption` too; there the caption is edited in the Inspector's cover section. A template that prints `ctx.boxes.hero.photo.caption` with its own markup keeps working, edited with **Caption…** only.
 
 ## Formatted text (`formatted-text`)
 

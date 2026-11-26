@@ -3,9 +3,10 @@ import { plainText } from './inline-text';
 import type { Parameter } from './parameters';
 
 /** Edits one occurrence in a private copy of its complete template spread. Ancestors, fonts and layout are retained;
- * the viewport is cropped to the node. This frame never writes project data or updates other occurrences. */
+ * the viewport is cropped to the node. This frame never writes project data or updates other occurrences. `key` names
+ * the reported text: the node's parameter path, or `captionKey` for a photo's caption. */
 export function inlineTextFrame(root: HTMLElement, node: HTMLElement, param: Extract<Parameter, { type: 'string' }>,
-  value: string, post: (data: unknown) => void, editorOrigin: string) {
+  value: string, post: (data: unknown) => void, editorOrigin: string, key = node.dataset.edit!) {
   const sheet = node.closest<HTMLElement>('.if-sheet')!;
   const rect = node.getBoundingClientRect();
   const sheetRect = sheet.getBoundingClientRect();
@@ -52,7 +53,7 @@ export function inlineTextFrame(root: HTMLElement, node: HTMLElement, param: Ext
     finally { restoreWhitespace(); }
   };
   const values = () => {
-    if (!dirty) return { [node.dataset.edit!]: value };
+    if (!dirty) return { [key]: value };
     // Chromium keeps a lone <br> as the caret container after deleting everything. It is not a saved newline.
     const empty = !node.textContent && node.childNodes.length <= 1;
     // innerText understands the browser's editable line containers, but also applies CSS text-transform and
@@ -62,8 +63,8 @@ export function inlineTextFrame(root: HTMLElement, node: HTMLElement, param: Ext
     try {
       node.style.setProperty('text-transform', 'none', 'important');
       node.style.setProperty('white-space', 'pre-wrap', 'important');
-      if (rich) return { [node.dataset.edit!]: empty ? '' : rich.read(!!param.multiline) };
-      return { [node.dataset.edit!]: plainText(empty ? '' : node.innerText, !!param.multiline) };
+      if (rich) return { [key]: empty ? '' : rich.read(!!param.multiline) };
+      return { [key]: plainText(empty ? '' : node.innerText, !!param.multiline) };
     } finally {
       properties.forEach((key, i) => previous[i][0] ? node.style.setProperty(key, previous[i][0], previous[i][1]) : node.style.removeProperty(key));
     }

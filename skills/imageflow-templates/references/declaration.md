@@ -46,9 +46,7 @@ export default defineTemplate({
       render: (ctx) => (
         <Spread className="story">
           <ctx.PhotoBox id="hero" rect={ctx.geometry.page('left', 'bleed')} />
-          {ctx.boxes.hero.params.showCaption && ctx.boxes.hero.photo?.caption && (
-            <p className="caption">{ctx.boxes.hero.photo.caption}</p>
-          )}
+          <ctx.Caption box="hero" className="caption" />
           <ctx.Text parameter="eyebrow" className="eyebrow" />
           <ctx.Text parameter="heading" as="h1" className="heading" style={{ color: ctx.document.accent }} />
           <ctx.MarkdownBox id="body" className="body editorial" />

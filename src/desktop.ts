@@ -503,6 +503,9 @@ export type BookGeometry = {
   // `page` is the page the node is on, for every target: occurrences are counted per page.
   targets: (Rect & { spread: string; page?: PageSide; edits: string[]; occurrence: number; owner?: { type: 'box' | 'element'; id: string }; upright?: boolean;
     inlineText?: boolean;
+    // The photo box whose photo's caption a ctx.Caption node shows (UI-019). Such a target edits no parameter, so
+    // `edits` is empty and it is numbered among the other caption nodes of its page; `inlineText` is set too.
+    caption?: string;
     // True for text in a vertical writing mode, whose lines run down the rectangle.
     vertical?: boolean;
     textFallback?: { parameter: string; text: string; label: string } })[];
