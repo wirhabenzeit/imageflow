@@ -34,7 +34,10 @@ export type ProvidedFacts = CaptureMetadata & {
   height: number;
   /** Read-only descriptive metadata; an override in photos.json wins over it. */
   provided?: { title?: string; caption?: string; credit?: string; altText?: string };
-  /** Recorded with the fact for the provider's own later use; the host does not read it. */
+  /**
+   * Recorded with the fact. The host reads the keys the provider declares in src/source-properties.ts (its curation
+   * marks, ADR 0014), and only through those specs; every other key is for the provider's own later use.
+   */
   extra?: Record<string, unknown>;
 };
 

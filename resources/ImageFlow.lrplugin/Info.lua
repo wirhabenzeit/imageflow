@@ -14,5 +14,5 @@ return {
   -- File → Plug-in Extras works in every module; Library → Plug-in Extras too.
   LrExportMenuItems = { { title = 'Send to ImageFlow', file = 'SendToImageFlow.lua', enabledWhen = 'photosSelected' } },
   LrLibraryMenuItems = { { title = 'Send to ImageFlow', file = 'SendToImageFlow.lua', enabledWhen = 'photosSelected' } },
-  VERSION = { major = 1, minor = 2, revision = 0, display = '1.2.0' },
+  VERSION = { major = 1, minor = 3, revision = 0, display = '1.3.0' },
 }

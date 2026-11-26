@@ -9,6 +9,9 @@ import { isLightroomIdentifier } from '../../src/source-locator';
  * - `metadata { photos: [{ uuid, known? }] }`: one `batchGetRawMetadata` and `batchGetFormattedMetadata` for the photos.
  *   `known` is the revision ImageFlow stored; the plugin hashes `getDevelopSettings()` only for a photo whose revision
  *   differs from it, or that has none (ADR 0011, §3.2). Photos the catalog does not hold are listed in `missing`.
+ *   From plugin 1.3.0 a row also has the photo's marks where they are set (ADR 0014): `rating` (1 to 5), `pickStatus`
+ *   (1 picked, -1 rejected), `colorNameForLabel` (Lightroom's colour name, 'red' to 'purple' or one of its own) and the
+ *   formatted `label` (the label's own name). An older plugin sends none of them.
  * - `thumbnails { photos: [{ uuid, known? }], folder }` (plugin 1.1.0): the previews Lightroom keeps itself, at least
  *   1400 px where it has them, as files in `folder`, with each photo's revision before and after. `known` is the revision
  *   ImageFlow knows the develop settings of, as in `metadata`. A photo Lightroom has no preview of now, such as one being
@@ -43,6 +46,12 @@ export const photoRowSchema = z.object({
   cameraModel: z.string().max(200).optional(),
   title: text, caption: text, copyright: text, creator: text, altText: text,
   fileName: z.string().max(255).optional(),
+  // The marks (plugin 1.3.0) only decorate a photo and reach no render, so one ImageFlow cannot read is dropped by
+  // itself instead of failing the job for every photo in it.
+  rating: z.number().int().min(1).max(5).optional().catch(undefined),
+  pickStatus: z.union([z.literal(1), z.literal(-1)]).optional().catch(undefined),
+  colorNameForLabel: z.string().min(1).max(40).optional().catch(undefined),
+  label: z.string().min(1).max(200).optional().catch(undefined),
 });
 export type PhotoRow = z.infer<typeof photoRowSchema>;
 export const metadataResultSchema = z.object({ photos: z.array(photoRowSchema).max(10_000), missing: z.array(z.string()).max(10_000).optional() });

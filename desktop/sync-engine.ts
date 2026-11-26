@@ -6,10 +6,11 @@ import sharp from 'sharp';
 import type { AssetFact } from '../src/asset-facts';
 import { parseDocument, photoIndexSchema, projectSchema, withBookFormat } from '../src/project';
 import type { PhotoIndex } from '../src/project';
-import { sourceEntries } from '../src/source-locations';
+import { sourceEntries, sourceProvider } from '../src/source-locations';
+import { declaredExtra, declaredProperties, withDeclaredExtra } from '../src/source-properties';
 import { entryReach, isFileLocator, packagePath } from '../src/source-locator';
 import type { LocatorFields } from '../src/source-locator';
-import { changedOriginals, commitHeaderSchema, commitHeaderVersion, contentBlobKey, coverBlobKey, decideSync, deriveTips, encodeStateBlob, factsAhead, newerStateBlob, NewerSyncFormatError, originalBlobKey, portableManifests,
+import { changedOriginals, changedProperties, commitHeaderSchema, commitHeaderVersion, contentBlobKey, coverBlobKey, decideSync, deriveTips, encodeStateBlob, factsAhead, newerStateBlob, NewerSyncFormatError, originalBlobKey, portableManifests,
   projectManifests, proxyBlobKey, stateBlobSchema, stateMatchesHeader } from '../src/sync-snapshot';
 import type { CommitHeader, StateBlob, SyncDecision, SyncedCommit } from '../src/sync-snapshot';
 import type { SyncStatus } from '../src/desktop';
@@ -165,6 +166,12 @@ type Context = { root: string; remote: SyncRemote; book: OpenProject; stale: boo
    * reported and `key`, a key of the content the provider shows now. A photo has one of `path` and `key`.
    */
   here: Record<string, { path?: string; key?: string; digest: string }>;
+  /**
+   * The marks (ADR 0014) of every photo without a file whose provider reported it available with facts in this sync run,
+   * as the provider showed them then: its `provider`, the declared keys of its `extra` and the digest of its declared
+   * properties (`SyncedCommit.localProps`). Kept apart from `here`, whatever preview is stored: a mark moves no content.
+   */
+  props: Record<string, { provider: string; declared: Record<string, unknown>; digest: string }>;
   /** Ends what `SyncRemote.prepareSync` started for this sync. */
   endSync?: () => void;
   /** The book this one is a copy of, while it syncs with the same remote (`copySource`): its first push names its originals. */
@@ -191,6 +198,7 @@ async function refreshFacts(context: Context) {
   // lays the photo out at the new version's size and draws it from its preview (`keptOriginals`, desktop/project.ts).
   const kept = await keptOriginals(root);
   context.here = {};
+  context.props = {};
   const sources = sourceEntries({ project: book.project, photoIndex: photos }).filter((entry) => entry.kind === 'photo');
   // Photos that are not files are asked about once per provider, all at once (ADR 0011): a sync holds the book, and a
   // provider such as Lightroom Classic answers over a bridge.
@@ -200,6 +208,13 @@ async function refreshFacts(context: Context) {
     const reported = provided.get(source.id)?.observed;
     // A file its provider reports where it reported none before is read like any file, below.
     if (reported && !(reported.state === 'available' && reported.file !== undefined)) {
+      // Its marks are what the provider shows now, read from this observation, not from the fact: the fact may be from
+      // the book's last load or from another Mac's push, and a mark set right before this sync must go up with it. Nothing
+      // is recorded in the fact; the session does that with its next look.
+      if (reported.state === 'available' && reported.facts) {
+        const provider = sourceProvider(source);
+        context.props[source.id] = { provider, declared: declaredExtra(provider, reported.facts.extra), digest: sha(Buffer.from(declaredProperties(provider, reported.facts.extra))) };
+      }
       // A photo without a file, which its provider answers for now. What the provider reported was recorded with its
       // revisions and the digest of its preview when the book loaded or the provider reported a change
       // (desktop/provided-photos.ts). The fact is this Mac's observation of the photo only while it is of the content
@@ -231,6 +246,22 @@ const hereKeys = (context: Context) => Object.fromEntries(Object.entries(context
  */
 const syncedKeys = (context: Context, synced: SyncedCommit | undefined, photos: Record<string, unknown>, except: ReadonlySet<string> = new Set()) =>
   Object.fromEntries(Object.entries({ ...synced?.localKeys, ...Object.fromEntries(Object.entries(hereKeys(context)).filter(([id]) => !except.has(id))) }).filter(([id]) => photos[id]));
+const hereProps = (context: Context) => Object.fromEntries(Object.entries(context.props).map(([id, { digest }]) => [id, digest]));
+/** The same for the marks of the photos without a file (`SyncedCommit.localProps`). */
+const syncedProps = (context: Context, synced: SyncedCommit | undefined, photos: Record<string, unknown>, except: ReadonlySet<string> = new Set()) =>
+  Object.fromEntries(Object.entries({ ...synced?.localProps, ...Object.fromEntries(Object.entries(hereProps(context)).filter(([id]) => !except.has(id))) }).filter(([id]) => photos[id]));
+/**
+ * A fact with the marks this Mac's provider shows for its photo in place of its own (ADR 0014), and nothing else
+ * changed: neither digest, size and revisions, which say which version of the photo it is, nor `verified`. Unchanged
+ * for a photo whose provider did not answer.
+ */
+const withObservedMarks = (context: Context, id: string, fact: AssetFact): AssetFact => {
+  const observed = context.props[id];
+  if (!observed) return fact;
+  const { extra: _, ...rest } = fact;
+  const extra = withDeclaredExtra(fact.extra, observed.declared);
+  return extra ? { ...rest, extra } : rest;
+};
 const photoFacts = (facts: Record<string, AssetFact>, photos: PhotoIndex) => Object.fromEntries(Object.entries(facts).filter(([id]) => photos[id]));
 const digestsOf = (facts: Record<string, AssetFact>) => Object.fromEntries(Object.entries(facts).map(([id, fact]) => [id, fact.digest]));
 
@@ -365,9 +396,15 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
   // A photo's fact from here goes up only when its original changed here since the last sync (or the snapshot lacks
   // one); an original merely left at an older digest never pushes that digest back over another Mac's re-export.
   const changed = changedOriginals(hereDigests(context), synced, hereKeys(context));
+  // The one exception is a photo without a file whose marks changed here (ADR 0014): its snapshot fact goes up with this
+  // Mac's marks, and with nothing else of this Mac's, so the rule above still holds for its content. A fact from here
+  // always carries the marks the provider showed in this run, which may be newer than those recorded in it.
+  const marked = changedProperties(hereProps(context), synced);
   const remoteFacts = photoFacts(base?.assetsMeta.assets ?? {}, state.photos);
-  const assets = Object.fromEntries(Object.keys(state.photos).flatMap((id) => {
-    const fact = (changed.has(id) ? facts[id] : remoteFacts[id]) ?? facts[id] ?? remoteFacts[id];
+  const assets = Object.fromEntries(Object.keys(state.photos).flatMap((id): [string, AssetFact][] => {
+    const remote = !changed.has(id) && remoteFacts[id];
+    if (remote) return [[id, marked.has(id) ? withObservedMarks(context, id, remote) : remote]];
+    const fact = facts[id] ? withObservedMarks(context, id, facts[id]) : remoteFacts[id];
     return fact ? [[id, fact]] : [];
   }));
   const originals: StateBlob['originals'] = {};
@@ -449,7 +486,9 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
     // What this Mac has: originals at the snapshot's digest, and older versions a pull kept until their new ones arrive.
     localDigests: Object.fromEntries(Object.entries(context.here).filter(([id, { path, digest }]) => path !== undefined &&
       (assets[id]?.digest === digest || synced?.localDigests?.[id] === digest)).map(([id, { digest }]) => [id, digest])),
-    localKeys: syncedKeys(context, synced, state.photos) });
+    localKeys: syncedKeys(context, synced, state.photos),
+    // Marks count as synced only for a photo this push carried a fact for; any other keeps what it had.
+    localProps: syncedProps(context, synced, state.photos, new Set(Object.keys(context.props).filter((id) => !assets[id]))) });
   return { header, blob };
 }
 
@@ -641,7 +680,7 @@ async function applyPull(context: Context, marker: PullMarker) {
 /** The first half of a pull: everything is downloaded, verified and staged, and the pull is marked. The book is untouched. */
 export async function stageSyncPull(remote: SyncRemote, book: OpenProject, tip: CommitHeader) {
   const root = await realpath(book.folder);
-  const { marker } = await stagePull({ root, remote, book, stale: false, options: { remote, book }, here: {} }, tip);
+  const { marker } = await stagePull({ root, remote, book, stale: false, options: { remote, book }, here: {}, props: {} }, tip);
   await markPull(root, marker);
   return marker;
 }
@@ -691,6 +730,11 @@ async function stagePull(context: Context, tip: CommitHeader) {
   // Photos whose original changed here since the last sync keep their local fact; every other original here that
   // differs from the snapshot is stale.
   const keepLocal = new Set([...changedOriginals(here, synced, hereKeys(context))].filter((id) => projected[id]));
+  // Marks that changed here are kept the same way (ADR 0014): the pull writes the snapshot's fact, marks included, but
+  // what they were compared with stays as it was (`localProps` below), so they still count as changed afterwards and the
+  // push that follows the pull carries them over the snapshot's. Every other photo's marks count from what this Mac's
+  // provider shows now, whatever the snapshot has: they were pulled, not changed here.
+  const keepProps = new Set([...changedProperties(hereProps(context), synced)].filter((id) => projected[id]));
   const proxies = await fetchProxies(remote, tip.bookId, await missingProxies(blob, projected, here, keepLocal));
   const staleOriginals: PullMarker['staleOriginals'] = {};
   const localDigests: PullMarker['localDigests'] = {};
@@ -734,7 +778,7 @@ async function stagePull(context: Context, tip: CommitHeader) {
     bookStateRevision: tip.bookStateRevision, templateChanged: !current || templates(current.contentDigests) !== templates(blob.content),
     staleOriginals, keepLocal: [...keepLocal], localDigests,
     // What a kept local fact was compared with stays as it is, so the fact counts as changed until a push carries it.
-    localKeys: syncedKeys(context, synced, projected, keepLocal) };
+    localKeys: syncedKeys(context, synced, projected, keepLocal), localProps: syncedProps(context, synced, projected, keepProps) };
   await preflightPull(root, marker);
   return { blob, marker };
 }
@@ -802,7 +846,7 @@ export async function syncBook(options: SyncOptions): Promise<SyncOutcome> {
   const registered = AssetFacts.registered(root);
   options.signal?.throwIfAborted();
   const remote = abortableRemote(options.remote, options.signal);
-  const context: Context = { root, remote, book: options.book, stale: false, options: { ...options, remote }, here: {} };
+  const context: Context = { root, remote, book: options.book, stale: false, options: { ...options, remote }, here: {}, props: {} };
   try {
     const decided = await decideAndSync(context);
     // A push that must not change the book downloads and replaces nothing either.
@@ -858,7 +902,7 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
   if (tombstone) throw new BookDeletedError(tombstone);
   const tips = deriveTips(commits);
   const synced = state.lastSynced;
-  const factsChanged = !!synced && factsAhead(hereDigests(context), synced, hereKeys(context));
+  const factsChanged = !!synced && factsAhead(hereDigests(context), synced, hereKeys(context), hereProps(context));
   const decision = decideSync({ pullInProgress: false, tips, commits, lastSynced: synced, localRevision: local.revision, factsChanged });
   // Without changing the book, only a push goes ahead: a pull waits (`deferred`), and a divergence is left as it is.
   if (options.pushOnly && decision.action === 'fast-forward') return deferred;
@@ -889,14 +933,24 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
       // for the first time or sees it as the snapshot has it.
       const agreed = Object.entries(context.here).filter(([id, { key, digest }]) => key !== undefined && key !== synced!.localKeys?.[id] &&
         (synced!.localKeys?.[id] === undefined || synced!.photoDigests[id] === digest));
-      if (agreed.length) await recordSynced(root, { ...synced!, localKeys: { ...synced!.localKeys, ...Object.fromEntries(agreed.map(([id, { key }]) => [id, key!])) } });
+      // Marks are counted from what this Mac shows of a photo the record has none for: here, with nothing ahead, a photo
+      // without marks (one with marks would have been pushed), so that removing a mark later counts as a change.
+      const first = Object.entries(hereProps(context)).filter(([id]) => synced!.localProps?.[id] === undefined);
+      if (agreed.length || first.length) {
+        await recordSynced(root, { ...synced!, localKeys: { ...synced!.localKeys, ...Object.fromEntries(agreed.map(([id, { key }]) => [id, key!])) },
+          ...(first.length ? { localProps: { ...synced!.localProps, ...Object.fromEntries(first) } } : {}) });
+      }
       return { action: 'in-sync', pushed: [], changed };
     }
     case 'adopt': {
       const blob = await fetchState(options.remote, bookId, decision.tip.stateDigest, decision.tip);
       const photoDigests = digestsOf(photoFacts(blob.assetsMeta.assets, local.photos));
       // Without a record of its own, every original here that differs from the snapshot counts as newer.
-      const adopted = { commitId: decision.tip.commitId, bookId, bookStateRevision: decision.tip.bookStateRevision, stateDigest: decision.tip.stateDigest, photoDigests };
+      // Marks this Mac shows as the snapshot has them count from there. Others are left without an entry, so the photos
+      // that have marks here push them once (`changedProperties`), as on a book synced before marks were.
+      const localProps = Object.fromEntries(Object.entries(context.props).filter(([id, { provider, digest }]) => photoDigests[id] &&
+        digest === sha(Buffer.from(declaredProperties(provider, blob.assetsMeta.assets[id]?.extra)))).map(([id, { digest }]) => [id, digest]));
+      const adopted = { commitId: decision.tip.commitId, bookId, bookStateRevision: decision.tip.bookStateRevision, stateDigest: decision.tip.stateDigest, photoDigests, localProps };
       const same = Object.entries(context.here).filter(([id, { digest }]) => photoDigests[id] === digest);
       await recordSynced(root, { ...adopted, localDigests: Object.fromEntries(same.filter(([, { path }]) => path !== undefined).map(([id, { digest }]) => [id, digest])),
         localKeys: Object.fromEntries(Object.entries(hereKeys(context)).filter(([id]) => photoDigests[id])) });
@@ -904,7 +958,7 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
       await restoreProxies(context.remote, bookId, blob);
       // Facts this Mac knows better than the snapshot go back with a commit of the same book state, and so do
       // originals here that it does not name.
-      if (factsAhead(hereDigests(context), adopted, hereKeys(context)) || await unnamedOriginals(context, blob)) {
+      if (factsAhead(hereDigests(context), adopted, hereKeys(context), hereProps(context)) || await unnamedOriginals(context, blob)) {
         const { header } = await push(context, [decision.tip.commitId], blob, facts, adopted, decision.tip.coverDigest);
         return { action: 'adopt', pushed: [header.commitId], changed };
       }
@@ -915,7 +969,7 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
       if (!blob) return { ...deferred, changed };
       const now = (await readSyncState(root)).lastSynced!;
       // The merge kept the facts of originals that changed here; they go back, never stale ones.
-      if (factsAhead(hereDigests(context), now, hereKeys(context)) || await unnamedOriginals(context, blob)) {
+      if (factsAhead(hereDigests(context), now, hereKeys(context), hereProps(context)) || await unnamedOriginals(context, blob)) {
         const { header } = await push(context, [decision.tip.commitId], blob, await readAssetFacts(root), now, decision.tip.coverDigest);
         return { action: 'fast-forward', pushed: [header.commitId], pulled: decision.tip.commitId, changed: true };
       }

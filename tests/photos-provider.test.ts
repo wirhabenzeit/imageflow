@@ -99,6 +99,17 @@ test('capture times, facts and revisions follow what Photos reports', () => {
   assert.equal(photosRevisions({ ...facts, caption: undefined }).revision, base.contentRevision);
 });
 
+test('a favourite is a fact of the photo and no revision of it', () => {
+  const facts: PhotosFacts = { width: 4032, height: 3024, adjusted: null, filename: 'IMG_1.HEIC', type: 'public.heic' };
+  assert.deepEqual(photosFacts({ ...facts, favorite: true }).extra, { type: 'public.heic', fileName: 'IMG_1.HEIC', favorite: true });
+  // An unmarked photo keeps no key for it.
+  assert.deepEqual(photosFacts({ ...facts, favorite: false }).extra, { type: 'public.heic', fileName: 'IMG_1.HEIC' });
+  assert.deepEqual(photosFacts(facts).extra, { type: 'public.heic', fileName: 'IMG_1.HEIC' });
+  // A heart tapped in Photos keeps the full-resolution download the revision keys.
+  assert.deepEqual(photosRevisions({ ...facts, favorite: true }), photosRevisions(facts));
+  assert.deepEqual(photosRevisions({ ...facts, caption: 'At dawn', favorite: true }), photosRevisions({ ...facts, caption: 'At dawn' }));
+});
+
 test('PhotoKit failures become states the host knows', () => {
   const code = (value: string) => Object.assign(new Error('x'), { code: value });
   assert.equal(photosFailure(code('PHPhotosErrorDomain:3169')).state, 'offline');
@@ -125,6 +136,7 @@ test('observe reports facts, finds a photo by its cloud identifier, and is denie
   assert.equal(a.state, 'available');
   assert.deepEqual(a.state === 'available' && a.facts?.provided, { caption: 'At dawn' });
   assert.equal(b.state, 'available');
+  assert.equal(b.state === 'available' && b.facts?.extra?.favorite, undefined);
   assert.deepEqual(gone, { state: 'missing', problem: 'No longer in the Photos library.' });
   assert.equal(bare.state, 'available');
   library.access = 'denied';
@@ -135,6 +147,18 @@ test('observe reports facts, finds a photo by its cloud identifier, and is denie
   // Without the addon (another platform), every photo is unreadable rather than an error.
   const [none] = await photosProvider(undefined).observe('/book', [ref('a', 1)]);
   assert.equal(none.state, 'unreadable');
+});
+
+test('observe carries a favourite in the facts, at the revisions it had before', async () => {
+  const library = new FakeLibrary();
+  library.add(1);
+  const provider = photosProvider(library);
+  const [before] = await provider.observe('/book', [ref('a', 1)]);
+  library.photos.get(local(1))!.favorite = true;
+  const [after] = await provider.observe('/book', [ref('a', 1)]);
+  assert.ok(before.state === 'available' && after.state === 'available');
+  assert.deepEqual(after.facts?.extra, { type: 'public.heic', fileName: 'IMG_1.HEIC', favorite: true });
+  assert.deepEqual(after.revisions, before.revisions);
 });
 
 test('previews and originals are written into the staging folder with their revisions', async (t) => {

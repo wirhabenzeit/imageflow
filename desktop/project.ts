@@ -21,7 +21,8 @@ import { CommittedProjectSaveError, persistProjectManifests, recoverProjectSave 
 import type { SaveCheckpoint } from './persistence';
 import { fileSourceOf, sourceEntries, sourcePath, sourceLinked, storedFileName } from '../src/source-locations';
 import type { PhotoSourceEntry, SourceEntry, SourceStatus } from '../src/source-locations';
-import { isFileLocator, locatorKindOf } from '../src/source-locator';
+import { isFileLocator, locatorKindOf, readLocator } from '../src/source-locator';
+import { declaredExtra } from '../src/source-properties';
 import type { Locator, PhotoLocator } from '../src/source-locator';
 import { providerOf } from './providers';
 import type { Observed, SourceRef } from './source-provider';
@@ -472,7 +473,7 @@ async function originalPhoto(book: Pick<OpenProject, 'photoIndex' | 'cache'>, id
   const { captured: _captured, location: _location, camera: _camera, ...details } = await photoDetails(pinned, null);
   const capture = Object.fromEntries(captureFields.flatMap((field) => fact[field] ? [[field, fact[field]]] : []));
   return { ...photoMetadata(book.photoIndex[id], fact.provided), ...details, ...capture, estimatedCapture: undefined,
-    ...(fact.provided ? { provided: fact.provided } : {}),
+    ...(fact.provided ? { provided: fact.provided } : {}), ...(fact.extra ? { extra: fact.extra } : {}),
     width: stored.width ?? details.width, height: stored.height ?? details.height, original: pinned,
     key: digestBytes(Buffer.from(stored.digest + ':rendition-3')), cache: renditionCacheFor(book.cache) };
 }
@@ -491,7 +492,7 @@ async function proxyPhoto(book: Pick<OpenProject, 'photoIndex' | 'cache'>, id: s
   // renditions are keyed by inode and size only, so they survive reopening.
   const identity = details.observation.split(':').slice(0, 2).join(':');
   return { ...photoMetadata(book.photoIndex[id], fact.provided), ...rendition, ...capture, estimatedCapture: undefined, observation: undefined,
-    ...(fact.provided ? { provided: fact.provided } : {}),
+    ...(fact.provided ? { provided: fact.provided } : {}), ...(fact.extra ? { extra: fact.extra } : {}),
     width: fact.width, height: fact.height, original: proxy, key: digestBytes(Buffer.from(fact.digest + ':proxy-v1:' + identity)),
     cache: renditionCacheFor(book.cache), ...(problem ? { problem } : {}) };
 }
@@ -805,11 +806,24 @@ export function projectSummary(book: OpenProject, id: string): ProjectSummary {
       const provided = Object.fromEntries([...Object.entries(book.unavailablePhotos ?? {}), ...book.photos].flatMap(([photo, { provided }]) => provided ? [[photo, provided]] : []));
       return Object.keys(provided).length ? { photoProvided: provided } : {};
     })(),
+    ...(() => {
+      // Only the curation marks the photo's provider declares (ADR 0014); every other key of `extra` is the provider's own.
+      const extra = Object.fromEntries([...Object.entries(book.unavailablePhotos ?? {}), ...book.photos].flatMap(([photo, { extra }]) => {
+        const entry = extra && book.photoIndex[photo];
+        const declared = entry ? declaredExtra(readLocator(entry)?.provider, extra) : {};
+        return Object.keys(declared).length ? [[photo, declared]] : [];
+      }));
+      return Object.keys(extra).length ? { photoExtra: extra } : {};
+    })(),
     texts: book.texts, sources: book.sources, ...(book.templateHash ? { templateHash: book.templateHash } : {}),
   };
 }
 
-/** The data a render frame loads; its URLs are on `origin`, the frame's own, so it reads them as its own files. */
+/**
+ * The data a render frame loads; its URLs are on `origin`, the frame's own, so it reads them as its own files. A photo
+ * is handed over field by field, so what only the editor reads of it (its provider's `provided` and `extra`, its
+ * observation) never reaches a template.
+ */
 export function renderData(book: OpenProject, id: string, mode: RenderProject['mode'], network?: readonly string[], origin = renderOrigin): RenderProject {
   const base = origin + '/render/' + id;
   // Template files are named by the template's hash where it has one, not by the render session, so the frames of

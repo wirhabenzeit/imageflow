@@ -151,6 +151,9 @@ export type ProjectSummary = ProjectFiles & {
   // The title, caption, credit and alt text a photo's provider reports (ADR 0011), which photos.json overrides field
   // by field: the Inspector shows them as placeholders and offers to revert an override.
   photoProvided?: Record<string, ProvidedMetadata>;
+  // The curation marks a photo's provider declares (ADR 0014, src/source-properties.ts), as the keys of its `extra` that
+  // hold them; photos without any are left out. Read through the provider's specs only, and never by a template.
+  photoExtra?: Record<string, Record<string, unknown>>;
   texts: Record<string, string>;
   sources?: Record<string, SourceStatus>;
 };

@@ -10,18 +10,18 @@ import { configureSourceAccess } from '../desktop/source-access';
 import { configureProxyStore } from '../desktop/proxy-store';
 import { AssetFacts, readAssetFacts } from '../desktop/asset-facts';
 import { acquireProjectLock, persistProjectManifests } from '../desktop/persistence';
-import { loadProject, photoMetadata, projectSummary, updateProject, withProjectFiles } from '../desktop/project';
+import { loadProject, photoMetadata, projectSummary, renderData, updateProject, withProjectFiles } from '../desktop/project';
 import type { OpenProject } from '../desktop/project';
 import { captureProjectInputs } from '../desktop/revisions';
 import { registerProvider } from '../desktop/providers';
-import { compactPreview, providedChanges, refreshProvided, strippedPreview } from '../desktop/provided-photos';
+import { compactPreview, providedChanges, refreshProvided, strippedPreview, visibleChange } from '../desktop/provided-photos';
 import { materializePhotos, placedPhotos } from '../desktop/materialized-photos';
 import { collectSources, saveDocumentCopy } from '../desktop/source-actions';
 import type { Materialized, MaterializeOptions, Observed, Revisions, SourceProvider, SourceRef, Unavailable } from '../desktop/source-provider';
 import { copySample } from '../desktop/sample-book.mjs';
 import { bookFormatOf, photoIndexSchema, projectSchema } from '../src/project';
 import { registerLocatorKind } from '../src/source-locator';
-import type { LocatorKind } from '../src/source-locator';
+import type { LightroomLocator, Locator, LocatorKind, PhotosLocator } from '../src/source-locator';
 import { photoName, printProblem, sourceEntries } from '../src/source-locations';
 import type { PhotoSourceEntry } from '../src/source-locations';
 import { assetMenu } from '../src/asset-menu';
@@ -50,7 +50,7 @@ const memoryLocator: LocatorKind<MemoryLocator> = {
 };
 
 type Asset = { revision: string; content: string; width: number; height: number; color: string;
-  provided?: { title?: string; caption?: string; credit?: string; altText?: string } };
+  provided?: { title?: string; caption?: string; credit?: string; altText?: string }; extra?: Record<string, unknown> };
 // A JPEG of one colour, with an EXIF/XMP segment and a comment that differ on every render, as Lightroom's do.
 async function render(color: string, width: number, height: number) {
   const plain = await sharp({ create: { width, height, channels: 3, background: color } }).jpeg().withIccProfile('srgb').toBuffer();
@@ -60,10 +60,14 @@ async function render(color: string, width: number, height: number) {
   return Buffer.concat([plain.subarray(0, 2), xmp, comment, plain.subarray(2)]);
 }
 
-class MemoryProvider implements SourceProvider<MemoryLocator> {
-  readonly provider = 'memory' as const;
+// Named `memory` it reads its own locators; under the name of a provider that declares curation marks (ADR 0014) it
+// reads that provider's, by `assetOf`.
+class MemoryProvider implements SourceProvider<Locator> {
+  constructor(readonly provider = 'memory', readonly assetOf = (locator: Locator) => (locator as MemoryLocator).asset) {}
   readonly assets = new Map<string, Asset>();
   online = true;
+  // Assets reported as unreadable.
+  unreadable = new Set<string>();
   observed: { id: string; known?: Revisions }[][] = [];
   previewed: string[][] = [];
   changed?: (ids: string[]) => void;
@@ -72,27 +76,28 @@ class MemoryProvider implements SourceProvider<MemoryLocator> {
   editDuringPreview?: string;
   duringPreview?: () => void;
   revisions = (asset: Asset): Revisions => ({ revision: asset.revision, contentRevision: asset.content });
-  async observe(_book: string, refs: readonly SourceRef<MemoryLocator>[]): Promise<Observed[]> {
+  async observe(_book: string, refs: readonly SourceRef<Locator>[]): Promise<Observed[]> {
     this.observed.push(refs.map(({ id, known }) => ({ id, ...(known ? { known } : {}) })));
     return refs.map(({ locator }) => {
       if (!this.online) return { state: 'offline', problem: 'The memory app is not running.' };
-      const asset = this.assets.get(locator.asset);
+      if (this.unreadable.has(this.assetOf(locator))) return { state: 'unreadable', problem: 'Unreadable in memory.' };
+      const asset = this.assets.get(this.assetOf(locator));
       if (!asset) return { state: 'missing', problem: 'Deleted from memory.' };
       return { state: 'available', revisions: this.revisions(asset), facts: { width: asset.width, height: asset.height,
-        captured: { dateTime: '2026-06-01T10:00:00', offset: '+02:00' }, ...(asset.provided ? { provided: asset.provided } : {}), extra: { color: asset.color } } };
+        captured: { dateTime: '2026-06-01T10:00:00', offset: '+02:00' }, ...(asset.provided ? { provided: asset.provided } : {}), extra: { color: asset.color, ...asset.extra } } };
     });
   }
-  async *preview(_book: string, refs: readonly SourceRef<MemoryLocator>[], { staging, signal }: MaterializeOptions): AsyncGenerator<Materialized> {
+  async *preview(_book: string, refs: readonly SourceRef<Locator>[], { staging, signal }: MaterializeOptions): AsyncGenerator<Materialized> {
     this.previewed.push(refs.map(({ id }) => id));
     for (const { id, locator } of refs) {
       if (signal.aborted) return;
-      const asset = this.assets.get(locator.asset);
+      const asset = this.assets.get(this.assetOf(locator));
       if (!asset || !this.online) { yield { id, state: (this.online ? 'missing' : 'offline') as Unavailable, problem: 'Not there.' }; continue; }
       const before = this.revisions(asset);
       const scale = Math.min(1, 140 / Math.max(asset.width, asset.height));
       const file = join(staging, randomUUID() + '.jpg');
       await writeFile(file, await render(asset.color, Math.round(asset.width * scale), Math.round(asset.height * scale)));
-      if (this.editDuringPreview === locator.asset) { this.editDuringPreview = undefined; asset.revision += '+'; this.duringPreview?.(); }
+      if (this.editDuringPreview === this.assetOf(locator)) { this.editDuringPreview = undefined; asset.revision += '+'; this.duringPreview?.(); }
       yield { id, file, before, after: this.revisions(asset) };
     }
   }
@@ -106,14 +111,14 @@ class MemoryProvider implements SourceProvider<MemoryLocator> {
   // Called before an original is reported, and after it was taken: a test aborts here.
   beforeOriginal?: (id: string) => void;
   afterOriginal?: (id: string) => void;
-  async *materialize(_book: string, refs: readonly SourceRef<MemoryLocator>[], { staging, signal }: MaterializeOptions): AsyncGenerator<Materialized> {
+  async *materialize(_book: string, refs: readonly SourceRef<Locator>[], { staging, signal }: MaterializeOptions): AsyncGenerator<Materialized> {
     this.materialized.push(refs.map(({ id }) => id));
     this.stagings.push(staging);
     for (const { id, locator } of refs) {
       if (signal.aborted) return;
-      const asset = this.assets.get(locator.asset);
+      const asset = this.assets.get(this.assetOf(locator));
       if (!asset || !this.online) { yield { id, state: (this.online ? 'missing' : 'offline') as Unavailable, problem: 'Not there.' }; continue; }
-      if (this.failOriginal.has(locator.asset)) {
+      if (this.failOriginal.has(this.assetOf(locator))) {
         await writeFile(join(staging, randomUUID() + '.part'), 'half an export');
         yield { id, state: 'unreadable', problem: 'The export failed in memory.' };
         continue;
@@ -121,14 +126,14 @@ class MemoryProvider implements SourceProvider<MemoryLocator> {
       const before = this.revisions(asset);
       const file = join(staging, randomUUID() + '.jpg');
       await writeFile(file, await render(asset.color, asset.width, asset.height));
-      const edits = this.editsDuringOriginal.get(locator.asset) ?? 0;
-      if (edits > 0) { this.editsDuringOriginal.set(locator.asset, edits - 1); asset.revision += '+'; }
+      const edits = this.editsDuringOriginal.get(this.assetOf(locator)) ?? 0;
+      if (edits > 0) { this.editsDuringOriginal.set(this.assetOf(locator), edits - 1); asset.revision += '+'; }
       this.beforeOriginal?.(id);
       yield { id, file, before, after: this.revisions(asset) };
       this.afterOriginal?.(id);
     }
   }
-  watch(_book: string, refs: readonly SourceRef<MemoryLocator>[], changed: (ids: string[]) => void) {
+  watch(_book: string, refs: readonly SourceRef<Locator>[], changed: (ids: string[]) => void) {
     this.watched = refs.map(({ id }) => id);
     this.changed = changed;
     return () => { this.changed = undefined; this.watched = []; };
@@ -370,6 +375,98 @@ test('a visual edit re-renders the preview, and reloads only if its digest chang
   assert.ok(await f.proxies.path(fact.digest));
   const reloaded = await loadProject(f.folder, f.cache);
   assert.ok(reloaded.photos.get('mem1')!.original.includes(fact.digest));
+});
+
+// --- Curation marks (ADR 0014) ------------------------------------------------------------------------------------
+
+test('a change of a curation mark its provider declares is a visible change; any other key of extra is not', () => {
+  const fact = assetFactSchema.parse({ digest: 'a'.repeat(64), width: 60, height: 40, verified: '2026-01-01T00:00:00.000Z' });
+  const extra = (value?: Record<string, unknown>) => ({ ...fact, ...(value ? { extra: value } : {}) });
+  const favourite = extra({ favorite: true, type: 'image', fileName: 'IMG_0001.HEIC' });
+  assert.equal(visibleChange(favourite, extra({ type: 'image', fileName: 'IMG_0001.HEIC' }), 'photos'), true, 'a favourite taken away');
+  assert.equal(visibleChange(extra(), favourite, 'photos'), true, 'a favourite given');
+  assert.equal(visibleChange(favourite, extra({ favorite: true, type: 'video', fileName: 'IMG_0002.MOV' }), 'photos'), false, 'keys no spec declares');
+  assert.equal(visibleChange(extra({ favorite: false }), extra(), 'photos'), false, 'an unset value is no mark');
+  assert.equal(visibleChange(favourite, extra({ ...favourite.extra, rating: 5 }), 'photos'), false, 'a key only another provider declares');
+  assert.equal(visibleChange(extra({ rating: 2 }), extra({ rating: 4 }), 'lightroom'), true);
+  assert.equal(visibleChange(extra({ rating: 2, orientation: 'AB' }), extra({ rating: 2, orientation: 'BC' }), 'lightroom'), false);
+  assert.equal(visibleChange(extra({ rating: 7 }), extra({ rating: 0 }), 'lightroom'), false, 'values outside the vocabulary are no marks');
+  assert.equal(visibleChange(extra({ color: 'red' }), extra({ color: 'red', colorLabel: 'Print' }), 'lightroom'), true, 'a custom label name');
+  assert.equal(visibleChange(favourite, extra(), 'memory'), false, 'a provider that declares nothing');
+});
+
+/**
+ * The fixture with a photo of Apple Photos (`fav`) and one of Lightroom Classic (`lr`), each served from memory under
+ * that provider's name, with its marks and keys of its own in `extra`.
+ */
+async function markedFixture(t: Parameters<typeof fixture>[0]) {
+  const f = await fixture(t);
+  const photos = new MemoryProvider('photos', (locator) => (locator as PhotosLocator).cloud);
+  const lightroom = new MemoryProvider('lightroom', (locator) => (locator as LightroomLocator).uuid);
+  const unregister = [registerProvider(photos), registerProvider(lightroom)];
+  t.after(async () => { for (const remove of unregister) remove(); });
+  photos.assets.set('photos-asset-0001', { revision: 'p1', content: 'p1', width: 3000, height: 2000, color: '#ffcc00', extra: { favorite: true, type: 'image', fileName: 'IMG_0001.HEIC' } });
+  lightroom.assets.set('LR-UUID-0001', { revision: 'l1', content: 'l1', width: 2000, height: 3000, color: '#00ccff', extra: { rating: 3, orientation: 'AB' } });
+  const files = structuredClone({ project: f.book.project, photoIndex: f.book.photoIndex });
+  files.photoIndex.fav = { photos: { cloud: 'photos-asset-0001' } } as never;
+  files.photoIndex.lr = { lightroom: { catalog: 'catalog-0001', uuid: 'LR-UUID-0001' } } as never;
+  const book = await updateProject(f.book, files, true);
+  const changes = async (provider: MemoryProvider, id: string) => providedChanges(f.folder, provider, sourceEntries(book).flatMap((entry) => entry.kind === 'photo' && entry.id === id ? [{ id, locator: entry.locator }] : []),
+    await AssetFacts.forBook(f.folder), { staging: join(f.cache, 'provider-staging'), available: (photo) => book.sources?.['photo:' + photo]?.state === 'available' });
+  return { ...f, book, photos, lightroom, changes };
+}
+
+test('a favourite changed at an unchanged revision reloads the book, and changes no render input', async (t) => {
+  const f = await markedFixture(t);
+  const asset = f.photos.assets.get('photos-asset-0001')!;
+  const previews = f.photos.previewed.length;
+  const inputs = await captureProjectInputs(f.folder);
+  // Tapping Favourite in Photos: the revision stays, as `photosRevisions()` leaves the mark out.
+  asset.extra = { type: 'image', fileName: 'IMG_0001.HEIC' };
+  assert.deepEqual(await f.changes(f.photos, 'fav'), { reload: ['fav'], revised: [], reshaped: [] });
+  const fact = (await AssetFacts.forBook(f.folder)).get('fav')!;
+  assert.deepEqual(fact.revisions, { revision: 'p1', contentRevision: 'p1' });
+  assert.deepEqual(fact.extra, { color: '#ffcc00', type: 'image', fileName: 'IMG_0001.HEIC' }, 'recorded at the same revision');
+  assert.equal(f.photos.previewed.length, previews, 'no preview');
+  assert.equal((await captureProjectInputs(f.folder)).revision, inputs.revision, 'the render inputs are the same');
+  // A key no spec declares changes at the same revision: recorded, but nothing is shown differently.
+  asset.extra = { type: 'video', fileName: 'IMG_0001.MOV' };
+  assert.deepEqual(await f.changes(f.photos, 'fav'), { reload: [], revised: [], reshaped: [] });
+  assert.equal((await AssetFacts.forBook(f.folder)).get('fav')!.extra?.type, 'video');
+});
+
+test('a Lightroom Classic rating that moves the revision reloads the book and revises the photo', async (t) => {
+  const f = await markedFixture(t);
+  const asset = f.lightroom.assets.get('LR-UUID-0001')!;
+  const previews = f.lightroom.previewed.length;
+  asset.revision = 'l2'; asset.extra = { rating: 5, orientation: 'AB' };
+  assert.deepEqual(await f.changes(f.lightroom, 'lr'), { reload: ['lr'], revised: ['lr'], reshaped: [] });
+  assert.equal((await AssetFacts.forBook(f.folder)).get('lr')!.extra?.rating, 5);
+  assert.equal(f.lightroom.previewed.length, previews, 'no preview: the content revision stayed');
+  // A key of its own that moves the revision: revised, not reloaded.
+  asset.revision = 'l3'; asset.extra = { rating: 5, orientation: 'BC' };
+  assert.deepEqual(await f.changes(f.lightroom, 'lr'), { reload: [], revised: ['lr'], reshaped: [] });
+});
+
+test('the summary carries the declared marks of available and unavailable photos, and render data none of extra', async (t) => {
+  const f = await markedFixture(t);
+  const summary = projectSummary(f.book, 'view');
+  // Only the declared keys: neither `type`, `fileName` and `orientation`, nor a `color` that is no colour label.
+  assert.deepEqual(summary.photoExtra, { fav: { favorite: true }, lr: { rating: 3 } });
+  assert.deepEqual(f.book.photos.get('lr')!.extra, { color: '#00ccff', rating: 3, orientation: 'AB' }, 'the photo carries its whole extra in the main process');
+  // Without a mark, a photo is left out; with none at all, so is the field.
+  const unmarked = { ...f.book, photos: new Map([...f.book.photos].filter(([id]) => id !== 'fav' && id !== 'lr')) };
+  assert.equal('photoExtra' in projectSummary(unmarked, 'view'), false);
+  // Lightroom Classic cannot read the photo now: it is laid out from its last fact, which keeps its marks.
+  f.lightroom.unreadable.add('LR-UUID-0001');
+  const reloaded = await loadProject(f.folder, f.cache);
+  assert.equal(reloaded.photos.has('lr'), false);
+  assert.ok(reloaded.unavailablePhotos?.lr);
+  assert.deepEqual(projectSummary(reloaded, 'view').photoExtra, { fav: { favorite: true }, lr: { rating: 3 } });
+  // Templates never see it.
+  const data = renderData(reloaded, 'view', 'edit');
+  for (const photo of Object.values(data.photos)) for (const key of ['extra', 'provided', 'observation']) assert.equal(key in photo, false, key);
+  assert.doesNotMatch(JSON.stringify(data.photos), /favorite|rating|orientation/);
 });
 
 test('a crop in the source that changes the aspect ratio is reported for the photo', async (t) => {

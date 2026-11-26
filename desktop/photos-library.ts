@@ -13,6 +13,8 @@ export type PhotosFacts = {
   /** The last edit or revert, or null for a photo never edited; absent before macOS 15. */
   adjusted?: number | null;
   base?: 'raw' | 'compressed'; caption?: string; keywords?: string[]; filename?: string; type?: string;
+  /** True for a favourite, absent otherwise. */
+  favorite?: boolean;
 };
 /** A photo of the last drag from Photos: `mediaType` is PhotoKit's, 1 for an image and 2 for a video. */
 export type DraggedPhoto = { localIdentifier: string; file: string | null; library: string | null; mediaType?: number | null };

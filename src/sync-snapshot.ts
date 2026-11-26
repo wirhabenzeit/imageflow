@@ -235,7 +235,18 @@ export type SyncedCommit = { commitId: string; bookId?: string; bookStateRevisio
    * synced while it could read it. A pull replaces such a photo's fact, so only this tells whether the photo changed
    * here since, or merely under this Mac.
    */
-  localKeys?: Record<string, string> };
+  localKeys?: Record<string, string>;
+  /**
+   * For photos without a file: the SHA-256 of the declared properties (`declaredProperties`, src/source-properties.ts:
+   * stars, flags, colour labels, favourites; ADR 0014) this Mac's own provider showed for the photo, kept as `localKeys`
+   * is. A pull replaces the photo's fact, marks included, so only this tells whether the marks changed here since, or
+   * merely under this Mac. A photo without marks has the digest of the empty string (`noProperties`), so "no marks" and
+   * "never recorded" stay apart.
+   */
+  localProps?: Record<string, string> };
+
+/** The SHA-256 of the empty string: the `localProps` digest of a photo whose provider shows no marks for it. */
+export const noProperties = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 
 export type SyncDecision =
   | { action: 'resume' }
@@ -269,9 +280,28 @@ export function changedOriginals(here: Record<string, string>, synced?: Pick<Syn
   }).map(([id]) => id));
 }
 
-/** Whether this Mac knows a photo fact the last synced snapshot lacks, which a push has to carry: an in-place re-export. */
-export function factsAhead(here: Record<string, string>, synced: Pick<SyncedCommit, 'photoDigests' | 'localDigests' | 'localKeys'>, keys: Record<string, string> = {}) {
-  return [...changedOriginals(here, synced, keys)].some((id) => here[id] !== synced.photoDigests[id]);
+/**
+ * The photos without a file whose marks changed here since the last sync (ADR 0014): `props` holds the digest of the
+ * declared properties of each photo whose provider answered in this sync run, and a photo is changed where that differs
+ * from what this Mac's provider showed at the last sync (`localProps`). As for content, the snapshot's marks say
+ * nothing here: another Mac may show other marks for good (an older copy of the catalog), and what it pulled is not
+ * what it shows. A photo the record has no entry for (a book synced before marks were, or a photo read here for the
+ * first time) counts as changed only where it has a mark here, so marks go up once and an unmarked photo stays quiet.
+ */
+export function changedProperties(props: Record<string, string>, synced?: Pick<SyncedCommit, 'localProps'>) {
+  return new Set(Object.entries(props).filter(([id, digest]) => {
+    const seen = synced?.localProps?.[id];
+    return seen !== undefined ? digest !== seen : digest !== noProperties;
+  }).map(([id]) => id));
+}
+
+/**
+ * Whether this Mac knows a photo fact the last synced snapshot lacks, which a push has to carry: an in-place re-export,
+ * or marks changed here (`changedProperties`), which change no content and so no digest.
+ */
+export function factsAhead(here: Record<string, string>, synced: Pick<SyncedCommit, 'photoDigests' | 'localDigests' | 'localKeys' | 'localProps'>, keys: Record<string, string> = {},
+  props: Record<string, string> = {}) {
+  return [...changedOriginals(here, synced, keys)].some((id) => here[id] !== synced.photoDigests[id]) || changedProperties(props, synced).size > 0;
 }
 
 /**

@@ -4,7 +4,9 @@ import { mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { LightroomBridge } from '../desktop/lightroom/bridge';
-import { captureTime, lightroomProvider } from '../desktop/providers/lightroom';
+import { captureTime, lightroomFacts, lightroomProvider } from '../desktop/providers/lightroom';
+import { metadataResultSchema, parseResult } from '../desktop/lightroom/protocol';
+import { readPhotoMarks } from '../src/source-properties';
 import { launchLightroom } from '../desktop/lightroom/launch';
 import { showInLightroom } from '../desktop/lightroom/show';
 import { registerProvider } from '../desktop/providers';
@@ -84,6 +86,55 @@ test('observe reports facts and both revisions, and is offline without Lightroom
   const jobs = plugin.jobs.filter(({ type }) => type === 'metadata');
   assert.equal(jobs.length, 1);
   assert.deepEqual((jobs[0].photos as { uuid: string }[]).map(({ uuid: id }) => id), [uuid(1), uuid(2), uuid(9)]);
+});
+
+test('a row carries the marks of plugin 1.3.0, a row of an older plugin none, and a mark ImageFlow cannot read is dropped by itself', () => {
+  const base = { uuid: uuid(1), revision: 'r', width: 6000, height: 4000, orientation: 'AB', fileName: 'DSC_0001.ARW' };
+  const parse = (photos: unknown[]) => parseResult(metadataResultSchema, { photos }, 'metadata').photos;
+  const extra = (row: Record<string, unknown>) => lightroomFacts(parse([{ ...base, ...row }])[0]).extra;
+  // An older plugin: the row parses as before and has no marks.
+  assert.deepEqual(parse([base]), [base]);
+  assert.deepEqual(extra({}), { orientation: 'AB', fileName: 'DSC_0001.ARW' });
+  assert.deepEqual(extra({ rating: 4, pickStatus: 1, colorNameForLabel: 'red', label: 'Red' }),
+    { orientation: 'AB', fileName: 'DSC_0001.ARW', rating: 4, flag: 'pick', color: 'red', colorLabel: 'Red' });
+  assert.deepEqual(extra({ pickStatus: -1, colorNameForLabel: 'green', label: 'Approved' }), { orientation: 'AB', fileName: 'DSC_0001.ARW', flag: 'reject', color: 'green', colorLabel: 'Approved' });
+  // A colour outside the five is left out with its label; a label without a colour means nothing.
+  assert.deepEqual(extra({ colorNameForLabel: 'grey', label: 'Review' }), { orientation: 'AB', fileName: 'DSC_0001.ARW' });
+  assert.deepEqual(extra({ label: 'Review' }), { orientation: 'AB', fileName: 'DSC_0001.ARW' });
+  // The plugin sends none of these; if one came, it alone is dropped and the row, and the job, still count.
+  const odd = [{ rating: 0, pickStatus: 0, colorNameForLabel: '', label: '' }, { rating: 6, pickStatus: 2, label: 'x'.repeat(201) },
+    { rating: 2.5, pickStatus: '1', colorNameForLabel: 7, label: null }].map((marks, index) => ({ ...base, uuid: uuid(index + 1), ...marks }));
+  // Such a key is left undefined, which JSON and `extra` never show.
+  assert.deepEqual(JSON.parse(JSON.stringify(parse(odd))), odd.map((_, index) => ({ ...base, uuid: uuid(index + 1) })));
+  assert.deepEqual(extra({ rating: 0, pickStatus: 0 }), { orientation: 'AB', fileName: 'DSC_0001.ARW' });
+  // What ImageFlow draws of them: the label only where it is not the colour's own name.
+  assert.deepEqual(readPhotoMarks('lightroom', extra({ rating: 5, pickStatus: -1, colorNameForLabel: 'blue', label: 'Blue' })).map(({ mark }) => mark),
+    [{ kind: 'stars', value: 5 }, { kind: 'flag', value: 'reject' }, { kind: 'color', value: 'blue' }]);
+});
+
+test('observe carries the marks into the facts with plugin 1.3.0, and an older plugin shows none', async (t) => {
+  const { provider, fake, bridge } = await setup(t);
+  const plugin = fake('1.3.0');
+  plugin.add(1, { rating: 3, pickStatus: 1, colorNameForLabel: 'purple', label: 'Print' });
+  plugin.add(2);
+  await plugin.connect();
+  await until(() => !!bridge.connection);
+  const [a, b] = (await provider.observe('/book', [ref('a', uuid(1)), ref('b', uuid(2))])).map(available);
+  assert.deepEqual(a.facts?.extra, { orientation: 'AB', fileName: 'DSC_0001.ARW', rating: 3, flag: 'pick', color: 'purple', colorLabel: 'Print' });
+  assert.deepEqual(b.facts?.extra, { orientation: 'AB', fileName: 'DSC_0002.ARW' });
+  // A mark changed in Lightroom moves the revision, not the develop hash, and comes with the next observation.
+  plugin.edit(uuid(1), { marks: { rating: undefined, pickStatus: -1 } });
+  const edited = available((await provider.observe('/book', [ref('a', uuid(1), catalogId, a.revisions)]))[0]);
+  assert.notEqual(edited.revisions.revision, a.revisions.revision);
+  assert.equal(edited.revisions.contentRevision, a.revisions.contentRevision);
+  assert.deepEqual(edited.facts?.extra, { orientation: 'AB', fileName: 'DSC_0001.ARW', flag: 'reject', color: 'purple', colorLabel: 'Print' });
+  await plugin.quit();
+  await until(() => !bridge.connection);
+  const older = fake('1.2.0');
+  older.add(1, { rating: 3, pickStatus: 1, colorNameForLabel: 'purple' });
+  await older.connect();
+  await until(() => !!bridge.connection);
+  assert.deepEqual(available((await provider.observe('/book', [ref('a', uuid(1))]))[0]).facts?.extra, { orientation: 'AB', fileName: 'DSC_0001.ARW' });
 });
 
 test('the develop hash is read only when the revision moved, so a metadata edit keeps the content revision', async (t) => {

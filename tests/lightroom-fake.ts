@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import sharp from 'sharp';
+import { gte } from 'semver';
 
 // A stand-in for ImageFlow.lrplugin in Lightroom Classic: it reads the bridge file, says hello, long-polls for jobs and
 // answers them from an in-memory catalog, over real HTTP, as the Lua plugin does. Nothing here touches Lightroom.
@@ -9,7 +10,10 @@ import sharp from 'sharp';
 export type FakePhoto = {
   lastEditTime: number; editCount: number; width: number; height: number; develop: Record<string, unknown>;
   color: string; fileName: string; title?: string; caption?: string; copyright?: string; captured?: string;
-};
+} & Marks;
+/** A photo's marks as plugin 1.3.0 sends them, each only when set: the raw `rating`, `pickStatus` and `colorNameForLabel`, the formatted `label`. */
+export type Marks = { rating?: number; pickStatus?: number; colorNameForLabel?: string; label?: string };
+const markKeys = ['rating', 'pickStatus', 'colorNameForLabel', 'label'] as const;
 type Job = { id: string; type: string; [key: string]: unknown };
 
 export const catalogId = 'C0FFEE00-0000-4000-8000-000000000001';
@@ -46,7 +50,7 @@ export class FakeLightroom {
   private loop?: Promise<void>;
   private bridge?: { port: number; token: string };
 
-  /** `version` is the installed plugin's: 1.1.0 is the first to answer `thumbnails`. */
+  /** `version` is the installed plugin's: 1.1.0 is the first to answer `thumbnails`, 1.3.0 the first to send marks. */
   constructor(private readonly file: string, private readonly version = '1.0.0') {}
 
   add(n: number, photo: Partial<FakePhoto> = {}) {
@@ -56,11 +60,12 @@ export class FakeLightroom {
   }
   revision(id: string) { const photo = this.photos.get(id)!; return [id, photo.lastEditTime.toFixed(6), photo.editCount, photo.width + 'x' + photo.height].join(':'); }
   developHash(id: string) { return createHash('md5').update(JSON.stringify(this.photos.get(id)!.develop)).digest('hex'); }
-  /** A visual edit moves the revision and the develop hash; a metadata edit only the revision. */
-  edit(id: string, change: { develop?: Record<string, unknown>; title?: string; crop?: { width: number; height: number }; color?: string }) {
+  /** A visual edit moves the revision and the develop hash; a metadata edit, a mark's included, only the revision. */
+  edit(id: string, change: { develop?: Record<string, unknown>; title?: string; crop?: { width: number; height: number }; color?: string; marks?: Marks }) {
     const photo = this.photos.get(id)!;
     photo.lastEditTime += 1;
     if (change.title !== undefined) { photo.title = change.title; photo.editCount += 1; }
+    if (change.marks) { Object.assign(photo, change.marks); photo.editCount += 1; }
     if (change.develop) photo.develop = { ...photo.develop, ...change.develop };
     if (change.color) photo.color = change.color;
     if (change.crop) Object.assign(photo, change.crop);
@@ -125,7 +130,9 @@ export class FakeLightroom {
     const revision = this.revision(id);
     return { uuid: id, revision, ...(known === revision ? {} : { developHash: this.developHash(id) }), width: photo.width, height: photo.height, orientation: 'AB',
       captured: photo.captured, cameraMake: 'SONY', cameraModel: 'ILCE-7M3', fileName: photo.fileName,
-      ...(photo.title ? { title: photo.title } : {}), ...(photo.caption ? { caption: photo.caption } : {}), ...(photo.copyright ? { copyright: photo.copyright } : {}) };
+      ...(photo.title ? { title: photo.title } : {}), ...(photo.caption ? { caption: photo.caption } : {}), ...(photo.copyright ? { copyright: photo.copyright } : {}),
+      // An older plugin reads no marks.
+      ...(!gte(this.version, '1.3.0') ? {} : Object.fromEntries(markKeys.flatMap((key) => photo[key] === undefined ? [] : [[key, photo[key]]]))) };
   }
 
   private async answer(job: Job): Promise<unknown> {
