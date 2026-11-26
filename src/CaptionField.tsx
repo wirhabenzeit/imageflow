@@ -17,6 +17,24 @@ export type CaptionEditing = { edit: (change: Edit, notice?: string) => void; us
 export const captionSwitch = (parameters: Parameters | undefined) =>
   Object.keys(parameters ?? {}).find((key) => { const param = parameters![key]; return param.type === 'boolean' && param.shows === 'caption'; });
 
+type CaptionBoxes = { boxes: Record<string, { type?: string; parameters?: Parameters }> };
+type CaptionLayouts = { spreads: Record<string, CaptionBoxes>; coverLayouts?: Record<string, CaptionBoxes> };
+
+/**
+ * Whether a template says which photo boxes print captions: it does once any photo box, spread or cover, declares
+ * `shows: 'caption'`. The same declaration on a text box says nothing about photos.
+ */
+export const declaresCaptionBoxes = (template: CaptionLayouts | undefined) => !!template &&
+  [...Object.values(template.spreads), ...Object.values(template.coverLayouts ?? {})]
+    .some(({ boxes }) => Object.values(boxes).some(({ type, parameters }) => type !== 'markdown' && captionSwitch(parameters) !== undefined));
+
+/**
+ * Whether a photo box prints its photo's caption (UI-017): true or false in a template that says so for its boxes
+ * (`declaresCaptionBoxes`), and undefined in one that never does, where any box may print it.
+ */
+export const printsCaption = (declared: boolean, parameters: Parameters | undefined) =>
+  declared ? captionSwitch(parameters) !== undefined : undefined;
+
 const shownCaption = (files: Pick<ProjectSummary, 'photoIndex' | 'photoProvided'>, photo: string) =>
   files.photoIndex[photo]?.caption ?? files.photoProvided?.[photo]?.caption ?? '';
 
@@ -40,8 +58,11 @@ export function captionEdit(summary: Pick<ProjectSummary, 'photoIndex' | 'photoP
 
 // The caption as typed, saved on leaving the field, on ⌘Return, and when the field goes away, such as when a click
 // elsewhere deselects the photo; Escape keeps the saved caption.
-export function CaptionField({ summary, photo, label = 'Caption', usage, save, autoFocus = false, done }: {
+// `printed` is false at a box whose layout never prints the caption (`printsCaption`); the field says so, as a caption
+// typed there changes nothing on this page.
+export function CaptionField({ summary, photo, label = 'Caption', usage, save, autoFocus = false, done, printed }: {
   summary: ProjectSummary; photo: string; label?: string; usage: SourceUsage; save: (caption: string) => void; autoFocus?: boolean; done?: () => void;
+  printed?: boolean;
 }) {
   const id = useId();
   const saved = summary.photoIndex[photo]?.caption ?? '';
@@ -74,19 +95,28 @@ export function CaptionField({ summary, photo, label = 'Caption', usage, save, a
         }
         else if (event.key === 'Enter') event.stopPropagation();
       }} />
+    {printed === false && <small className="field-description caption-not-printed">This layout doesn’t print captions.</small>}
     <small className="field-description">{places > 1 ? 'Belongs to the photo, also in the ' + (places - 1) + (places === 2 ? ' other place' : ' other places') + ' it is placed.' : 'Belongs to the photo, wherever it is placed.'}</small>
   </div>;
 }
 
-// The crop toolbar's Caption… button, beside the box's own settings such as Show caption, and its small panel.
-export function CaptionButton({ summary, photo, usage, save, request }: {
-  summary: ProjectSummary; photo: string; usage: SourceUsage; save: (caption: string) => void;
+// The crop toolbar's Caption… button, beside the box's own settings such as Show caption, and its small panel. At a box
+// that doesn't print captions (`printed` false) there is no button, as a caption typed there looks like a failed edit
+// (UI-017); Edit Caption… still opens the panel, which says so.
+export function CaptionButton({ summary, photo, usage, save, request, printed }: {
+  summary: ProjectSummary; photo: string; usage: SourceUsage; save: (caption: string) => void; printed?: boolean;
   // Opens the panel at once, for Edit Caption… in a context menu; a new number asks again.
   request?: number;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(request !== undefined);
-  const close = () => { setOpen(false); root.current?.querySelector('button')?.focus(); };
+  // Focus goes back to Caption…, or, at a box without one, to the toolbar's first other control, as the panel goes away.
+  const close = () => {
+    const own = root.current?.querySelector<HTMLElement>('button[aria-expanded]');
+    const other = [...root.current?.parentElement?.querySelectorAll<HTMLElement>('button') ?? []].find((button) => !root.current!.contains(button));
+    setOpen(false);
+    (own ?? other)?.focus();
+  };
   useEffect(() => { if (request !== undefined) setOpen(true); }, [request]);
   useEffect(() => {
     if (!open) return;
@@ -98,11 +128,12 @@ export function CaptionButton({ summary, photo, usage, save, request }: {
     document.addEventListener('keydown', keys);
     return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', keys); };
   }, [open]);
+  if (printed === false && !open) return null;
   return <div ref={root} className="crop-actions">
-    <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}>Caption…</button>
+    {printed !== false && <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}>Caption…</button>}
     {open && <div className="crop-action-panel" role="dialog" aria-label="Photo caption">
       <header><strong>Caption</strong><button type="button" aria-label="Close caption" onClick={close}>×</button></header>
-      <CaptionField key={photo} summary={summary} photo={photo} usage={usage} save={save} autoFocus done={close} label="Text" />
+      <CaptionField key={photo} summary={summary} photo={photo} usage={usage} save={save} autoFocus done={close} label="Text" printed={printed} />
     </div>}
   </div>;
 }
