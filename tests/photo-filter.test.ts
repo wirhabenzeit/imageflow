@@ -101,3 +101,13 @@ test('texts filter by placement and by being in the book or linked', () => {
   // A photo provider's filter has no hold on a text.
   assert.deepEqual(texts({ properties: { 'lightroom:rating': 5 } }), ['a', 'b']);
 });
+
+test('the strip keeps the photo in its middle when the list changes, or the nearest one left', async () => {
+  const { survivingAnchor } = await import('../src/filmstrip-anchor');
+  const before = ['a', 'b', 'c', 'd', 'e'];
+  assert.equal(survivingAnchor(before, ['a', 'c', 'e'], 'c'), 'c');
+  assert.equal(survivingAnchor(before, ['a', 'b', 'e'], 'c'), 'b', 'the one before it, at the same distance as the one after');
+  assert.equal(survivingAnchor(before, ['a', 'e'], 'd'), 'e');
+  assert.equal(survivingAnchor(before, ['x'], 'c'), undefined);
+  assert.equal(survivingAnchor(before, ['a'], 'gone'), undefined);
+});

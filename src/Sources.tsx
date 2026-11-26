@@ -13,7 +13,7 @@ import { FilterChips, FilterPopover, chipItems } from './PhotoFilter';
 import { SourceMarks, rejectedMark } from './SourceMarks';
 import type { PhotoView } from './photo-view';
 import { useListSelection } from './list-selection';
-import { useFilmstripAnchor } from './filmstrip-anchor';
+import { useFilmstripAnchor, useFilmstripListAnchor } from './filmstrip-anchor';
 import { Icon } from './Icon';
 import { useEffect, useMemo, useRef } from 'react';
 import type { DragEvent, KeyboardEvent } from 'react';
@@ -99,6 +99,7 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
   useFilmstripAnchor(list, tab === 'photo', JSON.stringify([view.value.group, view.value.gapMinutes, items.map(({ id }) => id)]));
   const current = selected[tab];
   const visibleCurrent = items.some(({ id }) => id === current) ? current : undefined;
+  useFilmstripListAnchor(list, tab === 'photo', items.map(({ id }) => id), visibleCurrent, JSON.stringify(filter));
   const selection = useListSelection(items.map(({ id }) => id), (id) => items.find((item) => item.id === id)?.title ?? id);
   useEffect(() => {
     if (!current) selection.setSelection([]);

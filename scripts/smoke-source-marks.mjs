@@ -163,6 +163,53 @@ try {
   // A click outside closes it.
   await page.locator('.canvas').click({ position: { x: 5, y: 5 } });
   await popover.waitFor({ state: 'detached' });
+
+  // The strip keeps its place when a filter changes the list. With enough photos to scroll: one star and three stars in turn.
+  const more = [];
+  for (let n = 10; n < 50; n++) more.push(plugin.add(n, { title: 'More ' + n, rating: n % 2 ? 3 : 1, color: '#5a7a4a' }));
+  plugin.selection = more;
+  await menuAction(app, 'Import Selected from Lightroom Classic…');
+  await until(async () => Object.keys((await summary()).photoIndex).length === 45, 'forty more photos');
+  const strip = page.locator('.source-items-photo');
+  await until(async () => await strip.evaluate((node) => node.scrollWidth > node.clientWidth * 2), 'the strip scrolls');
+  const all = (await summary()).photoIndex;
+  const byUuid = (uuid) => Object.keys(all).find((key) => all[key].lightroom?.uuid === uuid);
+  const inView = (photo) => strip.evaluate((node, photo) => {
+    const tile = node.querySelector('.source-photo[data-id="' + photo + '"]');
+    if (!tile) return false;
+    const a = tile.getBoundingClientRect(), b = node.getBoundingClientRect();
+    return a.right > b.left + 1 && a.left < b.right - 1;
+  }, photo);
+  const center = (photo) => strip.evaluate((node, photo) => {
+    const tile = node.querySelector('.source-photo[data-id="' + photo + '"]');
+    node.scrollLeft += tile.getBoundingClientRect().left + tile.offsetWidth / 2 - node.getBoundingClientRect().left - node.clientWidth / 2;
+  }, photo);
+  const low = byUuid(more[20]), high = byUuid(more[21]);
+  assert.ok(low && high, 'the photos are in the book');
+  // A selected photo the filter hides: the strip stays with its neighbours, not at its start.
+  await center(low);
+  await tile(low).click();
+  await trigger.click();
+  await popover.waitFor();
+  await popover.locator('.pf-provider[data-provider="lightroom"]').getByRole('radio', { name: '3 stars or more' }).click();
+  await until(async () => await tile(low).count() === 0, 'the selected photo is hidden');
+  assert.ok(await strip.evaluate((node) => node.scrollLeft) > 0, 'the strip did not go back to its start');
+  assert.ok(await inView(high), 'the photo next to the hidden one is in view');
+  // Cleared, the selected photo is back and in view.
+  await popover.getByRole('button', { name: 'Clear Filters' }).click();
+  await until(async () => await tile(low).count() === 1, 'the selected photo is back');
+  assert.ok(await inView(low), 'and in view');
+  // A selected photo the filter keeps stays in view, however many photos before it go.
+  await center(high);
+  await tile(high).click();
+  // The click on the tile closed the popover.
+  await trigger.click();
+  await popover.waitFor();
+  await popover.locator('.pf-provider[data-provider="lightroom"]').getByRole('radio', { name: '3 stars or more' }).click();
+  await until(async () => await tile(low).count() === 0, 'filtered again');
+  assert.ok(await inView(high), 'the selected photo is still in view');
+  await popover.getByRole('button', { name: 'Clear Filters' }).click();
+  await page.keyboard.press('Escape');
   assert.deepEqual(errors, []);
   console.log('Source marks: thumbnails, View toggles, Inspector rows, a provider\'s filter in a mixed book, Source pills and Quick Look.');
 } finally {
