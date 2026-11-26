@@ -1266,11 +1266,23 @@ export class DocumentSession {
   private factsOf(book: OpenProject) { return book.readOnly ? AssetFacts.readOnly(book.folder) : AssetFacts.forBook(book.folder); }
   /** Photos of Apple Photos this Mac cannot read that a notice named already in this session (UI-018). */
   private unreadableNoticed = new Set<string>();
+  private listening = false;
+  private unreadableWaiting?: OpenProject;
+  /** The editor asked for its book, after it began to listen to notices: one held back for it is sent now. */
+  editorListening() {
+    if (this.listening) return;
+    this.listening = true;
+    const waiting = this.unreadableWaiting;
+    this.unreadableWaiting = undefined;
+    if (waiting) this.noticeUnreadable(waiting);
+  }
   /**
    * A quiet notice when the book, as it opened or a reload or a sync changed it, has photos of Apple Photos that this
    * Mac cannot read now: from the states the load found, once for the same photos.
    */
   private noticeUnreadable(book: OpenProject) {
+    // Before the editor asked for its book it may not listen to notices yet: the notice waits for it (`editorListening`).
+    if (!this.listening) { this.unreadableWaiting = book; return; }
     const { notice, noticed } = unreadableNotice(book.sources, this.unreadableNoticed);
     this.unreadableNoticed = noticed;
     if (notice && !this.window.isDestroyed()) this.window.webContents.send(channels.appNotice, notice);

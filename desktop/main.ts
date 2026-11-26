@@ -2511,13 +2511,16 @@ void app.whenReady().then(async () => {
     if (appOwner(event) || pickerOwner(event)) showTemplates();
   });
   ipcMain.handle(channels.current, async (event): Promise<Result<ProjectSummary>> => {
-    const document = editorOwner(event) ?? assetsOwner(event);
+    // The editor asks for its book once it listens to notices (UI-018: a notice from opening waits for it).
+    const editor = editorOwner(event);
+    editor?.editorListening();
+    const document = editor ?? assetsOwner(event);
     if (document && !document.closing) return { value: document.summary };
     const loading = openingEditors.get(event.sender.id);
     if (loading && trusted(event, loading.window, editorURL)) {
       try {
         const opened = await opening.get(loading.identity);
-        if (opened?.window === loading.window && !opened.closing) return { value: opened.summary };
+        if (opened?.window === loading.window && !opened.closing) { opened.editorListening(); return { value: opened.summary }; }
       } catch (error) { return { error: errorMessage(error) }; }
     }
     return { error: 'This window has no open book.' };

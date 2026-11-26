@@ -127,27 +127,27 @@ export function photosProvider(library: PhotosPort | undefined, { recheck = rech
   // for the whole app.
   const watchers = new Map<object, { ids: Map<string, string[]>; changed: (ids: string[]) => void }>();
   let listening = false;
-  // Photos reported as changed that no book watched then, by local identifier: a capture offset the addon read for a
-  // photo observed before any book watched it (one dropped from Photos, say). The next book to watch one is told.
-  const unreported = new Set<string>();
-  const unreportedLimit = 10_000;
+  // Photos reported as changed lately, by local identifier, with when: a capture offset the addon read for a photo
+  // observed before its book watched it (one dropped from Photos, or a second book opening while the first watches).
+  // Every book that starts to watch one within a while is told; a book told twice only observes it again.
+  const recent = new Map<string, number>();
+  const recentLimit = 10_000, recentFor = 10 * 60_000;
   const listen = () => {
     if (listening || !library) return;
     listening = true;
     library.onChanges((changedLocals) => {
       const everything = changedLocals.includes('*');
-      const covered = new Set<string>();
       for (const { ids, changed: report } of watchers.values()) {
         const moved = everything ? [...ids.values()].flat() : [...new Set(changedLocals.flatMap((local) => ids.get(local) ?? []))];
-        if (!everything) for (const local of changedLocals) if (ids.has(local)) covered.add(local);
         if (moved.length) report(moved);
       }
       if (everything) return;
+      const now = Date.now();
+      for (const [local, at] of recent) if (now - at > recentFor) recent.delete(local);
       for (const local of changedLocals) {
-        if (covered.has(local)) { unreported.delete(local); continue; }
-        unreported.delete(local);
-        unreported.add(local);
-        if (unreported.size > unreportedLimit) unreported.delete(unreported.values().next().value!);
+        recent.delete(local);
+        recent.set(local, now);
+        if (recent.size > recentLimit) recent.delete(recent.keys().next().value!);
       }
     });
   };
@@ -276,8 +276,9 @@ export function photosProvider(library: PhotosPort | undefined, { recheck = rech
           else absentRefs.set(refs[index].locator.cloud, [...absentRefs.get(refs[index].locator.cloud) ?? [], refs[index].id]);
         });
         retrack();
-        // Changed while nothing watched them: observed again now.
-        const missed = [...ids.keys()].filter((local) => unreported.delete(local)).flatMap((local) => ids.get(local)!);
+        // Changed lately, maybe before this book watched them: observed again now.
+        const since = Date.now() - recentFor;
+        const missed = [...ids.keys()].filter((local) => (recent.get(local) ?? 0) > since).flatMap((local) => ids.get(local)!);
         if (missed.length) changed(missed);
         if (absentRefs.size) stopTimer = repeat(() => void lookAgain(), recheck);
       }).catch(() => {});

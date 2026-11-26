@@ -151,10 +151,13 @@ test('an offset read before any book watched the photo is reported once a book w
   provider.watch('/book', [ref('a', 1), ref('b', 2)], (ids) => reported.push(ids));
   while (!library.tracked.length) await new Promise((resolve) => setTimeout(resolve, 5));
   assert.deepEqual(reported, [['a']]);
-  // Told once only.
+  // A second book that starts to watch the same photo while the first does is told too.
   provider.watch('/other', [ref('c', 1)], (ids) => reported.push(ids));
   await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.deepEqual(reported, [['a']]);
+  assert.deepEqual(reported, [['a'], ['c']]);
+  // A change both books watch is reported to each, and to neither again by a later watch of another photo.
+  library.listener!([local(1)]);
+  assert.deepEqual(reported, [['a'], ['c'], ['a'], ['c']]);
 });
 
 test('a favourite is a fact of the photo and no revision of it', () => {

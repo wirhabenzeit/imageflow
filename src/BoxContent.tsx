@@ -29,8 +29,9 @@ export function PhotoContent({ summary, spread, box, label, change, inspect, adj
   inspect?: (source: SourceRef) => void; adjustCrop?: () => void;
   // The caption of the box's photo, edited below it (UI-014); the crop toolbar has a button of its own.
   // `printed` is false where the layout never prints the caption (CaptionField); the field shows there only when asked for,
-  // with Edit Caption… (`autoFocus`), as the toolbar's Caption… button does (UI-017).
-  caption?: { usage: SourceUsage; save: (photo: string, caption: string) => void; autoFocus?: boolean; done?: () => void; printed?: boolean };
+  // with Edit Caption… (`autoFocus`), as the toolbar's Caption… button does (UI-017), or `always`, as in the Cover
+  // Inspector, which has no Edit Caption… of its own.
+  caption?: { usage: SourceUsage; save: (photo: string, caption: string) => void; autoFocus?: boolean; done?: () => void; printed?: boolean; always?: boolean };
   // In the crop toolbar, where the photo itself is on screen: no thumbnail, name or crop summary.
   compact?: boolean;
   // The crop as numbers, for frames the template rotates, where dragging the photo is not available.
@@ -100,7 +101,7 @@ export function PhotoContent({ summary, spread, box, label, change, inspect, adj
       </div>
       {cropValues}
     </div>}
-    {assigned && caption && summary.photoIndex[assigned] && (caption.printed !== false || caption.autoFocus) && <CaptionField key={assigned} summary={summary} photo={assigned} usage={caption.usage}
+    {assigned && caption && summary.photoIndex[assigned] && (caption.printed !== false || caption.autoFocus || caption.always) && <CaptionField key={assigned} summary={summary} photo={assigned} usage={caption.usage}
       autoFocus={caption.autoFocus} done={caption.done} printed={caption.printed} save={(text) => caption.save(assigned, text)} />}
   </div>;
 }

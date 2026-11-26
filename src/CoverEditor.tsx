@@ -107,7 +107,7 @@ export function CoverInspector({ summary, cover, layouts, writable, choose, chan
         {Object.entries(definition.boxes).map(([id, box]) => <details key={id} open data-cover-item={id} className={flash === id ? 'flash' : undefined}>
           <summary>{box.label}</summary>
           <PhotoContent summary={summary} spread={cover} box={id} label={box.label} values change={change}
-            caption={caption && { usage: caption.usage, printed: caption.printed?.(id), save: (photo, text) => caption.save(id, photo, text) }} />
+            caption={caption && { usage: caption.usage, printed: caption.printed?.(id), always: true, save: (photo, text) => caption.save(id, photo, text) }} />
           <Fields schema={box.parameters} controls={box.controls} values={cover.boxes[id]?.params ?? {}}
             update={(key, value) => change((state) => { (state.boxes[id] ??= { params: {} }).params[key] = value; }, 'Cover photo settings changed')} />
         </details>)}

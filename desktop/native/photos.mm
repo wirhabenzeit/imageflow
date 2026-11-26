@@ -638,8 +638,8 @@ static NSNumber *exifOffsetMinutes(id text) {
   if (value.length != 6 || [value characterAtIndex:3] != ':') return nil;
   unichar sign = [value characterAtIndex:0];
   if (sign != '+' && sign != '-') return nil;
-  NSCharacterSet *digits = NSCharacterSet.decimalDigitCharacterSet;
-  for (NSUInteger at : {1, 2, 4, 5}) if (![digits characterIsMember:[value characterAtIndex:at]]) return nil;
+  // ASCII digits only: integerValue reads no others.
+  for (NSUInteger at : {1, 2, 4, 5}) { unichar c = [value characterAtIndex:at]; if (c < '0' || c > '9') return nil; }
   NSInteger hours = [[value substringWithRange:NSMakeRange(1, 2)] integerValue], minutes = [[value substringWithRange:NSMakeRange(4, 2)] integerValue];
   NSInteger total = (sign == '-' ? -1 : 1) * (hours * 60 + minutes);
   if (minutes > 59 || total < -12 * 60 || total > 14 * 60) return nil;
@@ -764,7 +764,9 @@ static void readOffsets(NSArray<PHAsset *> *assets) {
       if (!own) { offsetsTried[asset.localIdentifier] = [NSDate date]; continue; }
       offsets[asset.localIdentifier] = own;
       [offsetsTried removeObjectForKey:asset.localIdentifier];
-      if (![own isKindOfClass:NSNumber.class] || !asset.creationDate || [own integerValue] == macOffset(asset.creationDate)) continue;
+      // Reported also when it equals this Mac's offset: the book then records it without `offsetGuessed`, so another
+      // Mac in another zone keeps it rather than guessing anew. Not a visible change, so it reloads nothing.
+      if (![own isKindOfClass:NSNumber.class] || !asset.creationDate) continue;
       // The first correction since the last report schedules the next one, off this queue: a slow original after it
       // does not hold it up.
       if (!offsetsChanged.count) dispatch_after(dispatch_time(DISPATCH_TIME_NOW, offsetReportDelay), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ reportOffsets(); });
