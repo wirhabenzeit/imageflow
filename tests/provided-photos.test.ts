@@ -12,6 +12,7 @@ import { AssetFacts, readAssetFacts } from '../desktop/asset-facts';
 import { acquireProjectLock, persistProjectManifests } from '../desktop/persistence';
 import { loadProject, photoMetadata, projectSummary, renderData, updateProject, withProjectFiles } from '../desktop/project';
 import type { OpenProject } from '../desktop/project';
+import type { CaptureTime } from '../src/photo-metadata';
 import { captureProjectInputs } from '../desktop/revisions';
 import { registerProvider } from '../desktop/providers';
 import { compactPreview, providedChanges, refreshProvided, strippedPreview, visibleChange } from '../desktop/provided-photos';
@@ -49,7 +50,7 @@ const memoryLocator: LocatorKind<MemoryLocator> = {
   name: ({ name }) => name,
 };
 
-type Asset = { revision: string; content: string; width: number; height: number; color: string;
+type Asset = { revision: string; content: string; width: number; height: number; color: string; captured?: CaptureTime;
   provided?: { title?: string; caption?: string; credit?: string; altText?: string }; extra?: Record<string, unknown> };
 // A JPEG of one colour, with an EXIF/XMP segment and a comment that differ on every render, as Lightroom's do.
 async function render(color: string, width: number, height: number) {
@@ -84,7 +85,7 @@ class MemoryProvider implements SourceProvider<Locator> {
       const asset = this.assets.get(this.assetOf(locator));
       if (!asset) return { state: 'missing', problem: 'Deleted from memory.' };
       return { state: 'available', revisions: this.revisions(asset), facts: { width: asset.width, height: asset.height,
-        captured: { dateTime: '2026-06-01T10:00:00', offset: '+02:00' }, ...(asset.provided ? { provided: asset.provided } : {}), extra: { color: asset.color, ...asset.extra } } };
+        captured: asset.captured ?? { dateTime: '2026-06-01T10:00:00', offset: '+02:00' }, ...(asset.provided ? { provided: asset.provided } : {}), extra: { color: asset.color, ...asset.extra } } };
     });
   }
   async *preview(_book: string, refs: readonly SourceRef<Locator>[], { staging, signal }: MaterializeOptions): AsyncGenerator<Materialized> {
@@ -433,6 +434,41 @@ test('a favourite changed at an unchanged revision reloads the book, and changes
   asset.extra = { type: 'video', fileName: 'IMG_0001.MOV' };
   assert.deepEqual(await f.changes(f.photos, 'fav'), { reload: [], revised: [], reshaped: [] });
   assert.equal((await AssetFacts.forBook(f.folder)).get('fav')!.extra?.type, 'video');
+});
+
+test('a capture time corrected at an unchanged revision is recorded and reloads the book, as the time zone of an Apple Photos photo', async (t) => {
+  const f = await markedFixture(t);
+  const asset = f.photos.assets.get('photos-asset-0001')!;
+  const previews = f.photos.previewed.length;
+  assert.deepEqual((await AssetFacts.forBook(f.folder)).get('fav')!.captured, { dateTime: '2026-06-01T10:00:00', offset: '+02:00' });
+  // The provider first gave this Mac's offset, and then the one the original records: the same instant, another wall clock.
+  asset.captured = { dateTime: '2026-06-01T14:00:00', offset: '+06:00' };
+  assert.deepEqual(await f.changes(f.photos, 'fav'), { reload: ['fav'], revised: [], reshaped: [] });
+  const fact = (await AssetFacts.forBook(f.folder)).get('fav')!;
+  assert.deepEqual(fact.captured, { dateTime: '2026-06-01T14:00:00', offset: '+06:00' });
+  assert.deepEqual(fact.revisions, { revision: 'p1', contentRevision: 'p1' });
+  assert.equal(f.photos.previewed.length, previews, 'no preview');
+});
+
+test('a guessed offset of the same instant does not replace the recorded own offset, as on the next launch of Apple Photos', async (t) => {
+  const f = await markedFixture(t);
+  const asset = f.photos.assets.get('photos-asset-0001')!;
+  const extra = { ...asset.extra };
+  asset.captured = { dateTime: '2026-06-01T14:00:00', offset: '+06:00' };
+  assert.deepEqual(await f.changes(f.photos, 'fav'), { reload: ['fav'], revised: [], reshaped: [] });
+  // Relaunched: the addon has not read the original again yet, and guesses this Mac's offset.
+  asset.captured = { dateTime: '2026-06-01T10:00:00', offset: '+02:00' };
+  asset.extra = { ...extra, offsetGuessed: true };
+  assert.deepEqual(await f.changes(f.photos, 'fav'), { reload: [], revised: [], reshaped: [] });
+  let fact = (await AssetFacts.forBook(f.folder)).get('fav')!;
+  assert.deepEqual(fact.captured, { dateTime: '2026-06-01T14:00:00', offset: '+06:00' });
+  assert.equal(fact.extra?.offsetGuessed, undefined);
+  // A guess of another instant (the date was changed in Photos) is recorded.
+  asset.captured = { dateTime: '2026-06-02T10:00:00', offset: '+02:00' };
+  assert.deepEqual(await f.changes(f.photos, 'fav'), { reload: ['fav'], revised: [], reshaped: [] });
+  fact = (await AssetFacts.forBook(f.folder)).get('fav')!;
+  assert.deepEqual(fact.captured, { dateTime: '2026-06-02T10:00:00', offset: '+02:00' });
+  assert.equal(fact.extra?.offsetGuessed, true);
 });
 
 test('a Lightroom Classic rating that moves the revision reloads the book and revises the photo', async (t) => {

@@ -78,7 +78,7 @@ export function CoverCanvas({ project, geometry: cover, definition, guides, togg
 export function CoverInspector({ summary, cover, layouts, writable, choose, change, focus, caption }: {
   /** The box or element to point out, as a Book check finding asks for. */
   focus?: { box: string; at: number }; summary: ProjectSummary; cover?: CoverState; layouts: Record<string, CoverLayoutInfo>; writable: boolean;
-  caption?: { usage: SourceUsage; save: (box: string, photo: string, caption: string) => void };
+  caption?: { usage: SourceUsage; save: (box: string, photo: string, caption: string) => void; printed?: (box: string) => boolean | undefined };
   choose: (layout: string) => void; change: (apply: (cover: CoverState) => void, label?: string) => void;
 }) {
   const definition = cover && Object.hasOwn(layouts, cover.definition) ? layouts[cover.definition] : undefined;
@@ -107,7 +107,7 @@ export function CoverInspector({ summary, cover, layouts, writable, choose, chan
         {Object.entries(definition.boxes).map(([id, box]) => <details key={id} open data-cover-item={id} className={flash === id ? 'flash' : undefined}>
           <summary>{box.label}</summary>
           <PhotoContent summary={summary} spread={cover} box={id} label={box.label} values change={change}
-            caption={caption && { usage: caption.usage, save: (photo, text) => caption.save(id, photo, text) }} />
+            caption={caption && { usage: caption.usage, printed: caption.printed?.(id), always: true, save: (photo, text) => caption.save(id, photo, text) }} />
           <Fields schema={box.parameters} controls={box.controls} values={cover.boxes[id]?.params ?? {}}
             update={(key, value) => change((state) => { (state.boxes[id] ??= { params: {} }).params[key] = value; }, 'Cover photo settings changed')} />
         </details>)}

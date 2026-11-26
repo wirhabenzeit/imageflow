@@ -74,6 +74,36 @@ const suggestions: Record<SourceAway, string> = {
   uploading: 'Nothing needs to be done to edit the book. Print it once the other Mac has uploaded the originals.',
 };
 export const awaySuggestion = (away: SourceAway) => suggestions[away];
+/** What the Photos provider says of a photo this Mac's Photos library does not have, and never had as far as it can tell. */
+export const notInPhotosHere = 'Not in this Mac’s Photos library.';
+/**
+ * A photo of Apple Photos that this Mac's Photos library does not have (UI-018): often one another Mac added, which
+ * iCloud Photos has not brought yet. Told from the problem a load found already, so nothing more is asked of Photos;
+ * with or without a preview. A photo that can't be read for want of access or of iCloud is not one: its problem says
+ * what to do, and it stays the badge's and the Book check's.
+ */
+export const notInPhotosLibrary = (status: SourceStatus | undefined) => status?.kind === 'photo' && status.locator.provider === 'photos' && !status.pending &&
+  status.state === 'missing' && status.problem === notInPhotosHere;
+/** What the user can do about such a photo, where Assets and the Inspector show it: the help a Book check gives. */
+export const unreadableHelp = (status: SourceStatus | undefined) => notInPhotosLibrary(status)
+  ? 'To print it, use a Mac whose Photos library has it (the same iCloud Photos library), with ImageFlow allowed to read it in Settings → Sources and iCloud reachable.' : undefined;
+/** The photos of a book that are such photos. */
+export const unreadablePhotos = (sources: Record<string, SourceStatus> | undefined) => Object.values(sources ?? {}).flatMap((status) => notInPhotosLibrary(status) ? [status.id] : []);
+/**
+ * The quiet notice an open book gives of such photos: once for the photos it has not named before in this session, so
+ * a reload, a sync or an edit says nothing new of the same photos, and neither does a photo that arrived and went again.
+ * `noticed` is what the book named so far; the result is what it has named after this.
+ */
+export function unreadableNotice(sources: Record<string, SourceStatus> | undefined, noticed: ReadonlySet<string>): { notice?: string; noticed: Set<string> } {
+  const unreadable = unreadablePhotos(sources);
+  const fresh = unreadable.filter((id) => !noticed.has(id)).length;
+  const next = new Set([...noticed, ...unreadable]);
+  if (!fresh) return { noticed: next };
+  const one = fresh === 1;
+  const more = unreadable.length > fresh;
+  return { noticed: next, notice: fresh + (more ? ' more' : '') + (one ? ' photo' : ' photos') + ' from Photos ' + (one ? 'isn’t' : 'aren’t') +
+    ' in this Mac’s Photos library yet. Assets marks ' + (one ? 'it' : 'them') + ' and says why.' };
+}
 
 /**
  * An authoring check's finding for each reason: one, instead of one per photo and per box, with every place. A warning: it

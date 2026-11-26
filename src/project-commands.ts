@@ -4,8 +4,8 @@ import type { TemplateInfo } from './desktop';
 import type { PrintFormat } from './format';
 import { newSpread, resolveEditPath, writeEdit } from './editing';
 import type { EditTarget } from './editing';
-import { describeLayoutChange, discardContent, editorLayoutChoices, editorLayoutTarget, keptOutside, layoutChoices, layoutFootprint, swapContent, swapPages, switchLayout } from './layouts';
-import { hasFacingPages, spanAllowedAt, spanFits, spanRequiredAt } from './format';
+import { describeLayoutChange, discardContent, editorLayoutChoices, editorLayoutTarget, isKeptOutside, keptOutside, layoutChoices, layoutFootprint, swapContent, swapPages, switchLayout } from './layouts';
+import { hasFacingPages, pageNumbers, pageSequence, spanAllowedAt, spanFits, spanRequiredAt } from './format';
 import { isParameterValue, listProblems, newItemId, resolveValue, sameValue } from './parameters';
 import type { ListItem, Parameter, Parameters } from './parameters';
 import { boxBase, coverInstance, identifier, scopeState, storedBoxes } from './project';
@@ -131,7 +131,7 @@ export const projectOperationSchema = z.discriminatedUnion('op', [
     source: id.describe('Source ID from inspect_book sources or import_sources.') })
     .refine(validAddress, addressMessage).describe('Put a photo or Markdown text into a box.'),
   z.strictObject({ op: z.literal('replace_source'), source: id.describe('Photo to replace.'), with: id.describe('Photo that takes its place.') })
-    .describe('Swap a photo for another in every box, set aside or not. Crops stay if the shapes match.'),
+    .describe('Swap a photo for another in every box, set aside or not. Crops stay if the shapes match; the change names each box with crop kept, crop reset or no crop saved.'),
   z.strictObject({ op: z.literal('remove_sources'), kind: z.enum(['photo', 'text', 'file']).describe('Kind of all of them.'), sources: z.array(id).min(1).max(1000).describe('Source IDs.') })
     .describe('Remove sources from the book and clear every use. Their files stay; dryRun counts the uses.'),
   z.strictObject({ op: z.literal('clear_box'), ...boxTarget.shape }).refine(validAddress, addressMessage).describe('Remove the content of a box.'),
@@ -154,7 +154,14 @@ export const projectOperationNames = projectOperationSchema.options.map((schema)
 export type ProjectOperation = z.input<typeof projectOperationSchema>;
 export type ProjectOperations = z.input<typeof projectOperationsSchema>;
 export type ProjectCommandResult = {
-  files: ProjectFiles; changes: string[]; affectedSpreads: string[]; affectedCover?: true; references: Record<string, string>; reflow: boolean;
+  files: ProjectFiles; changes: string[];
+  /** The spreads the batch inserted, removed, moved or changed, in book order. A removed spread stands where it was. */
+  affectedSpreads: string[]; affectedCover?: true; references: Record<string, string>; reflow: boolean;
+  /**
+   * Other spreads now on other pages, because spreads were inserted, removed or moved before them: how many, and the
+   * pages they span, as "41 spreads, now pages 5–86" (API-022).
+   */
+  renumbered?: string;
   /** The batch takes sources out of the book. */
   removedSources?: true;
 };
@@ -247,15 +254,35 @@ export function applyProjectCommands(
   // Where a source is stored: the layouts, with how many of their boxes show it and how many keep it set aside.
   function placesOf(kind: 'photo' | 'text', sources: ReadonlySet<string>) {
     return storedLayouts(project).flatMap((layout) => {
-      const boxes = storedBoxes(layout).filter(({ state }) => sources.has(state[kind] ?? ''));
-      if (!boxes.length) return [];
+      const stored = storedBoxes(layout).filter(({ state }) => sources.has(state[kind] ?? ''));
+      if (!stored.length) return [];
       const cover = layout.id === coverInstance;
       const shown = cover ? own(coverLayoutsFor(template.coverLayouts, formatId), layout.definition ?? '') : undefined;
-      const aside = cover ? boxes.filter(({ box }) => !shown || !own(shown.boxes, box)).length
-        : keptOutside(layout, template.spreads).filter((item) => item.kind === (kind === 'photo' ? 'photo' : 'markdown') && sources.has(item.source)).length;
+      // Each box says whether it is set aside: on the cover, missing from the shown cover layout; on a spread, kept
+      // where no shown layout shows it (displaced, in a state not shown, or in a box its layout does not draw).
+      const outside = cover ? undefined : isKeptOutside(layout, template.spreads);
+      const boxes = stored.map((item) => ({ ...item, aside: cover ? !shown || !own(shown.boxes, item.box) : outside!(item) }));
+      const aside = boxes.filter((item) => item.aside).length;
       return [{ id: layout.id, boxes, shown: boxes.length - aside, aside }];
     });
   }
+  // Groups of boxes named in a change, as many names as fit the checkpoint's 300 characters for a change with its
+  // `tail` kept whole: `; crop kept: one hero, two left photo1 and 3 more`. Each group keeps at least its count.
+  const listedPlaces = (head: string, groups: [what: string, places: string[]][], tail: string, limit = 280) => {
+    const shown = groups.filter(([, places]) => places.length);
+    // Room for the `and N more` of every group, so the names stop early enough for them.
+    let room = limit - head.length - tail.length - shown.reduce((sum, [what, places]) => sum + what.length + 4 + (' and ' + places.length + ' more').length, 0);
+    return head + shown.map(([what, places]) => {
+      const names: string[] = [];
+      for (const place of places) {
+        const cost = place.length + (names.length ? 2 : 0);
+        if (cost > room) break;
+        names.push(place); room -= cost;
+      }
+      const more = places.length - names.length;
+      return '; ' + what + ': ' + (names.length ? names.join(', ') + (more ? ' and ' + more + ' more' : '') : more + (more === 1 ? ' box' : ' boxes'));
+    }).join('') + tail;
+  };
   const counted = (places: ReturnType<typeof placesOf>) => {
     const shown = places.reduce((sum, place) => sum + place.shown, 0), aside = places.reduce((sum, place) => sum + place.aside, 0);
     return shown + (shown === 1 ? ' box' : ' boxes') + ' shown and ' + aside + ' set aside';
@@ -478,7 +505,7 @@ export function applyProjectCommands(
         checkInsertion(spread, operation.after);
         registerSpread(spread, operation.ref);
         insertAfter(spread, operation.after);
-        changed('Inserted spread ' + spread.id, allSpreads(), true);
+        changed('Inserted spread ' + spread.id, [spread.id], true);
         break;
       }
       case 'insert_page_pair': {
@@ -503,7 +530,7 @@ export function applyProjectCommands(
         checkInsertion(spread, operation.after);
         registerSpread(spread, operation.ref);
         insertAfter(spread, operation.after);
-        changed('Inserted page pair ' + spread.id, allSpreads(), true);
+        changed('Inserted page pair ' + spread.id, [spread.id], true);
         break;
       }
       case 'clear_page': {
@@ -536,7 +563,7 @@ export function applyProjectCommands(
         checkInsertion(spread, operation.after === undefined ? source.id : operation.after);
         registerSpread(spread, operation.ref);
         insertAfter(spread, operation.after === undefined ? source.id : operation.after);
-        changed('Duplicated spread ' + source.id + ' as ' + spread.id, allSpreads(), true);
+        changed('Duplicated spread ' + source.id + ' as ' + spread.id, [spread.id], true);
         break;
       }
       case 'move_spread': {
@@ -552,13 +579,13 @@ export function applyProjectCommands(
             'right page and close on a single left page, with full spreads between them. Spreads cannot move into or out of those ends.');
         }
         project.spreads = ordered;
-        changed('Moved spread ' + spread.id, allSpreads(), true);
+        changed('Moved spread ' + spread.id, [spread.id], true);
         break;
       }
       case 'remove_spread': {
         const spread = findSpread(operation.spread);
         project.spreads.splice(project.spreads.indexOf(spread), 1);
-        changed('Removed spread ' + spread.id, [spread.id, ...allSpreads()], true);
+        changed('Removed spread ' + spread.id, [spread.id], true);
         break;
       }
       case 'switch_layout': {
@@ -624,20 +651,23 @@ export function applyProjectCommands(
         const before = options.photo?.(operation.source), after = options.photo?.(operation.with);
         // A crop frames the same part of a photo of the same shape; of another one, or an unknown one, it is dropped.
         const sameShape = !!before && !!after && Math.abs(before.width / before.height - after.width / after.height) <= 0.01 * (before.width / before.height);
-        let dropped = 0;
-        for (const { boxes } of places) for (const { state } of boxes) {
+        // Each placement says what became of its crop (API-021, 26 Nov): kept, reset to a centred fill, or none was saved.
+        const kept: string[] = [], reset: string[] = [], none: string[] = [];
+        for (const { id, boxes } of places) for (const { state, location, box, aside } of boxes) {
           state.photo = operation.with;
-          if (sameShape || (!state.crops && !state.focus)) continue;
+          const where = (id === coverInstance ? 'cover' : id) + (location === 'spread' ? '' : ' ' + location) + ' ' + box + (aside ? ' (set aside)' : '');
+          if (!state.crops && !state.focus) { none.push(where); continue; }
+          if (sameShape) { kept.push(where); continue; }
           delete state.crops; delete state.focus;
-          dropped++;
+          reset.push(where);
         }
         const caption = own(photoIndex, operation.source)!.caption, replacement = own(photoIndex, operation.with)!;
         const captioned = !!caption && replacement.caption === undefined && !after?.caption;
         if (captioned) replacement.caption = caption;
         if (!places.length && !captioned) break;
-        changed('Replaced photo ' + operation.source + ' with ' + operation.with + ' in ' + counted(places) +
-          (dropped ? '; crops of ' + dropped + (dropped === 1 ? ' box' : ' boxes') + ' dropped, as the shapes ' + (before && after ? 'differ' : 'are not known') : '') +
-          (captioned ? '; caption copied' : ''), [...places.map((place) => place.id), ...(captioned ? usersOf(operation.with) : [])]);
+        changed(listedPlaces('Replaced photo ' + operation.source + ' with ' + operation.with + ' in ' + counted(places),
+          [['crop kept', kept], ['crop reset, as the shapes ' + (before && after ? 'differ' : 'are not known'), reset], ['no crop saved', none]],
+          captioned ? '; caption copied' : ''), [...places.map((place) => place.id), ...(captioned ? usersOf(operation.with) : [])]);
         break;
       }
       case 'remove_sources': {
@@ -724,6 +754,49 @@ export function applyProjectCommands(
     }
     operationIndex++;
   }
-  return { files: next, changes, affectedSpreads: [...affected], ...(affectedCover ? { affectedCover: true as const } : {}),
+  const renumbered = renumberedSpreads(files.project.spreads, template.format, project.spreads, format, template.spreads, affected);
+  return { files: next, changes, affectedSpreads: inBookOrder(affected, files.project.spreads, project.spreads),
+    ...(renumbered ? { renumbered } : {}), ...(affectedCover ? { affectedCover: true as const } : {}),
     ...(removedSources ? { removedSources: true as const } : {}), references, reflow };
+}
+
+// Book order after the batch. A removed spread follows the nearest spread before it that is still in the book, and
+// removed neighbours keep their former order; a spread both inserted and removed by the batch comes last.
+function inBookOrder(ids: ReadonlySet<string>, before: SpreadState[], after: SpreadState[]) {
+  const index = new Map(after.map(({ id }, at) => [id, at]));
+  const formerly = before.map(({ id }) => id);
+  const key = (id: string) => {
+    const now = index.get(id);
+    if (now !== undefined) return now;
+    const was = formerly.indexOf(id);
+    if (was < 0) return Infinity;
+    for (let at = was - 1; at >= 0; at--) {
+      const kept = index.get(formerly[at]);
+      if (kept !== undefined) return kept + 0.5 + was / (formerly.length + 1) / 2;
+    }
+    return -0.5 + was / (formerly.length + 1) / 2;
+  };
+  return [...ids].sort((a, b) => key(a) - key(b));
+}
+
+// The spreads kept by the batch whose page numbers changed while their content did not.
+function renumberedSpreads(before: SpreadState[], beforeFormat: Pick<PrintFormat, 'label' | 'structure'>, after: SpreadState[],
+  afterFormat: Pick<PrintFormat, 'label' | 'structure'>, layouts: TemplateInfo['spreads'], affected: ReadonlySet<string>) {
+  const pagesOf = (spreads: SpreadState[], format: Pick<PrintFormat, 'label' | 'structure'>) => {
+    const sequence = pageSequence(spreads.map((spread) => layoutFootprint(spread, layouts)), format).spreads;
+    return new Map(spreads.map(({ id }, at) => [id, pageNumbers(sequence[at].page)]));
+  };
+  const was = pagesOf(before, beforeFormat);
+  const moved = [...pagesOf(after, afterFormat)].filter(([id, pages]) =>
+    !affected.has(id) && was.has(id) && was.get(id)!.join() !== pages.join());
+  if (!moved.length) return undefined;
+  // Runs of consecutive pages, so spreads that kept their numbers between two moved ones are not counted in.
+  const numbers = [...new Set(moved.flatMap(([, pages]) => pages))].sort((a, b) => a - b);
+  const runs: [number, number][] = [];
+  for (const page of numbers) {
+    const last = runs.at(-1);
+    if (last && page === last[1] + 1) last[1] = page; else runs.push([page, page]);
+  }
+  const shown = runs.slice(0, 4).map(([first, last]) => first === last ? String(first) : first + '–' + last).join(', ') + (runs.length > 4 ? ', …' : '');
+  return moved.length + (moved.length === 1 ? ' spread, now ' : ' spreads, now ') + (numbers.length === 1 ? 'page ' : 'pages ') + shown;
 }

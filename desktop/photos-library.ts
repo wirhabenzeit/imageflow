@@ -9,7 +9,12 @@ import { join } from 'node:path';
 export type PhotosAccess = 'authorized' | 'notDetermined' | 'denied' | 'restricted' | 'limited' | 'unsupported-system' | 'unsupported-build';
 /** A photo's facts as PhotoKit reports them; times in ms since 1970. */
 export type PhotosFacts = {
-  width: number; height: number; created?: number; offsetMinutes?: number; latitude?: number; longitude?: number;
+  width: number; height: number; created?: number; latitude?: number; longitude?: number;
+  /**
+   * The UTC offset the photo was taken at, in minutes: its original's own (EXIF) once the addon has read it. Until
+   * then, and for an original that records none, this Mac's offset at that instant, and `offsetGuessed` is true.
+   */
+  offsetMinutes?: number; offsetGuessed?: boolean;
   /** The last edit or revert, or null for a photo never edited; absent before macOS 15. */
   adjusted?: number | null;
   base?: 'raw' | 'compressed'; caption?: string; keywords?: string[]; filename?: string; type?: string;

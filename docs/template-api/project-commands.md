@@ -33,6 +33,8 @@ Pass `cover: true` where a layout, box, or element operation would otherwise nam
 
 Spread and page inserts can supply initial `params`, `boxes` and `elements` by ID. In a page pair, omit a side to leave it blank. See [Page layouts](page-layouts.md) and [Switching layouts](switching-layouts.md) for compatible placements and saved content.
 
+The result's `affectedSpreads` lists the inserted, removed, moved or changed spreads in book order. The spreads after an insert, removal or move only change page numbers. They are counted in `renumbered`, such as `"41 spreads, now pages 5–86"`, and are not listed. A layout that prints other spreads' page numbers, such as a contents page, can change without being listed: check it when `renumbered` is present. A replayed request (same `idempotencyKey`) leaves `renumbered` out.
+
 ## Parameter and list operations
 
 Use `scope:"document"` with just a `key`, or `scope:"spread"` with a `spread` and `key`. Use `scope:"box"` or `scope:"element"` with the owning box or element ID in `owner`. Add `page:"left"` or `"right"` when addressing a split page. Omit `page` for unsplit units.
@@ -60,7 +62,7 @@ See [Parameters](parameters.md) and [List parameters](list-parameters.md) for va
 | Set a photo crop | `{"op":"set_crop","spread":"arrival","box":"hero","centerX":0.5,"centerY":0.5,"zoom":1.25}` |
 | Update or clear photo metadata | `{"op":"set_photo_metadata","photo":"photo-1","values":{"caption":"First morning","credit":null}}` |
 
-`replace_source` changes every box that holds the photo, on spreads, pages and the cover, also content set aside by a layout change, which `assign_source` cannot reach. Crops and focus stay when the two photos have the same shape (within 1%), and are dropped otherwise. A saved caption is copied to a photo that has none; nothing else of the registry entry moves.
+`replace_source` changes every box that holds the photo, on spreads, pages and the cover, also content set aside by a layout change, which `assign_source` cannot reach. Crops and focus stay when the two photos have the same shape (within 1%), and are dropped otherwise. The change names each box under `crop kept`, `crop reset` (a centred fill now) or `no crop saved` (marking those set aside), as many names as fit the change line, then `and N more`. A saved caption is copied to a photo that has none; nothing else of the registry entry moves.
 
 `remove_sources` takes sources out of the book as **Remove from Book** does: their boxes are cleared, shown or set aside, and files are cleared from the parameters they are assigned to. The change line of a dry run says how many boxes that is. Files in the package and linked originals are not deleted, and one Undo brings everything back.
 

@@ -4,10 +4,11 @@ import type { TemplateInfo } from '../src/desktop';
 import { declarationWarnings } from '../src/declaration-check';
 import type { Schema } from '../src/declaration-check';
 import { fixtureFits, planFixtures, fixtureRequestSchema } from '../src/fixtures';
-import { formatSchema, mm, pageLabel, pageSequence, pagesText, printFormat, resolveFormat, sheetPages, spanAllowedAt, trimBox } from '../src/format';
+import { formatSchema, hasSingleEnds, mm, pageCountShortfall, pageLabel, pageSequence, pagesText, printFormat, resolveFormat, sheetPages, spanAllowedAt, trimBox } from '../src/format';
 import type { FacingFormat, ResolvedFormat, SinglePageFormat } from '../src/format';
 import { boundGeometry, design, lenientFormat, page, spread } from '../src/geometry';
 import { layoutChoices } from '../src/layouts';
+import { coverSequenceFindings, sequenceFindings } from '../src/sequence-findings';
 import { projectSchema } from '../src/project';
 import type { ProjectFiles } from '../src/project';
 import { applyProjectCommands, ProjectCommandError } from '../src/project-commands';
@@ -84,16 +85,71 @@ test('without facing pages every unit is one page, numbered in project order', (
   // The page-count rule with a step of one page.
   const steps = withCount({ min: 3, max: 6, step: 1 });
   assert.deepEqual([2, 3, 4, 6, 7].map((n) => pageSequence(Array(n).fill('page'), steps).issues.length), [1, 0, 0, 0, 1]);
-  assert.match(pageSequence(['page'], calendar).issues[0], /^Page count is 1\. .* requires 13–13 pages\.$/);
+  assert.match(pageSequence(['page'], calendar).issues[0].text, /^Page count is 1\. .* requires 13–13 pages: 12 pages to fill before export\.$/);
+  assert.match(pageSequence(Array(7).fill('page'), steps).issues[0].text, /requires 3–6 pages: 1 page to remove before export\.$/);
 });
 
-test('layouts of the other kind are drawn and reported as page-sequence problems', () => {
+test('a page count the format does not take names the pages to fill or remove before export (API-023)', () => {
+  const rule = { min: 28, max: 112, step: 4 as const };
+  assert.equal(pageCountShortfall(100, rule), undefined);
+  assert.deepEqual(pageCountShortfall(98, rule), { add: 2, remove: 2 });
+  assert.deepEqual(pageCountShortfall(97, rule), { add: 3, remove: 1 });
+  assert.deepEqual(pageCountShortfall(20, rule), { add: 8 });
+  assert.deepEqual(pageCountShortfall(118, rule), { remove: 6 });
+  // A maximum off the step: the last count reached in steps is the one to remove pages down to.
+  assert.deepEqual(pageCountShortfall(111, { min: 28, max: 110, step: 4 as const }), { remove: 3 });
+  assert.deepEqual(pageCountShortfall(107, { min: 28, max: 110, step: 4 as const }), { add: 1, remove: 3 });
+  const facing = { ...book, structure: { ...book.structure, ends: 'inside-covers' as const, pageCount: rule } };
+  const sequence = pageSequence(Array(49).fill('spread'), facing);
+  assert.equal(sequence.issues.length, 1);
+  assert.equal(sequence.count, 98);
+  assert.deepEqual(sequence.shortfall, { add: 2, remove: 2 });
+  assert.equal(sequence.issues[0].kind, 'count');
+  assert.match(sequence.issues[0].text, /^Page count is 98\. .* requires 28–112 pages in steps of 4: 2 pages to fill before export, or 2 pages to remove\.$/);
+  assert.equal(pageSequence(Array(50).fill('spread'), facing).shortfall, undefined);
+});
+
+test('a growing book\'s page count and ends are warnings until export, a layout that does not fit is an error everywhere (API-023)', () => {
+  // A book that opens and closes on single pages.
+  assert.ok(hasSingleEnds(book));
+  const facing = { ...book, structure: { ...book.structure, pageCount: { min: 28, max: 112, step: 4 as const } } };
+  // Opening page, 47 spreads and no closing page: the last spread is where the closing page belongs, and 95 pages.
+  const growing = pageSequence(['right', ...Array(47).fill('spread')], facing);
+  assert.deepEqual(growing.issues.map(({ kind }) => kind), ['end', 'count']);
+  const editing = sequenceFindings(growing, { exporting: false });
+  assert.deepEqual(editing.errors, []);
+  assert.deepEqual(editing.warnings.map(({ code, details }) => [code, details]), [['page-sequence', undefined], ['page-sequence', { pages: 95, add: 1, remove: 3 }]]);
+  const exported = sequenceFindings(growing, { exporting: true });
+  assert.deepEqual(exported.warnings, []);
+  assert.deepEqual(exported.errors.map(({ code }) => code), ['page-sequence', 'page-sequence']);
+  // Only the opening page: its closing page is missing.
+  assert.deepEqual(pageSequence(['right'], facing).issues.map(({ kind }) => kind), ['end', 'count']);
+  // A page layout that allows only the other side, and a spread layout in a format without facing pages.
+  const sided = pageSequence([{ span: 'page', sides: ['left'] }, ...Array(13).fill('spread'), 'left'], facing);
+  assert.deepEqual(sided.issues.map(({ kind }) => kind), ['layout']);
+  const calendarIssues = pageSequence([...Array(12).fill('page'), 'spread'], calendar);
+  assert.deepEqual(calendarIssues.issues.map(({ kind }) => kind), ['layout']);
+  for (const sequence of [sided, calendarIssues]) for (const exporting of [false, true]) {
+    const findings = sequenceFindings(sequence, { exporting });
+    assert.deepEqual(findings.warnings, []);
+    assert.deepEqual(findings.errors.map(({ code }) => code), ['layout-format-mismatch']);
+  }
+  // The cover: a growing interior is a warning until the cover is printed; a layout mismatch is an error.
+  const codes = (findings: ReturnType<typeof coverSequenceFindings>) => [findings.errors.map(({ code }) => code), findings.warnings.map(({ code }) => code)];
+  assert.deepEqual(codes(coverSequenceFindings(growing, { printing: false })), [[], ['cover-page-sequence']]);
+  assert.deepEqual(codes(coverSequenceFindings(growing, { printing: true })), [['cover-page-sequence'], []]);
+  assert.deepEqual(codes(coverSequenceFindings(growing, { provisionalPages: 96, printing: false })), [[], ['cover-page-count']]);
+  assert.deepEqual(codes(coverSequenceFindings(growing, { provisionalPages: 96, printing: true })), [['cover-page-count'], []]);
+  assert.deepEqual(codes(coverSequenceFindings(sided, { printing: false })), [['cover-page-sequence'], []]);
+});
+
+test('layouts of the other kind are drawn and reported as layout problems', () => {
   const single = pageSequence(['page', 'spread', 'page'], withCount({ min: 1, max: 20, step: 1 }));
   assert.deepEqual(single.spreads.map(({ page }) => page.number), [1, 2, 3]);
-  assert.deepEqual(single.issues, ['Page 2 uses a spread layout, but Wall calendar · A4 portrait has no facing pages. Switch it to a single-page layout.']);
+  assert.deepEqual(single.issues, [{ kind: 'layout', text: 'Page 2 uses a spread layout, but Wall calendar · A4 portrait has no facing pages. Switch it to a single-page layout.' }]);
   const facing = pageSequence(['spread', 'page'], { ...book, structure: { ...book.structure, ends: 'inside-covers' } });
   assert.deepEqual(facing.spreads[1], { span: 'spread', page: { left: 3, right: 4 }, sides: ['left', 'right'] });
-  assert.ok(facing.issues.some((message) => message.includes('without being shown as pages')));
+  assert.ok(facing.issues.some(({ kind, text }) => kind === 'layout' && text.includes('without being shown as pages')));
   assert.equal(spanAllowedAt('page', 0, 1, calendar), true);
   assert.equal(spanAllowedAt('spread', 0, 1, calendar), false);
   assert.equal(spanAllowedAt('page', 0, 1, book), true);
@@ -235,5 +291,5 @@ test('an unsplit page layout in the middle retains the full-spread footprint unt
     { left: undefined, right: 1 }, { left: 2, right: 3 }, { left: 4, right: 5 }, { left: 6, right: undefined },
   ]);
   assert.equal(sequence.count, 6);
-  assert.ok(sequence.issues.some((message) => /Spread 2.*without being shown as pages/.test(message)));
+  assert.ok(sequence.issues.some(({ kind, text }) => kind === 'layout' && /Spread 2.*without being shown as pages/.test(text)));
 });

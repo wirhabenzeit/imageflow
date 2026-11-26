@@ -13,7 +13,9 @@ import type { OpenProject } from '../desktop/project';
 import { ProjectSession } from '../desktop/project-session';
 import type { AuthoringCheckResult } from '../src/authoring-check';
 import type { RenderStatus } from '../src/desktop';
-import { mm } from '../src/format';
+import { mm, pageSequence } from '../src/format';
+import type { PrintFormat } from '../src/format';
+import { sequenceFindings } from '../src/sequence-findings';
 import { p } from '../src/parameters';
 import { PreviewError } from '../src/preview';
 import { parseMcpArguments } from '../src/mcp-contract';
@@ -40,7 +42,9 @@ const saved = { schemaVersion: 1, title: 'Draft book', template: { id: 'test', v
 type Rendered = { book: OpenProject; preview?: PreviewRequest; inspect?: import('../src/inspection').InspectionRequest };
 
 // `fails` makes the renderer reject a book the way a layout that throws does: the template loaded, the book did not render.
-async function fixture(t: TestContext, project: object = saved, fails?: (book: OpenProject) => boolean, writable = false) {
+// `rendered` gives the render status of a book, in place of a fixed one.
+async function fixture(t: TestContext, project: object = saved, fails?: (book: OpenProject) => boolean, writable = false,
+  rendered: (book: OpenProject) => Extract<RenderStatus, { state: 'ready' }> = () => status) {
   const work = await realpath(await mkdtemp(join(tmpdir(), 'imageflow-draft-')));
   t.after(() => rm(work, { recursive: true, force: true }));
   const folder = join(work, 'book');
@@ -60,10 +64,11 @@ async function fixture(t: TestContext, project: object = saved, fails?: (book: O
     check: (book, request, signal, index, draft) => checkProject(book, cache, request, async (snapshot, preview, _signal, inspect) => {
       renders.push({ book: snapshot, preview, inspect });
       if (fails?.(snapshot)) throw new PreviewError('render-failed', 'Heading rejected.', { template: status.template });
-      if (!preview) return { status };
+      const result = rendered(snapshot);
+      if (!preview) return { status: result };
       const image: BookPreview = { width: 4, height: 2, widthMm: 200, heightMm: 100, bounds: 'trim', side: 'spread', page: { left: 1, right: 2 },
-        spread: 'spread' in preview.target ? preview.target.spread : 'one', bytes: new Uint8Array([1, 2, 3]), mimeType: 'image/png', status };
-      return { status, preview: image };
+        spread: 'spread' in preview.target ? preview.target.spread : 'one', bytes: new Uint8Array([1, 2, 3]), mimeType: 'image/png', status: result };
+      return { status: result, preview: image };
     }, signal, index, undefined, draft, async () => {
       typechecks.push(book.folder);
       return { files: ['template/index.tsx'], totalDiagnostics: 1, truncated: false, elapsedMs: 10,
@@ -138,7 +143,7 @@ test('a draft renders an inserted layout by batch reference without saving or re
   const inserted = result.draft?.references?.chapter;
   assert.ok(inserted);
   assert.deepEqual({ ...result.draft, references: undefined, changes: undefined },
-    { applied: true, committed: false, affectedSpreads: ['one', inserted], reflow: true, references: undefined, changes: undefined });
+    { applied: true, committed: false, affectedSpreads: [inserted], reflow: true, references: undefined, changes: undefined });
   assert.equal(result.image?.draft, true);
   assert.ok(result.image && 'spread' in result.image);
   assert.equal(result.image.spread, inserted);
@@ -245,20 +250,30 @@ test('a draft can repair a saved book whose layout fails to render, and the repa
   assert.equal((await call('check_book') as AuthoringCheckResult).state, 'error');
 });
 
-test('a draft reports the book\'s page sequence as a warning, and the saved book as an error (API-006)', async (t) => {
-  const { call, revision, hooks } = await fixture(t);
-  const original = hooks.check;
-  hooks.check = async (...args) => {
-    const result = await original(...args);
-    result.diagnostics.push({ code: 'page-sequence', stage: 'render', severity: 'error', message: 'Page count is 58.' });
-    return result;
+test('a page count the format does not take yet is a warning in a draft and the saved book, and the change is saved (API-023)', async (t) => {
+  // The check finds the book's page sequence as the render does while editing: in a format of 4–20 pages in steps of 4,
+  // a third spread leaves 6 pages.
+  const format = { ...status.template.format, structure: { ...status.template.format.structure, pageCount: { min: 4, max: 20, step: 4 as const } } } as Pick<PrintFormat, 'label' | 'structure'>;
+  const rendered = (book: OpenProject) => {
+    const sequence = pageSequence(book.project.spreads.map(({ definition }) => status.template.spreads[definition].span), format);
+    return { ...status, pages: sequence.count, ...sequenceFindings(sequence, { exporting: false }) };
   };
-  const saved = await call('check_book') as AuthoringCheckResult;
-  assert.equal(saved.diagnostics.find(({ code }) => code === 'page-sequence')?.severity, 'error');
-  const drafted = await call('check_book', { expectedRevision: await revision(), draft: { operations: [{ op: 'set_title', title: 'Draft title' }] } }) as AuthoringCheckResult;
-  const finding = drafted.diagnostics.find(({ code }) => code === 'page-sequence');
-  assert.equal(finding?.severity, 'warning');
-  assert.match(finding?.message ?? '', /^Page count is 58\. A draft reports this as a warning/);
+  const two = { ...saved, spreads: [{ id: 'one', definition: 'main' }, { id: 'two', definition: 'main' }] };
+  const { call, revision } = await fixture(t, two, undefined, true, rendered);
+  const operations = [{ op: 'insert_spread', definition: 'chapter', after: 'two' }];
+  const findings = (result: AuthoringCheckResult) => result.diagnostics.filter(({ code }) => code === 'page-sequence')
+    .map(({ severity, message, details }) => [severity, message, details]);
+  const expected = [['warning', 'Page count is 6. Draft test requires 4–20 pages in steps of 4: 2 pages to fill before export, or 2 pages to remove.',
+    { pages: 6, add: 2, remove: 2 }]];
+  const expectedRevision = await revision();
+  const drafted = await call('check_book', { expectedRevision, draft: { operations } }) as AuthoringCheckResult;
+  assert.equal(drafted.state, 'ready', JSON.stringify(drafted.diagnostics));
+  assert.deepEqual(findings(drafted), expected);
+  const committed = await call('apply_project_changes', { expectedRevision, idempotencyKey: 'grow', label: 'Grow', operations });
+  assert.equal(committed.committed, true, JSON.stringify(committed));
+  const after = await call('check_book', { expectedRevision: committed.revision }) as AuthoringCheckResult;
+  assert.equal(after.state, 'ready', JSON.stringify(after.diagnostics));
+  assert.deepEqual(findings(after), expected);
 });
 
 test('a draft whose book is saved between the look and the check is planned at the revision it has then (API-007)', async (t) => {

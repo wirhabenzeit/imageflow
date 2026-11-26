@@ -9,7 +9,8 @@ import { closeApp, popupAction, testBook } from './ui-actions.mjs';
 
 // The 25 November evening beta findings in the app: a photo only set aside is not marked used (UI-016), a choice too
 // wide for the Inspector becomes a menu instead of scrolling it sideways (UI-015), and a placed photo's caption is
-// edited where the photo is, switching on the box setting that shows it (UI-014).
+// edited where the photo is, switching on the box setting that shows it (UI-014), and only boxes that print a caption
+// offer Caption… in their toolbar (UI-017).
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build/photo-captions-'));
 const folder = join(work, 'Captions.imageflow');
@@ -27,11 +28,12 @@ spreads:{${Object.entries(variants).map(([style, label]) => `${style}:single('${
 trio:{label:'Three photos',boxes:{hero:box.photo('Photo'),third:box.photo('Third')},render:(ctx: any)=><Spread><ctx.PhotoBox id="hero" rect={ctx.geometry.page('left','safe')}/><ctx.PhotoBox id="third" rect={ctx.geometry.page('right','safe')}/></Spread>}}});`);
 // As after switching from Three photos: the third photo is stored on the spread, and its layout has no box for it.
 await writeFile(join(folder, 'project.json'), JSON.stringify({ schemaVersion: 1, title: 'Captions', template: { id: 'captions', version: '1' },
-  spreads: [{ id: 'one', definition: 'bleed', boxes: { hero: { photo: 'shown' }, third: { photo: 'aside' } } }] }));
-for (const [id, background] of [['shown', '#709fb0'], ['aside', '#cbb68b'], ['loose', '#8b6f9a']]) {
+  spreads: [{ id: 'one', definition: 'bleed', boxes: { hero: { photo: 'shown' }, third: { photo: 'aside' } } },
+    { id: 'two', definition: 'trio', boxes: { hero: { photo: 'grid' } } }] }));
+for (const [id, background] of [['shown', '#709fb0'], ['aside', '#cbb68b'], ['loose', '#8b6f9a'], ['grid', '#6f9a7a']]) {
   await sharp({ create: { width: 800, height: 600, channels: 3, background } }).jpeg().toFile(join(folder, 'photos', id + '.jpg'));
 }
-await writeFile(join(folder, 'photos.json'), JSON.stringify(Object.fromEntries(['shown', 'aside', 'loose'].map((id) => [id, { path: 'photos/' + id + '.jpg', title: id }]))));
+await writeFile(join(folder, 'photos.json'), JSON.stringify(Object.fromEntries(['shown', 'aside', 'loose', 'grid'].map((id) => [id, { path: 'photos/' + id + '.jpg', title: id }]))));
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')], env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 const until = async (check, message = 'Operation completed') => { for (let i = 0; i < 250; i++) { if (await check()) return; await new Promise((resolve) => setTimeout(resolve, 40)); } assert.ok(await check(), message); };
 const current = async (page) => (await page.evaluate(() => window.imageflow.currentProject())).value;
@@ -90,6 +92,21 @@ try {
   await page.getByRole('button', { name: 'Edit Photo', exact: true }).click();
   await toolbar.getByRole('button', { name: 'Caption…' }).waitFor();
   assert.equal(await field.count(), 0, 'the caption stays closed');
+
+  // UI-017: Three photos has no Show caption, so its photo offers no Caption…; Edit Caption… still opens the field,
+  // which says the layout doesn't print it.
+  await toolbar.getByRole('button', { name: 'Done', exact: true }).click();
+  await toolbar.waitFor({ state: 'detached' });
+  await page.locator('.spread-thumb[data-spread="two"]').click();
+  await page.locator('.canvas .book-frame-book[data-current][data-ready]').waitFor();
+  await page.getByRole('button', { name: 'Edit Photo', exact: true }).click();
+  await toolbar.getByRole('button', { name: 'Done', exact: true }).waitFor();
+  assert.equal(await toolbar.getByRole('button', { name: 'Caption…' }).count(), 0, 'no Caption… where the layout prints no caption');
+  await toolbar.getByRole('button', { name: 'Done', exact: true }).click();
+  await toolbar.waitFor({ state: 'detached' });
+  await popupAction(app, page, page.getByRole('button', { name: 'Edit Photo', exact: true }), 'Edit Caption…', { button: 'right' });
+  await page.getByRole('textbox', { name: 'Caption of grid' }).waitFor();
+  await page.getByText('This layout doesn’t print captions.').waitFor();
   assert.deepEqual(errors, []);
   await page.screenshot({ path: join(work, 'captions.png') });
   console.log('Set-aside photos, overflowing choices and captions passed:', work);

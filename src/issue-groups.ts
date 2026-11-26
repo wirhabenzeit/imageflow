@@ -16,7 +16,10 @@ export type CheckRow = { key: string; level: IssueLevel; title: string; items: I
 // A code with a meaning here takes its values from the finding (`occurrenceText`), any other shows its messages.
 type CheckText = { title: string; detail?: string; fix?: string };
 const texts: Record<string, CheckText> = {
-  'page-sequence': { title: 'Pages don’t fit the format', fix: 'Add, remove or move spreads, or change a layout.' },
+  // A to-do while the book grows: only export reports it as an error.
+  'page-sequence': { title: 'Pages to fit the format before export', fix: 'Add, remove or move spreads, or change a layout.' },
+  // A layout of the wrong kind or side, after a format switch: an error everywhere.
+  'layout-format-mismatch': { title: 'Layouts don’t fit the format', fix: 'Choose a layout that fits the format, or switch back to the earlier format.' },
   'book-empty': { title: 'No spreads yet', fix: 'Add a spread.' },
   'format-unavailable': { title: 'Format no longer offered', fix: 'Choose a format in the book settings.' },
   'cover-page-count': { title: 'Cover needs a page count' },

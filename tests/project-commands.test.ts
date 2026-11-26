@@ -75,7 +75,42 @@ test('a batch inserts and references a spread before duplicating, moving, and re
   assert.equal(result.files.project.spreads[0].boxes.hero.photo, 'p2');
   assert.equal(result.changes.length, 5);
   assert.equal(result.reflow, true);
+  // The copy is new; one and two only moved two pages on. The spread inserted and removed again comes last.
+  assert.deepEqual(result.affectedSpreads, ['generated-2', 'generated-1']);
+  assert.deepEqual(result.renumbered, '2 spreads, now pages 3–6');
   assert.deepEqual(original, snapshot);
+});
+
+test('an insert reports the new spread, not every spread after it, which are counted as renumbered (API-022)', () => {
+  const book = files();
+  book.project = projectSchema.parse({ ...book.project, spreads: [...book.project.spreads, ...['three', 'four'].map((id) => ({ id, definition: 'main', boxes: {} }))] });
+  const inserted = applyProjectCommands(book, template, [{ op: 'insert_spread', definition: 'main', after: 'one' }], { generateId: () => 'new' });
+  assert.deepEqual(inserted.affectedSpreads, ['new']);
+  assert.deepEqual(inserted.renumbered, '3 spreads, now pages 5–10');
+  const pages: TemplateInfo = { ...template, spreads: { ...template.spreads, page: { ...template.spreads.main, span: 'page' } } };
+  const pair = applyProjectCommands(book, pages, [{ op: 'insert_page_pair', after: 'three', pages: { left: { definition: 'page' } } }], { generateId: () => 'pair' });
+  assert.deepEqual([pair.affectedSpreads, pair.renumbered], [['pair'], '1 spread, now pages 9–10']);
+  // At the end, nothing moves.
+  const last = applyProjectCommands(book, template, [{ op: 'insert_spread', definition: 'main', after: 'four' }], { generateId: () => 'last' });
+  assert.deepEqual([last.affectedSpreads, last.renumbered], [['last'], undefined]);
+  // A removed spread stands where it was, among edited ones in book order.
+  const removed = applyProjectCommands(book, template, [
+    { op: 'set_parameter', scope: 'spread', spread: 'four', key: 'heading', value: 'Four' },
+    { op: 'remove_spread', spread: 'two' },
+    { op: 'set_parameter', scope: 'spread', spread: 'one', key: 'heading', value: 'One' },
+  ]);
+  assert.deepEqual([removed.affectedSpreads, removed.renumbered], [['one', 'two', 'four'], '1 spread, now pages 3–4']);
+  // A moved spread is reported; those it passed are renumbered.
+  const moved = applyProjectCommands(book, template, [{ op: 'move_spread', spread: 'four', after: 'one' }]);
+  assert.deepEqual([moved.affectedSpreads, moved.renumbered], [['four'], '2 spreads, now pages 5–8']);
+  // Neighbours removed in reverse order still come in book order.
+  const both = applyProjectCommands(book, template, [{ op: 'remove_spread', spread: 'three' }, { op: 'remove_spread', spread: 'two' }]);
+  assert.deepEqual([both.affectedSpreads, both.renumbered], [['two', 'three'], '1 spread, now pages 3–4']);
+  // Renumbered spreads apart from each other are named by their own pages, not the range between them.
+  const six = files();
+  six.project = projectSchema.parse({ ...six.project, spreads: [...six.project.spreads, ...['three', 'four', 'five', 'six'].map((id) => ({ id, definition: 'main', boxes: {} }))] });
+  const apart = applyProjectCommands(six, template, [{ op: 'move_spread', spread: 'two', after: 'three' }, { op: 'move_spread', spread: 'five', after: 'six' }]);
+  assert.deepEqual([apart.affectedSpreads, apart.renumbered], [['two', 'five'], '2 spreads, now pages 3–4, 9–10']);
 });
 
 test('layout switches preserve hidden content, crops, and rejected parameter overrides', () => {
@@ -449,7 +484,9 @@ test('replace_source swaps a photo in every box, set aside or not, and keeps cro
   assert.equal(project.cover!.boxes.front.photo, 'p2');
   assert.deepEqual(result.affectedSpreads, ['one', 'two', 'three', 'four'], 'also where the replacement stood, for its caption');
   assert.equal(result.affectedCover, true);
-  assert.deepEqual(result.changes, ['Replaced photo p1 with p2 in 2 boxes shown and 2 set aside; caption copied']);
+  // Each placement says what became of its crop (API-021, 26 Nov).
+  assert.deepEqual(result.changes, ['Replaced photo p1 with p2 in 2 boxes shown and 2 set aside; crop kept: one hero, two second (set aside); ' +
+    'no crop saved: three hero (set aside), cover front; caption copied']);
   assert.deepEqual(photoIndex.p1, original.photoIndex.p1);
   assert.deepEqual(photoIndex.p2, { ...original.photoIndex.p2, caption: 'Old caption' });
   // Another shape, and one that is not known, drop the crops; a caption of its own stays.
@@ -458,11 +495,25 @@ test('replace_source swaps a photo in every box, set aside or not, and keeps cro
     assert.equal(other.files.project.spreads[0].boxes.hero.crops, undefined);
     assert.equal(other.files.project.spreads[0].boxes.hero.focus, undefined);
     assert.deepEqual(other.files.project.spreads[0].boxes.hero.params, { caption: true });
-    assert.match(other.changes[0], p2 ? /crops of 2 boxes dropped, as the shapes differ$/ : /as the shapes are not known; caption copied$/);
+    assert.match(other.changes[0], p2 ? /; crop reset, as the shapes differ: one hero, two second \(set aside\); no crop saved: three hero \(set aside\), cover front$/
+      : /; crop reset, as the shapes are not known: one hero, two second \(set aside\); no crop saved: .*; caption copied$/);
     assert.equal(other.files.photoIndex.p2.caption, p2 ? undefined : 'Old caption');
   }
   assert.deepEqual(applyProjectCommands(book, template, [{ op: 'replace_source', source: 'p1', with: 'p1' }]).changes, []);
   failure([{ op: 'replace_source', source: 'p1', with: 'nope' }], 'SOURCE_NOT_FOUND');
+});
+
+test('replace_source names as many boxes as fit a checkpoint change and keeps its caption note (API-021, 26 Nov)', () => {
+  const { files: book, template } = placed();
+  const crop = { crops: { main: { centerX: .3, centerY: .3, zoom: 2 } } };
+  // Twenty spreads with long IDs, half with a crop: the names cannot all fit in 300 characters.
+  book.project = projectSchema.parse({ ...book.project, spreads: Array.from({ length: 20 }, (_, index) => ({
+    id: 'a-rather-long-spread-identifier-' + String(index).padStart(2, '0'), definition: 'main',
+    boxes: { hero: { photo: 'p1', params: {}, ...(index % 2 ? crop : {}) } } })) });
+  const sizes: Record<string, ReturnType<typeof size>> = { p1: size(6000, 4000), p2: size(3000, 2000) };
+  const [change] = applyProjectCommands(book, template, [{ op: 'replace_source', source: 'p1', with: 'p2' }], { photo: (id) => sizes[id] }).changes;
+  assert.ok(change.length <= 300, change.length + ' characters: ' + change);
+  assert.match(change, /^Replaced photo p1 with p2 in 21 boxes shown and 0 set aside; crop kept: a-rather-long-spread-identifier-01 hero.* and \d+ more; no crop saved: (.* and \d+ more|\d+ boxes); caption copied$/);
 });
 
 test('remove_sources clears every use and says how many boxes that is (API-011)', () => {

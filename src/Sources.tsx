@@ -1,4 +1,4 @@
-import { awayBadge } from './away-originals';
+import { awayBadge, unreadableHelp } from './away-originals';
 import { EditMarkdown, NewMarkdown } from './MarkdownActions';
 import { assetMenu, assetMenuState, assetActions } from './asset-menu';
 import { PhotoViewMenu } from './PhotoViewMenu';
@@ -168,7 +168,7 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
     const common = {
       'data-id': id, role: 'option', 'aria-selected': selection.selected.includes(id),
       tabIndex: visibleCurrent === id || (!visibleCurrent && id === items[0]?.id) ? 0 : -1,
-      title: title + ' · ' + pagesText(placed, usage.aside?.[tab][id]) + (sourceLabel ? ' · ' + (sourceState?.outOfDate ? outOfDateNote(sourceState) : sourceState?.problem ?? sourceLabel) : ''),
+      title: title + ' · ' + pagesText(placed, usage.aside?.[tab][id]) + (sourceLabel ? ' · ' + (sourceState?.outOfDate ? outOfDateNote(sourceState) : sourceState?.problem ? [sourceState.problem, unreadableHelp(sourceState)].filter(Boolean).join(' ') : sourceLabel) : ''),
       onClick: (event: React.MouseEvent) => { selection.choose(id, event); choose({ kind: tab, id }); },
       onContextMenu: (event: React.MouseEvent<HTMLElement>) => { const ids = selection.context(id, event); choose({ kind: tab, id }); void context(ids); },
       onDoubleClick: () => quickLook({ kind: tab, id }),
