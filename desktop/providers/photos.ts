@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { PhotosLocator } from '../../src/source-locator';
+import { notInPhotosHere } from '../../src/away-originals';
 import type { PhotosAccess, PhotosFacts, PhotosLibrary } from '../photos-library';
 import type { Materialized, MaterializeOptions, Observed, ProvidedFacts, Repair, Revisions, SourceProvider, SourceRef, Unavailable } from '../source-provider';
 
@@ -19,10 +20,10 @@ import type { Materialized, MaterializeOptions, Observed, ProvidedFacts, Repair,
  * - Previews and originals are rendered by Photos as they are now, downloaded from iCloud where the photo is not on
  *   this Mac (with Optimize Mac Storage, most are not): about a second per preview, two to four per original.
  * - A photo is `denied` while ImageFlow may not read the library, `offline` while its library or iCloud cannot be
- *   reached, and `missing` once it left the library. A photo this Mac never had (no local identifier of its own, as
- *   one another Mac added and a sync brought here) is `missing` too, but says it is not in this Mac's library: often
- *   iCloud Photos has not brought it yet (UI-018). Such photos are looked for again now and then while a book watches
- *   them, as PhotoKit reports changes only of the photos it tracks.
+ *   reached, and `missing` once it left the library. A photo whose locator holds no local identifier (as one another
+ *   Mac added and a sync brought here) is `missing` too, but says it is not in this Mac's library: often iCloud Photos
+ *   has not brought it yet (UI-018). Photos the library does not have are looked for again now and then while a book
+ *   watches them, as PhotoKit reports changes only of the photos it tracks.
  */
 export type PhotosPort = Pick<PhotosLibrary, 'status' | 'localIdentifiers' | 'facts' | 'image' | 'cancel' | 'onChanges' | 'track'>;
 
@@ -35,8 +36,12 @@ const recheckMs = 5 * 60_000;
 type Problem = { state: Unavailable; problem: string };
 const denied: Problem = { state: 'denied', problem: 'ImageFlow may not read the Photos library. Allow it in System Settings → Privacy & Security → Photos.' };
 const gone: Problem = { state: 'missing', problem: 'No longer in the Photos library.' };
-const notHere: Problem = { state: 'missing', problem: 'Not in this Mac’s Photos library.' };
-/** A photo the library does not have: gone, if this Mac had it (it holds a local identifier of it), else never here. */
+const notHere: Problem = { state: 'missing', problem: notInPhotosHere };
+/**
+ * A photo the library does not have: gone when its locator holds a local identifier, else not here. Only a guess: the
+ * locator syncs with the book but its local identifier is the one of the Mac that added it, so a photo another Mac
+ * added with one may say gone here, and one this Mac deleted says not here once it was added without one.
+ */
 const absent = (locator: PhotosLocator): Problem => locator.local ? gone : notHere;
 /** Why no photo of the library can be read now, or undefined when ImageFlow may read it. */
 export function accessProblem(access: PhotosAccess | undefined): Problem | undefined {
@@ -100,8 +105,12 @@ export function photosFacts(facts: PhotosFacts): ProvidedFacts {
 
 let requestIds = 0;
 
+/** Calls `run` every `ms` until the returned function is called: a timer of its own in tests. */
+export type Every = (run: () => void, ms: number) => () => void;
+const every: Every = (run, ms) => { const timer = setInterval(run, ms); timer.unref?.(); return () => clearInterval(timer); };
+
 /** The Apple Photos provider over the PhotoKit addon. */
-export function photosProvider(library: PhotosPort | undefined, { recheck = recheckMs }: { recheck?: number } = {}): SourceProvider<PhotosLocator> {
+export function photosProvider(library: PhotosPort | undefined, { recheck = recheckMs, repeat = every }: { recheck?: number; repeat?: Every } = {}): SourceProvider<PhotosLocator> {
   // This Mac's local identifier of each cloud identifier, once looked up: the one in the locator may be another Mac's
   // or out of date, and the lookup of a cloud identifier is costly.
   const locals = new Map<string, string>();
@@ -209,7 +218,7 @@ export function photosProvider(library: PhotosPort | undefined, { recheck = rech
       // The photos this library does not have, by cloud identifier: a photo iCloud Photos brings later is reported
       // like a change once it is found, and tracked from then on.
       const absentRefs = new Map<string, string[]>();
-      let timer: ReturnType<typeof setInterval> | undefined;
+      let stopTimer: (() => void) | undefined;
       let looking = false;
       const lookAgain = async () => {
         if (looking || !watchers.has(owner) || library.status() !== 'authorized') return;
@@ -227,22 +236,23 @@ export function photosProvider(library: PhotosPort | undefined, { recheck = rech
             for (const id of own) track(local, id);
             return own;
           });
-          if (!absentRefs.size) { clearInterval(timer); timer = undefined; }
+          if (!absentRefs.size) { stopTimer?.(); stopTimer = undefined; }
           if (arrived.length) { retrack(); changed(arrived); }
         } catch { /* Looked for again next time. */ }
         finally { looking = false; }
       };
-      void resolve(refs).then(({ localOf }) => {
+      // A first lookup that fails (no access yet, Photos busy) leaves every photo to be looked for again.
+      void resolve(refs).catch(() => ({ localOf: refs.map(() => undefined) })).then(({ localOf }) => {
         if (!watchers.has(owner)) return;
         localOf.forEach((local, index) => {
           if (local) track(local, refs[index].id);
           else absentRefs.set(refs[index].locator.cloud, [...absentRefs.get(refs[index].locator.cloud) ?? [], refs[index].id]);
         });
         retrack();
-        if (absentRefs.size) { timer = setInterval(() => void lookAgain(), recheck); timer.unref?.(); }
-      }, () => {});
+        if (absentRefs.size) stopTimer = repeat(() => void lookAgain(), recheck);
+      });
       watchers.set(owner, { ids, changed });
-      return () => { clearInterval(timer); watchers.delete(owner); retrack(); };
+      return () => { stopTimer?.(); stopTimer = undefined; watchers.delete(owner); retrack(); };
     },
     // Access is given in System Settings, or by answering the question that asks for it.
     repairs: (state): readonly Repair[] => state === 'denied' ? ['allow'] : [],
