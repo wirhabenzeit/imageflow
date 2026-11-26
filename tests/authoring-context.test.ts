@@ -1074,7 +1074,7 @@ test('photos that are not placed can be listed by capture time and seen uncroppe
   assert.throws(() => parseMcpArguments('inspect_book', { project: 'p', view: 'sources', sheet: {}, limit: 60 }), /at most 48/);
 });
 
-test('the sources view gives a photo its pixel size where it is known (API-021)', () => {
+test('the sources view gives a photo its pixel size where it is known (API-021, 26 Nov)', () => {
   assert.deepEqual(pixelsOf({ width: 6000, height: 4000 }), { width: 6000, height: 4000 });
   assert.deepEqual(pixelsOf(undefined), {});
   assert.deepEqual(pixelsOf({ width: 0, height: 4000 }), {});

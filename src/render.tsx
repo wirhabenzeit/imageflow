@@ -1075,6 +1075,12 @@ function measuredBounds(node: HTMLElement, sheet: HTMLElement, format: Pick<Reso
   return { x: (rect.left - outer.left) * scale, y: (rect.top - outer.top) * scale, width: rect.width * scale, height: rect.height * scale };
 }
 
+// A box's own size in mm, before any rotation, as its `data-ppi` measures it (CSS pixels at 96 per inch).
+function ownSizeMm(node: HTMLElement) {
+  const style = getComputedStyle(node);
+  return { width: parseFloat(style.width) * 25.4 / 96, height: parseFloat(style.height) * 25.4 / 96 };
+}
+
 function typographyOf(node: HTMLElement) {
   const style = getComputedStyle(node);
   const points = (value: string) => Math.round(parseFloat(value) * 72 / 96 * 100) / 100;
@@ -1099,7 +1105,7 @@ function inspectElements(sheet: HTMLElement, spread: SpreadState, template: Temp
     return { spread: spread.id, id, ...onPage(page), kind, boundsMm: measuredBounds(node, sheet, format), upright: upright(node, sheet),
       typography: typographyOf(node),
       editPaths: Object.keys(parameters).map((key) => prefix + key), ...(source ? { source } : {}),
-      ...(photo ? { print: renderedPrint(node.dataset.ppi, photos[photo], placementIn(state.boxes[id], state.definition!)) } : {}) };
+      ...(photo ? { print: renderedPrint(node.dataset.ppi, photos[photo], placementIn(state.boxes[id], state.definition!), ownSizeMm(node)) } : {}) };
   });
   return { spread: spread.id, coordinateSpace: 'sheet-bleed-mm', items, total: nodes.length,
     nextOffset: request.offset + items.length < nodes.length ? request.offset + items.length : null };
@@ -2120,7 +2126,7 @@ async function renderPhysicalCover(root: HTMLElement, book: RenderProject, templ
       return { cover: true, id, kind: box ? 'photo' : 'element', boundsMm: measuredBounds(node, sheet, { spreadWidth: geometry.sheet.width }),
         typography: typographyOf(node), upright: upright(node, sheet), editPaths: Object.keys(parameters).map((key) => prefix + key),
         ...(box && state.boxes[id]?.photo ? { source: state.boxes[id].photo,
-          print: renderedPrint(node.dataset.ppi, book.photos[state.boxes[id].photo!], placementIn(state.boxes[id], state.definition)) } : {}) };
+          print: renderedPrint(node.dataset.ppi, book.photos[state.boxes[id].photo!], placementIn(state.boxes[id], state.definition), ownSizeMm(node)) } : {}) };
     });
     inspection = { cover: true, coordinateSpace: 'sheet-bleed-mm', items, total: nodes.length,
       nextOffset: inspect.offset + items.length < nodes.length ? inspect.offset + items.length : null };

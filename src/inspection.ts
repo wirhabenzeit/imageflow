@@ -24,7 +24,7 @@ export type ElementMeasurement = {
   boundsMm: { x: number; y: number; width: number; height: number }; upright: boolean;
   typography: { fontFamily: string; fontSizePt: number; lineHeightPt: number | null; fontWeight: string; color: string };
   editPaths: string[]; source?: string;
-  // A photo box with a photo: the original's pixels and the ppi it prints at (API-021).
+  // A photo box with a photo: the original's pixels and the ppi it prints at (API-021, 26 Nov).
   print?: PhotoPrint;
 };
 export type ElementInspection = {

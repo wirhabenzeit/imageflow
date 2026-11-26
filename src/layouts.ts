@@ -288,16 +288,23 @@ export type KeptContent = { id: string; kind: Kind; source: string; location: St
 // not shown at all (the spread's own while it is shown as pages, a page's while it is not), and content set aside as
 // replaced, which never shows by itself.
 export function keptOutside(spread: SpreadState, layouts: Layouts): KeptContent[] {
-  const shown = shownStates(spread);
-  return storedBoxes(spread).flatMap(({ location, box: id, state, displaced }) => {
-    const kind = kindOf(state);
-    if (!kind) return [];
-    if (displaced === undefined && shown.includes(location)) {
-      const layout = stateLayout(layouts, scopeState(spread, location === 'spread' ? undefined : location)!.definition);
-      if (kindOf(state) === boxKind(layout, id)) return [];
-    }
+  const outside = isKeptOutside(spread, layouts);
+  return storedBoxes(spread).flatMap((stored) => {
+    const kind = kindOf(stored.state);
+    if (!kind || !outside(stored)) return [];
+    const { location, box: id, state, displaced } = stored;
     return [{ id, kind, source: state.photo ?? state.text!, location, ...(displaced !== undefined ? { replaced: true as const } : {}) }];
   });
+}
+/** Whether a stored box of the spread (`storedBoxes`) holds content that no shown layout shows, as `keptOutside` counts it. */
+export function isKeptOutside(spread: SpreadState, layouts: Layouts) {
+  const shown = shownStates(spread);
+  return ({ location, box: id, state, displaced }: ReturnType<typeof storedBoxes>[number]) => {
+    if (!kindOf(state)) return false;
+    if (displaced !== undefined || !shown.includes(location)) return true;
+    const layout = stateLayout(layouts, scopeState(spread, location === 'spread' ? undefined : location)!.definition);
+    return kindOf(state) !== boxKind(layout, id);
+  };
 }
 
 export type Counts = Record<Kind, number>;

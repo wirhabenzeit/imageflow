@@ -12,39 +12,41 @@ export type PhotoResolution = { minimumPpi: number | null; measured: number; not
 export const newResolution = (minimum: number | undefined): PhotoResolution => ({ minimumPpi: minimum ?? null, measured: 0, notMeasured: 0 });
 
 /**
- * The photo in an inspected box (API-021): its original's size in pixels and the ppi it prints at in the box. `measured`
- * is true where the render drew the photo and measured it, as `PhotoResolution.measured` counts it, by its original's
- * size; false where it was not drawn (its preview is loading, or it cannot be read), and the ppi is estimated from the
- * size its source reported, the box's size and its crop, or null without a known size. `placement` is the crop the
- * estimate uses; the render passes it, and the reply leaves it out.
+ * The photo in an inspected box (API-021, 26 Nov): its original's size in pixels and the ppi it prints at in the box.
+ * `measured` is true where the render measured it (the box's `data-ppi`), as `PhotoResolution.measured` counts it, by
+ * its original's size; false where the render has no size for the photo, such as one whose file is unavailable, and the
+ * ppi is estimated from the size its source reported, the box's size and its crop, or null without a known size.
+ * `placement` and `boxMm` (the box's own size, unrotated, as the measurement uses it) are what the estimate uses; the
+ * render passes them, and the reply leaves them out.
  */
-export type PhotoPrint = { widthPx?: number; heightPx?: number; ppi: number | null; measured: boolean; placement?: Placement };
+export type PhotoPrint = { widthPx?: number; heightPx?: number; ppi: number | null; measured: boolean; placement?: Placement;
+  boxMm?: { width: number; height: number } };
 
-/** What the render knows of a box's photo: measured where it was drawn, else the crop an estimate needs. */
-export function renderedPrint(ppi: string | undefined, photo: Dimensions | undefined, placement: Placement): PhotoPrint {
+/** What the render knows of a box's photo: measured where it has a size for it, else what an estimate needs. */
+export function renderedPrint(ppi: string | undefined, photo: Dimensions | undefined, placement: Placement, boxMm: { width: number; height: number }): PhotoPrint {
   const value = ppi === undefined ? NaN : Number(ppi);
   return photo && Number.isFinite(value) ? { widthPx: photo.width, heightPx: photo.height, ppi: Math.round(value), measured: true }
-    : { ppi: null, measured: false, placement };
+    : { ppi: null, measured: false, placement, boxMm };
 }
 
 /**
  * A reply's print of a box: as measured, or estimated from the photo's known size like the render measures it, the
- * smaller of the crop's pixels per inch across and down.
+ * smaller of the crop's pixels per inch across and down of the box's own (unrotated) size.
  */
-export function estimatedPrint(print: PhotoPrint, size: Dimensions | undefined, box: { width: number; height: number }): PhotoPrint {
-  const { placement, ...rest } = print;
+export function estimatedPrint(print: PhotoPrint, size: Dimensions | undefined): PhotoPrint {
+  const { placement, boxMm: box, ...rest } = print;
   if (rest.measured) return rest;
-  if (!size?.width || !size.height || !placement || !(box.width > 0 && box.height > 0)) return { ppi: null, measured: false };
+  if (!size?.width || !size.height || !placement || !box || !(box.width > 0 && box.height > 0)) return { ppi: null, measured: false };
   const crop = getCrop(size, placement, box.width / box.height);
   const ppi = Math.min(size.width * crop.width / (box.width / 25.4), size.height * crop.height / (box.height / 25.4));
   return { widthPx: size.width, heightPx: size.height, ppi: Math.round(ppi), measured: false };
 }
 
 /** An inspection as a reply: each photo box's print as measured, or estimated by the photo's size (`sizeOf`). */
-export function inspectionPrints<T extends { items: { print?: PhotoPrint; source?: string; boundsMm: { width: number; height: number } }[] }>(
+export function inspectionPrints<T extends { items: { print?: PhotoPrint; source?: string }[] }>(
   inspection: T, sizeOf: (id: string) => Dimensions | undefined): T {
   return { ...inspection, items: inspection.items.map((item) => item.print
-    ? { ...item, print: estimatedPrint(item.print, item.print.measured || !item.source ? undefined : sizeOf(item.source), item.boundsMm) } : item) };
+    ? { ...item, print: estimatedPrint(item.print, item.print.measured || !item.source ? undefined : sizeOf(item.source)) } : item) };
 }
 
 /** Counts a box that holds a photo. `ppi` is undefined where the photo is not drawn. */

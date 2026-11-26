@@ -71,7 +71,7 @@ How an agent edits an ImageFlow book through the MCP server. The template API to
 - Use `preview.target.spreads` for a contact sheet of up to 12 spreads, and `box` or `element` targets for close-ups. `guides` and `labels` add trim, safe-area and box outlines.
 - Stress-test layouts with `check_book` `fixtures`: synthetic typical, long, empty, portrait-photo, valid-GPX and malformed-file content per format, with a coverage matrix and a bannered fixture contact sheet that is never the saved book. Coverage names the checks that did not run. `params` and `document` test settings at other values than their defaults, such as `{ "photoEdge": "bleed" }`.
 - To choose photos, call `inspect_book` with `view: "sources"`, `unplaced: true` or `captured: { from, to }`, and `sheet: {}`: an image of up to 48 photos, uncropped, with their IDs and capture times. Photo records carry the original's `width` and `height` in pixels where they are known.
-- To see how sharp placed photos print, call `check_book` with `inspect: { spread }`: each photo box has `print` with the original's `widthPx` and `heightPx` and the `ppi` it prints at, `measured: true` where the render drew it, as `render.photoResolution` counts it, or estimated from the size its source reported where it was not drawn (`ppi: null` without a known size). Compare it after `replace_source`.
+- To see how sharp placed photos print, call `check_book` with `inspect: { spread }`: each photo box has `print` with the original's `widthPx` and `heightPx` and the `ppi` it prints at, `measured: true` where the render measured it, as `render.photoResolution` counts it, or estimated from the size its source reported for a photo the render has no size for, such as one whose file is unavailable (`ppi: null` without a known size). Compare it after `replace_source`.
 
 ### Revisions
 
@@ -139,7 +139,7 @@ See [Parameters](#parameters) and [List parameters](#list-parameters) for value 
 | Set a photo crop | `{"op":"set_crop","spread":"arrival","box":"hero","centerX":0.5,"centerY":0.5,"zoom":1.25}` |
 | Update or clear photo metadata | `{"op":"set_photo_metadata","photo":"photo-1","values":{"caption":"First morning","credit":null}}` |
 
-`replace_source` changes every box that holds the photo, on spreads, pages and the cover, also content set aside by a layout change, which `assign_source` cannot reach. Crops and focus stay when the two photos have the same shape (within 1%), and are dropped otherwise. The change names each box under `crop kept`, `crop reset` (a centred fill now) or `no crop saved`, the first six of each. A saved caption is copied to a photo that has none; nothing else of the registry entry moves.
+`replace_source` changes every box that holds the photo, on spreads, pages and the cover, also content set aside by a layout change, which `assign_source` cannot reach. Crops and focus stay when the two photos have the same shape (within 1%), and are dropped otherwise. The change names each box under `crop kept`, `crop reset` (a centred fill now) or `no crop saved` (marking those set aside), as many names as fit the change line, then `and N more`. A saved caption is copied to a photo that has none; nothing else of the registry entry moves.
 
 `remove_sources` takes sources out of the book as **Remove from Book** does: their boxes are cleared, shown or set aside, and files are cleared from the parameters they are assigned to. The change line of a dry run says how many boxes that is. Files in the package and linked originals are not deleted, and one Undo brings everything back.
 

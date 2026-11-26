@@ -4,7 +4,7 @@ import type { TemplateInfo } from './desktop';
 import type { PrintFormat } from './format';
 import { newSpread, resolveEditPath, writeEdit } from './editing';
 import type { EditTarget } from './editing';
-import { describeLayoutChange, discardContent, editorLayoutChoices, editorLayoutTarget, keptOutside, layoutChoices, layoutFootprint, swapContent, swapPages, switchLayout } from './layouts';
+import { describeLayoutChange, discardContent, editorLayoutChoices, editorLayoutTarget, isKeptOutside, layoutChoices, layoutFootprint, swapContent, swapPages, switchLayout } from './layouts';
 import { hasFacingPages, spanAllowedAt, spanFits, spanRequiredAt } from './format';
 import { isParameterValue, listProblems, newItemId, resolveValue, sameValue } from './parameters';
 import type { ListItem, Parameter, Parameters } from './parameters';
@@ -247,18 +247,35 @@ export function applyProjectCommands(
   // Where a source is stored: the layouts, with how many of their boxes show it and how many keep it set aside.
   function placesOf(kind: 'photo' | 'text', sources: ReadonlySet<string>) {
     return storedLayouts(project).flatMap((layout) => {
-      const boxes = storedBoxes(layout).filter(({ state }) => sources.has(state[kind] ?? ''));
-      if (!boxes.length) return [];
+      const stored = storedBoxes(layout).filter(({ state }) => sources.has(state[kind] ?? ''));
+      if (!stored.length) return [];
       const cover = layout.id === coverInstance;
       const shown = cover ? own(coverLayoutsFor(template.coverLayouts, formatId), layout.definition ?? '') : undefined;
-      const aside = cover ? boxes.filter(({ box }) => !shown || !own(shown.boxes, box)).length
-        : keptOutside(layout, template.spreads).filter((item) => item.kind === (kind === 'photo' ? 'photo' : 'markdown') && sources.has(item.source)).length;
+      // Each box says whether it is set aside: on the cover, missing from the shown cover layout; on a spread, kept
+      // where no shown layout shows it (displaced, in a state not shown, or in a box its layout does not draw).
+      const outside = cover ? undefined : isKeptOutside(layout, template.spreads);
+      const boxes = stored.map((item) => ({ ...item, aside: cover ? !shown || !own(shown.boxes, item.box) : outside!(item) }));
+      const aside = boxes.filter((item) => item.aside).length;
       return [{ id: layout.id, boxes, shown: boxes.length - aside, aside }];
     });
   }
-  // Boxes named in a change, the first few of them: `; crop kept: one hero, two left photo1 and 3 more`.
-  const listedPlaces = (what: string, places: string[]) => !places.length ? ''
-    : '; ' + what + ': ' + places.slice(0, 6).join(', ') + (places.length > 6 ? ' and ' + (places.length - 6) + ' more' : '');
+  // Groups of boxes named in a change, as many names as fit the checkpoint's 300 characters for a change with its
+  // `tail` kept whole: `; crop kept: one hero, two left photo1 and 3 more`. Each group keeps at least its count.
+  const listedPlaces = (head: string, groups: [what: string, places: string[]][], tail: string, limit = 280) => {
+    const shown = groups.filter(([, places]) => places.length);
+    // Room for the `and N more` of every group, so the names stop early enough for them.
+    let room = limit - head.length - tail.length - shown.reduce((sum, [what, places]) => sum + what.length + 4 + (' and ' + places.length + ' more').length, 0);
+    return head + shown.map(([what, places]) => {
+      const names: string[] = [];
+      for (const place of places) {
+        const cost = place.length + (names.length ? 2 : 0);
+        if (cost > room) break;
+        names.push(place); room -= cost;
+      }
+      const more = places.length - names.length;
+      return '; ' + what + ': ' + (names.length ? names.join(', ') + (more ? ' and ' + more + ' more' : '') : more + (more === 1 ? ' box' : ' boxes'));
+    }).join('') + tail;
+  };
   const counted = (places: ReturnType<typeof placesOf>) => {
     const shown = places.reduce((sum, place) => sum + place.shown, 0), aside = places.reduce((sum, place) => sum + place.aside, 0);
     return shown + (shown === 1 ? ' box' : ' boxes') + ' shown and ' + aside + ' set aside';
@@ -627,11 +644,11 @@ export function applyProjectCommands(
         const before = options.photo?.(operation.source), after = options.photo?.(operation.with);
         // A crop frames the same part of a photo of the same shape; of another one, or an unknown one, it is dropped.
         const sameShape = !!before && !!after && Math.abs(before.width / before.height - after.width / after.height) <= 0.01 * (before.width / before.height);
-        // Each placement says what became of its crop (API-021): kept, reset to a centred fill, or none was saved.
+        // Each placement says what became of its crop (API-021, 26 Nov): kept, reset to a centred fill, or none was saved.
         const kept: string[] = [], reset: string[] = [], none: string[] = [];
-        for (const { id, boxes } of places) for (const { state, location, box, displaced } of boxes) {
+        for (const { id, boxes } of places) for (const { state, location, box, aside } of boxes) {
           state.photo = operation.with;
-          const where = (id === coverInstance ? 'cover' : id) + (location === 'spread' ? '' : ' ' + location) + ' ' + box + (displaced === undefined ? '' : ' (set aside)');
+          const where = (id === coverInstance ? 'cover' : id) + (location === 'spread' ? '' : ' ' + location) + ' ' + box + (aside ? ' (set aside)' : '');
           if (!state.crops && !state.focus) { none.push(where); continue; }
           if (sameShape) { kept.push(where); continue; }
           delete state.crops; delete state.focus;
@@ -641,10 +658,9 @@ export function applyProjectCommands(
         const captioned = !!caption && replacement.caption === undefined && !after?.caption;
         if (captioned) replacement.caption = caption;
         if (!places.length && !captioned) break;
-        changed('Replaced photo ' + operation.source + ' with ' + operation.with + ' in ' + counted(places) +
-          listedPlaces('crop kept', kept) + listedPlaces('crop reset, as the shapes ' + (before && after ? 'differ' : 'are not known'), reset) +
-          listedPlaces('no crop saved', none) +
-          (captioned ? '; caption copied' : ''), [...places.map((place) => place.id), ...(captioned ? usersOf(operation.with) : [])]);
+        changed(listedPlaces('Replaced photo ' + operation.source + ' with ' + operation.with + ' in ' + counted(places),
+          [['crop kept', kept], ['crop reset, as the shapes ' + (before && after ? 'differ' : 'are not known'), reset], ['no crop saved', none]],
+          captioned ? '; caption copied' : ''), [...places.map((place) => place.id), ...(captioned ? usersOf(operation.with) : [])]);
         break;
       }
       case 'remove_sources': {

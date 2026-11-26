@@ -756,7 +756,7 @@ export function createAuthoringService(hooks: Hooks) {
             ...(args.inspect ? { inspect: args.inspect } : {}), ...(args.typescript !== undefined ? { typescript: args.typescript } : {}) }, true)
           : await movedDraftCheck();
       const diagnostics = compactDiagnostics(report.diagnostics, args.include?.includes('occurrences'));
-      // The photos of an inspected spread with their pixels and ppi; measured by the render, or estimated (API-021).
+      // The photos of an inspected spread with their pixels and ppi; measured by the render, or estimated (API-021, 26 Nov).
       const inspection = report.render?.inspection && inspectionPrints(report.render.inspection, loadedPhoto(session.book));
       const { template: _template, render: rendered, ...rest } = report;
       const render = rendered && inspection ? { ...rendered, inspection } : rendered;
@@ -914,7 +914,7 @@ export function createAuthoringService(hooks: Hooks) {
         let records: Record<string, unknown>[] = view === 'sources' ? [
           // Capture time, location and camera come from the loaded photo file, next to what photos.json records.
           ...Object.entries(photos ?? {}).map(([id, source]) => ({ kind: 'photo', id, ...source, ...captureOf(session.book.photos.get(id) ?? session.book.unavailablePhotos?.[id]),
-            // The original's size in pixels, where it is known (API-021).
+            // The original's size in pixels, where it is known (API-021, 26 Nov).
             ...pixelsOf(session.book.photos.get(id) ?? session.book.unavailablePhotos?.[id]), usage: sourcePlaces(usage.photo[id]) })),
           ...Object.entries(project?.texts ?? {}).map(([id, path]) => ({ kind: 'text', id, path: sourcePath(path), linked: sourceLinked(path), usage: sourcePlaces(usage.text[id]) })),
           ...Object.entries(project?.files ?? {}).map(([id, path]) => ({ kind: 'file', id, path: sourcePath(path), linked: sourceLinked(path) })),
