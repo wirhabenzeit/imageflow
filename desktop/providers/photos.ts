@@ -16,6 +16,9 @@ import type { Materialized, MaterializeOptions, Observed, ProvidedFacts, Repair,
  *   many things that are no edit, and on its own.
  * - Neither holds the favourite, which goes into `extra` only: a heart tapped in Photos changes no picture, and must
  *   not discard a full-resolution download from iCloud that `revision` keys in the source cache.
+ * - The capture time is the creation date at the offset the original records (EXIF OffsetTimeOriginal), which the
+ *   addon reads in the background from originals on this Mac and then reports as a change, so a book records it
+ *   anew. Until then, or where the original records none, it is at this Mac's offset, marked `offsetGuessed`.
  * - Previews and originals are rendered by Photos as they are now, downloaded from iCloud where the photo is not on
  *   this Mac (with Optimize Mac Storage, most are not): about a second per preview, two to four per original.
  * - A photo is `denied` while ImageFlow may not read the library, `offline` while its library or iCloud cannot be
@@ -60,7 +63,10 @@ export function photosFailure(error: unknown): Problem {
 }
 
 const twoDigits = (value: number) => String(Math.floor(value)).padStart(2, '0');
-/** A PhotoKit creation date as ImageFlow's capture time: the wall clock of this Mac's time zone then, with its offset. */
+/**
+ * A PhotoKit creation date as ImageFlow's capture time: the wall clock at the photo's offset (its original's own, or
+ * this Mac's as a guess, see `PhotosFacts`), with that offset.
+ */
 export function capturedAt(created: number | undefined, offsetMinutes: number | undefined): ProvidedFacts['captured'] {
   if (created === undefined || !Number.isFinite(created)) return undefined;
   const offset = Number.isFinite(offsetMinutes) ? offsetMinutes! : 0;
@@ -86,7 +92,9 @@ export function photosFacts(facts: PhotosFacts): ProvidedFacts {
     ...(captured ? { captured } : {}),
     ...(Number.isFinite(facts.latitude) && Number.isFinite(facts.longitude) ? { location: { latitude: facts.latitude!, longitude: facts.longitude! } } : {}),
     ...(caption ? { provided: { caption } } : {}),
-    extra: { ...(facts.type ? { type: facts.type } : {}), ...(facts.filename ? { fileName: facts.filename } : {}), ...(facts.favorite === true ? { favorite: true } : {}) },
+    extra: { ...(facts.type ? { type: facts.type } : {}), ...(facts.filename ? { fileName: facts.filename } : {}), ...(facts.favorite === true ? { favorite: true } : {}),
+      // The offset of `captured` is this Mac's, not the photo's own: not known yet, or the original records none.
+      ...(captured && facts.offsetGuessed === true ? { offsetGuessed: true } : {}) },
   };
 }
 
@@ -101,10 +109,36 @@ export function photosProvider(library: PhotosPort | undefined): SourceProvider<
   // for the whole app.
   const watchers = new Map<object, { ids: Map<string, string[]>; changed: (ids: string[]) => void }>();
   let listening = false;
+  // Photos reported as changed that no book watched then, by local identifier: a capture offset the addon read for a
+  // photo observed before any book watched it (one dropped from Photos, say). The next book to watch one is told.
+  const unreported = new Set<string>();
+  const unreportedLimit = 10_000;
+  const listen = () => {
+    if (listening || !library) return;
+    listening = true;
+    library.onChanges((changedLocals) => {
+      const everything = changedLocals.includes('*');
+      const covered = new Set<string>();
+      for (const { ids, changed: report } of watchers.values()) {
+        const moved = everything ? [...ids.values()].flat() : [...new Set(changedLocals.flatMap((local) => ids.get(local) ?? []))];
+        if (!everything) for (const local of changedLocals) if (ids.has(local)) covered.add(local);
+        if (moved.length) report(moved);
+      }
+      if (everything) return;
+      for (const local of changedLocals) {
+        if (covered.has(local)) { unreported.delete(local); continue; }
+        unreported.delete(local);
+        unreported.add(local);
+        if (unreported.size > unreportedLimit) unreported.delete(unreported.values().next().value!);
+      }
+    });
+  };
   const retrack = () => library?.track([...new Set([...watchers.values()].flatMap(({ ids }) => [...ids.keys()]))]);
 
   /** The local identifier and facts of each reference; both undefined for a photo this library does not have. */
   async function resolve(refs: readonly SourceRef<PhotosLocator>[]) {
+    // Before `facts`, which may read capture offsets in the background and report them as changes.
+    listen();
     const localOf: (string | undefined)[] = refs.map(({ locator }) => locals.get(locator.cloud) ?? locator.local);
     const facts: (PhotosFacts | null)[] = await library!.facts(localOf.map((local) => local ?? ''));
     // A local identifier that names nothing, or none at all: the cloud identifier is asked, and the facts again.
@@ -187,20 +221,15 @@ export function photosProvider(library: PhotosPort | undefined): SourceProvider<
     watch(_book, refs, changed) {
       const owner = {};
       if (!library) return () => {};
-      if (!listening) {
-        listening = true;
-        library.onChanges((changedLocals) => {
-          for (const { ids, changed: report } of watchers.values()) {
-            const moved = changedLocals.includes('*') ? [...ids.values()].flat() : [...new Set(changedLocals.flatMap((local) => ids.get(local) ?? []))];
-            if (moved.length) report(moved);
-          }
-        });
-      }
+      listen();
       const ids = new Map<string, string[]>();
       void resolve(refs).then(({ localOf }) => {
         if (!watchers.has(owner)) return;
         localOf.forEach((local, index) => { if (local) ids.set(local, [...ids.get(local) ?? [], refs[index].id]); });
         retrack();
+        // Changed while nothing watched them: observed again now.
+        const missed = [...ids.keys()].filter((local) => unreported.delete(local)).flatMap((local) => ids.get(local)!);
+        if (missed.length) changed(missed);
       }, () => {});
       watchers.set(owner, { ids, changed });
       return () => { watchers.delete(owner); retrack(); };
