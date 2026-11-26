@@ -109,10 +109,36 @@ export function photosProvider(library: PhotosPort | undefined): SourceProvider<
   // for the whole app.
   const watchers = new Map<object, { ids: Map<string, string[]>; changed: (ids: string[]) => void }>();
   let listening = false;
+  // Photos reported as changed that no book watched then, by local identifier: a capture offset the addon read for a
+  // photo observed before any book watched it (one dropped from Photos, say). The next book to watch one is told.
+  const unreported = new Set<string>();
+  const unreportedLimit = 10_000;
+  const listen = () => {
+    if (listening || !library) return;
+    listening = true;
+    library.onChanges((changedLocals) => {
+      const everything = changedLocals.includes('*');
+      const covered = new Set<string>();
+      for (const { ids, changed: report } of watchers.values()) {
+        const moved = everything ? [...ids.values()].flat() : [...new Set(changedLocals.flatMap((local) => ids.get(local) ?? []))];
+        if (!everything) for (const local of changedLocals) if (ids.has(local)) covered.add(local);
+        if (moved.length) report(moved);
+      }
+      if (everything) return;
+      for (const local of changedLocals) {
+        if (covered.has(local)) { unreported.delete(local); continue; }
+        unreported.delete(local);
+        unreported.add(local);
+        if (unreported.size > unreportedLimit) unreported.delete(unreported.values().next().value!);
+      }
+    });
+  };
   const retrack = () => library?.track([...new Set([...watchers.values()].flatMap(({ ids }) => [...ids.keys()]))]);
 
   /** The local identifier and facts of each reference; both undefined for a photo this library does not have. */
   async function resolve(refs: readonly SourceRef<PhotosLocator>[]) {
+    // Before `facts`, which may read capture offsets in the background and report them as changes.
+    listen();
     const localOf: (string | undefined)[] = refs.map(({ locator }) => locals.get(locator.cloud) ?? locator.local);
     const facts: (PhotosFacts | null)[] = await library!.facts(localOf.map((local) => local ?? ''));
     // A local identifier that names nothing, or none at all: the cloud identifier is asked, and the facts again.
@@ -195,20 +221,15 @@ export function photosProvider(library: PhotosPort | undefined): SourceProvider<
     watch(_book, refs, changed) {
       const owner = {};
       if (!library) return () => {};
-      if (!listening) {
-        listening = true;
-        library.onChanges((changedLocals) => {
-          for (const { ids, changed: report } of watchers.values()) {
-            const moved = changedLocals.includes('*') ? [...ids.values()].flat() : [...new Set(changedLocals.flatMap((local) => ids.get(local) ?? []))];
-            if (moved.length) report(moved);
-          }
-        });
-      }
+      listen();
       const ids = new Map<string, string[]>();
       void resolve(refs).then(({ localOf }) => {
         if (!watchers.has(owner)) return;
         localOf.forEach((local, index) => { if (local) ids.set(local, [...ids.get(local) ?? [], refs[index].id]); });
         retrack();
+        // Changed while nothing watched them: observed again now.
+        const missed = [...ids.keys()].filter((local) => unreported.delete(local)).flatMap((local) => ids.get(local)!);
+        if (missed.length) changed(missed);
       }, () => {});
       watchers.set(owner, { ids, changed });
       return () => { watchers.delete(owner); retrack(); };

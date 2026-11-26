@@ -450,6 +450,27 @@ test('a capture time corrected at an unchanged revision is recorded and reloads 
   assert.equal(f.photos.previewed.length, previews, 'no preview');
 });
 
+test('a guessed offset of the same instant does not replace the recorded own offset, as on the next launch of Apple Photos', async (t) => {
+  const f = await markedFixture(t);
+  const asset = f.photos.assets.get('photos-asset-0001')!;
+  const extra = { ...asset.extra };
+  asset.captured = { dateTime: '2026-06-01T14:00:00', offset: '+06:00' };
+  assert.deepEqual(await f.changes(f.photos, 'fav'), { reload: ['fav'], revised: [], reshaped: [] });
+  // Relaunched: the addon has not read the original again yet, and guesses this Mac's offset.
+  asset.captured = { dateTime: '2026-06-01T10:00:00', offset: '+02:00' };
+  asset.extra = { ...extra, offsetGuessed: true };
+  assert.deepEqual(await f.changes(f.photos, 'fav'), { reload: [], revised: [], reshaped: [] });
+  let fact = (await AssetFacts.forBook(f.folder)).get('fav')!;
+  assert.deepEqual(fact.captured, { dateTime: '2026-06-01T14:00:00', offset: '+06:00' });
+  assert.equal(fact.extra?.offsetGuessed, undefined);
+  // A guess of another instant (the date was changed in Photos) is recorded.
+  asset.captured = { dateTime: '2026-06-02T10:00:00', offset: '+02:00' };
+  assert.deepEqual(await f.changes(f.photos, 'fav'), { reload: ['fav'], revised: [], reshaped: [] });
+  fact = (await AssetFacts.forBook(f.folder)).get('fav')!;
+  assert.deepEqual(fact.captured, { dateTime: '2026-06-02T10:00:00', offset: '+02:00' });
+  assert.equal(fact.extra?.offsetGuessed, true);
+});
+
 test('a Lightroom Classic rating that moves the revision reloads the book and revises the photo', async (t) => {
   const f = await markedFixture(t);
   const asset = f.lightroom.assets.get('LR-UUID-0001')!;

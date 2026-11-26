@@ -115,10 +115,25 @@ export type ProvidedOutcome =
   | { state: Unavailable; problem: string };
 
 type Reported = { ref: SourceRef<Locator>; facts: ProvidedFacts; revisions: Revisions };
+const instantOf = (captured: AssetFact['captured']) => captured?.offset ? new Date(captured.dateTime + captured.offset).getTime() : NaN;
+/**
+ * The capture time and extra to record of what a provider reported. A capture time whose offset the provider only
+ * guessed (`extra.offsetGuessed`, Apple Photos before it read the original's own) does not replace a recorded one of
+ * the same instant whose offset was not guessed: the provider forgets what it read when the app quits, and another Mac
+ * may not have the original to read it from.
+ */
+function ownOffsetKept(previous: AssetFact | undefined, { captured, extra }: ProvidedFacts): Pick<ProvidedFacts, 'captured' | 'extra'> {
+  if (extra?.offsetGuessed !== true || !captured || !previous?.captured || previous.extra?.offsetGuessed === true) return { captured, extra };
+  const instant = instantOf(captured);
+  if (!Number.isFinite(instant) || instant !== instantOf(previous.captured)) return { captured, extra };
+  const { offsetGuessed: _guessed, ...own } = extra;
+  return { captured: previous.captured, extra: own };
+}
 // The fact recorded for what a provider reported, or undefined when what it reported is not a valid fact (a width of
 // 0, say): the photo is then unreadable rather than laid out from facts that were never recorded.
 const factOf = (facts: AssetFacts, id: string, digest: string, { facts: reported, revisions }: Omit<Reported, 'ref'>, verified?: string) => {
-  const { width, height, captured, location, camera, provided, extra } = reported;
+  const { width, height, location, camera, provided } = reported;
+  const { captured, extra } = ownOffsetKept(facts.get(id), reported);
   return facts.provide(id, { digest, width, height, captured, location, camera, revisions, provided, extra, ...(verified ? { verified } : {}) }) === undefined ? undefined : facts.get(id);
 };
 const invalidFacts = 'Original unavailable: The source reported facts ImageFlow cannot use.';

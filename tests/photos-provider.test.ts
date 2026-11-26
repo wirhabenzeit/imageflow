@@ -138,6 +138,25 @@ test('a photo whose own offset was read is reported as changed and then observed
   assert.deepEqual(after.revisions, before.revisions, 'no new preview for it');
 });
 
+test('an offset read before any book watched the photo is reported once a book watches it', async () => {
+  const library = new FakeLibrary();
+  library.add(1, { created: Date.UTC(2026, 6, 14, 5, 28, 15), offsetMinutes: 120, offsetGuessed: true });
+  library.add(2, { created: Date.UTC(2026, 6, 14, 5, 28, 15), offsetMinutes: 120, offsetGuessed: true });
+  const provider = photosProvider(library);
+  // Observed (dropped from Photos, say), and its offset read before the book watches it.
+  await provider.observe('/book', [ref('a', 1)]);
+  assert.ok(library.listener, 'listening before the addon reads offsets');
+  library.listener!([local(1)]);
+  const reported: string[][] = [];
+  provider.watch('/book', [ref('a', 1), ref('b', 2)], (ids) => reported.push(ids));
+  while (!library.tracked.length) await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.deepEqual(reported, [['a']]);
+  // Told once only.
+  provider.watch('/other', [ref('c', 1)], (ids) => reported.push(ids));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(reported, [['a']]);
+});
+
 test('a favourite is a fact of the photo and no revision of it', () => {
   const facts: PhotosFacts = { width: 4032, height: 3024, adjusted: null, filename: 'IMG_1.HEIC', type: 'public.heic' };
   assert.deepEqual(photosFacts({ ...facts, favorite: true }).extra, { type: 'public.heic', fileName: 'IMG_1.HEIC', favorite: true });

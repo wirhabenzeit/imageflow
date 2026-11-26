@@ -601,14 +601,16 @@ static ImageFlowPhotosObserver *observer;
 // ---------- Capture offsets
 
 /*
- * The UTC offset each photo was taken at, as its original records it (EXIF OffsetTimeOriginal, else OffsetTime;
- * PhotoKit has no public time zone), by local identifier: minutes, or NSNull for an original that records none. An
+ * The UTC offset each photo was taken at, as its original records it (EXIF OffsetTimeOriginal, else
+ * OffsetTimeDigitized; OffsetTime is the modification time's; PhotoKit has no public time zone, and a zone set in
+ * Photos' Adjust Date & Time is not read), by local identifier: minutes, or NSNull for an original that records none. An
  * original never changes, so what was read holds for the process.
  *
  * They are read in the background, one photo after another, and only where the original is on this Mac: nothing is
- * downloaded from iCloud for them. Reading stops once ImageIO finds the metadata, mostly in the first chunk of the file.
- * A photo whose offset turns out to differ from the guess `facts` gave is reported as changed (`onChanges`), so a
- * book that shows it observes it again and records the right capture time. A photo whose original is not on this Mac
+ * downloaded from iCloud for them. Reading stops once ImageIO finds an offset, mostly in the first chunk of the file; that
+ * the original records none is concluded from the whole file only. A photo whose offset turns out to differ from the
+ * guess `facts` gave is reported as changed (`onChanges`), so a book that shows it observes it again and records the
+ * right capture time: a few seconds after the first of them, so that many read at once reload a book once. A photo whose original is not on this Mac
  * is tried again after a while, as it may have been downloaded meanwhile.
  */
 static NSMutableDictionary<NSString *, id> *offsets = [NSMutableDictionary new];
@@ -618,6 +620,10 @@ static std::mutex offsetsLock;
 static const NSTimeInterval offsetRetry = 600;
 // Enough for the metadata of any original: one read this far without finding it is taken to record no offset.
 static const NSUInteger offsetReadLimit = 64 * 1024 * 1024;
+// How long one original may take to read before it is left for later, so that one stalled file holds up little.
+static const int64_t offsetReadTimeout = 10 * NSEC_PER_SEC;
+// Corrections are reported this long after the first of them, together.
+static const int64_t offsetReportDelay = 3 * NSEC_PER_SEC;
 
 /** The original's own offset (NSNumber), NSNull for one known to record none, or nil when it is not known yet. */
 static id knownOffset(NSString *local) {
@@ -642,8 +648,9 @@ static NSNumber *exifOffsetMinutes(id text) {
 
 /**
  * What the metadata in `data` says of the offset: NSNumber minutes, or NSNull when it records none. Of the start of a
- * file only (`whole` false), NSNull needs the camera's EXIF (a capture time) without an offset, and nil means it is
- * not known yet: ImageIO reports an EXIF dictionary of its own making for files without one.
+ * file only (`whole` false), only an offset found counts, and nil means it is not known yet: the EXIF block may hold
+ * the capture time in the part read and its offset in the part not read yet, and ImageIO reports an EXIF dictionary of
+ * its own making for files without one.
  */
 static id offsetInData(NSData *data, bool whole) {
   CGImageSourceRef source = CGImageSourceCreateWithData((__bridge CFDataRef)data, (__bridge CFDictionaryRef)@{(id)kCGImageSourceShouldCache: @NO});
@@ -652,9 +659,9 @@ static id offsetInData(NSData *data, bool whole) {
   CFRelease(source);
   NSDictionary *exif = properties[(id)kCGImagePropertyExifDictionary];
   if (![exif isKindOfClass:NSDictionary.class]) exif = nil;
-  NSNumber *own = exifOffsetMinutes(exif[(id)kCGImagePropertyExifOffsetTimeOriginal]) ?: exifOffsetMinutes(exif[(id)kCGImagePropertyExifOffsetTime]);
+  NSNumber *own = exifOffsetMinutes(exif[(id)kCGImagePropertyExifOffsetTimeOriginal]) ?: exifOffsetMinutes(exif[(id)kCGImagePropertyExifOffsetTimeDigitized]);
   if (own) return own;
-  return whole || exif[(id)kCGImagePropertyExifDateTimeOriginal] || exif[(id)kCGImagePropertyExifDateTimeDigitized] ? NSNull.null : nil;
+  return whole ? NSNull.null : nil;
 }
 
 /** The offset the original of `asset` records (see `offsetInData`), or nil where it is not on this Mac or unreadable. */
@@ -672,22 +679,34 @@ static id readOffset(PHAsset *asset) {
   __block bool done = false;
   // Parsed again each time the data doubled: an original without EXIF is read to its end, and parsed a few times only.
   __block NSUInteger parseAt = 0;
+  // The request is named only once `requestDataForAssetResource` returns, and its handler may be called before: a stop
+  // asked for then is made as soon as it is named.
   __block PHAssetResourceDataRequestID request = PHInvalidAssetResourceDataRequestID;
+  __block bool cancelWanted = false;
   NSObject *lock = [NSObject new];
   dispatch_semaphore_t finished = dispatch_semaphore_create(0);
   PHAssetResourceManager *manager = PHAssetResourceManager.defaultManager;
-  request = [manager requestDataForAssetResource:original options:options dataReceivedHandler:^(NSData *chunk) {
-    bool stop = false;
+  // Stops the request: now if it is named, else once it is.
+  void (^stop)(void) = ^{
+    PHAssetResourceDataRequestID named = PHInvalidAssetResourceDataRequestID;
+    @synchronized (lock) {
+      if (request == PHInvalidAssetResourceDataRequestID) cancelWanted = true;
+      else named = request;
+    }
+    if (named != PHInvalidAssetResourceDataRequestID) [manager cancelDataRequest:named];
+  };
+  PHAssetResourceDataRequestID named = [manager requestDataForAssetResource:original options:options dataReceivedHandler:^(NSData *chunk) {
+    bool enough = false;
     @synchronized (lock) {
       if (done) return;
       [data appendData:chunk];
       if (data.length >= parseAt) { found = offsetInData(data, false); parseAt = data.length * 2; }
       // One this large records no offset where ImageIO could find it.
       if (!found && data.length > offsetReadLimit) found = NSNull.null;
-      stop = found;
-      if (stop) done = true;
+      enough = found;
+      if (enough) done = true;
     }
-    if (stop) { [manager cancelDataRequest:request]; dispatch_semaphore_signal(finished); }
+    if (enough) { stop(); dispatch_semaphore_signal(finished); }
   } completionHandler:^(NSError *error) {
     @synchronized (lock) {
       if (done) return;
@@ -697,12 +716,29 @@ static id readOffset(PHAsset *asset) {
     }
     dispatch_semaphore_signal(finished);
   }];
-  if (dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC))) {
+  bool cancel = false;
+  @synchronized (lock) { request = named; cancel = cancelWanted; }
+  if (cancel) [manager cancelDataRequest:named];
+  if (dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, offsetReadTimeout))) {
     @synchronized (lock) { done = true; }
-    [manager cancelDataRequest:request];
+    [manager cancelDataRequest:named];
     return nil;
   }
   @synchronized (lock) { return found; }
+}
+
+// Photos whose offset was read and differs from the guess, not reported yet (under offsetsLock).
+static NSMutableArray<NSString *> *offsetsChanged = [NSMutableArray new];
+
+/** Reports the corrections read so far. */
+static void reportOffsets() {
+  NSArray<NSString *> *ids;
+  {
+    std::lock_guard<std::mutex> guard(offsetsLock);
+    ids = [offsetsChanged copy];
+    [offsetsChanged removeAllObjects];
+  }
+  sendChanges(ids);
 }
 
 /** Reads the offsets of `assets` in the background (see above); those read or queued already are skipped. */
@@ -721,7 +757,6 @@ static void readOffsets(NSArray<PHAsset *> *assets) {
   }
   if (!todo.count) return;
   dispatch_async(queue, ^{
-    NSMutableArray<NSString *> *changed = [NSMutableArray new];
     for (PHAsset *asset in todo) { @autoreleasepool {
       id own = readOffset(asset);
       std::lock_guard<std::mutex> guard(offsetsLock);
@@ -729,9 +764,12 @@ static void readOffsets(NSArray<PHAsset *> *assets) {
       if (!own) { offsetsTried[asset.localIdentifier] = [NSDate date]; continue; }
       offsets[asset.localIdentifier] = own;
       [offsetsTried removeObjectForKey:asset.localIdentifier];
-      if ([own isKindOfClass:NSNumber.class] && asset.creationDate && [own integerValue] != macOffset(asset.creationDate)) [changed addObject:asset.localIdentifier];
+      if (![own isKindOfClass:NSNumber.class] || !asset.creationDate || [own integerValue] == macOffset(asset.creationDate)) continue;
+      // The first correction since the last report schedules the next one, off this queue: a slow original after it
+      // does not hold it up.
+      if (!offsetsChanged.count) dispatch_after(dispatch_time(DISPATCH_TIME_NOW, offsetReportDelay), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ reportOffsets(); });
+      [offsetsChanged addObject:asset.localIdentifier];
     } }
-    sendChanges(changed);
   });
 }
 
