@@ -122,6 +122,8 @@ export const mcpToolSchemas = {
       .describe('Only checkpoints committed with this key, such as a request whose reply was lost.'),
     cursor: z.string().uuid().optional().describe('nextCursor from the previous page.'),
     limit: z.int().min(1).max(100).default(20).describe('Number of checkpoints to return, newest first.'),
+    include: z.array(z.enum(['changes'])).max(1).optional()
+      .describe('changes: each agent checkpoint\'s full lists of changes, affected spreads, references and sources, instead of their counts.'),
   }),
   rebuild_dependencies: z.strictObject({ project }),
   list_templates: z.strictObject({}),

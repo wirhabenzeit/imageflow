@@ -150,7 +150,7 @@ export async function menuAction(app, name) {
   throw new Error('Menu command stayed disabled: ' + name);
 }
 // Exercise the renderer's real IPC and native Menu implementation, selecting the requested native item.
-export async function popupAction(app, page, trigger, label) {
+export async function popupAction(app, page, trigger, label, click = {}) {
   await app.evaluate(({ Menu }, label) => {
     globalThis.popupItems = [];
     Menu.prototype.popup = function ({ callback }) {
@@ -161,7 +161,7 @@ export async function popupAction(app, page, trigger, label) {
       callback?.();
     };
   }, label);
-  await trigger.click();
+  await trigger.click(click);
   return app.evaluate(() => new Promise((resolve, reject) => {
     const until = Date.now() + 5000;
     const poll = () => globalThis.popupItems.length ? resolve(globalThis.popupItems) : Date.now() > until ? reject(new Error('Native menu did not open')) : setTimeout(poll, 20);

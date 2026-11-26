@@ -153,6 +153,8 @@ Put one of these objects in `check_book.preview.target`. Page-number targets and
 | Page by its positive book page number | `{"page":3}` |
 | Box close-up, optionally on a split page | `{"spread":"$pair","page":"right","box":"hero"}` |
 | Element close-up, optionally on a split page | `{"spread":"$pair","page":"left","element":"map"}` |
+| A layout family's picker, as the settings show it; `"page"` on a split sheet, and `"choose"` clicks the control with that label | `{"spread":"arrival","picker":true}` |
+| The exterior cover, or one of its boxes or elements | `{"cover":true}`, `{"cover":true,"box":"hero"}` |
 | Contact sheet of up to 12 spreads | `{"spreads":["arrival","$pair"],"columns":2}` |
 
 Use `side:"page"` for a format without facing pages. Close-ups and `inspect_book` element requests use `page:"left"` or `"right"` to locate a box or element on a split sheet. Contact sheets need a `preview.maxEdge` of at least 128 pixels.
@@ -289,7 +291,7 @@ export default defineTemplate({
         eyebrow: p.string({ label: 'Chapter label', default: '' }),
       },
       boxes: {
-        hero: box.photo('Main photograph', { showCaption: p.boolean({ label: 'Show caption', default: true }) }),
+        hero: box.photo('Main photograph', { showCaption: p.boolean({ label: 'Show caption', default: true, shows: 'caption' }) }),
         body: box.markdown('Story', { flowOrder: 1 }),
       },
       render: (ctx) => (
@@ -423,7 +425,7 @@ Use `switch_layout` with `page` to split a full facing sheet or change its selec
 
 | Helper | Value | Options |
 | --- | --- | --- |
-| `p.boolean` | `boolean` | `default` |
+| `p.boolean` | `boolean` | `default`, `shows` (on a photo box: `'caption'`, see below) |
 | `p.integer` | `number` | `default`, `min`, `max`, `step`, `unit` (display only) |
 | `p.number` | `number` | `default`, `min`, `max`, `step`, `unit` (display only) |
 | `p.string` | `string` | `default`, `multiline`, `maxLength`, `placeholder`, `markdown` ([Formatted text](#formatted-text-formatted-text)) |
@@ -441,6 +443,14 @@ Any parameter, at any scope, may also have a `description`: plain help text of u
 zoom: p.number({ label: 'Zoom', default: 1, min: 1, max: 8, step: .1,
   description: 'Higher values zoom in. 1 shows the whole route; 2 shows half its width.' }),
 ```
+
+A yes/no parameter of a photo box that prints the photo's caption says so with `shows: 'caption'`:
+
+```ts
+hero: box.photo('Main photograph', { showCaption: p.boolean({ label: 'Show caption', default: false, shows: 'caption' }) }),
+```
+
+Any placed photo's caption can be edited from the page (**Caption…** beside the box's settings, **Edit Caption…** in its context menu). With `shows`, entering the first caption of a photo also switches the parameter on, as a caption would otherwise be saved and not printed. Changing a caption, or removing it, leaves the parameter alone. `shows` has no effect elsewhere, and ImageFlow 1.0.0-beta.24 and earlier ignore it.
 
 Descriptions appear with the parameter's type, range, `step`, `unit` and options in `get_authoring_context` (under `template`) and in `inspect_book`'s parameter view. In the editor, a field shows its parameter's description only as its hover tooltip, so the settings stay uncluttered; write it for agents first. A `description` on a `controls` entry is shown under the field instead and replaces it there; control descriptions have the same limits. Descriptions never change defaults, allowed values or saved data. Put units in `unit`, not in the description.
 
@@ -841,7 +851,7 @@ defineTemplate({
 
 ### App controls
 
-`<Choice>` (from `imageflow`) is ImageFlow's own segmented choice: the same control, colours, sizes, selected, disabled and focus states, in light and dark, as the generated settings beside it. Use it in component pickers of layout families and custom element or document editors instead of styling buttons yourself; the app's own class names are internal and may change. It is a radio group: Tab reaches the selected option, and the arrow keys, Home and End choose another. `label` names it, shown above the choice unless `hideLabel` (a picker's single choice is already named by the picker's `label`). Options take `{ value, label, disabled? }` with string, number or boolean values. In an element editor, `<Control parameter>` already draws a parameter's control; `Choice` is for choices that are not one parameter, such as variants.
+`<Choice>` (from `imageflow`) is ImageFlow's own segmented choice: the same control, colours, sizes, selected, disabled and focus states, in light and dark, as the generated settings beside it. Use it in component pickers of layout families and custom element or document editors instead of styling buttons yourself; the app's own class names are internal and may change. It is a radio group: Tab reaches the selected option, and the arrow keys, Home and End choose another. Where its options do not fit in one row, it is drawn as a menu instead. `label` names it, shown above the choice unless `hideLabel` (a picker's single choice is already named by the picker's `label`). Options take `{ value, label, disabled? }` with string, number or boolean values. In an element editor, `<Control parameter>` already draws a parameter's control; `Choice` is for choices that are not one parameter, such as variants.
 
 A picker with two independent choices, each disabled where no variant has the combination:
 

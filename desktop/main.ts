@@ -1989,7 +1989,7 @@ async function disableMcp() {
 async function enableMcp() {
   if (quitting || preparingQuit) throw new Error('ImageFlow is closing.');
   const connection = await createMcpConnection({
-    descriptorPath: mcpDescriptorPath(),
+    descriptorPath: mcpDescriptorPath(), version: app.getVersion(),
     onClientsChanged: (clients) => { mcpClients = clients; publishMcpSettings(); },
     onCall: async (name, args, signal, client) => {
       try {
@@ -2994,15 +2994,19 @@ void app.whenReady().then(async () => {
     const document = editorOwner(event);
     if (!document || !state || typeof state.enabled !== 'object' || !state.enabled ||
         typeof state.editing !== 'boolean' || typeof state.writable !== 'boolean' || typeof state.busy !== 'boolean') return;
-    const previousLabels = JSON.stringify([document.menuState?.pageLabels, document.menuState?.coverBoxIds]);
+    const previousLabels = JSON.stringify([document.menuState?.pageLabels, document.menuState?.coverBoxIds, document.menuState?.layoutBoxes]);
     const pageLabels = Object.fromEntries(document.book.project.spreads.flatMap(({ id }) => {
       const label = state.pageLabels?.[id];
       return typeof label === 'string' ? [[id, label.slice(0, 100)]] : [];
     }));
     const coverBoxIds = Array.isArray(state.coverBoxIds) ? state.coverBoxIds.filter((id) => typeof id === 'string') : undefined;
+    // The kind of each layout's boxes, as the editor last rendered the template: only what decides whether a box shows its content.
+    const layoutBoxes = state.layoutBoxes && typeof state.layoutBoxes === 'object' ? Object.fromEntries(Object.entries(state.layoutBoxes).flatMap(([id, layout]) =>
+      layout && typeof layout === 'object' && layout.boxes && typeof layout.boxes === 'object' ? [[id, { boxes: Object.fromEntries(Object.entries(layout.boxes)
+        .flatMap(([box, declared]) => declared?.type === 'photo' || declared?.type === 'markdown' ? [[box, { type: declared.type }]] : [])) }]] : [])) : undefined;
     document.menuState = { ...emptyMenuState, ...state,
-      pageLabels, coverBoxIds, enabled: Object.fromEntries(spreadCommands.map((id) => [id, state.enabled[id] === true])) as BookMenuState['enabled'] };
-    if (previousLabels !== JSON.stringify([pageLabels, coverBoxIds])) publishAssets(document);
+      pageLabels, coverBoxIds, layoutBoxes, enabled: Object.fromEntries(spreadCommands.map((id) => [id, state.enabled[id] === true])) as BookMenuState['enabled'] };
+    if (previousLabels !== JSON.stringify([pageLabels, coverBoxIds, layoutBoxes])) publishAssets(document);
     document.window.setDocumentEdited(state.saving === true);
     if (typeof state.sidebar === 'boolean') document.sidebar = state.sidebar;
     if (typeof state.inspector === 'boolean') document.inspector = state.inspector;

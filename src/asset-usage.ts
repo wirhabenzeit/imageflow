@@ -1,7 +1,8 @@
 import { coverInstance, storedBoxes, storedStates } from './project';
 import type { Project, ProjectFiles } from './project';
 import type { Parameters } from './parameters';
-import type { SourcePlace, SourceUsage } from './editing';
+import type { SourcePlace, SourcePlaces, SourceUsage } from './editing';
+import type { LayoutBoxes } from './layouts';
 import { sourceUsage } from './editing';
 import type { ProjectSummary } from './desktop';
 
@@ -9,6 +10,11 @@ export const assetPageLabels = (summary: ProjectSummary) => summary.project.spre
 
 // A usage's place as people read it: "Page 4", "Pages 4–5", or a name such as "Book settings".
 export const usageLabel = (pages: string) => /^\d/.test(pages) ? (pages.includes('–') ? 'Pages ' : 'Page ') + pages : pages;
+// Where a source that no page shows is set aside: "set aside on page 39".
+export const asideText = (places: readonly SourcePlace[] | undefined) => places?.length
+  ? 'set aside on ' + places.map(({ pages }) => asidePlace(pages)).join(', ') : undefined;
+/** A place in running text: "page 39", "the cover". */
+export const asidePlace = (pages: string) => pages === 'Cover' ? 'the cover' : usageLabel(pages).replace(/^P/, 'p');
 
 // Every set of saved parameter values in the book: document settings, then, for each spread, the parameters of each
 // state it stores (its own and its pages'), of their elements, and of every box it stores, replaced content included.
@@ -25,16 +31,34 @@ const held = (value: unknown): unknown[] => Array.isArray(value)
   ? value.flatMap((item) => item && typeof item === 'object' ? Object.entries(item).filter(([key]) => key !== 'id').map(([, field]) => field) : [])
   : [value];
 
-// By default, count saved references conservatively for unused and removal decisions, including retained values.
+// By default, count saved references conservatively for removal decisions, including retained values.
 // Pass the active cover layout's box IDs to restrict cover placements, or null when there is no active cover layout.
-export function assetUsage({ project, photoIndex }: ProjectFiles, pages: string[], coverBoxIds?: readonly string[] | null) {
+// Pass the template's layouts to count only the photos and texts they show: what is set aside is then in `aside`, by
+// the places that hold it and do not show it, and does not count as used (UI-016).
+export function assetUsage(files: ProjectFiles, pages: string[], coverBoxIds?: readonly string[] | null, layouts?: Record<string, LayoutBoxes>) {
+  if (!layouts) return countUsage(files, pages, coverBoxIds);
+  const usage = countUsage(files, pages, coverBoxIds, layouts);
+  const stored = countUsage(files, pages);
+  const aside: SourcePlaces = { photo: {}, text: {} };
+  for (const kind of ['photo', 'text'] as const) for (const [id, places] of Object.entries(stored[kind])) {
+    const kept = places.filter(({ spread }) => !usage[kind][id]?.some((place) => place.spread === spread));
+    if (kept.length) aside[kind][id] = kept;
+  }
+  return { ...usage, aside };
+}
+
+/** Assets as the editor last published them in the summary: a placed source is one its layout shows, once that is known. */
+export const shownAssetUsage = (summary: ProjectSummary) => summary.layoutBoxes
+  ? assetUsage(summary, assetPageLabels(summary), summary.coverBoxIds ?? null, summary.layoutBoxes) : assetUsage(summary, assetPageLabels(summary));
+
+function countUsage({ project, photoIndex }: ProjectFiles, pages: string[], coverBoxIds?: readonly string[] | null, layouts?: Record<string, LayoutBoxes>): SourceUsage & { file: Record<string, SourcePlace[]> } {
   const cover = project.cover;
   if (cover && coverBoxIds !== undefined) {
     project = { ...project, cover: coverBoxIds === null ? undefined : {
       ...cover, boxes: Object.fromEntries(Object.entries(cover.boxes).filter(([id]) => coverBoxIds.includes(id))),
     } };
   }
-  const usage = { ...sourceUsage(project, pages), file: {} } as SourceUsage & { file: Record<string, SourcePlace[]> };
+  const usage = { ...sourceUsage(project, pages, layouts), file: {} } as SourceUsage & { file: Record<string, SourcePlace[]> };
   function record(value: unknown, spread: string, page: string) {
     if (typeof value !== 'string') return;
     const kinds = [Object.hasOwn(photoIndex, value) && 'photo', Object.hasOwn(project.texts, value) && 'text', Object.hasOwn(project.files, value) && 'file'] as const;

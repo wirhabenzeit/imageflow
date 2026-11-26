@@ -24,6 +24,7 @@ import type { PreviewRequest } from '../src/preview';
 import { spreadByPrefix } from '../src/preview';
 import type { InspectionRequest } from '../src/inspection';
 import { photoExtensions } from './photos';
+import { heicAdvice, isHeic } from '../src/import-feedback';
 import { captureFields } from '../src/photo-metadata';
 import type { CaptureMetadata } from '../src/photo-metadata';
 
@@ -165,12 +166,17 @@ export function requestFingerprint(tool: string, args: Record<string, unknown>) 
 const manifestNames = ['project.json', 'photos.json'] as const;
 const startOf = (record: CheckpointRecord) =>
   Object.fromEntries(manifestNames.map((name) => [name, record.manifests[name].before])) as Record<typeof manifestNames[number], string>;
-function checkpointView(record: CheckpointRecord, outside: string[]) {
+// An agent's entry counts what it changed; the lists themselves, up to 200 changes and spreads each, come when asked for
+// (API-014 of 25 November, evening), and with the entry of one idempotencyKey, which is asked for after a lost reply.
+function checkpointView(record: CheckpointRecord, outside: string[], full: boolean) {
+  const { changes, affectedSpreads, references, sources, ...mcp } = record.mcp ?? {};
   return {
     checkpointId: record.checkpoint, time: record.time, origin: record.origin, label: record.label,
-    changed: manifestNames.filter((name) => record.manifests[name].before !== record.manifests[name].after),
+    changed: [...manifestNames.filter((name) => record.manifests[name].before !== record.manifests[name].after), ...(record.pull?.files ?? [])],
     ...(outside.length ? { changedOutsideBefore: outside } : {}),
-    ...(record.mcp ? { mcp: record.mcp } : {}),
+    ...(record.pull ? { pull: record.pull } : {}),
+    ...(record.mcp ? { mcp: full ? record.mcp : { ...mcp, ...(changes ? { changeCount: changes.length } : {}),
+      ...(affectedSpreads ? { affectedSpreadCount: affectedSpreads.length } : {}), ...(sources ? { sourceCount: sources.length } : {}) } } : {}),
   };
 }
 
@@ -718,7 +724,7 @@ export function createAuthoringService(hooks: Hooks) {
       if (args.cursor && !start) throw new AuthoringError('CURSOR_EXPIRED', 'That checkpoint is no longer retained. List again without cursor.');
       const limit = args.limit ?? 20;
       const page = matching.slice(start, start + limit);
-      return { project: session.handle, checkpoints: page.map(({ record, outside }) => checkpointView(record, outside)),
+      return { project: session.handle, checkpoints: page.map(({ record, outside }) => checkpointView(record, outside, !!args.idempotencyKey || !!args.include?.includes('changes'))),
         nextCursor: start + limit < matching.length ? page.at(-1)!.record.checkpoint : null,
         retained: records.length, oldest: records[0]?.time ?? null,
         changedOutsideSinceLatest: records.length ? changedBetween(records.at(-1)!.manifests, ledger.current) : [],
@@ -1058,7 +1064,8 @@ export function createAuthoringService(hooks: Hooks) {
         const source = await contained(fresh.folder, path, ['inbox']);
         if (paths.includes(source)) throw new AuthoringError('DUPLICATE_IMPORT', 'Each import source must appear only once, including paths that resolve to the same file.');
         const info = await stat(source);
-        if (!info.isFile() || !extensions.has(extname(source).toLowerCase())) throw new AuthoringError('INVALID_IMPORT', 'Every selected file must match the requested import kind.');
+        if (!info.isFile() || !extensions.has(extname(source).toLowerCase())) throw new AuthoringError('INVALID_IMPORT',
+          'Every selected file must match the requested import kind.' + (args.kind === 'photo' && isHeic(source) ? ' ' + heicAdvice : ''));
         size += info.size;
         if (size > 100 * 1024 * 1024) throw new AuthoringError('IMPORT_TOO_LARGE', 'Import batches are limited to 100 MB.');
         paths.push(source);

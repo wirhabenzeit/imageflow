@@ -75,6 +75,7 @@ export const commandRegistry = {
   'box-replace-photo': { label: 'Replace Photo…', enabled: writable },
   'box-adjust-crop': { label: 'Adjust Crop…', enabled: writable },
   'box-reset-crop': { label: 'Reset Crop', enabled: writable },
+  'box-edit-caption': { label: 'Edit Caption…', enabled: writable },
   'box-remove-photo': { label: 'Remove Photo', enabled: writable },
   'box-edit-text': { label: 'Edit Text', enabled: book },
   'box-replace-text': { label: 'Choose Markdown File…', enabled: writable },

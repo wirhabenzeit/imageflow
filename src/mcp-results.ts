@@ -150,13 +150,14 @@ export const mcpOutputSchemas = {
       title: z.string(), folder: z.string(), writable: z.boolean(), revision, history,
     })),
     scope: z.string().optional(),
+    notice: z.string().optional(),
   }),
   get_authoring_context: z.looseObject({
     project: z.string(), root: z.string().describe('The book folder.'), guide: z.string(),
     revision: reportFields.revision.optional(),
     diagnostics: reportFields.diagnostics.optional(), checks: reportFields.checks.optional(), checkedRevision,
     template: z.looseObject({}).optional().describe('Parsed template declarations: the active format, every format in full (printFormats), parameters, layouts with their boxes and elements, layout families and opening spreads.'),
-    templateIdentity: templateIdentitySchema.optional(),
+    templateIdentity: templateIdentitySchema.optional(), notice: z.string().optional(),
     sources: z.record(z.string(), z.looseObject({ text: z.string(), sha256: z.string(), truncated: z.boolean() })).optional().describe('Requested includeSource files.'),
     templateFiles: z.array(z.string()).optional().describe('Files under template/. Generated folders are listed once, ending in /. Like template, topics and capabilities, left out when only docs, examples or sources were requested.'),
     topics: z.array(z.looseObject({ id: z.string(), title: z.string(), summary: z.string(), bytes: z.number() })).optional()
@@ -195,7 +196,8 @@ export const mcpOutputSchemas = {
   list_book_checkpoints: z.looseObject({
     project: z.string(),
     checkpoints: z.array(z.looseObject({
-      checkpointId: z.string(), time: z.string(), origin: z.enum(['app', 'mcp']), label: z.string(), changed: z.array(z.string()),
+      checkpointId: z.string(), time: z.string(), origin: z.enum(['app', 'mcp']), label: z.string(),
+      changed: z.array(z.string()).describe('Manifests, and files a sync pull wrote.'),
       changedOutsideBefore: z.array(z.string()).optional().describe('Manifests changed outside ImageFlow since the previous checkpoint.'),
       mcp: z.looseObject({ tool: z.string(), idempotencyKey: z.string(), requestFingerprint: z.string(), session: z.string() }).optional(),
     })).describe('Newest first.'),

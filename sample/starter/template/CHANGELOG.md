@@ -5,6 +5,11 @@ an earlier version can bring over what it wants. A book's template is its own co
 it. Compare the two with the `read_library_template` agent tool, port the parts you want by hand, and then raise
 `basedOn.version` in your template.
 
+## 0.13.3
+
+- **Show caption** declares `shows: 'caption'`: entering the first caption of a photo switches it on. Its description
+  says where captions are edited.
+
 ## 0.13.2
 
 - The **Show caption** setting's description says where captions are edited: right-click the photo, on the page or in

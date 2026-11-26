@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { BookFrame } from './BookFrame';
 import { PhotoContent } from './BoxContent';
+import type { SourceUsage } from './editing';
 import { Fields } from './Fields';
 import { revealIn } from './reveal';
 import type { CoverLayoutInfo, ProjectSummary, Rect, RenderStatus } from './desktop';
@@ -74,9 +75,10 @@ export function CoverCanvas({ project, geometry: cover, definition, guides, togg
   </main>;
 }
 
-export function CoverInspector({ summary, cover, layouts, writable, choose, change, focus }: {
+export function CoverInspector({ summary, cover, layouts, writable, choose, change, focus, caption }: {
   /** The box or element to point out, as a Book check finding asks for. */
   focus?: { box: string; at: number }; summary: ProjectSummary; cover?: CoverState; layouts: Record<string, CoverLayoutInfo>; writable: boolean;
+  caption?: { usage: SourceUsage; save: (box: string, photo: string, caption: string) => void };
   choose: (layout: string) => void; change: (apply: (cover: CoverState) => void, label?: string) => void;
 }) {
   const definition = cover && Object.hasOwn(layouts, cover.definition) ? layouts[cover.definition] : undefined;
@@ -104,7 +106,8 @@ export function CoverInspector({ summary, cover, layouts, writable, choose, chan
           update={(id, value) => change((state) => { state.params[id] = value; }, 'Cover text and settings changed')} />
         {Object.entries(definition.boxes).map(([id, box]) => <details key={id} open data-cover-item={id} className={flash === id ? 'flash' : undefined}>
           <summary>{box.label}</summary>
-          <PhotoContent summary={summary} spread={cover} box={id} label={box.label} values change={change} />
+          <PhotoContent summary={summary} spread={cover} box={id} label={box.label} values change={change}
+            caption={caption && { usage: caption.usage, save: (photo, text) => caption.save(id, photo, text) }} />
           <Fields schema={box.parameters} controls={box.controls} values={cover.boxes[id]?.params ?? {}}
             update={(key, value) => change((state) => { (state.boxes[id] ??= { params: {} }).params[key] = value; }, 'Cover photo settings changed')} />
         </details>)}

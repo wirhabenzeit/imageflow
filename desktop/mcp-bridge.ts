@@ -6,6 +6,9 @@ import { mcpCatalog, mcpLimits } from '../src/mcp-contract';
 import type { McpCatalogTool, McpToolName } from '../src/mcp-contract';
 import { McpAppClient, McpConnectionError } from './mcp-connection';
 
+declare const __IMAGEFLOW_VERSION__: string | undefined;
+const version = typeof __IMAGEFLOW_VERSION__ === 'string' ? __IMAGEFLOW_VERSION__ : '0.0.0';
+
 function toolResult(result: Record<string, unknown>): CallToolResult {
   const { image, ...metadata } = result;
   const artwork = image as { data?: unknown; mimeType?: unknown } | undefined;
@@ -42,7 +45,7 @@ function start() {
   }
   const descriptorPath = resolve(args[1]);
   const handle = serveStdio(() => {
-    const server = new McpServer({ name: 'imageflow', version: '0.1.0' }, {
+    const server = new McpServer({ name: 'imageflow', version }, {
       instructions: 'ImageFlow edits photo books that are open in the ImageFlow app. Call list_projects for a book handle, then get_authoring_context; ' +
         'its topics list the template API reference, and docs: ["authoring-workflow"] explains the order of work. Edit template files with ' +
         'workspace tools, save project data with apply_project_changes, and verify every edit with check_book.',
@@ -84,8 +87,8 @@ function start() {
       }
       if (changed && server.isConnected()) server.sendToolListChanged();
     };
-    const refresh = () => { void app.catalog().then((tools) => { if (tools) adopt(tools); }, () => {}); };
-    const app = new McpAppClient(descriptorPath, () => server.server.getClientVersion()?.name ?? 'MCP client', refresh);
+    const app = new McpAppClient(descriptorPath, () => server.server.getClientVersion()?.name ?? 'MCP client',
+      { version, adopt });
     server.server.oninitialized = () => { void app.connect().catch(() => {}); };
     server.server.onclose = () => app.close();
     adopt(mcpCatalog());
