@@ -1152,8 +1152,7 @@ span.source-origin > img.source-origin-app { width: 16px; height: 16px; object-f
 .source-items-photo .source-photo .source-title { display: none; }
 .source-items-photo .source-photo .source-storage { max-width: 100%; box-sizing: border-box; padding: 2px 5px; border-radius: 3px; background: #000a; color: white; }
 .asset-toolbar input[type="search"] { flex: 1; min-width: 100px; }
-.asset-filter-tokens { display: flex; flex-wrap: wrap; gap: 6px; }
-.asset-filter-tokens button { border-radius: 14px; padding: 2px 9px; font-size: 11px; }
+.asset-filter-tokens { flex-wrap: wrap; }
 .asset-leftovers { flex: none; display: grid; justify-items: start; gap: 6px; max-height: 45%; padding-top: 8px; border-top: 1px solid var(--subtle-border); font-size: 12px; }
 .studio .asset-leftovers-title { display: inline-flex; align-items: center; gap: 4px; min-height: 0; padding: 2px 4px; margin-left: -4px; border: 0; border-radius: 4px; background: transparent; box-shadow: none; color: var(--muted); font-size: 12px; font-weight: 400; }
 .studio .asset-leftovers-title:hover { background: var(--selection-surface); }
@@ -1329,3 +1328,52 @@ span.source-origin > img.source-origin-app { width: 16px; height: 16px; object-f
 .markdown-header-fields dd { margin: 0; }
 .asset-rename { width: 100%; min-width: 0; font: inherit; font-weight: 600; padding: 1px 4px; }
 .pc-file.is-drop-target { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+
+/* The Filter control (ADR 0014, section 5): a button that shows when anything is filtered, a popover that stays open
+   while filters are combined, and chips of what is set in the strip's spacer. Each section is headed by the photos it
+   narrows, so a provider's filters read as that provider's alone. */
+.photo-filter { position: relative; flex: none; }
+.studio .photo-filter-trigger[data-active] { background: var(--selection-surface); color: var(--accent); box-shadow: inset 0 0 0 1px var(--selection-border); }
+.studio .photo-filter-trigger[data-active] svg:last-child:not(:first-child) { color: var(--accent); }
+.photo-filter-popover { position: absolute; right: 0; z-index: 40; width: 340px; max-width: calc(100vw - 24px); max-height: min(70vh, 520px); overflow: auto; box-sizing: border-box;
+  padding: 4px 12px 10px; border: 1px solid var(--control-border); border-radius: 9px; background: var(--popup-surface); color: var(--text);
+  box-shadow: 0 8px 28px #00000026, 0 1px 3px var(--subtle-hover); white-space: normal; text-align: left; font: 12px/1.4 var(--ui-font); }
+/* The strip is under the canvas, so the popover opens upwards over it; at the top of the Assets window downwards. */
+.photo-filter-up { bottom: calc(100% + 6px); }
+.photo-filter-down { top: calc(100% + 6px); }
+.pf-section { display: grid; gap: 7px; padding: 9px 0; border-top: 1px solid var(--edge); }
+.pf-section:first-child { border-top: 0; }
+.pf-heading { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 11px; font-weight: 600; color: var(--text); }
+.pf-note { margin: -3px 0 0; font-size: 11px; color: var(--muted); }
+.pf-row { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+.pf-label { flex: none; width: 42px; font-size: 11px; color: var(--muted); }
+.pf-choice { justify-self: start; display: inline-flex; }
+.pf-pills { display: flex; flex-wrap: wrap; gap: 5px; }
+.studio .pf-pill { display: inline-flex; align-items: center; gap: 5px; min-height: 22px; padding: 2px 9px 2px 3px; border: 1px solid var(--control-border); border-radius: 12px;
+  background: var(--control-surface); box-shadow: none; font-size: 11px; color: var(--text); }
+.studio .pf-pill:hover:not([aria-pressed="true"]) { background: var(--subtle-hover); }
+.studio .pf-pill[aria-pressed="true"] { border-color: var(--selection-border); background: var(--selection-surface); font-weight: 500; }
+.pf-stars { display: inline-flex; gap: 1px; }
+.studio .pf-stars button { display: grid; place-items: center; width: 22px; height: 22px; min-height: 0; padding: 0; border: 0; border-radius: 4px; background: transparent;
+  box-shadow: none; color: var(--muted); opacity: .45; font-size: 15px; line-height: 1; }
+.studio .pf-stars button[data-filled] { color: var(--text); opacity: 1; }
+.studio .pf-stars button:hover { background: var(--subtle-hover); opacity: 1; }
+.pf-colors { display: inline-flex; gap: 7px; }
+.studio .pf-colors button { width: 18px; height: 18px; min-height: 0; padding: 0; border: 0; border-radius: 50%; background: var(--mark-color);
+  box-shadow: inset 0 0 0 1px #0000002e; }
+.studio .pf-colors button[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--popup-surface), 0 0 0 4px var(--accent); }
+.pf-toggle { display: flex; align-items: center; }
+.pf-footer { display: flex; justify-content: space-between; gap: 8px; padding-top: 9px; border-top: 1px solid var(--edge); }
+.filter-chips { display: flex; align-items: center; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.filter-chips::-webkit-scrollbar { display: none; }
+.sources-bar .spacer { display: flex; align-items: center; padding: 0 4px; overflow: hidden; }
+.studio .filter-chip { display: inline-flex; flex: none; align-items: center; gap: 4px; min-height: 20px; padding: 1px 4px 1px 3px; border: 1px solid var(--selection-border);
+  border-radius: 10px; background: var(--selection-surface); box-shadow: none; color: var(--text); font-size: 11px; line-height: 16px; white-space: nowrap; }
+.filter-chip-label { padding-left: 2px; }
+.filter-chip-origin { flex: none; }
+.filter-chip-origin + .filter-chip-origin { margin-left: -2px; }
+.filter-chip .source-origin-mark, .filter-chip img.source-origin-app { width: 14px; height: 14px; min-width: 14px; }
+.filter-chip-remove { display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; color: var(--muted); font-size: 13px; line-height: 1; }
+.studio .filter-chip:hover .filter-chip-remove { background: var(--subtle-hover); color: var(--text); }
+.source-manager:not(.source-manager-embedded) > .filter-chips { padding: 0 0 2px; }
+.pf-origin { display: inline-flex; }

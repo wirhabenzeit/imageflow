@@ -20,7 +20,11 @@ import type { SourceRef } from './source-items';
 import type { SourceKind, SourceRepair } from './source-locations';
 import { assetMenu, assetMenuState, assetActions } from './asset-menu';
 import { asideText, assetPageLabels, assetUsage, shownAssetUsage } from './asset-usage';
-import { ActionMenu } from './ActionMenu';
+import { Choice, FilterChips, FilterPopover, chipItems } from './PhotoFilter';
+import type { ChipItem } from './PhotoFilter';
+import { fitFilter, orderedSources, shownProviders } from './photo-filter';
+import { photoFilterPredicate } from './source-properties';
+import type { PhotoFilter } from './source-properties';
 import { Icon } from './Icon';
 import { fileExtension, useFileIcons } from './file-icons';
 
@@ -50,9 +54,10 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const [notice, setNotice] = useState('');
   // The asset whose name is being edited in its row (Rename…).
   const [renaming, setRenaming] = useState<string>();
+  // The window's own filter (ADR 0014, section 5), not the strip's: placement, Source pills and the providers' marks as
+  // there, and Kind and Needs attention, which only this list has.
+  const [filter, setFilter] = useState<PhotoFilter>({});
   const [kind, setKind] = useState('all');
-  const [used, setUsed] = useState('all');
-  const [storage, setStorage] = useState('all');
   const [attention, setAttention] = useState(false);
   const [search, setSearch] = useState('');
   const raw = sourceEntries(summary);
@@ -121,11 +126,23 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
     else if (result.command in assetActions) await act({ action: assetActions[result.command as keyof typeof assetActions], keys });
   }
   const locked = busy || disabled;
+  // The Source pills are the sources of the list's assets; a source that left the book loses its pill and, for a
+  // provider, its filters (fitFilter). The marks' sections are there while the list can hold photos.
+  const sources = orderedSources(entries.map(sourceProvider));
+  const fitted = fitFilter(filter, sources);
+  useEffect(() => { if (fitted !== filter) setFilter(fitted); }, [fitted]);
+  const photoSources = kind === 'all' || kind === 'photo' ? orderedSources(entries.filter((entry) => entry.kind === 'photo').map(sourceProvider)) : [];
+  const passes = photoFilterPredicate(fitted);
   const shown = entries.filter((entry) => (kind === 'all' || kind === entry.kind) &&
-    (used === 'all' || (used === 'used') === !!placements(entry).length) &&
-    // Linked: anything not stored in the book, whether a file elsewhere or a photo of another provider.
-    (storage === 'all' || (storage === 'linked') === (sourceReach(entry) !== 'book')) && (!attention || (unavailable(entry.key) && !summary.sources?.[entry.key]?.pending) || summary.sources?.[entry.key]?.outOfDate) &&
+    passes({ provider: sourceProvider(entry), extra: entry.kind === 'photo' ? summary.photoExtra?.[entry.id] : undefined, used: !!placements(entry).length }) &&
+    (!attention || (unavailable(entry.key) && !summary.sources?.[entry.key]?.pending) || summary.sources?.[entry.key]?.outOfDate) &&
     entry.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
+  const kinds = { photo: 'Photos', markdown: 'Markdown', file: 'Files' } as const;
+  const chips: ChipItem[] = [
+    ...(kind !== 'all' ? [{ key: 'kind', label: kinds[kind as keyof typeof kinds], title: 'Only ' + kinds[kind as keyof typeof kinds].toLowerCase() + (kind === 'markdown' ? ' texts' : ''), remove: () => setKind('all') }] : []),
+    ...chipItems(fitted, setFilter, shownProviders(fitted, photoSources), 'assets'),
+    ...(attention ? [{ key: 'attention', label: 'Needs attention', title: 'Only assets that need attention', remove: () => setAttention(false) }] : []),
+  ];
   const groups = photoGroups(summary, shown.filter((entry) => entry.kind === 'photo').map(({ id }) => id), view.value);
   const headers = new Map(groups.filter((group) => group.label).map((group) => [group.ids[0], group]));
   const list = useListSelection(shown.map(({ key }) => key), (key) => entries.find((entry) => entry.key === key)!.name);
@@ -152,23 +169,17 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
       <button type="button" className="new-markdown" disabled={locked || (embedded && !fileTypes.length)} onClick={() => bring()}
         title={embedded ? fileTypes.length ? 'Import ' + fileTypes.join(', ') + ' files' : 'This template has no file parameters' : 'Import photos, texts and files for the template\'s file parameters'}><Icon name="down" /> Import…</button>
       {!embedded && <PhotoViewMenu view={view.value} update={view.update} custom={view.custom} providers={bookPhotoProviders(summary)} />}
-      <ActionMenu className="asset-filter" label={<>Filter <Icon name="chevron" /></>}>
-        {!embedded && <>{(['photo', 'markdown', 'file'] as const).map((value) => <button key={value} onClick={() => setKind(kind === value ? 'all' : value)}>{({ photo: 'Photos', markdown: 'Markdown', file: 'Files' })[value]}</button>)}
-        <hr /></>}
-        <button onClick={() => setUsed(used === 'unused' ? 'all' : 'unused')}>Unused</button>
-        <button onClick={() => setUsed(used === 'used' ? 'all' : 'used')}>Used</button>
-        <hr />
-        <button onClick={() => setStorage(storage === 'linked' ? 'all' : 'linked')}>Linked</button>
-        <button onClick={() => setStorage(storage === 'book' ? 'all' : 'book')}>In Book</button>
-        <button onClick={() => setAttention(!attention)}>Needs attention</button>
-      </ActionMenu>
+      {/* At the top of the Assets window the popover opens downwards; in the bottom panel upwards, as the strip's. The
+          bottom panel's list holds only files, so it has no Kind. */}
+      <FilterPopover filter={fitted} change={setFilter} sources={sources} providers={photoSources} noun="assets" direction={embedded ? 'up' : 'down'}
+        extraActive={kind !== 'all' || attention} clearExtra={() => { setKind('all'); setAttention(false); }}
+        lead={!embedded && <section className="pf-section" aria-label="Kind"><h3 className="pf-heading">Kind</h3>
+          <Choice label="Kind" value={kind} options={[['all', 'All'], ['photo', 'Photos'], ['markdown', 'Markdown'], ['file', 'Files']]} choose={setKind} /></section>}
+        tail={<section className="pf-section" aria-label="Needs attention">
+          <label className="pc-switch pf-toggle"><input type="checkbox" checked={attention} onChange={(event) => setAttention(event.target.checked)} />Needs attention only</label>
+          <p className="pf-note">Unavailable, or out of date in its source.</p></section>} />
     </header>
-    {(kind !== 'all' || used !== 'all' || storage !== 'all' || attention) && <div className="asset-filter-tokens" aria-label="Active filters">
-      {kind !== 'all' && <button onClick={() => setKind('all')} aria-label="Remove kind filter">Kind: {kind} ×</button>}
-      {used !== 'all' && <button onClick={() => setUsed('all')} aria-label="Remove usage filter">{used === 'unused' ? 'Unused' : 'Used'} ×</button>}
-      {storage !== 'all' && <button onClick={() => setStorage('all')} aria-label="Remove storage filter">{storage === 'linked' ? 'Linked' : 'In Book'} ×</button>}
-      {attention && <button onClick={() => setAttention(false)} aria-label="Remove attention filter">Needs attention ×</button>}
-    </div>}
+    <FilterChips chips={chips} className="filter-chips asset-filter-tokens" />
     <div className="source-manager-list" role="listbox" aria-label="Assets" aria-multiselectable="true" onKeyDown={(event) => {
       if (event.key === ' ') { event.preventDefault(); preview(); }
       else if (event.key === 'Backspace' || event.key === 'Delete') { event.preventDefault(); if (!locked && list.selected.length) void act({ action: 'remove', keys: list.selected }); }

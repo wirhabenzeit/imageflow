@@ -71,6 +71,9 @@ import type { PictureStatus } from './BookFrame';
 import type { BookCheck } from './BookCheck';
 import { QuickLook, Sources } from './Sources';
 import { keptMime, photosMime, photoMime, sourceList, sourceTitle, textMime } from './source-items';
+import { filteredSourceList, fitStripFilters, noStripFilters, quickLookList } from './photo-filter';
+import type { StripFilters } from './photo-filter';
+import type { PhotoFilter } from './source-properties';
 import type { SourceKind, SourceRef, SourcesTab } from './source-items';
 import { hasFacingPages, hasSingleEnds, pageNumbers, pageLabel, pageSequence, pagesText, resolveFormat, sheetPages } from './format';
 import type { ResolvedFormat } from './format';
@@ -269,6 +272,8 @@ export function App() {
   const [highlight, setHighlight] = useState<string>();
   const [dropTarget, setDropTarget] = useState<string>();
   const [sourceTab, setSourceTab] = useState<SourcesTab>('photo');
+  // The strip's filters (ADR 0014, section 5): window state, cleared when another book opens and never saved.
+  const [stripFilterState, setStripFilters] = useState<StripFilters>(noStripFilters);
   // Selection is exclusive: a source from the strip, or else the current spread.
   const [selectedSource, setSelectedSource] = useState<SourceRef>();
   const [focusBox, setFocusBox] = useState<{ box: string; at: number }>();
@@ -567,6 +572,7 @@ export function App() {
       setCoverStatus(undefined);
       setSelectedSource(undefined);
       setQuick(undefined);
+      setStripFilters(noStripFilters);
       setLastReady(undefined);
       setEditing(undefined);
       setElementEditor(undefined);
@@ -1929,7 +1935,6 @@ export function App() {
     setSourceTab(source.kind);
   }
 
-  const quickItems = useMemo(() => summary && quick ? sourceList(summary, quick.kind, photoView.value) : [], [summary, quick, photoView.value]);
   function navigateQuick(step: number) {
     if (!quick) return;
     const at = quickItems.findIndex(({ id }) => id === quick.id);
@@ -2026,6 +2031,13 @@ export function App() {
   const coverBoxIds = useMemo(() => coverGeometry && coverDefinition ? Object.keys(coverDefinition.boxes) : undefined, [coverGeometry, coverDefinition]);
   const usage = useMemo(() => summary ? assetUsage(summary, pageLabels, coverBoxIds ?? null, template?.spreads) : { photo: {}, text: {} },
     [summary, pageLabels.join(), coverBoxIds, template?.spreads]);
+  // A source that left the book takes its Source pill along, and a provider with no photo left its filters.
+  const stripFilters = useMemo(() => summary ? fitStripFilters(summary, stripFilterState) : stripFilterState, [summary, stripFilterState]);
+  useEffect(() => { if (stripFilters !== stripFilterState) setStripFilters(stripFilters); }, [stripFilters]);
+  const setStripFilter = useLiveCallback((kind: SourceKind, filter: PhotoFilter) => setStripFilters((filters) => ({ ...filters, [kind]: filter })));
+  // Quick Look steps through what the strip shows, filtered; a source the filter hides gets the whole list.
+  const quickItems = useMemo(() => summary && quick ? quickLookList(summary, quick, photoView.value,
+    filteredSourceList(summary, quick.kind, photoView.value, stripFilters[quick.kind], usage)) : [], [summary, quick, photoView.value, stripFilters, usage]);
   const layoutBoxes = useMemo(() => template && Object.fromEntries(Object.entries(template.spreads).map(([id, { boxes }]) =>
     [id, { boxes: Object.fromEntries(Object.entries(boxes).map(([box, { type }]) => [box, { type }])) }])), [template?.spreads]);
   // The box a Book check finding is about stays outlined while it is looked at.
@@ -2193,8 +2205,8 @@ export function App() {
   const sourcesPanel = useMemo(() => (summary && <Sources view={sourcesView} summary={summary} tab={sourceTab} setTab={setSourceTab}
           selected={selectedSource ? { [selectedSource.kind]: selectedSource.id } : {}} choose={chooseSource}
           failure={setError} changed={adoptSource} sourceAction={runSourceAction} usage={usage} writable={writable} busy={!!busy} importSources={importSources} quickLook={setQuick}
-          importPaths={importSourcePaths} fileTypes={fileTypes} importFileRequest={importFileRequest} />),
-    [summary, sourcesView, sourceTab, selectedSource, usage, writable, busy, chooseSource, adoptSource, importSources, importSourcePaths, fileTypes, importFileRequest]);
+          importPaths={importSourcePaths} fileTypes={fileTypes} importFileRequest={importFileRequest} filters={stripFilters} setFilter={setStripFilter} />),
+    [summary, sourcesView, sourceTab, selectedSource, usage, writable, busy, chooseSource, adoptSource, importSources, importSourcePaths, fileTypes, importFileRequest, stripFilters, setStripFilter]);
   const inspectorPanel = useMemo(() => (summary && spread && <Inspector summary={summary} writable={writable}
         spread={spread} page={selectedSide ?? selectedPage} source={selectedSource} template={template} render={render ?? lastReady}
         usage={usage} quickLook={quickSource} focus={focusBox}
@@ -2560,7 +2572,7 @@ export function App() {
           else setElementEditor((current) => current === elementEditor ? undefined : current);
         }} importFile={importProjectFile}
           prepare={template?.network?.length ? () => decideNetwork(template, true) : undefined} network={summary.network?.join(' ')} />}
-    {summary && quick && <QuickLook view={photoView.value} summary={summary} source={quick} usage={usage} navigate={navigateQuick}
+    {summary && quick && <QuickLook view={photoView.value} summary={summary} source={quick} usage={usage} navigate={navigateQuick} list={quickItems}
       close={() => setQuick(undefined)} jump={(id) => select(id)} />}
     {photoView.dialog}
     <footer className="status-bar">

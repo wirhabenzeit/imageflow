@@ -6,12 +6,16 @@ import { SourceBadge, sourceOrigin } from './SourceBadge';
 import type { PhotoViewControl } from './PhotoViewMenu';
 import { photoGroups, photoDate, captureLabel, captureFact, shownMarks } from './photo-view';
 import { bookPhotoMarks, bookPhotoProviders } from './source-properties';
+import type { PhotoFilter } from './source-properties';
+import { filterActive, filteredSourceList, quickLookList, shownProviders, stripSources } from './photo-filter';
+import type { StripFilters } from './photo-filter';
+import { FilterChips, FilterPopover, chipItems } from './PhotoFilter';
 import { SourceMarks, rejectedMark } from './SourceMarks';
 import type { PhotoView } from './photo-view';
 import { useListSelection } from './list-selection';
 import { useFilmstripAnchor } from './filmstrip-anchor';
 import { Icon } from './Icon';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { DragEvent, KeyboardEvent } from 'react';
 import { renderOrigin } from './desktop';
 import type { ProjectSummary, SourceAction } from './desktop';
@@ -43,13 +47,18 @@ type SourcesProps = {
   sourceAction: (request: SourceAction) => Promise<void>;
   // The extensions the template's file parameters accept, and the import that takes them as files (dropped files, or a chooser).
   fileTypes: string[]; importFileRequest: (files?: File[]) => void;
+  // The strip's filter of each tab (ADR 0014, section 5), kept by the book window so its Quick Look steps through the
+  // same list. It lasts as long as the book is open.
+  filters: StripFilters; setFilter: (kind: SourceKind, filter: PhotoFilter) => void;
 };
+
 
 // The Assets tab holds the book's other assets: the files of file parameters. It is offered when the template has such
 // parameters or the book already holds files, so a book without any does not carry an empty tab.
 const hasAssets = (summary: ProjectSummary, fileTypes: string[]) => fileTypes.length > 0 || Object.keys(summary.project.files).length > 0;
 
-function SourceTabs({ summary, tab, setTab, assets }: { summary: ProjectSummary; tab: SourcesTab; setTab: (tab: SourcesTab) => void; assets: boolean }) {
+// While a tab's filter is set, its count reads as shown of all (`Photos 14/42`).
+function SourceTabs({ summary, tab, setTab, assets, filtered = {} }: { summary: ProjectSummary; tab: SourcesTab; setTab: (tab: SourcesTab) => void; assets: boolean; filtered?: Partial<Record<SourcesTab, number>> }) {
   const tabs: [SourcesTab, string, number][] = [
     ['photo', 'Photos', Object.keys(summary.photoIndex).length],
     ['text', 'Texts', Object.keys(summary.project.texts).length],
@@ -57,31 +66,36 @@ function SourceTabs({ summary, tab, setTab, assets }: { summary: ProjectSummary;
   ];
   return <div className="segmented" role="tablist" aria-label="Source type">
     {tabs.map(([kind, label, count]) => <button key={kind} role="tab" aria-selected={tab === kind}
-      onClick={() => setTab(kind)}>{label} <span className="count">{count}</span></button>)}
+      aria-label={filtered[kind] !== undefined ? label + ', ' + filtered[kind] + ' of ' + count + ' shown' : undefined}
+      onClick={() => setTab(kind)}>{label} <span className="count">{filtered[kind] !== undefined ? filtered[kind] + '/' + count : count}</span></button>)}
   </div>;
+}
+// The filtered count of each tab whose filter is set.
+function filteredCounts(summary: ProjectSummary, filters: StripFilters, usage: SourceUsage) {
+  return Object.fromEntries((['photo', 'text'] as const).filter((kind) => filterActive(filters[kind]))
+    .map((kind) => [kind, filteredSourceList(summary, kind, undefined, filters[kind], usage).length]));
 }
 
 // Photos and texts as thumbnails and excerpts, or the book's other assets, the files of file parameters, as a plain list.
 export function Sources(props: SourcesProps) {
-  const { summary, tab, setTab, view, changed, busy, quickLook, writable, fileTypes, importFileRequest } = props;
+  const { summary, tab, setTab, view, changed, busy, quickLook, writable, fileTypes, importFileRequest, filters, usage } = props;
   const api = window.imageflow;
   const assets = hasAssets(summary, fileTypes);
   // The last file removed while its tab is open takes the tab with it; the strip shows photos again.
   if (tab !== 'assets' || !assets) return <SourceStrip {...props} tab={tab === 'assets' ? 'photo' : tab} assets={assets} />;
-  const tabs = <SourceTabs summary={summary} tab={tab} setTab={setTab} assets />;
+  const tabs = <SourceTabs summary={summary} tab={tab} setTab={setTab} assets filtered={filteredCounts(summary, filters, usage)} />;
   if (!api) return <section className="sources" aria-label="Sources"><div className="sources-bar">{tabs}</div></section>;
   return <SourceManager embedded view={view} api={api} summary={summary} adopt={changed} disabled={busy} quickLook={quickLook} tabs={tabs}
     fileTypes={fileTypes} importFiles={(files) => { if (writable && !busy) importFileRequest(files); }} />;
 }
 
-function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writable, busy, importSources, importPaths, quickLook, failure, sourceAction, assets }: SourcesProps & { tab: SourceKind; assets: boolean }) {
+function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writable, busy, importSources, importPaths, quickLook, failure, sourceAction, assets, filters, setFilter }: SourcesProps & { tab: SourceKind; assets: boolean }) {
   const list = useRef<HTMLDivElement>(null);
-  const [unused, setUnused] = useState(false);
-  const items = useMemo(() => {
-    const sources = sourceList(summary, tab, view.value);
-    if (!unused) return sources;
-    return sources.filter(({ id }) => !usage[tab][id]?.length);
-  }, [summary, tab, unused, usage, view.value]);
+  const filter = filters[tab];
+  const items = useMemo(() => filteredSourceList(summary, tab, view.value, filter, usage), [summary, tab, filter, usage, view.value]);
+  const counts = useMemo(() => filteredCounts(summary, filters, usage), [summary, filters, usage]);
+  const sources = useMemo(() => stripSources(summary, tab), [summary, tab]);
+  const unused = filter.placement === 'unused';
   useFilmstripAnchor(list, tab === 'photo', JSON.stringify([view.value.group, view.value.gapMinutes, items.map(({ id }) => id)]));
   const current = selected[tab];
   const visibleCurrent = items.some(({ id }) => id === current) ? current : undefined;
@@ -199,6 +213,8 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
     </div>;
   }
   const tiles = new Map(items.map((item) => [item.id, renderItem(item)]));
+  const noun = tab === 'photo' ? 'photos' : 'texts';
+  const change = (next: PhotoFilter) => setFilter(tab, next);
   const providers = useMemo(() => bookPhotoProviders(summary), [summary]);
 
   return <section className="sources" aria-label="Sources" onDragOver={(event) => {
@@ -208,20 +224,19 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
     if (writable && !busy) importPaths([...event.dataTransfer.files]);
   }}>
     <div className="sources-bar">
-      <SourceTabs summary={summary} tab={tab} setTab={setTab} assets={assets} />
-      <span className="spacer" />
-      <PhotoViewMenu view={view.value} update={view.update} custom={view.custom} photos={tab === 'photo'} providers={providers}>
-        <button onClick={() => setUnused(false)}>All assets{!unused ? ' ✓' : ''}</button>
-        <button onClick={() => setUnused(true)}>Unused only{unused ? ' ✓' : ''}</button>
-        {tab === 'photo' && <hr />}
-      </PhotoViewMenu>
+      <SourceTabs summary={summary} tab={tab} setTab={setTab} assets={assets} filtered={counts} />
+      {/* The chips of what is filtered sit in the space between the tabs and the buttons, and scroll there if they must. */}
+      <span className="spacer"><FilterChips chips={chipItems(filter, change, shownProviders(filter, tab === 'photo' ? sources : []), noun)} /></span>
+      <FilterPopover filter={filter} change={change} sources={sources} providers={tab === 'photo' ? sources : []} noun={noun} />
+      <PhotoViewMenu view={view.value} update={view.update} custom={view.custom} photos={tab === 'photo'} providers={providers} />
       {tab === 'text' && <NewMarkdown disabled={!writable || busy} />}
       <button className="source-import" disabled={!writable || busy} onClick={() => importSources('import')}>Import…</button>
     </div>
     <div ref={list} className={'source-items source-items-' + tab + (tab === 'photo' && view.value.group !== 'none' ? ' source-items-grouped' : '')} role="listbox"
       aria-label={tab === 'photo' ? 'Photos' : 'Texts'} onKeyDown={keys}>
-      {!items.length && <p className="source-empty muted">{tab === 'photo'
-        ? 'No photos yet. Import photos or drop them here.' : 'No Markdown sources yet. Import a .md file or drop it here.'}</p>}
+      {!items.length && <p className="source-empty muted">{filterActive(filter) && (tab === 'photo' ? Object.keys(summary.photoIndex).length : Object.keys(summary.project.texts).length)
+        ? <>No {noun} match the filters. <button type="button" className="link" onClick={() => change({})}>Clear Filters</button></>
+        : tab === 'photo' ? 'No photos yet. Import photos or drop them here.' : 'No Markdown sources yet. Import a .md file or drop it here.'}</p>}
       {tab === 'photo' && view.value.group !== 'none' ? groups.map((group) => {
         const count = (group.ids.length === group.total ? group.total : group.ids.length + ' of ' + group.total) +
           (unused ? ' unused' : group.ids.length === 1 && group.total === 1 ? ' photo' : ' photos');
@@ -240,13 +255,15 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
   </section>;
 }
 
-export function QuickLook({ view, summary, source, usage, navigate, close, jump }: {
+// `list`: what Previous and Next step through, the strip's filtered list in a book window (ADR 0014); the whole list
+// when it is not given or does not hold the source (a photo opened from the Inspector that the filter hides).
+export function QuickLook({ view, summary, source, usage, navigate, close, jump, list }: {
   view?: PhotoView; summary: ProjectSummary; source: SourceRef; usage: SourceUsage;
-  navigate: (step: number) => void; close: () => void; jump?: (spread: string) => void;
+  navigate: (step: number) => void; close: () => void; jump?: (spread: string) => void; list?: ReturnType<typeof sourceList>;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const frame = useRef<HTMLDivElement>(null);
-  const items = sourceList(summary, source.kind, view);
+  const items = quickLookList(summary, source, view, list);
   const at = items.findIndex(({ id }) => id === source.id);
   const item = items[at];
   const placed = usage[source.kind][source.id] ?? [];
