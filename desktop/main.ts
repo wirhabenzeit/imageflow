@@ -2929,7 +2929,8 @@ void app.whenReady().then(async () => {
     return document.activate(await document.projectSession.undo(direction));
   }));
   ipcMain.handle(channels.showSettings, (event, pane: SettingsPane) => {
-    if ((appOwner(event) || pickerOwner(event)) && (pane === 'general' || pane === 'sources' || pane === 'agents')) showSettings(pane);
+    // The Assets window asks too: its View menu leads to the Lightroom plugin's update (ADR 0014).
+    if ((appOwner(event) || pickerOwner(event) || assetsOwner(event)) && (pane === 'general' || pane === 'sources' || pane === 'agents')) showSettings(pane);
     else if (appOwner(event) && pane === 'sync') showSettings('sync');
   });
   ipcMain.handle(channels.templatePreview, async (event, id: unknown, hash: unknown) => {

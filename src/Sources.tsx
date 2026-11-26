@@ -271,9 +271,9 @@ export function QuickLook({ view, summary, source, usage, navigate, close, jump 
   const date = photo && captureFact(photoDate(summary, source.id));
   // Every mark of the photo, whatever the thumbnails show, as the Inspector lists them.
   const marks = photo ? bookPhotoMarks(summary, source.id) : [];
-  const details = photo
+  const details = (photo
     ? [photoSourceName(summary, source.id), date && date.label + ' ' + date.value, size && size.width + ' × ' + size.height + ' px', photo.caption, photo.credit && '© ' + photo.credit]
-    : [fileName(item.path), text !== undefined && words(text) + ' words'];
+    : [fileName(item.path), text !== undefined && words(text) + ' words']).filter(Boolean).join(' · ');
 
   return <dialog ref={dialog} className={'quicklook quicklook-' + source.kind} aria-label={'Quick Look · ' + item.title}
     onClose={close} onClick={(event) => { if (event.target === event.currentTarget) dialog.current?.close(); }}
@@ -304,7 +304,7 @@ export function QuickLook({ view, summary, source, usage, navigate, close, jump 
           ? <p className="missing">The Markdown file is missing.</p>
           : <article className="ql-markdown" dangerouslySetInnerHTML={{ __html: html }} />}</div>}
       <footer className="ql-footer">
-        <span>{details.filter(Boolean).join(' · ')}{marks.length > 0 && <> · <SourceMarks marks={marks} /></>}</span>
+        <span>{details}{marks.length > 0 && <>{details && ' · '}<SourceMarks marks={marks} /></>}</span>
         <span className="ql-usage">{placed.length ? <>Placed on {placed.map(({ spread, pages }) =>
           jump && spread ? <button key={spread} className="link" onClick={() => { dialog.current?.close(); jump(spread); }}>{pages}</button>
             : <span key={spread}>{pages}</span>)}</> : pagesText(undefined, usage.aside?.[source.kind][source.id])}</span>
