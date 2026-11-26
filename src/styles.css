@@ -1032,8 +1032,9 @@ span.source-origin > img.source-origin-app { width: 16px; height: 16px; object-f
 /* Sync status (#251): quiet when in sync, the attention color when the user has something to do. */
 .studio .sync-status { height: 20px; min-height: 0; margin: 0; padding: 0 8px; display: flex; align-items: center; gap: 4px; border: 0; background: transparent;
   box-shadow: none; color: var(--muted); font-size: 11px; font-weight: 400; white-space: nowrap; }
-.studio .sync-status:hover:not(:disabled) { background: var(--selection-surface); }
-.studio .sync-status:disabled { opacity: 1; }
+.studio .sync-status:hover:not([aria-disabled="true"]) { background: var(--selection-surface); }
+.studio .sync-status[aria-disabled="true"] { cursor: default; }
+.studio .sync-status[aria-disabled="true"]:active { background: transparent; }
 .sync-status .status-spinner { display: inline-block; }
 /* iCloud storage full (#292): what waits for room, and where to make some. */
 .status-bar .sync-full { gap: 6px; color: var(--error-text); }

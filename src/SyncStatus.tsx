@@ -63,18 +63,27 @@ export function SyncStatus({ api, notice }: { api?: DesktopApi; notice: (message
     <span>{waiting.notUploaded ? waiting.message.replace(/\.$/, '') + ': ' + waiting.notUploaded + (waiting.notUploaded === 1 ? ' original' : ' originals') + ' not uploaded' : waiting.message}</span>
     {waiting.manage && <button type="button" className="sync-manage" onClick={() => void api.syncAction('manage-storage').then((result) => { if ('error' in result) notice(result.error); })}>Manage Storage…</button>}
   </span>;
-  // Stop Syncing on This Mac from the status bar too, as in File → Sync; the app asks before it stops.
+  // As in File → Sync: the Sync window (#307), and Stop Syncing on This Mac, which the app asks about before it stops.
   const menu = (event: { preventDefault: () => void; clientX: number; clientY: number }) => {
     event.preventDefault();
-    if (view.syncing && !view.sending) return;
-    void api.popupMenu([{ id: 'stop', label: 'Stop Syncing on This Mac…' }], { x: Math.round(event.clientX), y: Math.round(event.clientY) })
-      .then((chosen) => (chosen === 'stop' ? api.syncAction('stop') : undefined)).then((result) => { if (result && 'error' in result) notice(result.error); });
+    void api.popupMenu([
+      { id: 'manage', label: 'Manage Synced Books…' },
+      { type: 'separator' },
+      { id: 'stop', label: 'Stop Syncing on This Mac…', enabled: !view.syncing || !!view.sending },
+    ], { x: Math.round(event.clientX), y: Math.round(event.clientY) })
+      .then(async (chosen) => {
+        if (chosen === 'manage') return void await api.showSync();
+        if (chosen !== 'stop') return;
+        const result = await api.syncAction('stop');
+        if ('error' in result) notice(result.error);
+      });
   };
   const notUploaded = failed && <span className="sync-download sync-full sync-upload-failed" role="status" title={failedText}>
     <span>{failedCount}</span></span>;
   return <>{download}{upload}{full}{notUploaded}<button type="button" className={'sync-status' + (status && !view.syncing ? ' sync-' + status.state : '')} title={title} aria-label={label + '. ' + title}
-    disabled={view.syncing} data-state={view.syncing ? 'syncing' : status?.state} data-uploading={left > 0 ? left : undefined} onContextMenu={menu}
-    onClick={() => void (settings ? api.showSettings('sync') : api.syncAction('sync').then((result) => { if ('error' in result) notice(result.error); }))}>
+    // aria-disabled, not disabled: a disabled button gets no right-click, and its menu is wanted during a sync too.
+    aria-disabled={view.syncing || undefined} data-state={view.syncing ? 'syncing' : status?.state} data-uploading={left > 0 ? left : undefined} onContextMenu={menu}
+    onClick={() => void (view.syncing ? undefined : settings ? api.showSettings('sync') : api.syncAction('sync').then((result) => { if ('error' in result) notice(result.error); }))}>
     {view.syncing && <span className="status-spinner" aria-hidden="true" />}{label}{!view.syncing && status?.pendingOriginals ? <span className="sync-pending" aria-hidden="true">·</span> : null}
   </button></>;
 }

@@ -31,7 +31,7 @@ Where your version of ImageFlow offers iCloud, choose **iCloud** in **Settings �
 
 ### Which books sync
 
-You turn on each book you want to sync. When you set up sync, the **Sync window** opens with the books on this Mac and the books already in your sync; the books on this Mac are switched off, and nothing is uploaded until you turn one on. Open the window again at any time with **Manage Synced Books…** in **Settings → Sync** or **File → Sync**.
+You turn on each book you want to sync. When you set up sync, the **Sync window** opens with the books on this Mac and the books already in your sync; the books on this Mac are switched off, and nothing is uploaded until you turn one on. Open the window again at any time with **Manage Synced Books…** in **Settings → Sync**, **File → Sync**, or by right-clicking the sync status in a book's status bar.
 
 - Turn a book on to sync it. It does not have to be open. Turn it off to stop syncing it on this Mac. **File → Sync → Start Syncing** and **Stop Syncing on This Mac…** do the same for the open book.
 - A book you make while sync is set up syncs from the start, as does a duplicate of a book that syncs. A book that was on this Mac before never starts by itself.
