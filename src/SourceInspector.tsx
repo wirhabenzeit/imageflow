@@ -15,6 +15,7 @@ import type { SourceRef } from './source-items';
 import { captureFact, photoDate } from './photo-view';
 import { bookPhotoMarks } from './source-properties';
 import { MarkFacts } from './SourceMarks';
+import { unreadableHelp } from './away-originals';
 
 const photoFields = [['title', 'Title'], ['caption', 'Caption'], ['credit', 'Credit'], ['altText', 'Alt text']] as const;
 
@@ -72,6 +73,8 @@ export function SourceInspector({ summary, source, template, render, usage, writ
     const provided = summary.photoProvided?.[source.id];
     // The marks of its provider's library (ADR 0014), read-only and whatever the thumbnails show; none for an unmarked photo.
     const marks = bookPhotoMarks(summary, source.id);
+    // What to do about a photo of Photos that this Mac's library does not have (UI-018).
+    const help = unreadableHelp(status);
     return <div className="source-inspector">
       <div className="si-head">
         <p className="eyebrow">Photo</p>
@@ -79,6 +82,7 @@ export function SourceInspector({ summary, source, template, render, usage, writ
         <p className="muted si-source">{origin && <SourceBadge origin={origin} labelled />}<span title={file?.path}>{photoSourceName(summary, source.id)}</span></p>
         {status?.outOfDate && <p className="muted">{outOfDateNote(status)}</p>}
         {status?.pending ? <p className="muted">{status.problem}</p> : summary.sources?.['photo:' + source.id]?.problem && <p className={status?.away ? 'muted' : 'error-text'}>{summary.sources['photo:' + source.id].problem}{summary.sources['photo:' + source.id].cached ? ' · Showing cached preview' : ''}</p>}
+        {help && <p className="muted">{help}</p>}
       </div>
       {summary.photos[source.id]
         ? <button type="button" className="si-preview" title="Quick Look (Space)" onClick={quickLook}>

@@ -197,6 +197,9 @@ test('observe reports facts, finds a photo by its cloud identifier, and is denie
   assert.equal(b.state === 'available' && b.facts?.extra?.favorite, undefined);
   assert.deepEqual(gone, { state: 'missing', problem: 'No longer in the Photos library.' });
   assert.equal(bare.state, 'available');
+  // A photo this Mac never had (no local identifier of its own, as one a sync brought) is not in its library, not gone.
+  const [never] = await provider.observe('/book', [ref('never', 9, false)]);
+  assert.deepEqual(never, { state: 'missing', problem: 'Not in this Mac’s Photos library.' });
   library.access = 'denied';
   const [denied] = await provider.observe('/book', [ref('a', 1)]);
   assert.equal(denied.state, 'denied');
@@ -287,6 +290,128 @@ test('watch tracks the photos of every book and reports changes by photo', async
   assert.deepEqual(second.at(-1)!.sort(), ['b', 'c']);
   stopFirst();
   assert.deepEqual(library.tracked.sort(), [local(1), local(2)]);
+});
+
+/** A timer the test runs by hand, for `photosProvider`'s `repeat`. */
+function manualTimer() {
+  const timer = { runs: [] as (() => void)[], started: 0, stopped: 0,
+    repeat: (run: () => void) => { timer.started++; timer.runs.push(run); return () => { timer.stopped++; timer.runs = timer.runs.filter((one) => one !== run); }; },
+    /** Runs every timer once, and lets what it started settle. */
+    async tick() { for (const run of timer.runs) run(); await settle(); },
+  };
+  return timer;
+}
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+/** A library whose cloud lookups are counted, and fail while `failing` is set. */
+function countingLibrary() {
+  const library = new FakeLibrary();
+  const counts = { lookups: 0, failing: false };
+  const lookup = library.localIdentifiers.bind(library);
+  library.localIdentifiers = async (clouds) => { counts.lookups++; if (counts.failing) throw new Error('Photos is busy.'); return lookup(clouds); };
+  return { library, counts };
+}
+
+test('a watched photo this library does not have is looked for again, and reported once Photos has it', async (t) => {
+  const { library, counts } = countingLibrary();
+  library.add(1);
+  const timer = manualTimer();
+  const provider = photosProvider(library, { repeat: timer.repeat });
+  const reported: string[][] = [];
+  const stop = provider.watch('/book', [ref('a', 1), ref('late', 2, false)], (ids) => reported.push(ids));
+  t.after(stop);
+  await settle();
+  assert.deepEqual(library.tracked, [local(1)]);
+  assert.equal(timer.runs.length, 1);
+  const first = counts.lookups;
+  await timer.tick();
+  await timer.tick();
+  assert.equal(counts.lookups, first + 2);
+  assert.deepEqual(reported, [], 'nothing to report while Photos does not have it');
+  // iCloud Photos brought it: reported as changed, tracked from then on, and not looked for any more.
+  library.add(2);
+  await timer.tick();
+  assert.deepEqual(reported, [['late']]);
+  assert.deepEqual(library.tracked.sort(), [local(1), local(2)]);
+  assert.deepEqual(timer.runs, []);
+  library.listener!([local(2)]);
+  assert.deepEqual(reported.at(-1), ['late']);
+});
+
+test('a watched photo is not looked for again once its book stops watching, nor while access is denied', async () => {
+  const { library, counts } = countingLibrary();
+  const timer = manualTimer();
+  const provider = photosProvider(library, { repeat: timer.repeat });
+  const stop = provider.watch('/book', [ref('late', 2, false)], () => {});
+  await settle();
+  await timer.tick();
+  const before = counts.lookups;
+  library.access = 'denied';
+  await timer.tick();
+  assert.equal(counts.lookups, before);
+  library.access = 'authorized';
+  await timer.tick();
+  assert.equal(counts.lookups, before + 1);
+  stop();
+  assert.equal(timer.stopped, 1);
+  assert.deepEqual(timer.runs, []);
+});
+
+test('a watch whose first lookup fails looks for every photo again', async (t) => {
+  const { library, counts } = countingLibrary();
+  library.add(1);
+  // The photo has a local identifier the library doesn't know, so the first lookup asks for its cloud identifier: it fails.
+  library.photos.set('stale', library.photos.get(local(1))!);
+  library.photos.delete(local(1));
+  counts.failing = true;
+  const timer = manualTimer();
+  const reported: string[][] = [];
+  const stop = photosProvider(library, { repeat: timer.repeat }).watch('/book', [ref('a', 1)], (ids) => reported.push(ids));
+  t.after(stop);
+  await settle();
+  assert.equal(counts.lookups, 1);
+  assert.equal(timer.runs.length, 1, 'looked for again although the first lookup failed');
+  // Failing again changes nothing; once Photos answers, the photo is reported and tracked.
+  await timer.tick();
+  assert.deepEqual(reported, []);
+  counts.failing = false;
+  await timer.tick();
+  assert.deepEqual(reported, [['a']]);
+  assert.deepEqual(library.tracked, ['stale']);
+  assert.deepEqual(timer.runs, []);
+});
+
+test('a watch stopped while a lookup is under way reports nothing and tracks nothing', async () => {
+  const { library } = countingLibrary();
+  const timer = manualTimer();
+  const provider = photosProvider(library, { repeat: timer.repeat });
+  const reported: string[][] = [];
+  const stop = provider.watch('/book', [ref('late', 2, false)], (ids) => reported.push(ids));
+  await settle();
+  // The lookup again waits for Photos; the book stops watching meanwhile, then Photos answers with the photo.
+  let answer!: () => void;
+  const lookup = library.localIdentifiers.bind(library);
+  library.localIdentifiers = async (clouds) => { await new Promise<void>((resolve) => { answer = resolve; }); return lookup(clouds); };
+  for (const run of timer.runs) run();
+  await settle();
+  stop();
+  library.add(2);
+  answer();
+  await settle();
+  assert.deepEqual(reported, []);
+  assert.deepEqual(library.tracked, []);
+  assert.deepEqual(timer.runs, []);
+  // Nor does a first lookup that finishes after the book stopped watching start a timer.
+  let first!: () => void;
+  library.localIdentifiers = async (clouds) => { await new Promise<void>((resolve) => { first = resolve; }); return lookup(clouds); };
+  library.photos.clear();
+  const late: string[][] = [];
+  const stopEarly = provider.watch('/other', [ref('late', 2, false)], (ids) => late.push(ids));
+  await settle();
+  stopEarly();
+  first();
+  await settle();
+  assert.equal(timer.started, 1);
+  assert.deepEqual(late, []);
 });
 
 // ---------- Drags from Photos
