@@ -22,14 +22,21 @@
 #include <string>
 #include <vector>
 
-// The SDK this is built with: captions, keywords and the RAW base come with the macOS 27 SDK, the content type with
-// 26. An older Xcode builds the addon without them, and the photos then have no caption.
-#if defined(__MAC_27_0)
-#define IMAGEFLOW_SDK_27 1
-#endif
-#if defined(__MAC_26_0)
-#define IMAGEFLOW_SDK_26 1
-#endif
+// APIs of macOS 15 and later are reached at runtime, not through the SDK the addon is built with: CI and release
+// builds may use an older Xcode, and the app must still use them wherever macOS has them. Each is checked with
+// `respondsToSelector:` (or `@available`) before it is used.
+static id property(id object, NSString *name) { return object && [object respondsToSelector:NSSelectorFromString(name)] ? [object valueForKey:name] : nil; }
+/** A cloud identifier's archival string (macOS 15.2), or nil. */
+static NSString *archivalString(PHCloudIdentifier *identifier) { id value = property(identifier, @"archivalStringValue"); return [value isKindOfClass:NSString.class] ? value : nil; }
+/** The cloud identifier of an archival string (macOS 15.2), or nil. */
+static PHCloudIdentifier *cloudIdentifier(NSString *text) {
+  SEL init = NSSelectorFromString(@"initWithArchivalStringValue:");
+  if (![PHCloudIdentifier instancesRespondToSelector:init]) return nil;
+  PHCloudIdentifier *allocated = [PHCloudIdentifier alloc];
+  // An init: the result is owned, as ARC expects of the init family.
+  id (*send)(id, SEL, NSString *) = (id (*)(id, SEL, NSString *))[allocated methodForSelector:init];
+  return send(allocated, init, text);
+}
 
 #define CHECK(call) do { if ((call) != napi_ok) { napi_throw_error(env, nullptr, #call " failed"); return nullptr; } } while (0)
 
@@ -264,7 +271,7 @@ static napi_value CloudIdentifiers(napi_env env, napi_callback_info info) {
     NSMutableArray *out = [NSMutableArray new];
     if (@available(macOS 15.2, *)) {
       NSDictionary *mappings = [PHPhotoLibrary.sharedPhotoLibrary cloudIdentifierMappingsForLocalIdentifiers:locals];
-      for (NSString *local in locals) { PHCloudIdentifier *cloud = [mappings[local] cloudIdentifier]; [out addObject:cloud.archivalStringValue ?: NSNull.null]; }
+      for (NSString *local in locals) { PHCloudIdentifier *cloud = [mappings[local] cloudIdentifier]; [out addObject:archivalString(cloud) ?: NSNull.null]; }
     } else {
       for (NSUInteger i = 0; i < locals.count; i++) [out addObject:NSNull.null];
     }
@@ -286,11 +293,11 @@ static napi_value LocalIdentifiers(napi_env env, napi_callback_info info) {
     NSMutableArray *out = [NSMutableArray new];
     if (@available(macOS 15.2, *)) {
       NSMutableArray<PHCloudIdentifier *> *ids = [NSMutableArray new];
-      for (NSString *text in clouds) { PHCloudIdentifier *id_ = [[PHCloudIdentifier alloc] initWithArchivalStringValue:text]; if (id_) [ids addObject:id_]; }
+      for (NSString *text in clouds) { PHCloudIdentifier *id_ = cloudIdentifier(text); if (id_) [ids addObject:id_]; }
       NSDictionary *mappings = [PHPhotoLibrary.sharedPhotoLibrary localIdentifierMappingsForCloudIdentifiers:ids];
       NSUInteger at = 0;
       for (NSString *text in clouds) {
-        PHCloudIdentifier *id_ = [[PHCloudIdentifier alloc] initWithArchivalStringValue:text];
+        PHCloudIdentifier *id_ = cloudIdentifier(text);
         if (!id_) { [out addObject:NSNull.null]; continue; }
         // Look up by the parsed identifier in order: the dictionary's keys are the identifiers passed in.
         PHCloudIdentifier *key = ids[at++];
@@ -325,9 +332,7 @@ static napi_value Facts(napi_env env, napi_callback_info info) {
     if (unavailable) { settle(pending, true, ^(napi_env e) { return errorValue(e, unavailable); }); return; }
     PHFetchOptions *options = [PHFetchOptions new];
     options.includeHiddenAssets = YES;
-#ifdef IMAGEFLOW_SDK_27
-    if (@available(macOS 27, *)) options.prefetchAssetExtendedMetadata = YES;
-#endif
+    if ([options respondsToSelector:NSSelectorFromString(@"setPrefetchAssetExtendedMetadata:")]) [options setValue:@YES forKey:@"prefetchAssetExtendedMetadata"];
     NSMutableDictionary<NSString *, PHAsset *> *byId = [NSMutableDictionary new];
     for (PHAsset *asset in [PHAsset fetchAssetsWithLocalIdentifiers:locals options:options]) byId[asset.localIdentifier] = asset;
     NSMutableArray *rows = [NSMutableArray new];
@@ -342,20 +347,23 @@ static napi_value Facts(napi_env env, napi_callback_info info) {
       if (asset.location && CLLocationCoordinate2DIsValid(asset.location.coordinate)) {
         row[@"latitude"] = @(asset.location.coordinate.latitude); row[@"longitude"] = @(asset.location.coordinate.longitude);
       }
-      if (@available(macOS 15, *)) row[@"adjusted"] = asset.adjustmentTimestamp ? @(round(asset.adjustmentTimestamp.timeIntervalSince1970 * 1000)) : NSNull.null;
-      row[@"base"] = @"compressed";
-#ifdef IMAGEFLOW_SDK_27
-      if (@available(macOS 27, *)) {
-        if (asset.originalResourceChoice == PHOriginalResourceChoiceRaw) row[@"base"] = @"raw";
-        PHAssetExtendedMetadata *metadata = asset.extendedMetadata;
-        if (metadata.caption.length) row[@"caption"] = metadata.caption;
-        if (metadata.keywords.count) row[@"keywords"] = metadata.keywords;
-        if (metadata.originalFilename.length) row[@"filename"] = metadata.originalFilename;
+      // The last edit or revert (macOS 15).
+      if ([asset respondsToSelector:NSSelectorFromString(@"adjustmentTimestamp")]) {
+        id adjusted = property(asset, @"adjustmentTimestamp");
+        row[@"adjusted"] = [adjusted isKindOfClass:NSDate.class] ? @(round([adjusted timeIntervalSince1970] * 1000)) : NSNull.null;
       }
-#endif
-#ifdef IMAGEFLOW_SDK_26
-      if (@available(macOS 26, *)) { if (asset.contentType.identifier) row[@"type"] = asset.contentType.identifier; }
-#endif
+      // Whether it renders from RAW (macOS 27: PHOriginalResourceChoiceRaw is 1).
+      id choice = property(asset, @"originalResourceChoice");
+      row[@"base"] = [choice isKindOfClass:NSNumber.class] && [choice integerValue] == 1 ? @"raw" : @"compressed";
+      // Caption, keywords and file name (macOS 27).
+      id metadata = property(asset, @"extendedMetadata");
+      id caption = property(metadata, @"caption"), keywords = property(metadata, @"keywords"), filename = property(metadata, @"originalFilename");
+      if ([caption isKindOfClass:NSString.class] && [caption length]) row[@"caption"] = caption;
+      if ([keywords isKindOfClass:NSArray.class] && [keywords count]) row[@"keywords"] = keywords;
+      if ([filename isKindOfClass:NSString.class] && [filename length]) row[@"filename"] = filename;
+      // Its type (macOS 26).
+      id type = property(property(asset, @"contentType"), @"identifier");
+      if ([type isKindOfClass:NSString.class]) row[@"type"] = type;
       [rows addObject:row];
     }
     settle(pending, false, ^(napi_env e) {
