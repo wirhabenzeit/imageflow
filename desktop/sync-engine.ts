@@ -167,8 +167,8 @@ type Context = { root: string; remote: SyncRemote; book: OpenProject; stale: boo
    */
   here: Record<string, { path?: string; key?: string; digest: string }>;
   /**
-   * The marks (ADR 0014) of every photo without a file whose provider reported it available with facts in this sync run,
-   * as the provider showed them then: its `provider`, the declared keys of its `extra` and the digest of its declared
+   * The marks (ADR 0014) of every photo without a file that has a fact here and whose provider reported it available
+   * with facts in this sync run, as the provider showed them then: its `provider`, the declared keys of its `extra` and the digest of its declared
    * properties (`SyncedCommit.localProps`). Kept apart from `here`, whatever preview is stored: a mark moves no content.
    */
   props: Record<string, { provider: string; declared: Record<string, unknown>; digest: string }>;
@@ -210,8 +210,10 @@ async function refreshFacts(context: Context) {
     if (reported && !(reported.state === 'available' && reported.file !== undefined)) {
       // Its marks are what the provider shows now, read from this observation, not from the fact: the fact may be from
       // the book's last load or from another Mac's push, and a mark set right before this sync must go up with it. Nothing
-      // is recorded in the fact; the session does that with its next look.
-      if (reported.state === 'available' && reported.facts) {
+      // is recorded in the fact; the session does that with its next look. A photo without a fact (its preview is still
+      // to come) has nothing a push could carry its marks in: they are left out until it has one, or every sync would
+      // push a commit that changes nothing.
+      if (reported.state === 'available' && reported.facts && facts.get(source.id)) {
         const provider = sourceProvider(source);
         context.props[source.id] = { provider, declared: declaredExtra(provider, reported.facts.extra), digest: sha(Buffer.from(declaredProperties(provider, reported.facts.extra))) };
       }
@@ -671,10 +673,28 @@ const mayApply = async (context: Context) => !context.options.beforeApply || awa
 
 /** Marks and projects a staged pull, then looks at the originals here again: stale ones went, downloaded ones came. */
 async function applyPull(context: Context, marker: PullMarker) {
+  const seen = new Set(Object.keys(context.props));
   await markPull(context.root, marker);
   context.stale = true;
   await finishPull(context.root, marker);
-  await refreshFacts(context);
+  await agreePulledMarks(context, await refreshFacts(context), seen);
+}
+
+/**
+ * Right after a pull, with the facts it wrote: counts the marks of photos the record has none for from what this Mac
+ * shows of them now (ADR 0014). Those are the photos the pull brought (`seen` has the photos read before it; a photo
+ * another Mac added, or one that only now has a fact), whose marks were pulled, not changed here, and the photos this
+ * Mac shows as the snapshot has them. Without this the push that follows a pull would send the pulled marks back, or
+ * an older state of this Mac's library over them. A mark changed here before the pull was read then and differs from
+ * the snapshot's, so it stays without an entry and goes up. A pull finished after an interruption has no `seen`.
+ */
+async function agreePulledMarks(context: Context, facts: Record<string, AssetFact>, seen?: ReadonlySet<string>) {
+  const synced = (await readSyncState(context.root)).lastSynced;
+  if (!synced) return;
+  const agreed = Object.entries(context.props).filter(([id, { provider, digest }]) => synced.localProps?.[id] === undefined && synced.photoDigests[id] !== undefined &&
+    ((seen && !seen.has(id)) || digest === sha(Buffer.from(declaredProperties(provider, facts[id]?.extra)))));
+  if (agreed.length) await updateSyncState(context.root, (state) => state.lastSynced?.commitId !== synced.commitId ? state
+    : { ...state, lastSynced: { ...state.lastSynced, localProps: { ...state.lastSynced.localProps, ...Object.fromEntries(agreed.map(([id, { digest }]) => [id, digest])) } } });
 }
 
 /** The first half of a pull: everything is downloaded, verified and staged, and the pull is marked. The book is untouched. */
@@ -889,6 +909,7 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
   if (state.pull) throw new Error('The interrupted sync could not be finished.');
   context.copiedFrom = copySource(state);
   const facts = await refreshFacts(context);
+  if (interrupted) await agreePulledMarks(context, facts);
   const local = await captureBookState(root);
   const bookId = local.project.bookId;
   if (!bookId) throw new Error('This book has no lineage ID yet. Make an edit, then sync.');

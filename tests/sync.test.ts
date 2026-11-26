@@ -1156,6 +1156,8 @@ type LibraryPhoto = { revision: string; content: string; width: number; height: 
 class FakePhotos implements SourceProvider<PhotosLocator> {
   readonly provider = 'photos' as const;
   library?: Map<string, LibraryPhoto> = new Map();
+  /** No preview can be made (still downloading from iCloud): the photo then has no fact. */
+  noPreview = false;
   private revisions = (photo: LibraryPhoto): Revisions => ({ revision: photo.revision, contentRevision: photo.content });
   private unavailable = (cloud: string) => !this.library ? { state: 'denied' as const, problem: 'No access to Photos' }
     : !this.library.get(cloud) ? { state: 'missing' as const, problem: 'No longer in Photos' } : undefined;
@@ -1171,6 +1173,7 @@ class FakePhotos implements SourceProvider<PhotosLocator> {
       if (signal.aborted) return;
       const failure = this.unavailable(locator.cloud);
       if (failure) { yield { id, ...failure }; continue; }
+      if (this.noPreview) { yield { id, state: 'unreadable', problem: 'Still downloading from iCloud' }; continue; }
       const photo = this.library!.get(locator.cloud)!;
       const file = join(staging, id + '-' + photo.content + '.jpg');
       await image(file, photo.color, photo.width / 25, photo.height / 25);
@@ -1317,6 +1320,41 @@ test('a sync record from before marks synced pushes them once where a photo has 
   library.get(cloud(2))!.favorite = true;
   assert.deepEqual(await outcome(a, remote), { action: 'push', pushed: 1 });
   assert.equal((await webFactOf(remote, a, 'plain')).extra?.favorite, true);
+});
+
+test('a marked photo that has no fact yet pushes nothing for its mark, and the mark goes up once the photo has one', async (t) => {
+  const { a, remote } = await world(t);
+  const photos = fakePhotos(t);
+  photos.library = new Map([[cloud(1), { ...libraryPhoto, favorite: true }]]);
+  photos.noPreview = true;
+  await sync(a, remote);
+  await edit(a, (files) => { files.photoIndex.heart = { photos: { cloud: cloud(1) } } as never; });
+  assert.deepEqual(await outcome(a, remote), { action: 'push', pushed: 1 }, 'the photo itself is an edit');
+  assert.equal((await readAssetFacts(a.folder)).heart, undefined, 'without a preview there is no fact to carry the mark');
+  for (let n = 0; n < 2; n++) assert.deepEqual(await outcome(a, remote), { action: 'in-sync', pushed: 0 }, 'a mark that cannot go up is not a reason to push');
+  assert.equal((await readSyncState(a.folder)).lastSynced?.localProps?.heart, undefined);
+  photos.noPreview = false;
+  assert.deepEqual(await outcome(a, remote), { action: 'push', pushed: 1 });
+  assert.equal((await webFactOf(remote, a, 'heart')).extra?.favorite, true);
+  assert.deepEqual(await outcome(a, remote), { action: 'in-sync', pushed: 0 });
+});
+
+test('a marked photo another Mac added is pulled without pushing its mark back, on a Mac that shows the same library', async (t) => {
+  const { a, b, remote } = await world(t);
+  const photos = fakePhotos(t);
+  photos.library = new Map([[cloud(1), { ...libraryPhoto, favorite: true }]]);
+  await sync(a, remote);
+  await copyBook(a, b);
+  assert.deepEqual(await outcome(b, remote), { action: 'adopt', pushed: 0 });
+  await edit(b, (files) => { files.photoIndex.heart = { photos: { cloud: cloud(1) } } as never; });
+  assert.deepEqual(await outcome(b, remote), { action: 'push', pushed: 1 });
+  assert.deepEqual(await outcome(a, remote), { action: 'fast-forward', pushed: 0 }, 'the mark was pulled, not changed here');
+  assert.ok((await readSyncState(a.folder)).lastSynced?.localProps?.heart, 'and it counts from what this Mac shows now');
+  assert.deepEqual(await outcome(a, remote), { action: 'in-sync', pushed: 0 });
+  // Cleared here afterwards, it is a change made here.
+  photos.library.get(cloud(1))!.favorite = false;
+  assert.deepEqual(await outcome(a, remote), { action: 'push', pushed: 1 });
+  assert.equal((await webFactOf(remote, a, 'heart')).extra?.favorite, undefined);
 });
 
 test('the marks’ digests stay out of sync.json, which a build before them reads strictly, and are dropped when sync.json changes without them', async (t) => {

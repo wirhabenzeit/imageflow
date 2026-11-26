@@ -178,7 +178,7 @@ async function writeSyncState(folder: string, state: SyncState) {
   const { localProps: pulling, ...pull } = parsed.pull ?? {} as Partial<PullMarker>;
   const bytes = JSON.stringify({ ...parsed, ...(parsed.lastSynced ? { lastSynced } : {}), ...(parsed.pull ? { pull } : {}) }) + '\n';
   await writeAtomically(path, 'sync.json', bytes);
-  const marks = { ...(parsed.lastSynced && synced ? { lastSynced: synced } : {}), ...(parsed.pull && pulling && Object.keys(pulling).length ? { pull: pulling } : {}) };
+  const marks = { ...(parsed.lastSynced && synced && Object.keys(synced).length ? { lastSynced: synced } : {}), ...(parsed.pull && pulling && Object.keys(pulling).length ? { pull: pulling } : {}) };
   if (Object.keys(marks).length) await writeAtomically(path, marksFile, JSON.stringify(marksSchema.parse({ version: 1, record: digest(Buffer.from(bytes, 'utf8')), ...marks })) + '\n');
   else await rm(join(path, marksFile), { force: true });
 }

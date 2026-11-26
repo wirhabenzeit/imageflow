@@ -94,7 +94,7 @@ export function declaredExtra(provider: string | undefined, extra: Record<string
   }
   return result;
 }
-/** `extra` with `provider`'s declared properties replaced by `declared` (from `declaredExtra`); undefined when nothing is left. */
+/** `extra` with every reserved key replaced by `declared` (one provider's, from `declaredExtra`); undefined when nothing is left. */
 export function withDeclaredExtra(extra: Record<string, unknown> | undefined, declared: Record<string, unknown>): Record<string, unknown> | undefined {
   const rest = Object.fromEntries(Object.entries(extra ?? {}).filter(([key]) => !(reservedKeys as readonly string[]).includes(key)));
   const merged = { ...rest, ...declared };
@@ -119,7 +119,7 @@ export type PhotoFilter = {
 export type FilteredPhoto = { provider: string | undefined; extra?: Record<string, unknown>; used: boolean };
 
 function passes(mark: SourceBadgeMark | undefined, kind: SourceBadgeMark['kind'], value: PropertyFilterValue): boolean {
-  if (kind === 'stars') return typeof value !== 'number' || value < 1 || (mark?.kind === 'stars' && mark.value >= value);
+  if (kind === 'stars') return typeof value !== 'number' || !(value >= 1) || (mark?.kind === 'stars' && mark.value >= value);
   if (kind === 'heart') return value !== true || mark?.kind === 'heart';
   if (kind === 'flag') {
     const flag = mark?.kind === 'flag' ? mark.value : undefined;
