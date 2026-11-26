@@ -20,6 +20,7 @@ import { editorURL } from './desktop';
 import { bookLayout } from './desktop';
 import type { BookGeometry, BookView, Issue, Rect, RenderStatus, TemplateInfo } from './desktop';
 import { cssMM, pageLabel, pageSequence, pagesText, resolveFormat, sheetBleed, sheetPages, spanRequiredAt, toMillimeters } from './format';
+import { coverSequenceFindings, sequenceFindings } from './sequence-findings';
 import { coverLayoutsFor, resolveCover } from './cover';
 import type { CoverResolution } from './cover';
 import { animateReorder, reorderOffsets } from './reorder-motion';
@@ -1991,13 +1992,13 @@ async function renderPhysicalCover(root: HTMLElement, book: RenderProject, templ
   const edit = book.mode === 'edit';
   const errors: Issue[] = [], warnings: Issue[] = [];
   const issue = (message: string, code: string, box?: string): Issue => ({ message, code, cover: true, where: 'Cover', box });
-  if (cover.status === 'provisional') {
-    errors.push(issue('The cover needs a supported interior page count. The preview uses ' + cover.previewPages + ' pages.', 'cover-page-count'));
-  } else if (book.fixture?.coverPages === undefined && sequence.issues.length) {
-    errors.push(issue('Fix the interior page sequence before exporting the cover. ' + sequence.issues[0], 'cover-page-sequence'));
-  }
-  if (!layout) errors.push(issue('Choose a cover layout for this format.', 'cover-layout-unavailable'));
   const printing = !edit && query.get('view') === 'cover';
+  // A growing interior is a warning on the cover until the cover is printed (API-023).
+  const interior = coverSequenceFindings({ ...sequence, issues: book.fixture?.coverPages === undefined ? sequence.issues : [] },
+    { provisionalPages: cover.status === 'provisional' ? cover.previewPages : undefined, printing });
+  errors.push(...interior.errors);
+  warnings.push(...interior.warnings);
+  if (!layout) errors.push(issue('Choose a cover layout for this format.', 'cover-layout-unavailable'));
   const artwork = query.get('view') === 'cover-artwork' ? parsePreviewRequest(JSON.parse(query.get('request') ?? 'null')) : undefined;
   const inspect = query.has('inspect') ? inspectionSchema.parse(JSON.parse(query.get('inspect')!)) : undefined;
   if (printing && errors.length) throw new Error(errors[0].message);
@@ -2362,15 +2363,12 @@ export async function startRender(root: HTMLElement) {
     if (declared.data.preview && (!edit || view === 'book')) warnings.push(...await templatePreviewWarnings(declared.data.preview, chooseFormat(declared.data).format));
     // A book without spreads is valid while it is being started, but there is nothing to print yet.
     const photos = { pending: (id: string) => !!book.sources?.['photo:' + id]?.pending, resolution: newResolution(template.format.output.resolution?.minimum) };
-    // A growing book often has a page count or end pages the format does not take yet: while it is edited and checked,
-    // that is a to-do before export (a warning). Only the print export and the proof, which make the book, report it as
-    // an error (API-023).
+    // A growing book's page count and book ends are warnings until the print export and the proof (API-023); a layout
+    // that does not fit the format is an error everywhere (sequenceFindings).
     const exporting = book.mode === 'export' && !present && !check && !artwork && !inspect;
-    const sequenceIssues: Issue[] = spreads.length ? sequence.issues.map((text, index) => ({ ...message(text), code: 'page-sequence',
-      ...(sequence.shortfall && index === sequence.issues.length - 1 ? { details: { pages: sequence.count, ...sequence.shortfall } } : {}),
-      suggestion: 'Insert, remove or move spreads, or switch layouts, so the page sequence fits the format before export.' })) : [];
-    if (!exporting) warnings.push(...sequenceIssues);
-    const errors: Issue[] = spreads.length ? exporting ? sequenceIssues : [] : [{
+    const sequenceIssues = spreads.length ? sequenceFindings(sequence, { exporting }) : { errors: [], warnings: [] };
+    warnings.push(...sequenceIssues.warnings);
+    const errors: Issue[] = spreads.length ? sequenceIssues.errors : [{
       ...message('The book has no spreads yet.'), code: 'book-empty', suggestion: 'Add a spread with insert_spread, or with Add Spread in the editor.' }];
     // The preview falls back to the default format, but printing at a size nobody chose is blocked.
     if (template.unknownChoice) {

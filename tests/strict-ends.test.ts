@@ -36,16 +36,18 @@ test("delivery: 'spreads' cannot have single end pages, and printFormat defaults
 
 test('the page sequence requires a single right page first and a single left page last', () => {
   assert.deepEqual(pageSequence(['right', 'spread', 'spread', 'left'], blurb).issues, []);
-  assert.deepEqual(pageSequence(['spread', 'spread', 'right', 'left'], blurb).issues.slice(0, 1), [
-    "Spread 1 is a full spread, but Blurb requires the book to open on a single right page. Switch it to a layout with span: 'right'."]);
-  assert.deepEqual(pageSequence(['right', 'spread', 'left', 'spread'], blurb).issues.slice(1), [
-    "Spread 4 is a full spread, but Blurb requires the book to close on a single left page. Switch it to a layout with span: 'left'."]);
-  assert.deepEqual(pageSequence(['right', 'right', 'left'], blurb).issues.filter((issue) => !issue.startsWith('Page count')), [
-    'Spread 2 is a single right page, but single pages belong only at the book ends. Switch it to a full spread layout.']);
-  assert.match(pageSequence(['right'], blurb).issues[0], /only its opening page, but Blurb requires it to close on a single left page/);
+  assert.deepEqual(pageSequence(['spread', 'spread', 'right', 'left'], blurb).issues.slice(0, 1), [{ kind: 'end',
+    text: "Spread 1 is a full spread, but Blurb requires the book to open on a single right page. Switch it to a layout with span: 'right'." }]);
+  assert.deepEqual(pageSequence(['right', 'spread', 'left', 'spread'], blurb).issues.slice(1), [{ kind: 'end',
+    text: "Spread 4 is a full spread, but Blurb requires the book to close on a single left page. Switch it to a layout with span: 'left'." }]);
+  assert.deepEqual(pageSequence(['right', 'right', 'left'], blurb).issues.filter(({ kind }) => kind !== 'count'), [{ kind: 'end',
+    text: 'Spread 2 is a single right page, but single pages belong only at the book ends. Switch it to a full spread layout.' }]);
+  assert.match(pageSequence(['right'], blurb).issues[0].text, /only its opening page, but Blurb requires it to close on a single left page/);
   // Inside covers take full spreads throughout.
   assert.deepEqual(pageSequence(['spread', 'spread'], saal).issues, []);
-  assert.match(pageSequence(['right', 'spread', 'spread'], saal).issues[0], /Saal has no single pages at the book ends/);
+  // Without single ends, a single page is a layout that does not fit the format.
+  assert.deepEqual(pageSequence(['right', 'spread', 'spread'], saal).issues[0].kind, 'layout');
+  assert.match(pageSequence(['right', 'spread', 'spread'], saal).issues[0].text, /Saal has no single pages at the book ends/);
   assert.equal(spanFits('right', saal), false);
   assert.equal(spanFits('left', blurb), true);
 });

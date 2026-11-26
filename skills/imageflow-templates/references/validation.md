@@ -18,6 +18,6 @@ When a spread renders:
 
 At export:
 
-- The format's checks: page count rule, transparency policy, fonts, resolution of each placed photo, file size. A page count the format does not take, or a page sequence that does not fit it (`page-sequence`), is a warning while the book is edited and checked, naming the pages to fill or remove ("2 pages to fill before export, or 2 pages to remove"); export and the proof report it as an error.
+- The format's checks: page count rule, transparency policy, fonts, resolution of each placed photo, file size. A page count the format does not take, or book ends that do not fit it (`page-sequence`), is a warning while the book is edited and checked, naming the pages to fill or remove ("2 pages to fill before export, or 2 pages to remove"); export and the proof report it as an error. A layout of the wrong kind or side for the format (`layout-format-mismatch`) is an error everywhere.
 
 Errors in edit mode appear in Book check. PDF export reports layout errors and PDF preflight failures, then asks whether to export anyway. It still requires a successful render and correct PDF page count and dimensions. Warnings do not require confirmation.

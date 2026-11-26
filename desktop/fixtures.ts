@@ -134,7 +134,7 @@ export function fixtureDraft(template: TemplateInfo, format: string, cells: Fixt
 
 export const fixtureNotEvaluated = [
   'Photo resolution: synthetic photos stand in for real originals, so photo-resolution-low findings are omitted.',
-  'Page count, page sequence and book ends: fixture books place layouts side by side regardless of span.',
+  'Page count, page sequence, book ends and layouts that do not fit the format: fixture books place layouts side by side regardless of span.',
   'Anchors declared on other spreads, document parameter and book-level findings: see the saved-book diagnostics.',
   'Parameters other than strings and files keep their declared defaults, or the values in params and document; crops use the default fill.',
   'File parameters get valid synthetic files only for types with built-in samples (' + Object.keys(fixtureFiles).join(', ') + '); others stay unassigned except in malformed-files.',
@@ -142,7 +142,7 @@ export const fixtureNotEvaluated = [
   'Print preflight.',
 ];
 // Findings that describe the synthetic book's arrangement rather than the layout under test.
-const ignoredCodes = new Set(['page-sequence', 'photo-resolution-low', 'anchor-missing', 'anchor-ambiguous', 'project-input', 'format-unavailable']);
+const ignoredCodes = new Set(['page-sequence', 'layout-format-mismatch', 'photo-resolution-low', 'anchor-missing', 'anchor-ambiguous', 'project-input', 'format-unavailable']);
 
 export function fixtureFindings(diagnostics: AuthoringDiagnostic[], cells: FixtureCell[], format: string) {
   const bySpread = new Map(cells.map((cell) => [cell.spread, cell]));

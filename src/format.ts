@@ -285,17 +285,25 @@ function endIssue(span: Span, index: number, count: number, format: Pick<PrintFo
     : ', but ' + format.label + ' has no single pages at the book ends. Switch it to a full spread layout.');
 }
 
+/**
+ * One way a book's pages do not fit its format. `count`: the page count is one the format does not take; `end`: a
+ * spread sits where the format requires a single opening or closing page, or the closing page is missing. Both happen
+ * while a book grows. `layout`: a layout of the wrong kind or side for the format, after a format switch or a wrong
+ * layout choice.
+ */
+export type SequenceIssue = { text: string; kind: 'count' | 'end' | 'layout' };
+
 export function pageSequence(spans: (Span | { span: Span; sides?: readonly ('left' | 'right')[] })[], format: Pick<PrintFormat, 'label' | 'structure'>) {
   let count = 0;
-  const issues: string[] = [];
+  const issues: SequenceIssue[] = [];
   const facing = hasFacingPages(format);
   const spreads = spans.map((entry, index) => {
     const { span, sides: allowedSides } = typeof entry === 'string' ? { span: entry } : entry;
     if (!facing) {
       // A layout for facing pages in a format without them is still drawn, on one page, and reported.
       if (span !== 'page') {
-        issues.push('Page ' + (count + 1) + ' uses a ' + (span === 'spread' ? 'spread' : 'single ' + span + ' page') + ' layout, but ' +
-          format.label + ' has no facing pages. Switch it to a single-page layout.');
+        issues.push({ kind: 'layout', text: 'Page ' + (count + 1) + ' uses a ' + (span === 'spread' ? 'spread' : 'single ' + span + ' page') + ' layout, but ' +
+          format.label + ' has no facing pages. Switch it to a single-page layout.' });
       }
       const page: UnitPages = { number: ++count };
       return { span, page, sides: ['page'] as PrintSide[] };
@@ -304,10 +312,12 @@ export function pageSequence(spans: (Span | { span: Span; sides?: readonly ('lef
     const shown = span === 'page' ? required : span;
     if (!spanAllowedAt(span, index, spans.length, format, allowedSides)) {
       issues.push(span === 'page' && required !== 'spread' && allowedSides && !allowedSides.includes(required as 'left' | 'right')
-        ? 'Spread ' + (index + 1) + ' requires a single ' + required + ' page, but this layout allows only the ' + allowedSides.join(' and ') + ' side. Choose a page layout that allows ' + required + '.'
+        ? { kind: 'layout', text: 'Spread ' + (index + 1) + ' requires a single ' + required + ' page, but this layout allows only the ' + allowedSides.join(' and ') + ' side. Choose a page layout that allows ' + required + '.' }
         : span === 'page' && required === 'spread'
-          ? 'Spread ' + (index + 1) + ' uses a single-page layout without being shown as pages. Choose a spread layout or split it into page layouts.'
-          : endIssue(shown, index, spans.length, format));
+          ? { kind: 'layout', text: 'Spread ' + (index + 1) + ' uses a single-page layout without being shown as pages. Choose a spread layout or split it into page layouts.' }
+          // With single ends, a spread at an end or a single page between them is where a growing book is between its
+          // ends; a format without single ends has no single pages at all.
+          : { kind: hasSingleEnds(format) ? 'end' : 'layout', text: endIssue(shown, index, spans.length, format) });
     }
     const left = shown === 'right' ? undefined : ++count;
     const right = shown === 'left' ? undefined : ++count;
@@ -318,7 +328,7 @@ export function pageSequence(spans: (Span | { span: Span; sides?: readonly ('lef
   });
   // A book of one spread may open correctly, but it cannot close on a single left page too.
   if (facing && hasSingleEnds(format) && spans.length === 1 && spreads[0].span === 'right') {
-    issues.push('The book has only its opening page, but ' + format.label + " requires it to close on a single left page. Add a layout with span: 'left' at the end.");
+    issues.push({ kind: 'end', text: 'The book has only its opening page, but ' + format.label + " requires it to close on a single left page. Add a layout with span: 'left' at the end." });
   }
   const { min, max, step } = format.structure.pageCount;
   const shortfall = pageCountShortfall(count, format.structure.pageCount);
@@ -327,9 +337,8 @@ export function pageSequence(spans: (Span | { span: Span; sides?: readonly ('lef
     const todo = shortfall.add !== undefined
       ? pages(shortfall.add) + ' to fill before export' + (shortfall.remove !== undefined ? ', or ' + pages(shortfall.remove) + ' to remove' : '')
       : pages(shortfall.remove!) + ' to remove before export';
-    issues.push('Page count is ' + count + '. ' + format.label + ' requires ' + min + '–' + max + ' pages' + (step > 1 ? ' in steps of ' + step : '') + ': ' + todo + '.');
+    issues.push({ kind: 'count', text: 'Page count is ' + count + '. ' + format.label + ' requires ' + min + '–' + max + ' pages' + (step > 1 ? ' in steps of ' + step : '') + ': ' + todo + '.' });
   }
-  // The page-count finding, when there is one, is the last issue.
   return { spreads, count, issues, ...(shortfall ? { shortfall } : {}) };
 }
 

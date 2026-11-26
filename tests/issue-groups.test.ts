@@ -33,6 +33,10 @@ test('one row per problem, what needs something done first and what is only good
   assert.deepEqual(rowMessages(rows[0], plain), []);
   assert.deepEqual(rowMessages(rows[1], plain), ['Page count is 2.']);
   assert.equal(occurrenceText(rows[1], rows[1].items[0], plain), undefined);
+  // A layout that does not fit the format has its own row, apart from the pages to fit before export.
+  assert.deepEqual(checkRows({ errors: [{ message: 'Page 2 uses a spread layout, but Calendar has no facing pages.', code: 'layout-format-mismatch' }],
+    warnings: [{ message: 'Page count is 2.', code: 'page-sequence' }] }).map(({ level, title }) => [level, title]),
+  [['error', 'Layouts don’t fit the format'], ['warning', 'Pages to fit the format before export']]);
   assert.deepEqual(rows[2].items.map((issue) => occurrenceText(rows[2], issue, plain)), ['Original missing: /Photos/a.jpg', 'Original missing: /Photos/b.jpg']);
   assert.equal(occurrenceText(rows[3], rows[3].items[0], plain), '4.2 pt, needs 6');
 });
