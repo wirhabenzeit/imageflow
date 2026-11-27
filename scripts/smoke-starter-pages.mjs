@@ -9,6 +9,9 @@ import { copySample } from '../desktop/sample-book.mjs';
 import { closeApp, menuAction, pickLayout, testBook } from './ui-actions.mjs';
 
 // The shipped starter, rather than a synthetic page template: real pictures, text flow, folios and export.
+// The starter's detail grid leaves two of its four boxes for the reader's own photos: those, and only those, are reported
+// as empty photo boxes (photo-box-empty).
+const sampleWarnings = (warnings) => warnings.filter(({ code, spread, box }) => !(code === 'photo-box-empty' && spread === 'details' && ['third', 'fourth'].includes(box)));
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'starter-pages-'));
 const folder = join(work, 'Starter Pages.imageflow');
@@ -77,7 +80,7 @@ try {
   assert.ok(initial.flow['arriving:' + textSide + ':body'], 'The starter text flow has a page-scoped key');
 
   console.log('Starter warnings: ' + JSON.stringify(initial.warnings));
-  assert.deepEqual(initial.warnings, [], 'The unedited starter has no Book check warnings');
+  assert.deepEqual(sampleWarnings(initial.warnings), [], 'The unedited starter has no other Book check warnings');
   console.log('Starter render passed: 32 pages, 11 split sheets, three genuine spread designs, clean findings, anchors and picture list.');
   const rerendered = async action => {
     const before = await w.locator(ready).getAttribute('data-revision');
@@ -183,7 +186,7 @@ try {
     const current = await status();
     assert.equal(current.template.formatId, format);
     console.log(format + ' warnings: ' + JSON.stringify(current.warnings));
-    assert.deepEqual(current.warnings, [], format + ' Book check warnings');
+    assert.deepEqual(sampleWarnings(current.warnings), [], format + ' Book check warnings');
     assert.deepEqual(current.errors, [], format + ' errors: ' + JSON.stringify(current.errors));
     const output = join(work, 'Starter-' + format + '.pdf');
     await app.evaluate(({ dialog }, output) => {
@@ -217,7 +220,7 @@ try {
   assert.equal(reopenedStatus.pages, 32);
   console.log('Reopened warnings: ' + JSON.stringify(reopenedStatus.warnings));
   assert.deepEqual(reopenedStatus.errors, []);
-  assert.deepEqual(reopenedStatus.warnings, []);
+  assert.deepEqual(sampleWarnings(reopenedStatus.warnings), []);
   assert.deepEqual(await readBook(), savedBeforeClose, 'Closing and reopening preserves all page states exactly');
   console.log('Save, close and reopen preserves the schema-2 book and clean 32-page render.');
   await mkdir(join(root, '.build', 'testing'), { recursive: true });
