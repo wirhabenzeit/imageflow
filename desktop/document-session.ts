@@ -39,6 +39,7 @@ import { importIntoProject, importProvidedPhotos, loadProject, projectSummary, r
 import type { ImportProgress } from './project';
 import type { OpenProject } from './project';
 import { photoExtensions } from './photos';
+import { importablePhotoExtensions } from './photo-decode';
 import { photosDrop } from './photos-drop';
 import { photosLibrary, photosLibraryOf } from './photos-library';
 import type { PhotosAccess } from './photos-library';
@@ -1625,7 +1626,7 @@ export class DocumentSession {
     if (!paths) {
       const photo = request.kind === 'photo';
       const file = request.kind === 'file';
-      const extensions = photo ? [...photoExtensions] : file ? request.accept! : ['.md'];
+      const extensions = photo ? [...importablePhotoExtensions(photoExtensions)] : file ? request.accept! : ['.md'];
       const choice = await dialog.showOpenDialog(owner, {
         title: !request.kind ? 'Import' : photo ? 'Import Photos' : file ? 'Choose File' : 'Import Markdown',
         properties: !request.kind ? ['openFile', 'openDirectory', 'multiSelections'] : request.folder ? ['openDirectory'] : file ? ['openFile'] : ['openFile', 'multiSelections'],

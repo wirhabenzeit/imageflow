@@ -80,12 +80,6 @@ function PagePaper({ context, bled = false, children }: {
   </Page>;
 }
 
-function Caption({ context, box, rect, className = 'caption' }: {
-  context: Pick<Context, 'geometry'>; box: { params: { caption: boolean }; photo: Photo | null }; rect: Rect; className?: string;
-}) {
-  return box.params.caption && box.photo?.caption ? <p className={className} style={context.geometry.css(rect)}>{box.photo.caption}</p> : null;
-}
-
 /** A shade over the lower part of a photo, so white type stays readable. It never takes a click from the photo. */
 const Shade = ({ context, rect }: { context: Pick<Context, 'geometry'>; rect: Rect }) =>
   <div className="shade" style={context.geometry.css(rect)} />;
@@ -100,10 +94,11 @@ const oneLine = (text: string) => plainText(text).replace(/\s+/g, ' ').trim();
 // A Markdown file may name itself in a YAML header (`title: Arriving`), read from `text.meta`. Anything else there is
 // ignored, and a title that is not a string is as if there were none.
 const sourceTitle = (text: FlowPosition | null) => typeof text?.meta.title === 'string' ? oneLine(text.meta.title) : '';
-// For layouts that draw the photo's caption. Declare the toggle only where it has an effect: the editor shows a
-// control for every declared parameter. The value is shared by every layout with this box, so it returns when the
-// spread switches back to a layout that draws captions.
-const caption = p.boolean({ label: 'Show caption', default: false, shows: 'caption', description: 'Prints the caption saved with the photo. To edit it, select the photo and choose Caption…, or right-click it and choose Edit Caption….' });
+// For layouts that draw the photo's caption with `<ctx.Caption box="hero" />`, which prints it only while this toggle is
+// on and lets the user click it on the page to type it. Declare the toggle only where it has an effect: the editor
+// shows a control for every declared parameter. The value is shared by every layout with this box, so it returns when
+// the spread switches back to a layout that draws captions.
+const caption = p.boolean({ label: 'Show caption', default: false, shows: 'caption', description: 'Prints the caption saved with the photo. To edit it, click it on the page, select the photo and choose Caption…, or right-click it and choose Edit Caption….' });
 const captioned = (label: string) => box.photo(label, { caption });
 const columns = p.enum({ label: 'Columns', default: '1', options: ['1', '2', '3'], labels: { 1: 'Full width', 2: '2 columns', 3: '3 columns' } });
 const body = (label: string, flowOrder = 1) => box.markdown(label, { flowOrder, parameters: { columns } });
@@ -306,7 +301,7 @@ const compass = <svg viewBox="0 0 100 100" aria-hidden="true">
 
 export default defineTemplate({
   id: 'imageflow-starter',
-  version: '0.13.3',
+  version: '0.13.4',
   label: 'Photobook',
   description: 'A travel journal with full-bleed photographs, stories, grids, maps and a picture list, in a light or a dark theme.',
   preview: './preview.jpg',
@@ -428,7 +423,7 @@ export default defineTemplate({
         const at = ctx.geometry.design(canvas);
         return <PagePaper context={ctx} bled>
           <ctx.PhotoBox id="hero" rect={ctx.geometry.page('bleed')} />
-          <Caption context={ctx} box={ctx.boxes.hero} className="caption overlay" rect={at.page(margin, 266, page - 2 * margin, 10)} />
+          <ctx.Caption box="hero" className="caption overlay" rect={at.page(margin, 266, page - 2 * margin, 10)} />
         </PagePaper>;
       },
     }),
@@ -438,7 +433,7 @@ export default defineTemplate({
         const at = ctx.geometry.design(canvas);
         return <PagePaper context={ctx}>
           <ctx.PhotoBox id="hero" rect={at.page(30, 44, 230, 190)} />
-          <Caption context={ctx} box={ctx.boxes.hero} rect={at.page(30, 240, 230, 20)} />
+          <ctx.Caption box="hero" className="caption" rect={at.page(30, 240, 230, 20)} />
         </PagePaper>;
       },
     }),
@@ -448,7 +443,7 @@ export default defineTemplate({
         const at = ctx.geometry.design(canvas);
         return <PagePaper context={ctx}>
           <ctx.PhotoBox id="hero" rect={at.page(48, 36, 194, 216)}>{ShapedPhoto}</ctx.PhotoBox>
-          <Caption context={ctx} box={ctx.boxes.hero} className="caption centred" rect={at.page(48, 258, 194, 10)} />
+          <ctx.Caption box="hero" className="caption centred" rect={at.page(48, 258, 194, 10)} />
         </PagePaper>;
       },
     }),
@@ -569,7 +564,7 @@ export default defineTemplate({
         const at = ctx.geometry.design(canvas);
         return <Paper context={ctx} bled={{ left: true, right: true }}>
           <ctx.PhotoBox id="hero" rect={ctx.geometry.spread('bleed')} />
-          <Caption context={ctx} box={ctx.boxes.hero} className="caption overlay" rect={at.left(margin, 266, 2 * page - 2 * margin, 10)} />
+          <ctx.Caption box="hero" className="caption overlay" rect={at.left(margin, 266, 2 * page - 2 * margin, 10)} />
         </Paper>;
       },
     }),

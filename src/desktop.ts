@@ -162,7 +162,7 @@ export type ProjectSummary = ProjectFiles & {
   sources?: Record<string, SourceStatus>;
 };
 // `existing`: files the book already holds, linked or copied, found by path or by content; they are not added again.
-// `heic`: how many of the skipped files are HEIC photos, which the notice names.
+// `heic`: how many of the skipped files are HEIC photos, which the notice names (where this Mac cannot decode them).
 export type ImportCounts = { photos: number; texts: number; files: number; skipped: number; failed: number; existing?: number; heic?: number };
 export type Result<T> = { value: T } | { error: string; code?: 'BOOK_BUSY' };
 /**
@@ -273,7 +273,10 @@ export type LeftoverFile = { path: string; size: number; modified: number };
 export type ContextMenuItem = import('./commands').RegisteredCommand | { command: import('./commands').RegisteredCommand; value?: string; label?: string; enabled?: boolean; checked?: boolean; items?: ContextMenuItem[] } | { type: 'separator' };
 export type ContextMenuResult = { command: import('./commands').RegisteredCommand; value?: string };
 export type SourceCommand = { action: 'place'; keys: string[] } | { action: 'jump'; spread: string };
-export type PopupItem = { id?: string; label?: string; type?: 'separator'; enabled?: boolean; checked?: boolean; toolTip?: string; submenu?: PopupItem[] };
+// `shortcut`: a key shown beside the item, such as `Backspace`, which the page handles itself (see `popupShortcuts`).
+export type PopupItem = { id?: string; label?: string; type?: 'separator'; enabled?: boolean; checked?: boolean; toolTip?: string; shortcut?: string; submenu?: PopupItem[] };
+/** The keys a popup menu item may show; the menu only shows them and registers none. */
+export const popupShortcuts = new Set(['Backspace', 'Delete']);
 export type MarkdownState = {
   id: string; name: string; path: string; external: boolean; text: string; version: number; basis: number;
   dirty: boolean; saving: boolean; closing?: boolean; error?: string; conflict?: string;
@@ -499,6 +502,9 @@ export type BookGeometry = {
   // `page` is the page the node is on, for every target: occurrences are counted per page.
   targets: (Rect & { spread: string; page?: PageSide; edits: string[]; occurrence: number; owner?: { type: 'box' | 'element'; id: string }; upright?: boolean;
     inlineText?: boolean;
+    // The photo box whose photo's caption a ctx.Caption node shows (UI-019). Such a target edits no parameter, so
+    // `edits` is empty and it is numbered among the other caption nodes of its page; `inlineText` is set too.
+    caption?: string;
     // True for text in a vertical writing mode, whose lines run down the rectangle.
     vertical?: boolean;
     textFallback?: { parameter: string; text: string; label: string } })[];

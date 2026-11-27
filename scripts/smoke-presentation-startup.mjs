@@ -170,6 +170,47 @@ try {
     assert.equal(await proof.locator('.if-present-crop:visible img[data-src]').evaluate(image => image.naturalWidth),
       Math.min(1800, Number((await proof.locator('.if-present-crop:visible img[data-src]').getAttribute('src')).split('/').pop())),
       'Leaving overview restores full photo quality');
+    // Pinch to zoom (UI-021): the artwork enlarges around the pointer, a two-finger swipe pans rather than turning the
+    // spread, and ⌘0, a double-click, Escape and turning the spread each show it whole; a second Escape still ends it.
+    const transform = () => page.locator('.presentation-stage').evaluate((stage) => stage.style.transform);
+    const zoomedTo = (zoomed) => page.waitForFunction((zoomed) => document.querySelector('.presentation-stage').style.transform.includes('scale') === zoomed, zoomed);
+    const wheel = (init) => page.locator('.presentation').evaluate((host, init) => host.dispatchEvent(new WheelEvent('wheel',
+      { clientX: 200, clientY: 150, bubbles: true, cancelable: true, ...init })), init);
+    const pinch = async () => { await wheel({ ctrlKey: true, deltaY: -100 }); await zoomedTo(true); };
+    const showing = (photo) => proof.locator('.if-present-crop:visible img[data-src][src*="/' + photo + '/"]').waitFor();
+    await pinch();
+    const before = await transform();
+    await wheel({ deltaX: -100 });
+    await page.waitForFunction((before) => document.querySelector('.presentation-stage').style.transform !== before, before);
+    await showing('p39');
+    await page.keyboard.press('Meta+0');
+    await zoomedTo(false);
+    // On a Mac the View menu takes ⌘+, ⌘− and ⌘0 before the page does: with the presentation focused, they zoom it.
+    const presentationMenu = async (id) => {
+      const windowId = await app.browserWindow(page).then((window) => window.evaluate((window) => window.id));
+      assert.ok(await app.evaluate(({ Menu, BrowserWindow }, { id, windowId }) => {
+        const item = Menu.getApplicationMenu().getMenuItemById(id);
+        if (!item.enabled) return false;
+        item.click(item, BrowserWindow.fromId(windowId)); return true;
+      }, { id, windowId }), id + ' is enabled in the presentation');
+    };
+    await presentationMenu('zoom-in');
+    await zoomedTo(true);
+    await presentationMenu('zoom-actual');
+    await zoomedTo(false);
+    await pinch();
+    await page.mouse.dblclick(300, 300);
+    await zoomedTo(false);
+    await showing('p39');
+    await pinch();
+    await page.keyboard.press('Escape');
+    await zoomedTo(false);
+    assert.equal(page.isClosed(), false, 'The first Escape returns an enlarged spread to the whole');
+    await pinch();
+    await page.keyboard.press('ArrowLeft');
+    // Spread 38 shows the fallback photo, so the indicator tells the spread.
+    await page.waitForFunction(() => document.querySelector('.presentation-indicator').textContent.includes('39 / 40'));
+    await zoomedTo(false);
     const closed = page.waitForEvent('close');
     await page.keyboard.press('Escape').catch((error) => { if (!page.isClosed()) throw error; });
     await closed;

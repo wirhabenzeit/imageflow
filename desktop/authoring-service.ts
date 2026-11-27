@@ -25,6 +25,7 @@ import { spreadByPrefix } from '../src/preview';
 import type { InspectionRequest } from '../src/inspection';
 import { inspectionPrints } from '../src/photo-resolution';
 import { photoExtensions } from './photos';
+import { importablePhotoExtensions } from './photo-decode';
 import { heicAdvice, isHeic } from '../src/import-feedback';
 import { captureFields } from '../src/photo-metadata';
 import type { CaptureMetadata } from '../src/photo-metadata';
@@ -312,6 +313,12 @@ export const loadedPhoto = (book: OpenProject) => (id: string) => {
   return photo && { width: photo.width, height: photo.height, caption: photo.provided?.caption };
 };
 
+/**
+ * Whether a photo's capture time is at this Mac's UTC offset rather than its own (API-020): an Apple Photos photo whose
+ * original's offset, and place, ImageFlow has not read yet. The time is then right as an instant but its wall clock may
+ * be hours off.
+ */
+export const offsetGuessOf = (photo: { extra?: Record<string, unknown> } | undefined) => photo?.extra?.offsetGuessed === true ? { capturedOffsetGuessed: true } : {};
 /** A photo's size in pixels for the sources view, where it is known. */
 export const pixelsOf = (photo: { width?: number; height?: number } | undefined) =>
   photo?.width && photo.height ? { width: photo.width, height: photo.height } : {};
@@ -912,7 +919,8 @@ export function createAuthoringService(hooks: Hooks) {
           // Capture time, location and camera come from the loaded photo file, next to what photos.json records.
           ...Object.entries(photos ?? {}).map(([id, source]) => ({ kind: 'photo', id, ...source, ...captureOf(session.book.photos.get(id) ?? session.book.unavailablePhotos?.[id]),
             // The original's size in pixels, where it is known (API-021, 26 Nov).
-            ...pixelsOf(session.book.photos.get(id) ?? session.book.unavailablePhotos?.[id]), usage: sourcePlaces(usage.photo[id]) })),
+            ...pixelsOf(session.book.photos.get(id) ?? session.book.unavailablePhotos?.[id]),
+            ...offsetGuessOf(session.book.photos.get(id) ?? session.book.unavailablePhotos?.[id]), usage: sourcePlaces(usage.photo[id]) })),
           ...Object.entries(project?.texts ?? {}).map(([id, path]) => ({ kind: 'text', id, path: sourcePath(path), linked: sourceLinked(path), usage: sourcePlaces(usage.text[id]) })),
           ...Object.entries(project?.files ?? {}).map(([id, path]) => ({ kind: 'file', id, path: sourcePath(path), linked: sourceLinked(path) })),
         ] : view === 'cover' ? (project?.cover ? [project.cover] : [])
@@ -1065,7 +1073,8 @@ export function createAuthoringService(hooks: Hooks) {
         notice: 'The source already has this name. Nothing was changed.' };
       result = { state: 'ready', project: session.handle, committed: true, revision: null, ...renamed(next!, entry.id) };
     } else {
-      const extensions = args.kind === 'photo' ? photoExtensions : new Set(args.kind === 'markdown' ? ['.md'] : args.accept);
+      // HEIC photos where macOS decodes them here (#328).
+      const extensions = args.kind === 'photo' ? importablePhotoExtensions(photoExtensions) : new Set(args.kind === 'markdown' ? ['.md'] : args.accept);
       const paths: string[] = [];
       let size = 0;
       for (const path of args.paths as string[]) {

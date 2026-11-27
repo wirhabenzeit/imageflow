@@ -259,7 +259,10 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .source-item { position: relative; flex: none; height: 114px; display: grid; border: 1px solid var(--control-border); border-radius: 6px; background: var(--control-surface); cursor: default; user-select: none; overflow: hidden; }
 .source-item:hover { border-color: var(--in-view); }
 .source-item[aria-selected="true"] { border-color: var(--accent); box-shadow: 0 0 0 1.5px var(--accent); background: var(--selection-surface); }
-.source-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* One ring per photo (UI-022): a selected photo with keyboard focus shows its selection only; one with focus but not
+   selected (after Command-click took it out) a thin dashed ring, which doesn't read as a second selection. */
+.source-item:focus-visible { outline: 1px dashed var(--accent); outline-offset: 2px; }
+.source-item[aria-selected="true"]:focus-visible { outline: none; }
 .source-photo { width: 118px; grid-template-rows: minmax(0, 1fr) 22px; }
 .source-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .source-photo .source-title { padding: 2px 6px; font-size: 11px; }
@@ -492,6 +495,8 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .inline-text-format .format-bold { font-weight: 700; }
 .inline-text-format .format-italic { font-style: italic; }
 .inline-text-format .format-strike { text-decoration: line-through; }
+/* Where else a caption typed on the page shows, as it belongs to the photo (UI-019). */
+.inline-caption-elsewhere { flex: none; color: var(--muted); font-size: 12px; white-space: nowrap; }
 /* On a narrow canvas the fields wrap onto a second row, so nothing overlaps; the width only follows the canvas. */
 .inline-editor-fields { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0; padding: 0 0 0 10px;
   border-width: 0 0 0 1px; min-width: 0; }
@@ -1135,6 +1140,11 @@ span.source-origin > img.source-origin-app { width: 16px; height: 16px; object-f
 /* Painted, not hidden, like the book view's candidate: a hidden frame showed nothing for a moment once promoted, and may
    not get its size (F-038). It must not take the overview's clicks meanwhile. */
 .presentation .book-frame-pending { pointer-events: none !important; }
+/* The artwork's layer, scaled from its corner while zoomed (UI-021); the presentation clips what extends past the screen. */
+.presentation { overflow: hidden; }
+.presentation-stage { position: absolute; inset: 0; transform-origin: 0 0; }
+.presentation-zoomed { cursor: grab; }
+.presentation-panning { cursor: grabbing; }
 .presentation-idle, .presentation-idle * { cursor: none; }
 .presentation-indicator { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 6px 12px;
   border-radius: 20px; background: #000b; color: #eee; font-size: 12px; opacity: 0; transition: opacity .25s; pointer-events: none; }

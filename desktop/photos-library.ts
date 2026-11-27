@@ -11,8 +11,9 @@ export type PhotosAccess = 'authorized' | 'notDetermined' | 'denied' | 'restrict
 export type PhotosFacts = {
   width: number; height: number; created?: number; latitude?: number; longitude?: number;
   /**
-   * The UTC offset the photo was taken at, in minutes: its original's own (EXIF) once the addon has read it. Until
-   * then, and for an original that records none, this Mac's offset at that instant, and `offsetGuessed` is true.
+   * The UTC offset the photo was taken at, in minutes: its original's own (EXIF) once the addon has read it, or its
+   * place's where the original is not on this Mac or records none. Until then, and where neither tells, this Mac's
+   * offset at that instant, and `offsetGuessed` is true.
    */
   offsetMinutes?: number; offsetGuessed?: boolean;
   /** The last edit or revert, or null for a photo never edited; absent before macOS 15. */
@@ -38,6 +39,10 @@ export interface PhotosLibrary {
   pick(window: Buffer): Promise<string[]>;
   /** Closes the picker, which then answers []: for its window closing while it is open. */
   cancelPick(): void;
+  /** An image file's upright size, alpha and number of pictures, read by ImageIO without decoding; null where it can't (#328). */
+  imageInfo(path: string): { width: number; height: number; alpha: boolean; count: number } | null;
+  /** Decodes an image file through ImageIO, upright, into a TIFF at `file` (at most `size` px), or only checks it decodes (#328). */
+  decode(path: string, options?: { file?: string; size?: number }): Promise<{ width: number; height: number }>;
 }
 
 let loaded: PhotosLibrary | null | undefined;
@@ -49,6 +54,9 @@ export function photosLibrary(): PhotosLibrary | undefined {
   }
   return loaded ?? undefined;
 }
+
+/** Uses `library` as the addon: for tests, which run outside the staged app and load the built addon themselves. */
+export function providePhotosLibrary(library: PhotosLibrary | null) { loaded = library; }
 
 /** The part of a path that names a Photos library bundle, if the path is inside one. */
 export const photosLibraryOf = (path: string) => /^(.*?\.photoslibrary)(?:\/|$)/i.exec(path)?.[1];

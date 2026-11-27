@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import type { ProjectSummary } from './desktop';
 import type { SourceUsage } from './editing';
 import type { Edit } from './Inspector';
-import { resolveValue } from './parameters';
+import { captionSwitch, resolveValue } from './parameters';
 import type { Parameters } from './parameters';
 import type { ProjectFiles, SpreadState } from './project';
 import { photoName } from './source-locations';
@@ -13,9 +13,7 @@ import { photoName } from './source-locations';
 /** What a photo box needs to edit the caption of its photo. */
 export type CaptionEditing = { edit: (change: Edit, notice?: string) => void; usage: SourceUsage };
 
-/** The box parameter that says whether the photo's caption shows (`p.boolean({ shows: 'caption' })`), if one does. */
-export const captionSwitch = (parameters: Parameters | undefined) =>
-  Object.keys(parameters ?? {}).find((key) => { const param = parameters![key]; return param.type === 'boolean' && param.shows === 'caption'; });
+export { captionSwitch };
 
 type CaptionBoxes = { boxes: Record<string, { type?: string; parameters?: Parameters }> };
 type CaptionLayouts = { spreads: Record<string, CaptionBoxes>; coverLayouts?: Record<string, CaptionBoxes> };

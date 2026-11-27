@@ -14,6 +14,7 @@ import { renderOrigin } from '../src/desktop';
 import type { ImportCounts, ImportRequest, ProjectSummary } from '../src/desktop';
 import { isHeic } from '../src/import-feedback';
 import { importPhotoDetails, photoDetails, photoExtensions } from './photos';
+import { importablePhotoExtensions } from './photo-decode';
 import { renditionCacheFor } from './rendition-cache';
 import { photoDate } from './capture-time';
 import type { ProjectPhoto } from './photos';
@@ -627,6 +628,8 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
   // First check every file, several at a time, without changing anything; then add them in the chosen order.
   type Checked = { file: string; kind: 'photo' | 'markdown' | 'file'; info: import('node:fs').Stats } | 'skipped' | 'failed';
   const checked: Checked[] = new Array(paths.length);
+  // HEIC photos where macOS decodes them here (#328): the book links or stores the HEIC itself.
+  const photoTypes = importablePhotoExtensions(photoExtensions);
   let done = 0;
   let next = 0;
   progress?.({ done, total: paths.length });
@@ -636,8 +639,8 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
     const extension = extname(file).toLowerCase();
     // Without a kind, photos and Markdown are recognised by type. Other files are imported only when a file
     // parameter of the template accepts their extension; nothing else is guessed.
-    const kind = request.kind ?? (photoExtensions.has(extension) ? 'photo' : extension === '.md' ? 'markdown' : request.accept?.includes(extension) ? 'file' : undefined);
-    const extensions = kind === 'photo' ? photoExtensions : kind === 'file' ? new Set(request.accept) : new Set(['.md']);
+    const kind = request.kind ?? (photoTypes.has(extension) ? 'photo' : extension === '.md' ? 'markdown' : request.accept?.includes(extension) ? 'file' : undefined);
+    const extensions = kind === 'photo' ? photoTypes : kind === 'file' ? new Set(request.accept) : new Set(['.md']);
     if (!info.isFile() || !kind || !extensions.has(extension)) return 'skipped';
     try {
       if (kind === 'photo') await importPhotoDetails(file);

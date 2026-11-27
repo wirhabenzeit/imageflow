@@ -19,7 +19,8 @@ import type { Materialized, MaterializeOptions, Observed, ProvidedFacts, Repair,
  *   not discard a full-resolution download from iCloud that `revision` keys in the source cache.
  * - The capture time is the creation date at the offset the original records (EXIF OffsetTimeOriginal), which the
  *   addon reads in the background from originals on this Mac and then reports as a change, so a book records it
- *   anew. Until then, or where the original records none, it is at this Mac's offset, marked `offsetGuessed`.
+ *   anew. Where the original is only in iCloud or records none, the time zone of the place it was taken stands in
+ *   (API-020). Until then, or where neither tells, it is at this Mac's offset, marked `offsetGuessed`.
  * - Previews and originals are rendered by Photos as they are now, downloaded from iCloud where the photo is not on
  *   this Mac (with Optimize Mac Storage, most are not): about a second per preview, two to four per original.
  * - A photo is `denied` while ImageFlow may not read the library, `offline` while its library or iCloud cannot be

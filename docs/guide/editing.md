@@ -32,12 +32,12 @@ These flows can be tested in the editor now. Page-level MCP mutation commands ar
 
 ## Photos
 
-- **Import:** use **Assets → Import…**, the Sources strip's **Import** menu, or drop JPEG, PNG or WebP files onto the strip or a photo box. HEIC photos, as iPhones take them, cannot be imported: export them as JPEG first (in Photos, **File → Export**), or bring them in through Lightroom Classic.
+- **Import:** use **Assets → Import…**, the Sources strip's **Import** menu, or drop JPEG, PNG, WebP, AVIF or HEIC files onto the strip or a photo box. HEIC photos, as iPhones take them, are linked or stored as they are, like any photo; macOS draws them, and an export prints them at full resolution. Photos in Apple Photos are better added from there (drag them in), which also brings along the edits made in Photos.
 - **Place:** drag a photo from the strip onto a photo box. Drag an unselected placed photo onto another box to swap them.
 - **Crop:** click a placed photo, then drag to reposition it. Pinch, Control-scroll or use the toolbar slider to zoom. Each gesture is one undoable edit.
-- **Caption:** select a placed photo and choose **Caption…**, or right-click it and choose **Edit Caption…**. The caption belongs to the photo, wherever it is placed; whether a page prints it is a setting of the template.
+- **Caption:** click a caption printed on the page to type it there (an empty one shows "Add caption" while **Show caption** is on), select a placed photo and choose **Caption…**, or right-click it and choose **Edit Caption…**. Typing on the page works in templates whose pages mark their captions, such as the starter. The caption belongs to the photo, wherever it is placed; whether a page prints it is a setting of the template.
 - **Check resolution:** the crop toolbar compares print resolution with the template's minimum and target.
-- **Replace or remove:** use **More photo actions** for **Replace photo…**, **Remove photo** and **Crop values…**. Empty boxes offer **Choose photo…**.
+- **Replace or remove:** use **More photo actions** for **Replace photo…**, **Remove photo** and **Crop values…**. With a photo selected, Backspace or Delete removes it from the box too; the photo stays in the book, and Undo brings it back with its crop. Empty boxes offer **Choose photo…**.
 
 Escape, **Done** or a click elsewhere deselects the photo. Select a photo in the Sources strip to edit its title, caption, credit and alt text in the Inspector. To get there from a placed photo, right-click it on the page, or its row under **On this page** (or **On this spread**) in the Inspector, and choose **Show in Assets**; **Quick Look** is in the same menu. Texts offer both too.
 

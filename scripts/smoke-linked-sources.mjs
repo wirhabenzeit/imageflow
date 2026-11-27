@@ -75,6 +75,28 @@ try {
   summary.project.spreads.find(({ id }) => id === 'road').elements.route.params.track = imported.file;
   assert.ok((await page.evaluate((s) => window.imageflow.saveProject(s.id, { project: s.project, photoIndex: s.photoIndex }), summary)).value);
   await reload(page);
+  // A HEIC photo is linked as it is, and the app decodes it through macOS for its renditions (#328).
+  const heic = join(external, 'IMG_0001.HEIC');
+  await cp(join(root, 'tests/fixtures/turned.heic'), heic);
+  const heicImport = await page.evaluate(async (path) => {
+    const { value } = await window.imageflow.currentProject();
+    return window.imageflow.importFiles(value.id, { kind: 'photo', paths: [path] });
+  }, heic);
+  assert.equal(heicImport.value?.counts.photos, 1, JSON.stringify(heicImport));
+  const heicId = heicImport.value.imported[0];
+  await reload(page);
+  assert.deepEqual((await current(page)).photoIndex[heicId].path, heic);
+  // Asked for as the book view asks for a placed photo's, by the URL of one it shows, with the HEIC's id.
+  const bookFrame = page.frames().find((frame) => frame.url().includes('/view/') || frame.url().startsWith('imageflow://render')) ?? page.frames()[1];
+  const heicThumb = await bookFrame.evaluate(async (id) => {
+    const shown = [...document.querySelectorAll('img')].map((image) => image.src).find((src) => /\/(photo|thumb)\/[\w-]+/.test(src));
+    if (!shown) return 'no photo shown';
+    const response = await fetch(shown.replace(/\/(photo|thumb)\/[\w-]+(\/\d+)?/, '/thumb/' + id));
+    if (!response.ok) return response.status;
+    const bitmap = await createImageBitmap(await response.blob());
+    return { width: bitmap.width, height: bitmap.height };
+  }, heicId);
+  assert.deepEqual(heicThumb, { width: 160, height: 240 }, 'an upright thumbnail of the HEIC');
   const crop = (await current(page)).project.spreads.find(({ id }) => id === 'arriving').pages.left.boxes.hero.crops;
   const replacement = join(external, 'New.png');
   await sharp({ create: { width: 3600, height: 2800, channels: 3, background: '#e4b874' } }).png().toFile(replacement);
@@ -128,8 +150,8 @@ try {
   await assert.rejects(stat(race), { code: 'ENOENT' });
   await waitForPage(page, async () => (await window.imageflow.currentProject()).value.sources && !document.querySelector('.preview-state'));
   // Remove all originals. The book stays editable and every source keeps a marked cached view.
-  const photoBytes = await readFile(photo); const textBytes = await readFile(text); const fileBytes = await readFile(file);
-  await Promise.all([photo, text, file].map((path) => rm(path)));
+  const photoBytes = await readFile(photo); const textBytes = await readFile(text); const fileBytes = await readFile(file); const heicBytes = await readFile(heic);
+  await Promise.all([photo, text, file, heic].map((path) => rm(path)));
   await waitForPage(page, async () => Object.values((await window.imageflow.currentProject()).value.sources).filter((source) => (source.kind === 'photo' ? source.locator?.provider === 'linked' : source.linked)).every((source) => source.state === 'missing' && source.cached));
   await ready(page);
   await menuAction(app, 'Assets…');
@@ -173,7 +195,7 @@ try {
   assert.ok(warned.value.errors.some((finding) => finding.code === 'source-unavailable'));
   await stat(proof);
   assert.match(execFileSync('pdftotext', [proof, '-']).toString(), /ORIGINAL UNAVAILABLE/);
-  await Promise.all([writeFile(photo, photoBytes), writeFile(text, textBytes), writeFile(file, fileBytes)]);
+  await Promise.all([writeFile(photo, photoBytes), writeFile(text, textBytes), writeFile(file, fileBytes), writeFile(heic, heicBytes)]);
   await waitForPage(page, async () => Object.values((await window.imageflow.currentProject()).value.sources).every((source) => source.state === 'available'));
   await ready(page);
   await reload(page);
@@ -293,6 +315,8 @@ try {
   await reloadBook(copy);
   await reload(copy);
   assert.ok(Object.values((await current(copy)).sources).every((source) => source.state === 'available'));
+  // The copy stores the HEIC as it is.
+  assert.match((await current(copy)).photoIndex[heicId].path, /^photos\/.*\.HEIC$/);
   console.log('Linked photos, Markdown and parameter files, atomic refresh, cached missing states, export consistency, and portable Save a Copy passed.');
 } catch (error) { console.error(stderr.join('\n')); throw error; }
 finally { await closeApp(app); await rm(work, { recursive: true, force: true }); }

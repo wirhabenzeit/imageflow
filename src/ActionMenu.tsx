@@ -2,7 +2,7 @@ import { Children, isValidElement } from 'react';
 import type { ReactNode, MouseEvent, ReactElement } from 'react';
 import type { PopupItem } from './desktop';
 
-type Button = { children?: ReactNode; disabled?: boolean; title?: string; onClick?: (event: MouseEvent<HTMLButtonElement>) => void };
+type Button = { children?: ReactNode; disabled?: boolean; title?: string; 'aria-keyshortcuts'?: string; onClick?: (event: MouseEvent<HTMLButtonElement>) => void };
 const text = (node: ReactNode): string => Children.toArray(node).map((item) => typeof item === 'string' || typeof item === 'number' ? String(item)
   : isValidElement<{ children?: ReactNode }>(item) ? text(item.props.children) : '').join('');
 
@@ -20,7 +20,9 @@ export function ActionMenu({ label, className, disabled, children }: {
       if (node.type === 'hr') items.push({ type: 'separator' });
       else if (node.type === 'button') {
         const id = String(actions.push(node) - 1);
-        items.push({ id, label: text(node.props.children), enabled: !node.props.disabled, toolTip: node.props.title });
+        items.push({ id, label: text(node.props.children), enabled: !node.props.disabled, toolTip: node.props.title,
+          // A key that does the same where the menu was opened, shown beside the item (the menu does not handle it).
+          ...(node.props['aria-keyshortcuts'] ? { shortcut: node.props['aria-keyshortcuts'] } : {}) });
       } else if (node.type === Submenu) {
         const { label, disabled } = node.props as { label: string; disabled?: boolean };
         items.push({ label, enabled: !disabled, submenu: collect(node.props.children) });

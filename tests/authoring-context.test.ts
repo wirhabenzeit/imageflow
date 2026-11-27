@@ -8,7 +8,7 @@ import { checkedOutput } from './mcp-output-check';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import sharp from 'sharp';
-import { AuthoringError, compactDiagnostics, compactRender, createAuthoringService, isReferenceCall, pixelsOf } from '../desktop/authoring-service';
+import { AuthoringError, compactDiagnostics, compactRender, createAuthoringService, isReferenceCall, offsetGuessOf, pixelsOf } from '../desktop/authoring-service';
 import { checkProject } from '../desktop/check';
 import { importIntoProject, loadProject } from '../desktop/project';
 import { ProjectSession } from '../desktop/project-session';
@@ -1078,4 +1078,10 @@ test('the sources view gives a photo its pixel size where it is known (API-021, 
   assert.deepEqual(pixelsOf({ width: 6000, height: 4000 }), { width: 6000, height: 4000 });
   assert.deepEqual(pixelsOf(undefined), {});
   assert.deepEqual(pixelsOf({ width: 0, height: 4000 }), {});
+});
+
+test('the sources view marks a capture time at a guessed offset (API-020, 26 Nov)', () => {
+  assert.deepEqual(offsetGuessOf({ extra: { offsetGuessed: true, type: 'public.heic' } }), { capturedOffsetGuessed: true });
+  assert.deepEqual(offsetGuessOf({ extra: { type: 'public.heic' } }), {});
+  assert.deepEqual(offsetGuessOf(undefined), {});
 });

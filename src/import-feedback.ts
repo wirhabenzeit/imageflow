@@ -1,6 +1,9 @@
 import type { ImportCounts } from './desktop';
 
-/** What to do with a HEIC photo, which neither Chromium nor the app's image library decodes (UI-013 of 25 November, evening). */
+/**
+ * What to do with a HEIC photo that could not be imported: one this Mac cannot decode (UI-013 of 25 November, evening).
+ * Where macOS decodes it, the book links or stores it like any photo (#328, desktop/photo-decode.ts).
+ */
 export const heicAdvice = 'If they are in Photos or Lightroom Classic, add them from there instead (drag them in from Photos, or import them from Lightroom), which renders them; or export them as JPEG first, for example from Preview.';
 export const isHeic = (path: string) => /\.(heic|heif)$/i.test(path);
 

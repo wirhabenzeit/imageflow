@@ -111,6 +111,10 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
   useEffect(() => {
     const node = list.current?.querySelector<HTMLElement>('[data-id="' + CSS.escape(current ?? '') + '"]');
     node?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    // Keyboard focus follows a photo chosen elsewhere (on the page, by Show in Assets, by typing its name): a focus
+    // ring left on the photo before looked like a second selection (UI-022). Only while the strip has focus.
+    const active = document.activeElement;
+    if (node && active !== node && active instanceof HTMLElement && active.closest('.source-item') && list.current?.contains(active)) node.focus({ preventScroll: true });
   }, [current, tab]);
   useEffect(() => {
     const node = list.current;
@@ -147,11 +151,13 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
     if (step && items.length) {
       event.preventDefault();
       const next = items[at < 0 ? 0 : Math.max(0, Math.min(items.length - 1, at + step))].id;
-      if (event.shiftKey) selection.key(event); else selection.setSelection([next]);
+      // Through the list's own selection, so that the anchor of a later Shift-click or Shift-arrow is the photo the
+      // keys reached, and Shift with left and right extends the selection as with up and down.
+      selection.choose(next, { shiftKey: event.shiftKey });
       focus(next);
     } else if (event.key === 'Home' || event.key === 'End') {
       event.preventDefault();
-      if (items.length) { const id = items[event.key === 'Home' ? 0 : items.length - 1].id; selection.setSelection([id]); focus(id); }
+      if (items.length) { const id = items[event.key === 'Home' ? 0 : items.length - 1].id; selection.choose(id, { shiftKey: event.shiftKey }); focus(id); }
     } else if (event.key === ' ') {
       event.preventDefault();
       // Never the selected photo while a filter hides it: the strip's keys act on what the strip shows.
@@ -166,7 +172,7 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
       : sourceState && sourceFile(sourceState)?.linked && !view.value.showSource ? 'Linked' : undefined;
     const origin = view.value.showSource ? sourceOrigin(sourceState) : undefined;
     const common = {
-      'data-id': id, role: 'option', 'aria-selected': selection.selected.includes(id),
+      'data-id': id, 'data-list-id': id, role: 'option', 'aria-selected': selection.selected.includes(id),
       tabIndex: visibleCurrent === id || (!visibleCurrent && id === items[0]?.id) ? 0 : -1,
       title: title + ' · ' + pagesText(placed, usage.aside?.[tab][id]) + (sourceLabel ? ' · ' + (sourceState?.outOfDate ? outOfDateNote(sourceState) : sourceState?.problem ? [sourceState.problem, unreadableHelp(sourceState)].filter(Boolean).join(' ') : sourceLabel) : ''),
       onClick: (event: React.MouseEvent) => { selection.choose(id, event); choose({ kind: tab, id }); },

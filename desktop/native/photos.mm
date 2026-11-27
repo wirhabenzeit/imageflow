@@ -9,6 +9,7 @@
 // process without `NSPhotoLibraryUsageDescription` in its Info.plist is killed by TCC when it asks for access, so
 // `status()` reports such a process (a development Electron) as unsupported and nothing asks.
 #import <AppKit/AppKit.h>
+#import <CoreLocation/CoreLocation.h>
 #import <Foundation/Foundation.h>
 #import <ImageIO/ImageIO.h>
 #import <Photos/Photos.h>
@@ -324,8 +325,9 @@ static void readOffsets(NSArray<PHAsset *> *assets);
  * { width, height, created (ms since 1970), offsetMinutes (the UTC offset it was taken at), offsetGuessed?, latitude?,
  *   longitude?, adjusted (ms of the last edit or revert, or null), base ('raw' | 'compressed'), caption?, keywords?,
  *   filename?, type?, favorite? (true, or absent) }
- * `offsetMinutes` is the original's own (EXIF OffsetTimeOriginal) once it has been read (`readOffsets`). Until then,
- * and for an original that records none, it is this Mac's offset at that instant, and `offsetGuessed` is true.
+ * `offsetMinutes` is the original's own (EXIF OffsetTimeOriginal) once it has been read (`readOffsets`), or where the
+ * original is not on this Mac or records none, that of the time zone of the place it was taken. Until then, and for a
+ * photo neither tells, it is this Mac's offset at that instant, and `offsetGuessed` is true.
  */
 static napi_value Facts(napi_env env, napi_callback_info info) {
   size_t argc = 1; napi_value argv[1];
@@ -526,6 +528,106 @@ static napi_value Image(napi_env env, napi_callback_info info) {
   return promise;
 }
 
+// ---------- HEIC files (#328)
+// HEIC and HEIF files a book links or stores are decoded here, through ImageIO: neither Chromium nor sharp (whose
+// prebuilt libheif has no HEVC decoder) can. The book keeps the original; desktop/photo-decode.ts makes renditions from
+// what this writes.
+
+static CGImageSourceRef openImage(NSString *path) {
+  return CGImageSourceCreateWithURL((__bridge CFURLRef)[NSURL fileURLWithPath:path], (__bridge CFDictionaryRef)@{(id)kCGImageSourceShouldCache: @NO});
+}
+
+/**
+ * imageInfo(path): the primary picture of an image file as ImageIO reads it, without decoding it: { width, height }
+ * upright (its orientation applied), `alpha`, and `count`, the number of pictures in the file (an iPhone's depth map
+ * and HDR gain map are not among them). Null where ImageIO cannot read the file.
+ */
+static napi_value ImageInfo(napi_env env, napi_callback_info info) {
+  size_t argc = 1; napi_value argv[1];
+  CHECK(napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr));
+  NSString *path = argc ? stringArg(env, argv[0]) : nil;
+  if (!path) { napi_throw_type_error(env, nullptr, "Expected a path."); return nullptr; }
+  @autoreleasepool {
+    CGImageSourceRef source = openImage(path);
+    if (!source) return nullValue(env);
+    NSDictionary *properties = (__bridge_transfer NSDictionary *)CGImageSourceCopyPropertiesAtIndex(source, CGImageSourceGetPrimaryImageIndex(source), nullptr);
+    size_t count = CGImageSourceGetCount(source);
+    CFRelease(source);
+    NSNumber *width = properties[(id)kCGImagePropertyPixelWidth], *height = properties[(id)kCGImagePropertyPixelHeight];
+    if (!width || !height || !count) return nullValue(env);
+    bool turned = [properties[(id)kCGImagePropertyOrientation] integerValue] >= 5;
+    napi_value value = object(env);
+    setProp(env, value, "width", num(env, turned ? height.doubleValue : width.doubleValue));
+    setProp(env, value, "height", num(env, turned ? width.doubleValue : height.doubleValue));
+    setProp(env, value, "alpha", boolean(env, [properties[(id)kCGImagePropertyHasAlpha] boolValue]));
+    setProp(env, value, "count", num(env, count));
+    return value;
+  }
+}
+
+/**
+ * decode(path, { file?, size? }): decodes the primary picture of an image file, upright, in its own colour space and
+ * bit depth, scaled to `size` pixels on its long edge where `size` is smaller. With `file`, writes it there as an
+ * uncompressed TIFF with that colour profile; without, only checks that it decodes. Resolves to { width, height }.
+ */
+static napi_value Decode(napi_env env, napi_callback_info info) {
+  size_t argc = 2; napi_value argv[2];
+  CHECK(napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr));
+  NSString *path = argc > 0 ? stringArg(env, argv[0]) : nil;
+  NSString *file = nil; double size = 0;
+  if (argc > 1) {
+    napi_valuetype type = napi_undefined;
+    napi_typeof(env, argv[1], &type);
+    napi_value value;
+    if (type == napi_object && napi_get_named_property(env, argv[1], "file", &value) == napi_ok) file = stringArg(env, value);
+    if (type == napi_object && napi_get_named_property(env, argv[1], "size", &value) == napi_ok) napi_get_value_double(env, value, &size);
+  }
+  napi_value promise;
+  PendingRef pending = newPending(env, &promise);
+  if (!path) { settle(pending, true, ^(napi_env e) { return errorValue(e, failure(1, @"Expected a path.")); }); return promise; }
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ @autoreleasepool {
+    NSString *name = path.lastPathComponent;
+    CGImageSourceRef source = openImage(path);
+    size_t primary = source ? CGImageSourceGetPrimaryImageIndex(source) : 0;
+    NSDictionary *properties = source ? (__bridge_transfer NSDictionary *)CGImageSourceCopyPropertiesAtIndex(source, primary, nullptr) : nil;
+    NSNumber *width = properties[(id)kCGImagePropertyPixelWidth], *height = properties[(id)kCGImagePropertyPixelHeight];
+    if (!source || !width || !height || CGImageSourceGetStatus(source) != kCGImageStatusComplete) {
+      if (source) CFRelease(source);
+      settle(pending, true, ^(napi_env e) { return errorValue(e, failure(2, [name stringByAppendingString:@" is not a picture macOS can read."])); });
+      return;
+    }
+    double longEdge = MAX(width.doubleValue, height.doubleValue);
+    // A thumbnail made from the picture itself, at full size unless smaller is asked for, is the picture decoded and
+    // turned upright by its orientation, whichever way the file records it (EXIF, or HEIF's own transforms).
+    CGImageRef image = CGImageSourceCreateThumbnailAtIndex(source, primary, (__bridge CFDictionaryRef)@{
+      (id)kCGImageSourceCreateThumbnailFromImageAlways: @YES, (id)kCGImageSourceCreateThumbnailWithTransform: @YES,
+      (id)kCGImageSourceShouldCacheImmediately: @YES, (id)kCGImageSourceThumbnailMaxPixelSize: @(size > 0 && size < longEdge ? size : longEdge)});
+    CFRelease(source);
+    NSError *error = nil;
+    if (!image) error = failure(2, [name stringByAppendingString:@" could not be decoded."]);
+    else if (!file) {
+      // Reading the pixels is what decodes them, from every part of the file even when scaled down: a truncated file
+      // fails here.
+      CFDataRef pixels = CGDataProviderCopyData(CGImageGetDataProvider(image));
+      if (!pixels) error = failure(2, [name stringByAppendingString:@" could not be decoded."]);
+      else CFRelease(pixels);
+    } else {
+      CGImageDestinationRef destination = CGImageDestinationCreateWithURL((__bridge CFURLRef)[NSURL fileURLWithPath:file], (__bridge CFStringRef)UTTypeTIFF.identifier, 1, nullptr);
+      if (!destination) error = failure(2, @"The decoded picture could not be written.");
+      else {
+        CGImageDestinationAddImage(destination, image, nullptr);
+        if (!CGImageDestinationFinalize(destination)) error = failure(2, @"The decoded picture could not be written.");
+        CFRelease(destination);
+      }
+    }
+    size_t decodedWidth = image ? CGImageGetWidth(image) : 0, decodedHeight = image ? CGImageGetHeight(image) : 0;
+    if (image) CGImageRelease(image);
+    if (error) { settle(pending, true, ^(napi_env e) { return errorValue(e, error); }); return; }
+    settle(pending, false, ^(napi_env e) { napi_value value = object(e); setProp(e, value, "width", num(e, decodedWidth)); setProp(e, value, "height", num(e, decodedHeight)); return value; });
+  } });
+  return promise;
+}
+
 /** cancel(id): stops an image request; one that has not started yet is stopped when it would. */
 static napi_value Cancel(napi_env env, napi_callback_info info) {
   size_t argc = 1; napi_value argv[1]; double id_ = 0;
@@ -606,8 +708,8 @@ static ImageFlowPhotosObserver *observer;
  * Photos' Adjust Date & Time is not read), by local identifier: minutes, or NSNull for an original that records none. An
  * original never changes, so what was read holds for the process.
  *
- * They are read in the background, one photo after another, and only where the original is on this Mac: nothing is
- * downloaded from iCloud for them. Reading stops once ImageIO finds an offset, mostly in the first chunk of the file; that
+ * They are read in the background, one photo after another, and only where the original is on this Mac (else its place
+ * says, see `offsetByPlace`): nothing is downloaded from iCloud for them. Reading stops once ImageIO finds an offset, mostly in the first chunk of the file; that
  * the original records none is concluded from the whole file only. A photo whose offset turns out to differ from the
  * guess `facts` gave is reported as changed (`onChanges`), so a book that shows it observes it again and records the
  * right capture time: a few seconds after the first of them, so that many read at once reload a book once. A photo whose original is not on this Mac
@@ -727,6 +829,49 @@ static id readOffset(PHAsset *asset) {
   @synchronized (lock) { return found; }
 }
 
+// ---------- Time zones by place
+
+/*
+ * Where an original is not on this Mac (with Optimize Mac Storage, most are not), or records no offset, the place a
+ * photo was taken says its time zone (API-020): asked of Apple's geocoder, which needs the network but no download of
+ * the original and no location permission, once per cell of about 10 km, so a trip's photos ask a handful of times.
+ * Only from the offsets queue, one at a time: the geocoder throttles many requests at once. A failed lookup (offline,
+ * throttled) tells nothing and is not kept, so the photo is tried again with the others; a place with no time zone
+ * (open sea) is kept as such.
+ */
+static NSMutableDictionary<NSString *, id> *zones = [NSMutableDictionary new];
+static const int64_t zoneTimeout = 15 * NSEC_PER_SEC;
+
+/** The time zone at `location` (NSTimeZone), NSNull where the place has none, or nil where it could not be looked up now. */
+static id zoneAt(CLLocation *location) {
+  CLLocationCoordinate2D at = location.coordinate;
+  NSString *cell = [NSString stringWithFormat:@"%.1f,%.1f", round(at.latitude * 10) / 10, round(at.longitude * 10) / 10];
+  if (id known = zones[cell]) return known;
+  __block id found = nil;
+  dispatch_semaphore_t done = dispatch_semaphore_create(0);
+  CLGeocoder *geocoder = [CLGeocoder new];
+  [geocoder reverseGeocodeLocation:location completionHandler:^(NSArray<CLPlacemark *> *placemarks, NSError *error) {
+    if (!error) found = placemarks.firstObject.timeZone ?: (id)NSNull.null;
+    else if ([error.domain isEqualToString:kCLErrorDomain] && error.code == kCLErrorGeocodeFoundNoResult) found = NSNull.null;
+    dispatch_semaphore_signal(done);
+  }];
+  if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, zoneTimeout))) { [geocoder cancelGeocode]; return nil; }
+  if (found) zones[cell] = found;
+  return found;
+}
+
+/**
+ * What the place of `asset` says of its offset where its original said `own` (see `readOffset`): `own` when it is an
+ * offset; else the offset of the place's time zone at that instant, or what `own` was where the place tells nothing.
+ * Where the lookup failed, nil (try again later) rather than NSNull, so the place is asked again.
+ */
+static id offsetByPlace(PHAsset *asset, id own) {
+  if ([own isKindOfClass:NSNumber.class] || !asset.creationDate || !asset.location || !CLLocationCoordinate2DIsValid(asset.location.coordinate)) return own;
+  id zone = zoneAt(asset.location);
+  if ([zone isKindOfClass:NSTimeZone.class]) return @([(NSTimeZone *)zone secondsFromGMTForDate:asset.creationDate] / 60);
+  return zone ? own : nil;
+}
+
 // Photos whose offset was read and differs from the guess, not reported yet (under offsetsLock).
 static NSMutableArray<NSString *> *offsetsChanged = [NSMutableArray new];
 
@@ -758,7 +903,8 @@ static void readOffsets(NSArray<PHAsset *> *assets) {
   if (!todo.count) return;
   dispatch_async(queue, ^{
     for (PHAsset *asset in todo) { @autoreleasepool {
-      id own = readOffset(asset);
+      // The original's own offset, else its place's (API-020).
+      id own = offsetByPlace(asset, readOffset(asset));
       std::lock_guard<std::mutex> guard(offsetsLock);
       [offsetsQueued removeObject:asset.localIdentifier];
       if (!own) { offsetsTried[asset.localIdentifier] = [NSDate date]; continue; }
@@ -890,6 +1036,7 @@ NAPI_MODULE_INIT() {
   const struct { const char *name; napi_callback fn; } functions[] = {
     {"status", Status}, {"requestAccess", RequestAccess}, {"dragged", Dragged}, {"cloudIdentifiers", CloudIdentifiers},
     {"localIdentifiers", LocalIdentifiers}, {"facts", Facts}, {"image", Image}, {"cancel", Cancel}, {"onChanges", OnChanges}, {"track", Track}, {"pick", Pick}, {"cancelPick", CancelPick},
+    {"imageInfo", ImageInfo}, {"decode", Decode},
   };
   for (const auto &entry : functions) {
     napi_value fn;

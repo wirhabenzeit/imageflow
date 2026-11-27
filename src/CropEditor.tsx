@@ -15,8 +15,10 @@ import type { Dimensions, Placement } from './spread';
 // A box the template draws with a render callback (`custom`) is not covered by a plain copy of the photo: the book frame
 // draws the gesture's placement through the template (`preview`), and the frame here only takes the gestures, so the
 // template's mask or artwork follows the crop. The faded photo still shows around the frame.
-export function CropEditor({ frame, photo, src, placement: saved, inchesPerPixel, resolution, settling, save, close, toolbarHost, custom = false, preview, children }: {
+export function CropEditor({ frame, photo, src, placement: saved, inchesPerPixel, resolution, settling, save, close, remove, toolbarHost, custom = false, preview, children }: {
   frame: Rect; photo: Dimensions; src: string; placement?: Placement; toolbarHost?: HTMLElement | null;
+  // Backspace or Delete: takes the photo out of its box (UI-020), as Remove photo does.
+  remove?: () => void;
   inchesPerPixel?: number; resolution?: { minimum: number; target: number };
   settling: boolean; save: (placement: Placement) => void; close: () => void; custom?: boolean; preview?: (placement: Placement | undefined) => void;
   children?: ReactNode;
@@ -135,6 +137,20 @@ export function CropEditor({ frame, photo, src, placement: saved, inchesPerPixel
     // The nested menu or action panel handles Escape first, before it can end crop editing.
     if (event.key === 'Escape' && toolbar.current?.querySelector('.crop-actions [role="dialog"], .crop-actions details[open]')) return;
     const control = (event.target as HTMLElement).closest?.('button, summary, input, select, textarea, a[href], [role="radio"], [role="option"], [contenteditable]');
+    // A button has no use for Backspace or Delete: they remove the photo from a button that selected it too, such as
+    // the Inspector's Edit button (UI-020). Text fields, lists and menus keep them.
+    const removing = (event.key === 'Backspace' || event.key === 'Delete') && remove && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
+    // Never from inside an open dialog, menu or list, whatever in it has focus: the photo is behind it.
+    if (removing && (!control || control.matches('button, summary')) && !(event.target as HTMLElement).closest?.('dialog, [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]')) {
+      // A crop change still waiting to be saved is dropped rather than saved first: the removal is one Undo step, and
+      // undoing it brings back the crop the box had.
+      clearTimeout(pending.current);
+      pending.current = undefined;
+      event.preventDefault();
+      event.stopPropagation();
+      remove!();
+      return;
+    }
     if (control) {
       if (event.key === 'Escape' && toolbar.current?.contains(control)) {
         event.preventDefault();

@@ -39,7 +39,7 @@ import { cp, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'nod
 import { basename, dirname, extname, join, isAbsolute, parse, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
-import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, renderOrigins, settingsURL, startURL, starterURL, assetsURL, syncURL, templatesURL } from '../src/desktop';
+import { channels, popupShortcuts, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, renderOrigins, settingsURL, startURL, starterURL, assetsURL, syncURL, templatesURL } from '../src/desktop';
 import type { AgentLeaseReply, BookMenuState, Command, ImportRequest, LibraryAction, LibraryBook, LibraryRemote, LightroomState, OpenAction, ProjectSummary, RecentDocument, Result, SyncBook, SyncStatus, MarkdownAction, McpClientTarget, McpSettings, SourceAction, SyncAction, TemplateInfo } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
 import { renderPolicy } from './csp';
@@ -1675,11 +1675,16 @@ function syncBackendChanged() {
   updateMenus();
 }
 
+const presentationZoom = new Set<RegisteredCommand>(['zoom-in', 'zoom-out', 'zoom-actual', 'zoom-fit']);
 function installMenu() {
   const registered = (id: RegisteredCommand, command: Command | undefined = id as Command, type?: 'checkbox' | 'radio'): MenuItemConstructorOptions => {
     const item = commandState(id, emptyMenuState);
     return { ...item, type, acceleratorWorksWhenHidden: false, click: (_item, owner) => {
       const document = focusedDocument(owner);
+      // In a presentation the zoom commands zoom the presentation: AppKit runs a menu's shortcut before the page sees the key.
+      if (document && owner instanceof BrowserWindow && presentationZoom.has(id) && presentationWindows.documentFor(owner) === document) {
+        owner.webContents.send(channels.command, id); return;
+      }
       if (!document || !commandState(id, document.menuState ?? emptyMenuState).enabled) return;
       if ((id === 'undo' || id === 'redo') && owner === assetsWindows.get(document)?.window) {
         void document.run(async () => document.notify({ value: document.activate(await document.projectSession.undo(id)) }))
@@ -1817,6 +1822,10 @@ function updateMenus() {
   for (const [id, enabled] of Object.entries(syncEnabled)) { const item = menu?.getMenuItemById(id); if (item) item.enabled = enabled; }
   const zoomAlias = menu?.getMenuItemById('zoom-in-equals');
   if (zoomAlias) zoomAlias.enabled = commandState('zoom-in', state).enabled;
+  // A presentation zooms itself (UI-021), within its own limits, whatever the editor's zoom is.
+  if (document && owner && presentationWindows.documentFor(owner) === document) {
+    for (const id of [...presentationZoom, 'zoom-in-equals']) { const item = menu?.getMenuItemById(id); if (item) item.enabled = true; }
+  }
   for (const direction of ['undo', 'redo']) {
     const own = menu?.getMenuItemById(direction), text = menu?.getMenuItemById('native-' + direction);
     if (own) own.visible = !native;
@@ -2397,7 +2406,7 @@ void app.whenReady().then(async () => {
     if (!owner || !Array.isArray(items) || items.length > 80) return null;
     let selected: string | null = null;
     // A submenu, such as the texts a box can show, holds up to 500 items, one level deep.
-    type Item = { type?: unknown; label?: unknown; id?: unknown; enabled?: unknown; checked?: unknown; toolTip?: unknown; submenu?: unknown } | null;
+    type Item = { type?: unknown; label?: unknown; id?: unknown; enabled?: unknown; checked?: unknown; toolTip?: unknown; shortcut?: unknown; submenu?: unknown } | null;
     const build = (items: Item[], depth = 0): MenuItemConstructorOptions[] => items.slice(0, 500).flatMap<MenuItemConstructorOptions>((item) => {
       if (item?.type === 'separator') return [{ type: 'separator' as const }];
       if (typeof item?.label !== 'string') return [];
@@ -2408,6 +2417,8 @@ void app.whenReady().then(async () => {
       if (typeof id !== 'string') return [];
       return [{ label: item.label.slice(0, 160), enabled: item.enabled !== false,
         ...(typeof item.toolTip === 'string' ? { toolTip: item.toolTip.slice(0, 300) } : {}),
+        // Shown only: the page that opened the menu handles the key itself.
+        ...(typeof item.shortcut === 'string' && popupShortcuts.has(item.shortcut) ? { accelerator: item.shortcut, registerAccelerator: false } : {}),
         ...(typeof item.checked === 'boolean' ? { type: 'checkbox' as const, checked: item.checked } : {}), click: () => { selected = id; } }];
     });
     const entries = build(items as Item[]);

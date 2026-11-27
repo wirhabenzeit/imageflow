@@ -24,7 +24,7 @@ import { getCrop, placementIn } from './spread';
 import type { Crop, Placement as CropPlacement } from './spread';
 import { declarationConflicts, familyProblems } from './layouts';
 import type { VariantTags } from './layouts';
-import { isParameterValue, p, parametersSchema, resolveParams } from './parameters';
+import { captionSwitch, isParameterValue, p, parametersSchema, resolveParams } from './parameters';
 import type { Parameters } from './parameters';
 import type { BoxDefinition, SpreadDefinition, TemplateInfo } from './desktop';
 import { boundGeometry, geometry, lenientFormat } from './geometry';
@@ -70,8 +70,9 @@ export type RenderContext = {
   MarkdownBox: typeof MarkdownBox;
   Element: typeof Element;
   Text: typeof Text;
+  Caption: typeof Caption;
 };
-export type CoverRenderContext = Pick<RenderContext, 'params' | 'document' | 'boxes' | 'elements' | 'formatId' | 'layout' | 'mode' | 'view' | 'PhotoBox' | 'Text' | 'Element'> & {
+export type CoverRenderContext = Pick<RenderContext, 'params' | 'document' | 'boxes' | 'elements' | 'formatId' | 'layout' | 'mode' | 'view' | 'PhotoBox' | 'Text' | 'Caption' | 'Element'> & {
   cover: ResolvedCover;
   interiorPages: number;
 };
@@ -1135,6 +1136,28 @@ export function Text({ parameter, as = 'p', presentation, placeholder, fallback,
   </Tag>;
 }
 
+// The caption of a photo box's photo, marked so the editor edits it on the page (UI-019). The caption is the photo's,
+// saved with it wherever it is placed, so the mark names the box and never a parameter. It renders nothing for an empty
+// box, which has no photo to own a caption, nor while the box's Show caption switch (`shows: 'caption'`) is off, so the
+// switch and the printed caption always agree. Empty, it shows `placeholder` on the interactive canvas only, as ctx.Text
+// does: thumbnails, layout previews, checks, presentation and export get an empty node.
+export function Caption({ box, as = 'p', placeholder = 'Add caption', decorative, className, style, rect, ...marker }: Styling & Placement & IssueMarker & DecorativeMarker &
+  { box: string; as?: TextTag; placeholder?: string }) {
+  const data = useSpread();
+  const declared = Object.hasOwn(data.definition.boxes, box) ? data.definition.boxes[box] : undefined;
+  if (!declared || declared.type === 'markdown') throw new Error('Caption shows the caption of photo box ' + box + ', which this layout does not declare.');
+  if (!textTags.has(as)) throw new Error('Caption cannot render as ' + as + '. Use one of ' + [...textTags].join(', ') + '.');
+  const resolved = Object.hasOwn(data.values.boxes, box) ? data.values.boxes[box] : undefined;
+  const toggle = captionSwitch(declared.parameters);
+  if (!resolved?.photo || (toggle !== undefined && resolved.params[toggle] !== true)) return null;
+  const text = resolved.photo.caption ?? '';
+  const empty = !text.trim() && renderView(data.book) === 'canvas';
+  const Tag = as;
+  return <Tag data-caption={box} data-empty={empty ? '' : undefined} className={className} style={place(rect, style)} {...decorativeOn(decorative)} {...issueOn(marker)}>
+    {empty ? <span className="if-text-placeholder">{placeholder}</span> : text.trim() ? text : null}
+  </Tag>;
+}
+
 // A value of a `markdown: 'inline'` string parameter as <strong>, <em> and <s>; everything else stays text, never HTML.
 // ctx.Text uses it for such parameters; templates use it where they show the value with their own markup.
 export function FormattedText({ value }: { value: string }) {
@@ -1277,7 +1300,7 @@ export function CoverArtwork({ book, template, cover, geometry, interiorPages }:
   const values = artworkValues(book, template.parameters, spread, definition, {});
   const format = { ...resolveFormat(template.format), resolution: geometry.output.resolution };
   const layout = { ...values, cover: geometry, interiorPages, formatId: template.formatId, layout: cover.definition,
-    mode: book.mode, view: renderView(book), PhotoBox, Text, Element };
+    mode: book.mode, view: renderView(book), PhotoBox, Text, Caption, Element };
   return <SpreadData.Provider value={{ book, spread, format, renderPhotos: true, definition, documentParameters: template.parameters,
     values, lazyPhotos: false }}><definition.render {...layout} /></SpreadData.Provider>;
 }
@@ -1379,7 +1402,7 @@ function LayoutView({ book, template, format, spread, page, index, positions, re
       spread: bookSpread, layout: spread.definition,
       edit: (...paths) => paths.length ? { 'data-edit': paths.join(' ') } : {},
       book: bookContext(index, spread.id, scopePage), geometry: boundGeometry(format, { lenient: !fits, side }),
-      PhotoBox, MarkdownBox, Element, Text,
+      PhotoBox, MarkdownBox, Element, Text, Caption,
     });
   } catch (error) {
     throw new SpreadError(definition.label + ' could not render: ' + (error instanceof Error ? error.message : String(error)), spread.id, { cause: error, page: scopePage });
