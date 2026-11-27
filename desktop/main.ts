@@ -1675,11 +1675,16 @@ function syncBackendChanged() {
   updateMenus();
 }
 
+const presentationZoom = new Set<RegisteredCommand>(['zoom-in', 'zoom-out', 'zoom-actual', 'zoom-fit']);
 function installMenu() {
   const registered = (id: RegisteredCommand, command: Command | undefined = id as Command, type?: 'checkbox' | 'radio'): MenuItemConstructorOptions => {
     const item = commandState(id, emptyMenuState);
     return { ...item, type, acceleratorWorksWhenHidden: false, click: (_item, owner) => {
       const document = focusedDocument(owner);
+      // In a presentation the zoom commands zoom the presentation: AppKit runs a menu's shortcut before the page sees the key.
+      if (document && owner instanceof BrowserWindow && presentationZoom.has(id) && presentationWindows.documentFor(owner) === document) {
+        owner.webContents.send(channels.command, id); return;
+      }
       if (!document || !commandState(id, document.menuState ?? emptyMenuState).enabled) return;
       if ((id === 'undo' || id === 'redo') && owner === assetsWindows.get(document)?.window) {
         void document.run(async () => document.notify({ value: document.activate(await document.projectSession.undo(id)) }))
@@ -1817,6 +1822,10 @@ function updateMenus() {
   for (const [id, enabled] of Object.entries(syncEnabled)) { const item = menu?.getMenuItemById(id); if (item) item.enabled = enabled; }
   const zoomAlias = menu?.getMenuItemById('zoom-in-equals');
   if (zoomAlias) zoomAlias.enabled = commandState('zoom-in', state).enabled;
+  // A presentation zooms itself (UI-021), within its own limits, whatever the editor's zoom is.
+  if (document && owner && presentationWindows.documentFor(owner) === document) {
+    for (const id of [...presentationZoom, 'zoom-in-equals']) { const item = menu?.getMenuItemById(id); if (item) item.enabled = true; }
+  }
   for (const direction of ['undo', 'redo']) {
     const own = menu?.getMenuItemById(direction), text = menu?.getMenuItemById('native-' + direction);
     if (own) own.visible = !native;

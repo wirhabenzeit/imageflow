@@ -57,6 +57,20 @@ export function Presentation({ summary, start, close }: {
     if (key === '0') zoom.reset();
     else if (!overview && !help) zoom.zoomBy(key === '-' ? 1 / 1.25 : 1.25);
   });
+  // On macOS the View menu's shortcuts reach the app before the page: the main process sends them here while this
+  // window is focused, so ⌘0, ⌘+ and ⌘− zoom the presentation, not the editor behind it.
+  // Should one key press arrive both ways, the second is ignored; repeats of one way all count.
+  const lastZoomKey = useRef({ key: '', via: '', at: -Infinity });
+  const zoomOnce = (key: string, via: 'menu' | 'page') => {
+    const now = performance.now(), last = lastZoomKey.current;
+    if (last.key === key && last.via !== via && now - last.at < 150) return;
+    lastZoomKey.current = { key, via, at: now };
+    zoomKey(key);
+  };
+  useEffect(() => window.imageflow?.onCommand((command) => {
+    if (command === 'zoom-in') zoomOnce('+', 'menu'); else if (command === 'zoom-out') zoomOnce('-', 'menu');
+    else if (command === 'zoom-actual' || command === 'zoom-fit') zoomOnce('0', 'menu');
+  }), []);
   function focusPresentation() {
     const node = host.current;
     if (node && !node.contains(document.activeElement)) node.focus({ preventScroll: true });
@@ -94,7 +108,7 @@ export function Presentation({ summary, start, close }: {
     const listener = (event: KeyboardEvent) => {
       // ⌘0 / ⌘+ / ⌘− zoom the presentation, as on the canvas; consumed so the editor's menu commands stay with the editor.
       if (event.metaKey && !event.ctrlKey && !event.altKey && ['0', '=', '+', '-'].includes(event.key)) {
-        event.preventDefault(); event.stopImmediatePropagation(); zoomKey(event.key); return;
+        event.preventDefault(); event.stopImmediatePropagation(); zoomOnce(event.key === '=' ? '+' : event.key, 'page'); return;
       }
       // Preserve the system Close Window shortcut and other native commands.
       if (event.metaKey || event.ctrlKey) return;

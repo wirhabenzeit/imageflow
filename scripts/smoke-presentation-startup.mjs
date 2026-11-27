@@ -185,6 +185,19 @@ try {
     await showing('p39');
     await page.keyboard.press('Meta+0');
     await zoomedTo(false);
+    // On a Mac the View menu takes ⌘+, ⌘− and ⌘0 before the page does: with the presentation focused, they zoom it.
+    const presentationMenu = async (id) => {
+      const windowId = await app.browserWindow(page).then((window) => window.evaluate((window) => window.id));
+      assert.ok(await app.evaluate(({ Menu, BrowserWindow }, { id, windowId }) => {
+        const item = Menu.getApplicationMenu().getMenuItemById(id);
+        if (!item.enabled) return false;
+        item.click(item, BrowserWindow.fromId(windowId)); return true;
+      }, { id, windowId }), id + ' is enabled in the presentation');
+    };
+    await presentationMenu('zoom-in');
+    await zoomedTo(true);
+    await presentationMenu('zoom-actual');
+    await zoomedTo(false);
     await pinch();
     await page.mouse.dblclick(300, 300);
     await zoomedTo(false);

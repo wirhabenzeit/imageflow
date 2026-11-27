@@ -538,9 +538,9 @@ static CGImageSourceRef openImage(NSString *path) {
 }
 
 /**
- * imageInfo(path): the first picture of an image file as ImageIO reads it, without decoding it: { width, height }
- * upright (its orientation applied), `alpha`, and `count`, the number of pictures in the file. Null where ImageIO
- * cannot read the file.
+ * imageInfo(path): the primary picture of an image file as ImageIO reads it, without decoding it: { width, height }
+ * upright (its orientation applied), `alpha`, and `count`, the number of pictures in the file (an iPhone's depth map
+ * and HDR gain map are not among them). Null where ImageIO cannot read the file.
  */
 static napi_value ImageInfo(napi_env env, napi_callback_info info) {
   size_t argc = 1; napi_value argv[1];
@@ -550,7 +550,7 @@ static napi_value ImageInfo(napi_env env, napi_callback_info info) {
   @autoreleasepool {
     CGImageSourceRef source = openImage(path);
     if (!source) return nullValue(env);
-    NSDictionary *properties = (__bridge_transfer NSDictionary *)CGImageSourceCopyPropertiesAtIndex(source, 0, nullptr);
+    NSDictionary *properties = (__bridge_transfer NSDictionary *)CGImageSourceCopyPropertiesAtIndex(source, CGImageSourceGetPrimaryImageIndex(source), nullptr);
     size_t count = CGImageSourceGetCount(source);
     CFRelease(source);
     NSNumber *width = properties[(id)kCGImagePropertyPixelWidth], *height = properties[(id)kCGImagePropertyPixelHeight];
@@ -566,9 +566,9 @@ static napi_value ImageInfo(napi_env env, napi_callback_info info) {
 }
 
 /**
- * decode(path, { file?, size? }): decodes the first picture of an image file, upright, in its own colour space and bit
- * depth. With `file`, writes it there as an uncompressed TIFF with that colour profile, scaled to `size` pixels on its
- * long edge where `size` is smaller; without, only checks that every pixel decodes. Resolves to { width, height }.
+ * decode(path, { file?, size? }): decodes the primary picture of an image file, upright, in its own colour space and
+ * bit depth, scaled to `size` pixels on its long edge where `size` is smaller. With `file`, writes it there as an
+ * uncompressed TIFF with that colour profile; without, only checks that it decodes. Resolves to { width, height }.
  */
 static napi_value Decode(napi_env env, napi_callback_info info) {
   size_t argc = 2; napi_value argv[2];
@@ -588,7 +588,8 @@ static napi_value Decode(napi_env env, napi_callback_info info) {
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ @autoreleasepool {
     NSString *name = path.lastPathComponent;
     CGImageSourceRef source = openImage(path);
-    NSDictionary *properties = source ? (__bridge_transfer NSDictionary *)CGImageSourceCopyPropertiesAtIndex(source, 0, nullptr) : nil;
+    size_t primary = source ? CGImageSourceGetPrimaryImageIndex(source) : 0;
+    NSDictionary *properties = source ? (__bridge_transfer NSDictionary *)CGImageSourceCopyPropertiesAtIndex(source, primary, nullptr) : nil;
     NSNumber *width = properties[(id)kCGImagePropertyPixelWidth], *height = properties[(id)kCGImagePropertyPixelHeight];
     if (!source || !width || !height || CGImageSourceGetStatus(source) != kCGImageStatusComplete) {
       if (source) CFRelease(source);
@@ -598,14 +599,15 @@ static napi_value Decode(napi_env env, napi_callback_info info) {
     double longEdge = MAX(width.doubleValue, height.doubleValue);
     // A thumbnail made from the picture itself, at full size unless smaller is asked for, is the picture decoded and
     // turned upright by its orientation, whichever way the file records it (EXIF, or HEIF's own transforms).
-    CGImageRef image = CGImageSourceCreateThumbnailAtIndex(source, 0, (__bridge CFDictionaryRef)@{
+    CGImageRef image = CGImageSourceCreateThumbnailAtIndex(source, primary, (__bridge CFDictionaryRef)@{
       (id)kCGImageSourceCreateThumbnailFromImageAlways: @YES, (id)kCGImageSourceCreateThumbnailWithTransform: @YES,
       (id)kCGImageSourceShouldCacheImmediately: @YES, (id)kCGImageSourceThumbnailMaxPixelSize: @(size > 0 && size < longEdge ? size : longEdge)});
     CFRelease(source);
     NSError *error = nil;
     if (!image) error = failure(2, [name stringByAppendingString:@" could not be decoded."]);
     else if (!file) {
-      // Reading every pixel is what decodes them all: a truncated file fails here.
+      // Reading the pixels is what decodes them, from every part of the file even when scaled down: a truncated file
+      // fails here.
       CFDataRef pixels = CGDataProviderCopyData(CGImageGetDataProvider(image));
       if (!pixels) error = failure(2, [name stringByAppendingString:@" could not be decoded."]);
       else CFRelease(pixels);

@@ -30,9 +30,10 @@ export async function photoDetails(original: string, maximumBytes: number | null
   // sharp reads a HEIC's EXIF without decoding it; its size and alpha come from ImageIO, which decodes it.
   const metadata = await sharp(original).metadata();
   const size = native ? nativeImageInfo(original) : undefined;
-  const still = native ? size!.count === 1 && metadata.format === 'heif' && metadata.compression === 'hevc'
-    : ['jpeg', 'png', 'webp'].includes(metadata.format ?? '') || (metadata.format === 'heif' && metadata.compression === 'av1');
-  if (!still || !metadata.width || !metadata.height || (metadata.pages ?? 1) > 1) throw new Error('Expected a still ' + formats + ' image.');
+  // A HEIC is placed by its primary picture, also where the file holds others (a burst, say); macOS decodes HEVC and AV1.
+  const still = native ? metadata.format === 'heif' && ['hevc', 'av1'].includes(metadata.compression ?? '')
+    : (['jpeg', 'png', 'webp'].includes(metadata.format ?? '') || (metadata.format === 'heif' && metadata.compression === 'av1')) && (metadata.pages ?? 1) === 1;
+  if (!still || !metadata.width || !metadata.height) throw new Error('Expected a still ' + formats + ' image.');
   const turned = (metadata.orientation ?? 1) >= 5;
   const capture = captureMetadata(metadata.exif);
   return {
@@ -59,7 +60,8 @@ export async function importPhotoDetails(original: string) {
 
 /** Metadata alone can succeed on a truncated image: this decodes all of it, and fails where it can't. */
 export async function checkPixels(original: string) {
-  if (decodedNatively(original)) await decodeNatively(original);
+  // Scaled down, a HEIC still decodes from all of its file, without holding a full-size copy: imports check several at once.
+  if (decodedNatively(original)) await decodeNatively(original, { size: 512 });
   else await sharp(original, { failOn: 'warning' }).resize({ width: 1, height: 1 }).toBuffer();
 }
 
@@ -127,8 +129,10 @@ export async function photoFile(photo: ProjectPhoto, rendition: Rendition, width
       let input = photo.original;
       if (decodedNatively(photo.original)) {
         input = join(staging, 'decoded.tiff');
-        // Twice the size, so the last step down is sharp's, as for any photo.
-        await decodeNatively(photo.original, { file: input, ...(size ? { size: size * 2 } : {}) });
+        // Twice the size needed, so the last step down is sharp's, as for any photo: of a thumbnail or preview, or of a
+        // print rendition for a placement that needs fewer pixels than the photo has. Otherwise at full size.
+        const needed = size ?? (resample ? Math.ceil(resample * Math.max(photo.width, photo.height) / photo.width) : undefined);
+        await decodeNatively(photo.original, { file: input, ...(needed ? { size: needed * 2 } : {}) });
       }
       const image = sharp(input).autoOrient().withIccProfile('srgb');
       if (size) {

@@ -2490,7 +2490,7 @@ export function App() {
                 frame={cropFrame} photo={summary.photoSizes[cropPhoto]} src={renderOrigin + '/render/' + summary.id + '/photo/' + cropPhoto}
                 placement={cropPlacement} settling={!!cropping.settling}
                 inchesPerPixel={format && cropSheet ? format.spreadWidth / cropSheet.width / 25.4 : undefined}
-                resolution={template?.format.output.resolution} save={saveCrop} close={deselectPhoto} remove={cropPhoto ? removeCroppedPhoto : undefined}
+                resolution={template?.format.output.resolution} save={saveCrop} close={deselectPhoto} remove={cropPhoto && writable ? removeCroppedPhoto : undefined}
                 custom={!!cropFrame.custom} preview={(placement) => setCropPreview(placement && { spread: cropping.spread, box: cropping.box, page: cropping.page, placement })}
                 toolbarHost={canvasWrap.current}>
                 {/* The box's photo and its own parameters (such as Show caption) sit with the selected photo. Replacing or

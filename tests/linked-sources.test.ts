@@ -116,6 +116,11 @@ test('a HEIC photo is linked or stored as it is, and macOS decodes it for every 
       const [r, , b] = await pixel(file, metadata.width! - 5, 5);
       assert.ok(b > 200 && r < 60, rendition + ' is upright');
     }
+    // A print rendition for a placement that needs fewer pixels is decoded only as large as it needs, still upright.
+    const smaller = await photoFile(photo, 'export', 100);
+    assert.deepEqual([(await sharp(smaller).metadata()).width, (await sharp(smaller).metadata()).height], [100, 150]);
+    const [r, , b] = await pixel(smaller, 95, 3);
+    assert.ok(b > 200 && r < 60, 'the smaller print rendition is upright');
   }
   // An export reads every photo from a private copy, which keeps the HEIC's extension, so it decodes the same way.
   const pinned = await loadProject(f.folder, f.cache, false, true);

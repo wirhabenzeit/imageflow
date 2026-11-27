@@ -140,7 +140,8 @@ export function CropEditor({ frame, photo, src, placement: saved, inchesPerPixel
     // A button has no use for Backspace or Delete: they remove the photo from a button that selected it too, such as
     // the Inspector's Edit button (UI-020). Text fields, lists and menus keep them.
     const removing = (event.key === 'Backspace' || event.key === 'Delete') && remove && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
-    if (removing && (!control || control.matches('button, summary')) && !control?.closest('[role="dialog"], [role="menu"], [role="listbox"]')) {
+    // Never from inside an open dialog, menu or list, whatever in it has focus: the photo is behind it.
+    if (removing && (!control || control.matches('button, summary')) && !(event.target as HTMLElement).closest?.('dialog, [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]')) {
       // A crop change still waiting to be saved is dropped rather than saved first: the removal is one Undo step, and
       // undoing it brings back the crop the box had.
       clearTimeout(pending.current);

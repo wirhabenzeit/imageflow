@@ -32,6 +32,14 @@ export function usePresentationZoom({ host, enabled, swipe }: {
   const pinch = useEffectEvent(zoomBy);
   const pan = useEffectEvent((dx: number, dy: number) => apply((view) => panPresentation(view, dx, dy, size())));
   const fit = useEffectEvent(reset);
+  // A window that changes size while zoomed, leaving full screen say, keeps the enlarged artwork covering it.
+  useEffect(() => {
+    const node = host.current;
+    if (!node || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => pan(0, 0));
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
   useEffect(() => {
     const node = host.current;
     if (!node) return;
