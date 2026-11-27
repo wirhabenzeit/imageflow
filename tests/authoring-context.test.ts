@@ -8,7 +8,7 @@ import { checkedOutput } from './mcp-output-check';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import sharp from 'sharp';
-import { AuthoringError, changedList, compactDiagnostics, compactRender, createAuthoringService, diagnosticsOnce, isReferenceCall, offsetGuessOf, pixelsOf } from '../desktop/authoring-service';
+import { AuthoringError, changedList, compactDiagnostics, compactRender, createAuthoringService, diagnosticsSince, isReferenceCall, offsetGuessOf, pixelsOf } from '../desktop/authoring-service';
 import { checkProject } from '../desktop/check';
 import { importIntoProject, loadProject } from '../desktop/project';
 import { ProjectSession } from '../desktop/project-session';
@@ -975,12 +975,14 @@ test('check replies count the book-wide render lists and list only the addressed
 });
 
 test('a finding in many places names the first few and counts them, unless all are asked for (API-014)', async (t) => {
-  const { hooks, call } = await fixture(t);
+  const { hooks, call, session } = await fixture(t);
   const errors = Array.from({ length: 32 }, (_, n) => ({ message: 'Original unavailable', code: 'source-unavailable', spread: 'one', where: 'Pages 1–2', box: 'b' + n, source: 'p' + n,
     sourceKind: 'photo' as const, problem: 'Offline', away: 'catalog' as const }));
   hooks.check = (book, request, signal, index) => checkProject(book, hooks.cache, request, async () => ({ status: { ...status, errors } }), signal, index);
+  // Each from a connection of its own: one that saw the findings gets them counted, not listed (API-005).
   for (const name of ['check_book', 'inspect_book', 'get_authoring_context']) {
-    const [finding, ...rest] = (await call(name)).diagnostics as AuthoringDiagnostic[];
+    const result = await createAuthoringService(hooks)(name, { project: session.handle, view: 'summary' }, new AbortController().signal);
+    const [finding, ...rest] = checkedOutput(name, result).diagnostics as AuthoringDiagnostic[];
     assert.deepEqual(rest, []);
     assert.equal(finding.severity, 'warning');
     assert.deepEqual(finding.details, { reason: 'catalog', originals: 32, placed: 32, places: 32 });
@@ -1089,20 +1091,56 @@ test('the sources view marks a capture time at a guessed offset (API-020, 26 Nov
   assert.deepEqual(offsetGuessOf(undefined), {});
 });
 
-test('a preview repeats no diagnostics this connection was just given for the same revision (API-005, 27 Nov)', () => {
-  const seen = new WeakMap<object, string>();
-  const one = {}, other = {};
-  const found = [{ code: 'text-overflow', stage: 'render', severity: 'error', message: 'Does not fit.' },
-    { code: 'source-unavailable', stage: 'render', severity: 'warning', message: 'Lightroom is closed.' }] as Parameters<typeof diagnosticsOnce>[3];
-  // A full check lists them; a preview right after it at the same revision does not, and says how many there are.
-  assert.equal(diagnosticsOnce(seen, one, 'r1', found, false).diagnostics, found);
-  const again = diagnosticsOnce(seen, one, 'r1', found, true);
+test('replies list the findings that changed since this connection last saw them, and count the rest (API-005, 27 Nov)', () => {
+  const seen = new Map<string, ReadonlySet<string>>();
+  const overflow = { code: 'text-overflow', stage: 'render', severity: 'error', message: 'Does not fit.' };
+  const offline = { code: 'source-unavailable', stage: 'render', severity: 'warning', message: 'Lightroom is closed.' };
+  const empty = { code: 'photo-box-empty', stage: 'render', severity: 'warning', message: '2 photo boxes are empty.' };
+  const found = [overflow, offline] as Parameters<typeof diagnosticsSince>[2];
+  // The first reply of a connection lists every finding.
+  assert.equal(diagnosticsSince(seen, 's1', found).diagnostics, found);
+  // The same again: none listed, all counted.
+  const again = diagnosticsSince(seen, 's1', found);
   assert.deepEqual(again.diagnostics, []);
   assert.deepEqual({ ...(again as { diagnosticsUnchanged: object }).diagnosticsUnchanged, note: undefined }, { errors: 1, warnings: 1, note: undefined });
-  // Another connection, another revision, or other findings: listed in full.
-  assert.equal(diagnosticsOnce(seen, other, 'r1', found, true).diagnostics, found);
-  assert.equal(diagnosticsOnce(seen, one, 'r2', found, true).diagnostics, found);
-  assert.equal(diagnosticsOnce(seen, one, 'r2', found.slice(1), true).diagnostics.length, 1);
+  // After an edit: the overflow went, an empty box came. Only that is listed; the one that went is counted.
+  const edited = diagnosticsSince(seen, 's1', [offline, empty] as typeof found);
+  assert.deepEqual(edited.diagnostics, [empty]);
+  assert.deepEqual({ ...(edited as { diagnosticsUnchanged: object }).diagnosticsUnchanged, note: undefined }, { errors: 0, warnings: 1, resolved: 1, note: undefined });
+  // A finding that changed (another count of places) is listed again.
+  assert.deepEqual(diagnosticsSince(seen, 's1', [offline, { ...empty, message: '3 photo boxes are empty.' }] as typeof found).diagnostics.length, 1);
+  // Another connection, or a full listing: every finding.
+  assert.equal(diagnosticsSince(seen, 's2', found).diagnostics, found);
+  assert.equal(diagnosticsSince(seen, 's1', found, { full: true }).diagnostics, found);
+  // A draft is listed in full and not remembered: the next look at the saved book compares with what came before it.
+  assert.deepEqual(diagnosticsSince(seen, 's1', [overflow] as typeof found, { full: true, remember: false }).diagnostics, [overflow]);
+  assert.deepEqual(diagnosticsSince(seen, 's1', found).diagnostics, []);
+});
+
+test('replies through the app connection count the findings they gave already, by session (API-005, 27 Nov)', async (t) => {
+  const { session, hooks } = await fixture(t);
+  const errors = [{ message: 'Original unavailable', code: 'source-unavailable', spread: 'one', where: 'Pages 1–2', box: 'b', source: 'p',
+    sourceKind: 'photo' as const, problem: 'Offline', away: 'catalog' as const }];
+  hooks.check = (book, request, signal, index) => checkProject(book, hooks.cache, request, async () => ({ status: { ...status, errors } }), signal, index);
+  const service = createAuthoringService(hooks);
+  // The app's connection makes a new client object for every call of one session.
+  const as = (id: string, name: string, args: Record<string, unknown>) =>
+    service(name, { project: session.handle, ...args }, new AbortController().signal, { name: 'Agent', session: id }).then((result) => checkedOutput(name, result));
+  const first = await as('s1', 'inspect_book', { view: 'summary' });
+  const listed = first.diagnostics as unknown[];
+  assert.ok(listed.length, 'the fixture book has findings');
+  const counted = (result: Record<string, unknown>) => { const { errors, warnings } = result.diagnosticsUnchanged as { errors: number; warnings: number }; return errors + warnings; };
+  const again = await as('s1', 'inspect_book', { view: 'sources', limit: 1 });
+  assert.deepEqual(again.diagnostics, []);
+  assert.equal(counted(again), listed.length);
+  assert.deepEqual((await as('s2', 'inspect_book', { view: 'summary' })).diagnostics, listed, 'another connection gets them listed');
+  // check_book counts them too, and lists every finding when asked for all places.
+  const checkedAgain = await as('s1', 'check_book', {});
+  assert.deepEqual(checkedAgain.diagnostics, []);
+  assert.equal(counted(checkedAgain), listed.length);
+  assert.equal(((await as('s1', 'check_book', { include: ['occurrences'] })).diagnostics as unknown[]).length, listed.length);
+  // Context lists every finding, always.
+  assert.equal(((await as('s1', 'get_authoring_context', {})).diagnostics as unknown[]).length, listed.length);
 });
 
 test('a revision conflict names the first few changed files, then how many more', () => {

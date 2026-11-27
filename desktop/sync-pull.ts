@@ -8,7 +8,7 @@ import { parseDocument, photoIndexSchema, projectSchema, withBookFormat } from '
 import type { PhotoIndex, Project } from '../src/project';
 import { pullChanges, pullLabel } from '../src/pull-summary';
 import { entryReach, packagePath } from '../src/source-locator';
-import { originalBlobKey, projectManifests, stateBlobSchema } from '../src/sync-snapshot';
+import { originalBlobKey, projectManifests, stateBlobSchema, withCaptureOf } from '../src/sync-snapshot';
 import type { StateBlob } from '../src/sync-snapshot';
 import { AssetFacts, readAssetFacts } from './asset-facts';
 import { bookStateFolder, persistProjectManifests } from './persistence';
@@ -145,6 +145,18 @@ async function readMarks(path: string, text: string) {
   } catch { return undefined; }
 }
 
+/**
+ * Why a sync record does not read. Fields this build does not know mean a newer ImageFlow wrote it: on 27 Nov an old
+ * build that macOS opened instead of the current one told the user to remove a sound record. Updating opens the book
+ * again; removing the record is only for one that is damaged.
+ */
+export function unreadableSyncRecord(path: string, issues: readonly { code: string }[]) {
+  if (issues.length && issues.every(({ code }) => code === 'unrecognized_keys')) {
+    return new Error('This book was synced by a newer version of ImageFlow than this one. Update ImageFlow to open it. If an older copy of ImageFlow opened instead of the current one, quit it and open the current one.');
+  }
+  return new Error('This book’s sync record is damaged. Keep a copy of ' + path + ', then remove it to sync the book again from scratch.');
+}
+
 export async function readSyncState(folder: string): Promise<SyncState> {
   const path = await syncFolder(folder, false);
   if (!path) return { version: 1 };
@@ -152,7 +164,7 @@ export async function readSyncState(folder: string): Promise<SyncState> {
   try { text = await readFile(join(path, 'sync.json'), 'utf8'); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1 }; throw error; }
   const parsed = storedSyncStateSchema.safeParse(JSON.parse(text));
-  if (!parsed.success) throw new Error('This book’s sync record is invalid. Preserve ' + join(path, 'sync.json') + ' and remove it to sync again from scratch.');
+  if (!parsed.success) throw unreadableSyncRecord(join(path, 'sync.json'), parsed.error.issues);
   const state = parsed.data;
   const marks = (state.lastSynced || state.pull) && await readMarks(path, text);
   if (!marks) return state;
@@ -407,13 +419,13 @@ async function pruneTemplate(root: string, keep: Set<string>) {
 
 /**
  * The per-asset rule for a pull (ADR 0010): the fact of a photo whose original changed here since the last sync wins
- * (`keepLocal`); otherwise the snapshot's, even over an original still here at an older digest. Facts of photos that
- * left the book go.
+ * (`keepLocal`); otherwise the snapshot's, even over an original still here at an older digest, but with this Mac's
+ * capture time where it knows the time zone better (`capturedAhead`). Facts of photos that left the book go.
  */
 export function mergePulledFacts(photos: PhotoIndex, local: Record<string, AssetFact>, remote: Record<string, AssetFact>, keepLocal: ReadonlySet<string>) {
   const merged: Record<string, AssetFact> = {};
   for (const id of Object.keys(photos)) {
-    const fact = local[id] && keepLocal.has(id) ? local[id] : remote[id] ?? local[id];
+    const fact = local[id] && keepLocal.has(id) ? local[id] : remote[id] ? withCaptureOf(remote[id], local[id]) : local[id];
     if (fact) merged[id] = fact;
   }
   return merged;

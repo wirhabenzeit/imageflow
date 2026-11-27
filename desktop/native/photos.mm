@@ -872,6 +872,30 @@ static id offsetByPlace(PHAsset *asset, id own) {
   return zone ? own : nil;
 }
 
+static dispatch_queue_t offsetsQueue();
+
+/**
+ * zoneAt(latitude, longitude): the time zone of a place, for a photo of another source whose capture time has no offset
+ * (a drone's, through Lightroom Classic; API-020): its identifier (`Asia/Bishkek`), null where the place has none (open
+ * sea), or undefined where it could not be looked up now (offline, throttled). Asked one at a time with the photos' own.
+ */
+static napi_value ZoneAt(napi_env env, napi_callback_info info) {
+  size_t argc = 2; napi_value argv[2];
+  CHECK(napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr));
+  double latitude = NAN, longitude = NAN;
+  if (argc > 1) { napi_get_value_double(env, argv[0], &latitude); napi_get_value_double(env, argv[1], &longitude); }
+  napi_value promise;
+  PendingRef pending = newPending(env, &promise);
+  CLLocationCoordinate2D at = CLLocationCoordinate2DMake(latitude, longitude);
+  if (!CLLocationCoordinate2DIsValid(at)) { settle(pending, true, ^(napi_env e) { return errorValue(e, failure(1, @"Expected a latitude and a longitude.")); }); return promise; }
+  dispatch_async(offsetsQueue(), ^{ @autoreleasepool {
+    id zone = zoneAt([[CLLocation alloc] initWithLatitude:at.latitude longitude:at.longitude]);
+    NSString *name = [zone isKindOfClass:NSTimeZone.class] ? [(NSTimeZone *)zone name] : nil;
+    settle(pending, false, ^(napi_env e) { return name ? str(e, name) : zone ? nullValue(e) : undefinedValue(e); });
+  } });
+  return promise;
+}
+
 // Photos whose offset was read and differs from the guess, not reported yet (under offsetsLock).
 static NSMutableArray<NSString *> *offsetsChanged = [NSMutableArray new];
 
@@ -886,9 +910,15 @@ static void reportOffsets() {
   sendChanges(ids);
 }
 
+/** The queue offsets are read on, and places looked up (`zoneAt` keeps its cells unlocked, for this queue only). */
+static dispatch_queue_t offsetsQueue() {
+  static dispatch_queue_t queue = dispatch_queue_create("imageflow.photos.offsets", dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_UTILITY, 0));
+  return queue;
+}
+
 /** Reads the offsets of `assets` in the background (see above); those read or queued already are skipped. */
 static void readOffsets(NSArray<PHAsset *> *assets) {
-  static dispatch_queue_t queue = dispatch_queue_create("imageflow.photos.offsets", dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_UTILITY, 0));
+  dispatch_queue_t queue = offsetsQueue();
   NSMutableArray<PHAsset *> *todo = [NSMutableArray new];
   {
     std::lock_guard<std::mutex> guard(offsetsLock);
@@ -1036,7 +1066,7 @@ NAPI_MODULE_INIT() {
   const struct { const char *name; napi_callback fn; } functions[] = {
     {"status", Status}, {"requestAccess", RequestAccess}, {"dragged", Dragged}, {"cloudIdentifiers", CloudIdentifiers},
     {"localIdentifiers", LocalIdentifiers}, {"facts", Facts}, {"image", Image}, {"cancel", Cancel}, {"onChanges", OnChanges}, {"track", Track}, {"pick", Pick}, {"cancelPick", CancelPick},
-    {"imageInfo", ImageInfo}, {"decode", Decode},
+    {"imageInfo", ImageInfo}, {"decode", Decode}, {"zoneAt", ZoneAt},
   };
   for (const auto &entry : functions) {
     napi_value fn;

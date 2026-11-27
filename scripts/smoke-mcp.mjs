@@ -454,7 +454,8 @@ try {
   await writeFile(join(folder,'project.json'),'{ invalid JSON');
   // Inputs that change during a call correctly return SOURCE_CHANGED. Let the app observe this write first.
   await window.locator('.status-error').waitFor();
-  for (const name of ['get_authoring_context','inspect_book']) {
+  // inspect_book first: it lists what is new to this connection, and context always lists every finding.
+  for (const name of ['inspect_book','get_authoring_context']) {
     const result=await good(name,{project,...(name==='inspect_book' ? {view:'summary'} : {includeSource:['template/index.tsx']})});
     assert.ok(result.diagnostics.some(d=>d.message.includes('invalid JSON') && d.location?.path==='project.json'));
     if (name==='get_authoring_context') assert.equal(result.sources['template/index.tsx'].text,authored);

@@ -38,7 +38,7 @@ import { MemoryKeyIndexCache } from '../desktop/sync-key-index';
 import { MemoryHeaderCache } from '../desktop/sync-header-cache';
 import { readCommitHeaderV1 } from './sync-v1-reader';
 import { bookTrusted, distrustBook, trustBook } from '../desktop/source-access';
-import { configureSyncSetup, readSyncState, startNewBook, startsWithSetup, startSyncing, SyncElsewhereError, SyncHalfPulledError, SyncStoppedError, takeAbandonedAtOpen, updateSyncState } from '../desktop/sync-pull';
+import { configureSyncSetup, mergePulledFacts, readSyncState, startNewBook, startsWithSetup, startSyncing, SyncElsewhereError, SyncHalfPulledError, SyncStoppedError, takeAbandonedAtOpen, updateSyncState } from '../desktop/sync-pull';
 import { insideBook, pendingUploadsText, SyncService, UntrustedBookError } from '../desktop/sync-service';
 import { ClosedBookSyncs } from '../desktop/sync-closed';
 import { FirstSync, settleSyncSetup, syncExcludedBook } from '../desktop/sync-start';
@@ -46,10 +46,9 @@ import { AutomaticRuns, AutoSync, autoSyncTiming, SyncInterruptedError } from '.
 import { SettingsStore } from '../desktop/settings';
 import { syncPatchError, syncSetupPatch } from '../desktop/sync-settings';
 import type { FolderSyncBackend, S3SyncBackend, SyncBackend } from '../src/settings';
-import { blobKeyPattern, bookPrefix, changedProperties, commitKey, contentBlobKey, coverBlobKey, deletedMarkerKey, decideSync, factsAhead, noProperties, readBookTombstone, readCommitHeader, readRemoteIdentity, NewerSyncFormatError, deriveTips, isUnlocatedPath, originalBlobKey, portableManifests,
-  projectManifests, proxyBlobKey, stateBlobSchema, tombstoneKey } from '../src/sync-snapshot';
+import { blobKeyPattern, bookPrefix, capturedAhead, changedProperties, commitKey, contentBlobKey, coverBlobKey, decideSync, deletedMarkerKey, deriveTips, factsAhead, isUnlocatedPath, NewerSyncFormatError, noProperties, originalBlobKey, portableManifests, projectManifests, proxyBlobKey, readBookTombstone, readCommitHeader, readRemoteIdentity, stateBlobSchema, tombstoneKey } from '../src/sync-snapshot';
 import type { CommitHeader, StateBlob } from '../src/sync-snapshot';
-import type { ProjectFiles } from '../src/project';
+import type { PhotoIndex, ProjectFiles } from '../src/project';
 import { printProblem } from '../src/source-locations';
 import { copySample } from '../desktop/sample-book.mjs';
 import { canonicalJson } from '../src/canonical-json';
@@ -172,6 +171,27 @@ const proxyFile = async (mac: Mac, digest: string) => {
 };
 /** The laptop starts as a Finder or AirDrop copy of the desktop's book, with no sync record of its own. */
 const copyBook = (from: Mac, to: Mac) => cp(from.folder, to.folder, { recursive: true });
+
+core('a capture time zone known better here survives a pull, and only a later, own one counts (API-020, 27 Nov)', () => {
+  const fact = (dateTime: string, offset: string | null, verified: string, extra?: Record<string, unknown>): AssetFact =>
+    ({ digest: 'a'.repeat(64), width: 3024, height: 4032, captured: { dateTime, offset }, verified, ...(extra ? { extra } : {}) });
+  const stamped = fact('2026-08-21T09:36:46', '+02:00', '2026-11-26T07:20:00.000Z');
+  const read = fact('2026-08-21T13:36:46', '+06:00', '2026-11-27T12:30:00.000Z');
+  assert.equal(capturedAhead(read, stamped), true);
+  assert.equal(capturedAhead(stamped, read), false, 'an older observation is not ahead');
+  assert.equal(capturedAhead({ ...read, verified: stamped.verified }, stamped), false, 'nor one of the same time');
+  assert.equal(capturedAhead({ ...read, extra: { offsetGuessed: true } }, stamped), false, 'nor a guess');
+  assert.equal(capturedAhead(fact('2026-08-21T13:36:47', '+06:00', read.verified), stamped), false, 'nor another moment');
+  // A time without an offset (a drone's, through Lightroom) takes the offset of its place, at the same camera time.
+  assert.equal(capturedAhead(fact('2026-08-26T06:38:32', '+06:00', read.verified), fact('2026-08-26T06:38:32', null, stamped.verified)), true);
+  assert.equal(capturedAhead(fact('2026-08-26T06:38:32', '+06:00', read.verified), fact('2026-08-26T10:38:32', null, stamped.verified)), false);
+  // The pull: the snapshot's fact, with this Mac's capture time and when it was read; the rest as before.
+  const photos = { p: { online: { url: 'x' } }, q: { online: { url: 'y' } } } as unknown as PhotoIndex;
+  const remote = { p: { ...stamped, width: 4032 }, q: stamped };
+  const merged = mergePulledFacts(photos, { p: read, q: { ...read, extra: { offsetGuessed: true } } }, remote, new Set());
+  assert.deepEqual(merged.p, { ...remote.p, captured: read.captured, verified: read.verified });
+  assert.deepEqual(merged.q, stamped, 'a guess here leaves the snapshot as it is');
+});
 
 core('the decision table: fast-forward or keep both, and facts never diverge', () => {
   const header = (commitId: string, bookStateRevision: string, parents: string[] = []): CommitHeader => ({ version: 2, commitId, bookId: '00000000-0000-4000-8000-000000000000',
@@ -865,7 +885,9 @@ const onlineLocator: LocatorKind<OnlineLocator> = {
   key: ({ url }) => url,
   name: ({ name }) => name,
 };
-type OnlineAsset = { revision: string; content: string; width: number; height: number; color: string; title: string };
+type OnlineAsset = { revision: string; content: string; width: number; height: number; color: string; title: string;
+  /** When it was taken, and whether the offset is only this Mac's guess (as Apple Photos before it read the original). */
+  captured?: { dateTime: string; offset: string | null }; guessed?: true };
 class OnlineServer implements SourceProvider<OnlineLocator> {
   readonly provider = 'online' as const;
   readonly assets = new Map<string, OnlineAsset>();
@@ -882,7 +904,8 @@ class OnlineServer implements SourceProvider<OnlineLocator> {
   async observe(_book: string, refs: readonly SourceRef<OnlineLocator>[]): Promise<Observed[]> {
     return refs.map(({ locator }) => {
       const asset = this.asset(locator.url);
-      return this.unavailable(locator.url) ?? { state: 'available', revisions: this.revisions(asset!), facts: { width: asset!.width, height: asset!.height, provided: { title: asset!.title } } };
+      return this.unavailable(locator.url) ?? { state: 'available', revisions: this.revisions(asset!), facts: { width: asset!.width, height: asset!.height, provided: { title: asset!.title },
+        ...(asset!.captured ? { captured: asset!.captured } : {}), ...(asset!.guessed ? { extra: { offsetGuessed: true } } : {}) } };
     });
   }
   async *preview(_book: string, refs: readonly SourceRef<OnlineLocator>[], { staging, signal }: MaterializeOptions): AsyncGenerator<Materialized> {
@@ -1095,6 +1118,50 @@ test('two Macs that see different versions of an online photo for good stop push
   assert.deepEqual(await outcome(laptop(), remote), { action: 'fast-forward', pushed: 0 });
   for (const mac of [desktop, laptop, desktop, laptop]) assert.deepEqual(await outcome(mac(), remote), { action: 'in-sync', pushed: 0 });
   assert.equal((await webFact(remote, a)).provided?.title, 'Harbour at night');
+});
+
+test('a capture time zone corrected on one Mac goes up by itself, and a pull from a Mac that only knows the old one keeps it (API-020, 27 Nov)', async (t) => {
+  const { a, b, remote } = await world(t);
+  const server = onlineServer(t);
+  // The same moment: as a Mac stamped it at its own offset before it could read the original, and as the original says.
+  const stamped = { ...dawn, captured: { dateTime: '2026-08-21T09:36:46', offset: '+02:00' } };
+  const read = { ...dawn, captured: { dateTime: '2026-08-21T13:36:46', offset: '+06:00' } };
+  const offset = async (mac: Mac) => (await readAssetFacts(mac.folder)).web.captured?.offset;
+  // The desktop recorded the stamped time and synced it; the laptop has a copy of that book.
+  server.assets.set(harbour, stamped);
+  await edit(a, (files) => { files.photoIndex.web = { online: { url: harbour } } as never; });
+  await sync(a, remote);
+  await copyBook(a, b);
+  // The laptop reads the original: the correction alone is pushed, though no digest changed.
+  server.assets.set(harbour, read);
+  assert.deepEqual(await outcome(b, remote), { action: 'adopt', pushed: 1 });
+  assert.equal(await offset(b), '+06:00');
+  assert.equal((await webFact(remote, a)).captured?.offset, '+06:00');
+  // The desktop cannot read the photo now: it takes the correction and pushes nothing back.
+  server.signedIn = false;
+  assert.deepEqual(await outcome(a, remote), { action: 'fast-forward', pushed: 0 });
+  assert.equal(await offset(a), '+06:00');
+  assert.deepEqual(await outcome(a, remote), { action: 'in-sync', pushed: 0 });
+  // Nor once it reads the photo again but only guesses its offset: a guess never replaces a recorded own offset.
+  server.signedIn = true;
+  server.lagging = new Map([[harbour, { ...stamped, guessed: true }]]);
+  for (const round of [1, 2]) assert.deepEqual(await outcome(a, remote), { action: 'in-sync', pushed: 0 }, 'round ' + round);
+  assert.equal(await offset(a), '+06:00');
+  server.lagging = undefined;
+
+  // An edit of the desktop's, from a copy that still has the stamped time (a book left open there since): the edit
+  // goes up with the offset the snapshot has, not the stale one, and the laptop takes it without pushing.
+  await edit(a, caption('shore', 'From the desktop'));
+  const facts = await readAssetFacts(a.folder);
+  const verified = new Date(Date.parse(facts.web.verified) - 86_400_000).toISOString();
+  await AssetFacts.adoptSynced(a.folder, { ...facts, web: { ...facts.web, captured: stamped.captured, verified } });
+  server.signedIn = false;
+  assert.deepEqual(await outcome(a, remote), { action: 'push', pushed: 1 });
+  assert.equal((await webFact(remote, a)).captured?.offset, '+06:00', 'the stale offset stays on the desktop');
+  server.signedIn = true;
+  assert.deepEqual(await outcome(b, remote), { action: 'fast-forward', pushed: 0 });
+  assert.equal(await offset(b), '+06:00');
+  assert.deepEqual(await outcome(b, remote), { action: 'in-sync', pushed: 0 });
 });
 
 const keyOf = (content: string) => sha(Buffer.from(content));
@@ -1374,6 +1441,13 @@ test('the marks’ digests stay out of sync.json, which a build before them read
   assert.equal((await readSyncState(a.folder)).lastSynced?.localProps, undefined, 'the digests of another record are not taken for this one');
   assert.deepEqual(await outcome(a, remote), { action: 'push', pushed: 1 }, 'and the favourite goes up once, as from a record before marks');
   assert.deepEqual(await outcome(a, remote), { action: 'in-sync', pushed: 0 });
+  // A field this build does not know is a newer build's: the book asks for an update, not for its record to go (27 Nov).
+  const synced = await readFile(path, 'utf8');
+  await writeFile(path, JSON.stringify({ ...JSON.parse(synced), fromANewerBuild: true }));
+  await assert.rejects(readSyncState(a.folder), /synced by a newer version of ImageFlow.*Update ImageFlow/);
+  await writeFile(path, JSON.stringify({ ...JSON.parse(synced), enabled: 'yes' }));
+  await assert.rejects(readSyncState(a.folder), /sync record is damaged\. Keep a copy of .*sync\.json/);
+  await writeFile(path, synced);
 });
 
 // --- Lightroom Classic (reach `mac`), through the fake plugin over the real bridge ------------------------------------

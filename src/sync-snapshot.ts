@@ -295,6 +295,28 @@ export function changedProperties(props: Record<string, string>, synced?: Pick<S
   }).map(([id]) => id));
 }
 
+type CaptureFact = { captured?: { dateTime: string; offset?: string | null }; verified: string; extra?: Record<string, unknown> };
+const captureInstant = ({ dateTime, offset }: { dateTime: string; offset?: string | null }) => offset ? Date.parse(dateTime + offset) : NaN;
+/**
+ * Whether `here` knows the time zone of a photo's capture better than `there`, another copy of its fact (a snapshot's):
+ * the same moment, or the same camera time where `there` has no offset, at another offset, observed later and not
+ * guessed (API-020). The offset of a photo is corrected without any other change, and a Mac that cannot read the photo
+ * never corrects it: such a correction would otherwise never go up, and a pull would put the old offset back (27 Nov).
+ */
+export function capturedAhead(here: CaptureFact | undefined, there: CaptureFact | undefined) {
+  const [mine, theirs] = [here?.captured, there?.captured];
+  if (!here || !there || !mine?.offset || !theirs || mine.offset === theirs.offset || here.extra?.offsetGuessed === true) return false;
+  if (!(here.verified > there.verified)) return false;
+  return theirs.offset ? captureInstant(mine) === captureInstant(theirs) : mine.dateTime === theirs.dateTime;
+}
+/**
+ * `there` with the capture time of `here` where that is ahead (`capturedAhead`), and otherwise as it is. It then takes
+ * the time `here` was observed too, so the copy it goes to next sees it as the newer one.
+ */
+export function withCaptureOf<F extends CaptureFact>(there: F, here: CaptureFact | undefined): F {
+  return here?.captured && capturedAhead(here, there) ? { ...there, captured: here.captured, verified: here.verified } : there;
+}
+
 /**
  * Whether this Mac knows a photo fact the last synced snapshot lacks, which a push has to carry: an in-place re-export,
  * or marks changed here (`changedProperties`), which change no content and so no digest.

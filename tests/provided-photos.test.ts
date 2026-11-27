@@ -493,11 +493,10 @@ test('the summary carries the declared marks of available and unavailable photos
   // Without a mark, a photo is left out; with none at all, so is the field.
   const unmarked = { ...f.book, photos: new Map([...f.book.photos].filter(([id]) => id !== 'fav' && id !== 'lr')) };
   assert.equal('photoExtra' in projectSummary(unmarked, 'view'), false);
-  // Lightroom Classic cannot read the photo now: it is laid out from its last fact, which keeps its marks.
+  // Lightroom Classic cannot read the photo now: it is drawn from its proxy and its last fact, which keeps its marks.
   f.lightroom.unreadable.add('LR-UUID-0001');
   const reloaded = await loadProject(f.folder, f.cache);
-  assert.equal(reloaded.photos.has('lr'), false);
-  assert.ok(reloaded.unavailablePhotos?.lr);
+  assert.equal(reloaded.sources!['photo:lr'].cached, true);
   assert.deepEqual(projectSummary(reloaded, 'view').photoExtra, { fav: { favorite: true }, lr: { rating: 3 } });
   // Templates never see it.
   const data = renderData(reloaded, 'view', 'edit');
@@ -570,6 +569,22 @@ test('an offline provider shows its photos from their proxies, offers its own re
   // Back online: reported as available again, and reloaded.
   f.provider.online = true;
   assert.deepEqual((await changesOf(f, ['mem1'], () => false)).reload, ['mem1']);
+});
+
+test('a provider that cannot read its photos shows them from their proxies, as Apple Photos failing as a whole on 27 Nov', async (t) => {
+  const f = await fixture(t);
+  await settle(f.book);
+  f.provider.unreadable.add('a1');
+  f.provider.unreadable.add('a2');
+  const failed = await loadProject(f.folder, f.cache);
+  for (const id of ['mem1', 'mem2']) {
+    const status = failed.sources!['photo:' + id];
+    assert.equal(status.state, 'unreadable');
+    assert.equal(status.cached, true, 'the proxy stands in for ' + id);
+    assert.match(failed.photos.get(id)!.problem!, /Unreadable in memory/);
+    assert.match(printProblem(status)!, /Unreadable in memory/);
+  }
+  assert.equal(failed.photos.get('mem1')!.width, 6000);
 });
 
 // --- Export -------------------------------------------------------------------------------------------------------
