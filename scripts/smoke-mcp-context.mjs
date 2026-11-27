@@ -71,7 +71,7 @@ try {
   assert.equal(summary.total, 0);
   assert.equal(summary.templateIdentity.saved.id, 'mcp-context');
   assert.equal(summary.templateIdentity.matchesSavedHash, true);
-  const empty = await call('check_book', { project: firstHandle });
+  const empty = await call('check_book', { project: firstHandle, include: ['occurrences'] });
   assert.ok(empty.data.diagnostics.some((finding) => finding.code === 'book-empty'));
   const absent = await call('check_book', { project: firstHandle, expectedRevision: summary.revision,
     preview: { target: { page: 1 }, maxEdge: 300 } });

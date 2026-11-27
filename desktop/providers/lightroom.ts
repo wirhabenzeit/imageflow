@@ -4,6 +4,8 @@ import { gte, valid } from 'semver';
 import type { LightroomLocator } from '../../src/source-locator';
 import { sourceColors } from '../../src/source-properties';
 import { within } from './files';
+import { withPlaceOffset } from '../place-zones';
+import type { PlaceZone } from '../place-zones';
 import { LightroomOffline } from '../lightroom/bridge';
 import type { LightroomBridge, LightroomConnection } from '../lightroom/bridge';
 import { metadataResultSchema, parseResult, renderResultSchema, thumbnailsResultSchema, thumbnailsSince } from '../lightroom/protocol';
@@ -207,7 +209,11 @@ async function* preview(bridge: LightroomPort, refs: readonly SourceRef<Lightroo
 }
 
 /** The Lightroom Classic provider over a bridge (desktop/lightroom/bridge.ts). */
-export function lightroomProvider(bridge: LightroomPort): SourceProvider<LightroomLocator> {
+/**
+ * `placeZone` looks up the time zone of a place, for a capture time without an offset of its own (a drone's; API-020):
+ * the Photos addon's geocoder by default.
+ */
+export function lightroomProvider(bridge: LightroomPort, { placeZone }: { placeZone?: PlaceZone } = {}): SourceProvider<LightroomLocator> {
   // The catalog each book last observed its photos with (null: none connected). A watch starts from it, not from the
   // connection when the watch starts: a book that loaded just before Lightroom connected has its photos offline, and
   // the plugin connecting before its watch started must still bring them back.
@@ -240,7 +246,7 @@ export function lightroomProvider(bridge: LightroomPort): SourceProvider<Lightro
             if (!row) { results[index] = gone; continue; }
             const revisions = revisionsOf(row, known(ref));
             if (revisions.contentRevision) hashes.set(hashKey(ref.locator), revisions);
-            results[index] = { state: 'available', revisions, facts: lightroomFacts(row) };
+            results[index] = { state: 'available', revisions, facts: await withPlaceOffset(lightroomFacts(row), placeZone, { signal }) };
           }
         } catch (error) { for (const { index } of chunk) results[index] = failure(error); }
       }

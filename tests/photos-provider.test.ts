@@ -178,6 +178,10 @@ test('PhotoKit failures become states the host knows', () => {
   assert.equal(photosFailure(code('PHPhotosErrorDomain:3201')).state, 'missing');
   assert.equal(photosFailure(code('ImageFlowPhotos:3311')).state, 'denied');
   assert.equal(photosFailure(new Error('Odd')).problem, 'Original unavailable: Odd');
+  // The library failing as a whole says so, and what may help.
+  const silent = photosFailure(Object.assign(new Error('The operation couldn’t be completed. (Cocoa error -1.)'), { code: 'NSCocoaErrorDomain:-1' }));
+  assert.equal(silent.state, 'unreadable');
+  assert.match(silent.problem, /^Photos did not answer \(.*Cocoa error -1.*\)\. .*opening ImageFlow again/);
   // A download that failed for the network, wrapped in PhotoKit's own iCloud errors.
   assert.equal(photosFailure(Object.assign(new Error('x'), { code: 'CloudPhotoLibraryErrorDomain:1005', underlying: 'NSURLErrorDomain:-1009' })).state, 'offline');
   assert.equal(accessProblem('authorized'), undefined);

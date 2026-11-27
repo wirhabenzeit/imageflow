@@ -43,6 +43,8 @@ export interface PhotosLibrary {
   imageInfo(path: string): { width: number; height: number; alpha: boolean; count: number } | null;
   /** Decodes an image file through ImageIO, upright, into a TIFF at `file` (at most `size` px), or only checks it decodes (#328). */
   decode(path: string, options?: { file?: string; size?: number }): Promise<{ width: number; height: number }>;
+  /** The time zone of a place (`Asia/Bishkek`), null where it has none, undefined where it could not be looked up now (API-020). */
+  zoneAt?(latitude: number, longitude: number): Promise<string | null | undefined>;
 }
 
 let loaded: PhotosLibrary | null | undefined;

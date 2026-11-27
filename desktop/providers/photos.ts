@@ -72,6 +72,10 @@ export function photosFailure(error: unknown): Problem {
       return gone;
     case 'PHPhotosErrorDomain:3310': case 'PHPhotosErrorDomain:3311': case 'ImageFlowPhotos:3311':
       return denied;
+    // The whole library failed to answer, with no reason given (27 Nov, after an update): it answered again once
+    // ImageFlow was opened anew. Its photos are drawn from their previews meanwhile.
+    case 'NSCocoaErrorDomain:-1':
+      return { state: 'unreadable', problem: 'Photos did not answer (' + message + '). Its photos are shown from their previews; quitting and opening ImageFlow again may help.' };
     default:
       return { state: 'unreadable', problem: 'Original unavailable: ' + message };
   }

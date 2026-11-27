@@ -10,7 +10,7 @@ import { sourceEntries, sourceProvider } from '../src/source-locations';
 import { declaredExtra, declaredProperties, withDeclaredExtra } from '../src/source-properties';
 import { entryReach, isFileLocator, packagePath } from '../src/source-locator';
 import type { LocatorFields } from '../src/source-locator';
-import { changedOriginals, changedProperties, commitHeaderSchema, commitHeaderVersion, contentBlobKey, coverBlobKey, decideSync, deriveTips, encodeStateBlob, factsAhead, newerStateBlob, NewerSyncFormatError, originalBlobKey, portableManifests,
+import { capturedAhead, changedOriginals, changedProperties, commitHeaderSchema, commitHeaderVersion, contentBlobKey, coverBlobKey, decideSync, deriveTips, encodeStateBlob, factsAhead, newerStateBlob, NewerSyncFormatError, originalBlobKey, portableManifests, withCaptureOf,
   projectManifests, proxyBlobKey, stateBlobSchema, stateMatchesHeader } from '../src/sync-snapshot';
 import type { CommitHeader, StateBlob, SyncDecision, SyncedCommit } from '../src/sync-snapshot';
 import type { SyncStatus } from '../src/desktop';
@@ -240,6 +240,10 @@ async function refreshFacts(context: Context) {
   return { ...facts.all() };
 }
 
+/** Whether a fact here knows the time zone of a capture better than the snapshot `blob` has it (`capturedAhead`). */
+const capturesAhead = (facts: Record<string, AssetFact>, blob: StateBlob | undefined) =>
+  !!blob && Object.entries(facts).some(([id, fact]) => capturedAhead(fact, blob.assetsMeta.assets[id]));
+
 const hereDigests = (context: Context) => Object.fromEntries(Object.entries(context.here).map(([id, { digest }]) => [id, digest]));
 const hereKeys = (context: Context) => Object.fromEntries(Object.entries(context.here).flatMap(([id, { key }]) => key === undefined ? [] : [[id, key]]));
 /**
@@ -409,7 +413,7 @@ async function push(context: Context, parents: string[], base: StateBlob | undef
   const marked = changedProperties(hereProps(context), synced);
   const remoteFacts = photoFacts(base?.assetsMeta.assets ?? {}, state.photos);
   const assets = Object.fromEntries(Object.keys(state.photos).flatMap((id): [string, AssetFact][] => {
-    const remote = !changed.has(id) && remoteFacts[id];
+    const remote = !changed.has(id) && remoteFacts[id] && withCaptureOf(remoteFacts[id], facts[id]);
     if (remote) return [[id, marked.has(id) ? withObservedMarks(context, id, remote) : remote]];
     const fact = facts[id] ? withObservedMarks(context, id, facts[id]) : remoteFacts[id];
     return fact ? [[id, fact]] : [];
@@ -928,7 +932,9 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
   if (tombstone) throw new BookDeletedError(tombstone);
   const tips = deriveTips(commits);
   const synced = state.lastSynced;
-  const factsChanged = !!synced && factsAhead(hereDigests(context), synced, hereKeys(context), hereProps(context));
+  // A capture time corrected here changes no digest: it is told from the snapshot this Mac last synced (read once).
+  const factsChanged = !!synced && (factsAhead(hereDigests(context), synced, hereKeys(context), hereProps(context)) ||
+    capturesAhead(facts, await fetchState(options.remote, bookId, synced.stateDigest, undefined, { cached: true }).catch(() => undefined)));
   const decision = decideSync({ pullInProgress: false, tips, commits, lastSynced: synced, localRevision: local.revision, factsChanged });
   // Without changing the book, only a push goes ahead: a pull waits (`deferred`), and a divergence is left as it is.
   if (options.pushOnly && decision.action === 'fast-forward') return deferred;
@@ -984,7 +990,7 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
       await restoreProxies(context.remote, bookId, blob);
       // Facts this Mac knows better than the snapshot go back with a commit of the same book state, and so do
       // originals here that it does not name.
-      if (factsAhead(hereDigests(context), adopted, hereKeys(context), hereProps(context)) || await unnamedOriginals(context, blob)) {
+      if (factsAhead(hereDigests(context), adopted, hereKeys(context), hereProps(context)) || capturesAhead(facts, blob) || await unnamedOriginals(context, blob)) {
         const { header } = await push(context, [decision.tip.commitId], blob, facts, adopted, decision.tip.coverDigest);
         return { action: 'adopt', pushed: [header.commitId], changed };
       }
@@ -994,9 +1000,11 @@ async function decideAndSync(context: Context): Promise<SyncOutcome> {
       const blob = await pull(context, decision.tip);
       if (!blob) return { ...deferred, changed };
       const now = (await readSyncState(root)).lastSynced!;
-      // The merge kept the facts of originals that changed here; they go back, never stale ones.
-      if (factsAhead(hereDigests(context), now, hereKeys(context), hereProps(context)) || await unnamedOriginals(context, blob)) {
-        const { header } = await push(context, [decision.tip.commitId], blob, await readAssetFacts(root), now, decision.tip.coverDigest);
+      // The merge kept the facts of originals that changed here, and capture times known better here; they go back,
+      // never stale ones.
+      const merged = await readAssetFacts(root);
+      if (factsAhead(hereDigests(context), now, hereKeys(context), hereProps(context)) || capturesAhead(merged, blob) || await unnamedOriginals(context, blob)) {
+        const { header } = await push(context, [decision.tip.commitId], blob, merged, now, decision.tip.coverDigest);
         return { action: 'fast-forward', pushed: [header.commitId], pulled: decision.tip.commitId, changed: true };
       }
       return { action: 'fast-forward', pushed: [], pulled: decision.tip.commitId, changed: true };

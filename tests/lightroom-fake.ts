@@ -10,6 +10,7 @@ import { gte } from 'semver';
 export type FakePhoto = {
   lastEditTime: number; editCount: number; width: number; height: number; develop: Record<string, unknown>;
   color: string; fileName: string; title?: string; caption?: string; copyright?: string; captured?: string;
+  gps?: { latitude: number; longitude: number };
 } & Marks;
 /** A photo's marks as plugin 1.3.0 sends them, each only when set: the raw `rating`, `pickStatus` and `colorNameForLabel`, the formatted `label`. */
 export type Marks = { rating?: number; pickStatus?: number; colorNameForLabel?: string; label?: string };
@@ -131,6 +132,7 @@ export class FakeLightroom {
     return { uuid: id, revision, ...(known === revision ? {} : { developHash: this.developHash(id) }), width: photo.width, height: photo.height, orientation: 'AB',
       captured: photo.captured, cameraMake: 'SONY', cameraModel: 'ILCE-7M3', fileName: photo.fileName,
       ...(photo.title ? { title: photo.title } : {}), ...(photo.caption ? { caption: photo.caption } : {}), ...(photo.copyright ? { copyright: photo.copyright } : {}),
+      ...(photo.gps ? { gps: photo.gps } : {}),
       // An older plugin reads no marks.
       ...(!gte(this.version, '1.3.0') ? {} : Object.fromEntries(markKeys.flatMap((key) => photo[key] === undefined ? [] : [[key, photo[key]]]))) };
   }

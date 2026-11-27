@@ -295,6 +295,37 @@ export function changedProperties(props: Record<string, string>, synced?: Pick<S
   }).map(([id]) => id));
 }
 
+type CaptureFact = { captured?: { dateTime: string; offset?: string | null }; verified: string; extra?: Record<string, unknown> };
+const captureInstant = ({ dateTime, offset }: { dateTime: string; offset?: string | null }) => offset ? Date.parse(dateTime + offset) : NaN;
+/**
+ * Whether `here` knows the time zone of a photo's capture better than `there`, another copy of its fact (a snapshot's),
+ * for the same moment (or the same camera time where `there` has no offset), with an offset `here` did not guess
+ * (API-020): one `there` only guessed or lacks, whenever either was observed, and the same offset too, which confirms
+ * the guess; and another offset `there` holds as its own where `here` was observed later. The offset of a photo is
+ * corrected without any other change, and a Mac that cannot read the photo never corrects it: such a correction would
+ * otherwise never go up, and a pull would put the old offset back (27 Nov).
+ */
+export function capturedAhead(here: CaptureFact | undefined, there: CaptureFact | undefined) {
+  const [mine, theirs] = [here?.captured, there?.captured];
+  if (!here || !there || !mine?.offset || !theirs || here.extra?.offsetGuessed === true) return false;
+  const sameMoment = theirs.offset ? captureInstant(mine) === captureInstant(theirs) : mine.dateTime === theirs.dateTime;
+  if (!sameMoment) return false;
+  const guessed = there.extra?.offsetGuessed === true;
+  if (mine.offset === theirs.offset) return guessed;
+  return guessed || !theirs.offset || here.verified > there.verified;
+}
+/**
+ * `there` with the capture time of `here` where that is ahead (`capturedAhead`), and otherwise as it is. It then takes
+ * the time `here` was observed too, so the copy it goes to next sees it as the newer one, and loses the mark of a
+ * guessed offset: a mark left on a real offset would let the next guess replace it (`ownOffsetKept`).
+ */
+export function withCaptureOf<F extends CaptureFact>(there: F, here: CaptureFact | undefined): F {
+  if (!here?.captured || !capturedAhead(here, there)) return there;
+  const { extra: kept, ...rest } = there;
+  const { offsetGuessed: _guessed, ...extra } = kept ?? {};
+  return { ...rest, captured: here.captured, verified: here.verified, ...(Object.keys(extra).length ? { extra } : {}) } as F;
+}
+
 /**
  * Whether this Mac knows a photo fact the last synced snapshot lacks, which a push has to carry: an in-place re-export,
  * or marks changed here (`changedProperties`), which change no content and so no digest.

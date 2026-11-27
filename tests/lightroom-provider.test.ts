@@ -28,15 +28,17 @@ import { sourceWarnings } from '../src/away-originals';
 import { assetMenu } from '../src/asset-menu';
 import { catalogId, FakeLightroom, otherCatalogId, uuid } from './lightroom-fake';
 import './persistence-root';
+import { forgetPlaceZones } from '../desktop/place-zones';
+import type { PlaceZone } from '../desktop/place-zones';
 
 // The Lightroom Classic provider (ADR 0011) over the real loopback bridge, against a fake plugin that speaks the
 // bridge protocol over HTTP. No Lightroom runs and nothing is written outside temporary folders.
 
-async function setup(t: { after: (fn: () => Promise<void>) => void }) {
+async function setup(t: { after: (fn: () => Promise<void>) => void }, placeZone?: PlaceZone) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'if-lr-provider-')));
   const bridge = new LightroomBridge({ file: join(root, 'bridge.json'), version: 'test', hold: 300, grace: 5000, closeGrace: 200 });
   await bridge.start();
-  const provider = lightroomProvider(bridge);
+  const provider = lightroomProvider(bridge, { placeZone });
   const fakes: FakeLightroom[] = [];
   const fake = (version?: string) => { const plugin = new FakeLightroom(join(root, 'bridge.json'), version); fakes.push(plugin); return plugin; };
   const staging = join(root, 'staging');
@@ -86,6 +88,35 @@ test('observe reports facts and both revisions, and is offline without Lightroom
   const jobs = plugin.jobs.filter(({ type }) => type === 'metadata');
   assert.equal(jobs.length, 1);
   assert.deepEqual((jobs[0].photos as { uuid: string }[]).map(({ uuid: id }) => id), [uuid(1), uuid(2), uuid(9)]);
+});
+
+test('a capture time without an offset takes the time zone of the place it was taken, as a drone\'s (API-020)', async (t) => {
+  forgetPlaceZones();
+  const asked: string[] = [];
+  let online = false;
+  const { provider, fake, bridge } = await setup(t, async (latitude, longitude) => { asked.push(latitude + ',' + longitude); return online ? 'Asia/Bishkek' : undefined; });
+  const plugin = fake();
+  plugin.add(1, { fileName: 'DJI_0001.DNG', captured: '2026-08-26T06:38:32', gps: { latitude: 40.717089, longitude: 75.861571 } });
+  plugin.add(2, { fileName: 'DJI_0002.DNG', captured: '2026-08-26T06:39:00', gps: { latitude: 40.716918, longitude: 75.861208 } });
+  plugin.add(3, { captured: '2026-08-26T06:39:00+02:00', gps: { latitude: 40.7, longitude: 75.8 } });
+  plugin.add(4, { captured: '2026-08-26T06:39:00' });
+  await plugin.connect();
+  await until(() => !!bridge.connection);
+  const refs = [ref('a', uuid(1)), ref('b', uuid(2)), ref('own', uuid(3)), ref('nowhere', uuid(4))];
+  // Offline: the time stays without an offset, and after one failed lookup no other photo waits for another.
+  const [offline, alsoOffline] = await provider.observe('/book', refs);
+  assert.deepEqual(available(offline).facts?.captured, { dateTime: '2026-08-26T06:38:32', offset: null });
+  assert.deepEqual(available(alsoOffline).facts?.captured, { dateTime: '2026-08-26T06:39:00', offset: null });
+  // Asked again once the pause after a failure is over (here: forgotten).
+  forgetPlaceZones();
+  online = true;
+  const [a, b, own, nowhere] = await provider.observe('/book', refs);
+  assert.deepEqual(available(a).facts?.captured, { dateTime: '2026-08-26T06:38:32', offset: '+06:00' });
+  assert.deepEqual(available(b).facts?.captured, { dateTime: '2026-08-26T06:39:00', offset: '+06:00' });
+  assert.deepEqual(available(own).facts?.captured, { dateTime: '2026-08-26T06:39:00', offset: '+02:00' }, 'an offset of its own stays');
+  assert.deepEqual(available(nowhere).facts?.captured, { dateTime: '2026-08-26T06:39:00', offset: null }, 'without a place, none');
+  // Offline, one lookup for the whole batch; online, two photos of one place of about 10 km ask once.
+  assert.deepEqual(asked, ['40.717089,75.861571', '40.717089,75.861571']);
 });
 
 test('a row carries the marks of plugin 1.3.0, a row of an older plugin none, and a mark ImageFlow cannot read is dropped by itself', () => {

@@ -104,20 +104,42 @@ export function compactDiagnostics(diagnostics: AuthoringDiagnostic[], all = fal
 }
 const shownOccurrences = 3;
 
+// Connections remembered by `diagnosticsSince`, the most recent ones: a session lasts as long as its client is attached.
+const sessionsKept = 64;
+const findingKey = (diagnostic: AuthoringDiagnostic) => createHash('sha256').update(JSON.stringify(diagnostic)).digest('hex');
 /**
- * The diagnostics of a check_book reply, or none where this connection was just given the same ones for the same
- * revision: a run of previews (contact sheets, close-ups) repeated them all, about 4 KB each (API-005, 27 Nov). `seen`
- * remembers what the connection was last given. A full check always lists them; so does a preview that asks for
- * occurrences.
+ * The diagnostics of a reply, as what changed since this connection was last given the book's findings: those new or
+ * different since then are listed, those it has seen already are counted, as are those that went. Previews, close-ups
+ * and checks after each edit repeated every finding, about 4 KB each time (API-005, 27 Nov). `seen` remembers by
+ * session: the connection hands every call an object of its own, so remembering by object never matched in the app
+ * (beta.27). `full` lists every finding (the first call of a connection always does); `remember` is false for a reply
+ * that does not describe the saved book (a draft, fixtures), which leaves the memory as it was.
  */
-export function diagnosticsOnce(seen: WeakMap<object, string>, client: object, revision: unknown, diagnostics: AuthoringDiagnostic[], preview: boolean) {
-  const key = createHash('sha256').update(JSON.stringify([revision, diagnostics])).digest('hex');
-  const same = seen.get(client) === key;
-  seen.set(client, key);
-  if (!preview || !same || !diagnostics.length) return { diagnostics };
-  const count = (severity: string) => diagnostics.filter((diagnostic) => diagnostic.severity === severity).length;
-  return { diagnostics: [], diagnosticsUnchanged: { errors: count('error'), warnings: count('warning'),
-    note: 'The same diagnostics as this connection\'s last check of this revision; check without preview to list them again.' } };
+export function diagnosticsSince(seen: Map<string, ReadonlySet<string>>, session: string, diagnostics: AuthoringDiagnostic[],
+  { full = false, remember = true }: { full?: boolean; remember?: boolean } = {}) {
+  const keys = diagnostics.map(findingKey);
+  const before = seen.get(session);
+  if (remember) rememberFindings(seen, session, diagnostics);
+  if (full || !before) return { diagnostics };
+  const fresh = diagnostics.filter((_, index) => !before.has(keys[index]));
+  const known = diagnostics.filter((_, index) => before.has(keys[index]));
+  const now = new Set(keys);
+  const resolved = [...before].filter((key) => !now.has(key)).length;
+  if (!known.length) return { diagnostics };
+  const count = (severity: string) => known.filter((diagnostic) => diagnostic.severity === severity).length;
+  return { diagnostics: fresh, diagnosticsUnchanged: { errors: count('error'), warnings: count('warning'), ...(resolved ? { resolved } : {}),
+    note: 'Findings this connection was given before and that are still there are counted, not listed; check_book with include: ["occurrences"] lists every finding.' } };
+}
+
+/**
+ * Records `diagnostics` as what this connection was last given (`diagnosticsSince`). A reply that may still fail after
+ * it was built (a source changed meanwhile) records them only once it is sure to be sent: findings it never delivered
+ * would otherwise be counted as seen on the retry.
+ */
+export function rememberFindings(seen: Map<string, ReadonlySet<string>>, session: string, diagnostics: readonly AuthoringDiagnostic[]) {
+  seen.delete(session);
+  seen.set(session, new Set(diagnostics.map(findingKey)));
+  for (const oldest of seen.keys()) { if (seen.size <= sessionsKept) break; seen.delete(oldest); }
 }
 
 type PhotoRecord = { id: string; captured?: CaptureMetadata['captured']; usage?: unknown[]; [field: string]: unknown };
@@ -353,8 +375,8 @@ const contextGuide = 'Start with docs: ["authoring-workflow"]. Use docs for topi
 export function createAuthoringService(hooks: Hooks) {
   // Calls without a connection, such as tests, share one session for this service.
   const unattached: McpClientSession = { name: 'MCP client', session: randomUUID() };
-  // What each agent connection was last given as diagnostics (diagnosticsOnce).
-  const shownDiagnostics = new WeakMap<object, string>();
+  // The findings each agent connection was last given, by session (diagnosticsSince).
+  const shownDiagnostics = new Map<string, ReadonlySet<string>>();
   let cachedCheck: { session: ProjectSession; inputs: ProjectInputCapture; result: AuthoringCheckResult } | undefined;
   let cachedTemplateHash: { session: ProjectSession; observation: string; files: string; hash: string } | undefined;
   const get = (handle: unknown) => {
@@ -790,8 +812,11 @@ export function createAuthoringService(hooks: Hooks) {
           ? await checked(session, signal, { expectedRevision: args.expectedRevision, preview: args.preview, ...(args.cover ? { cover: args.cover } : {}),
             ...(args.inspect ? { inspect: args.inspect } : {}), ...(args.typescript !== undefined ? { typescript: args.typescript } : {}) }, true)
           : await movedDraftCheck();
-      const once = diagnosticsOnce(shownDiagnostics, client, report.revision,
-        compactDiagnostics(report.diagnostics, args.include?.includes('occurrences')), !!args.preview && !args.include?.includes('occurrences'));
+      // What changed since this connection's last look at the saved book. A draft or fixtures describe another book:
+      // their findings are listed in full, and not remembered.
+      const every = !!args.include?.includes('occurrences'), other = !!args.draft || !!args.fixtures;
+      const once = diagnosticsSince(shownDiagnostics, client.session, compactDiagnostics(report.diagnostics, every),
+        { full: every || other, remember: !other });
       const diagnostics = once.diagnostics;
       // The photos of an inspected spread with their pixels and ppi; measured by the render, or estimated (API-021, 26 Nov).
       const inspection = report.render?.inspection && inspectionPrints(report.render.inspection, loadedPhoto(session.book));
@@ -807,7 +832,9 @@ export function createAuthoringService(hooks: Hooks) {
     if (name === 'inspect_book' && args.view === 'elements') {
       const report = await checked(session, signal, { inspect: { spread: args.spread, cover: args.cover, page: args.page, box: args.box, element: args.element,
         offset: args.offset, limit: args.limit } });
-      return { project: session.handle, revision: report.revision, ...(report.superseded ? { superseded: report.superseded } : {}), state: report.state, diagnostics: compactDiagnostics(report.diagnostics),
+      // Findings this connection was given already are counted, not listed again (API-005).
+      return { project: session.handle, revision: report.revision, ...(report.superseded ? { superseded: report.superseded } : {}), state: report.state,
+        ...diagnosticsSince(shownDiagnostics, client.session, compactDiagnostics(report.diagnostics)),
         checks: report.checks, ...(report.render?.inspection && inspectionPrints(report.render.inspection, loadedPhoto(session.book))) };
     }
     if (name === 'get_authoring_context' || name === 'inspect_book') {
@@ -991,7 +1018,7 @@ export function createAuthoringService(hooks: Hooks) {
           } : {}),
           ...(image ? { image } : {}),
           ...(view === 'parameters' ? { document: { values: project?.params, declarations: template?.parameters } } : {}),
-          diagnostics, checks: report.checks, history: session.history };
+          ...diagnosticsSince(shownDiagnostics, client.session, diagnostics, { remember: false }), checks: report.checks, history: session.history };
       }
       await verifySources?.();
       const observedAfter = await Promise.allSettled([templateObservation(folder, signal)]);
@@ -1018,6 +1045,8 @@ export function createAuthoringService(hooks: Hooks) {
         const sync = hooks.syncState?.();
         if (sync) result.sync = sync;
       }
+      // Sure to be sent now: later replies on this connection count from these findings. Context lists every one.
+      rememberFindings(shownDiagnostics, client.session, diagnostics);
       return result;
     }
     if (name === 'rebuild_dependencies') {

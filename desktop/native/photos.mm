@@ -835,18 +835,20 @@ static id readOffset(PHAsset *asset) {
  * Where an original is not on this Mac (with Optimize Mac Storage, most are not), or records no offset, the place a
  * photo was taken says its time zone (API-020): asked of Apple's geocoder, which needs the network but no download of
  * the original and no location permission, once per cell of about 10 km, so a trip's photos ask a handful of times.
- * Only from the offsets queue, one at a time: the geocoder throttles many requests at once. A failed lookup (offline,
- * throttled) tells nothing and is not kept, so the photo is tried again with the others; a place with no time zone
- * (open sea) is kept as such.
+ * From the offsets queue, one at a time, and from `zoneAt`'s own queue, so a lookup for another source never waits
+ * behind originals being read: the geocoder throttles many requests at once, and two at most reach it. A failed
+ * lookup (offline, throttled) tells nothing and is not kept, so the photo is tried again with the others; a place with
+ * no time zone (open sea) is kept as such.
  */
 static NSMutableDictionary<NSString *, id> *zones = [NSMutableDictionary new];
+static std::mutex zonesLock;
 static const int64_t zoneTimeout = 15 * NSEC_PER_SEC;
 
 /** The time zone at `location` (NSTimeZone), NSNull where the place has none, or nil where it could not be looked up now. */
 static id zoneAt(CLLocation *location) {
   CLLocationCoordinate2D at = location.coordinate;
   NSString *cell = [NSString stringWithFormat:@"%.1f,%.1f", round(at.latitude * 10) / 10, round(at.longitude * 10) / 10];
-  if (id known = zones[cell]) return known;
+  { std::lock_guard<std::mutex> guard(zonesLock); if (id known = zones[cell]) return known; }
   __block id found = nil;
   dispatch_semaphore_t done = dispatch_semaphore_create(0);
   CLGeocoder *geocoder = [CLGeocoder new];
@@ -856,7 +858,7 @@ static id zoneAt(CLLocation *location) {
     dispatch_semaphore_signal(done);
   }];
   if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, zoneTimeout))) { [geocoder cancelGeocode]; return nil; }
-  if (found) zones[cell] = found;
+  if (found) { std::lock_guard<std::mutex> guard(zonesLock); zones[cell] = found; }
   return found;
 }
 
@@ -870,6 +872,34 @@ static id offsetByPlace(PHAsset *asset, id own) {
   id zone = zoneAt(asset.location);
   if ([zone isKindOfClass:NSTimeZone.class]) return @([(NSTimeZone *)zone secondsFromGMTForDate:asset.creationDate] / 60);
   return zone ? own : nil;
+}
+
+/** The queue of `zoneAt`: its own, so a place is looked up while the offsets queue reads originals (up to 10 s each). */
+static dispatch_queue_t zonesQueue() {
+  static dispatch_queue_t queue = dispatch_queue_create("imageflow.photos.zones", dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INITIATED, 0));
+  return queue;
+}
+
+/**
+ * zoneAt(latitude, longitude): the time zone of a place, for a photo of another source whose capture time has no offset
+ * (a drone's, through Lightroom Classic; API-020): its identifier (`Asia/Bishkek`), null where the place has none (open
+ * sea), or undefined where it could not be looked up now (offline, throttled), within `zoneTimeout`.
+ */
+static napi_value ZoneAt(napi_env env, napi_callback_info info) {
+  size_t argc = 2; napi_value argv[2];
+  CHECK(napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr));
+  double latitude = NAN, longitude = NAN;
+  if (argc > 1) { napi_get_value_double(env, argv[0], &latitude); napi_get_value_double(env, argv[1], &longitude); }
+  napi_value promise;
+  PendingRef pending = newPending(env, &promise);
+  CLLocationCoordinate2D at = CLLocationCoordinate2DMake(latitude, longitude);
+  if (!CLLocationCoordinate2DIsValid(at)) { settle(pending, true, ^(napi_env e) { return errorValue(e, failure(1, @"Expected a latitude and a longitude.")); }); return promise; }
+  dispatch_async(zonesQueue(), ^{ @autoreleasepool {
+    id zone = zoneAt([[CLLocation alloc] initWithLatitude:at.latitude longitude:at.longitude]);
+    NSString *name = [zone isKindOfClass:NSTimeZone.class] ? [(NSTimeZone *)zone name] : nil;
+    settle(pending, false, ^(napi_env e) { return name ? str(e, name) : zone ? nullValue(e) : undefinedValue(e); });
+  } });
+  return promise;
 }
 
 // Photos whose offset was read and differs from the guess, not reported yet (under offsetsLock).
@@ -886,9 +916,15 @@ static void reportOffsets() {
   sendChanges(ids);
 }
 
+/** The queue offsets are read on, and the places of their photos looked up. */
+static dispatch_queue_t offsetsQueue() {
+  static dispatch_queue_t queue = dispatch_queue_create("imageflow.photos.offsets", dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_UTILITY, 0));
+  return queue;
+}
+
 /** Reads the offsets of `assets` in the background (see above); those read or queued already are skipped. */
 static void readOffsets(NSArray<PHAsset *> *assets) {
-  static dispatch_queue_t queue = dispatch_queue_create("imageflow.photos.offsets", dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_UTILITY, 0));
+  dispatch_queue_t queue = offsetsQueue();
   NSMutableArray<PHAsset *> *todo = [NSMutableArray new];
   {
     std::lock_guard<std::mutex> guard(offsetsLock);
@@ -1036,7 +1072,7 @@ NAPI_MODULE_INIT() {
   const struct { const char *name; napi_callback fn; } functions[] = {
     {"status", Status}, {"requestAccess", RequestAccess}, {"dragged", Dragged}, {"cloudIdentifiers", CloudIdentifiers},
     {"localIdentifiers", LocalIdentifiers}, {"facts", Facts}, {"image", Image}, {"cancel", Cancel}, {"onChanges", OnChanges}, {"track", Track}, {"pick", Pick}, {"cancelPick", CancelPick},
-    {"imageInfo", ImageInfo}, {"decode", Decode},
+    {"imageInfo", ImageInfo}, {"decode", Decode}, {"zoneAt", ZoneAt},
   };
   for (const auto &entry : functions) {
     napi_value fn;

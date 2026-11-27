@@ -532,12 +532,15 @@ async function loadPhoto(book: Pick<OpenProject, 'photoIndex' | 'cache'>, source
   // yet located, an owned photo not yet downloaded), not approved on this Mac, or whose provider is not reachable. It
   // is read from the proxy store only, never from the original's path, so an unapproved location stays unread (ADR
   // 0005, ADR 0010, ADR 0011).
-  // A photo of a library ImageFlow may no longer read (Apple Photos, ADR 0013) is drawn from its proxy too.
-  if (!standInStates.has(status.state) && !(status.state === 'denied' && source.kind === 'photo' && !isFileLocator(source.locator))) return { fact };
+  // A photo of a library ImageFlow may no longer read (Apple Photos, ADR 0013), or whose provider failed to read it, is
+  // drawn from its proxy too: a library that fails as a whole (Photos' "Cocoa error -1" of 27 Nov) left every one of
+  // its photos blank, though their previews were stored.
+  if (!standInStates.has(status.state) && !(providerStandInStates.has(status.state) && source.kind === 'photo' && !isFileLocator(source.locator))) return { fact };
   const photo = await proxyPhoto(book, source.id, fact, status.problem ?? 'Original unavailable');
   return photo ? { standIn: true, photo } : { fact };
 }
 const standInStates = new Set<SourceStatus['state']>(['missing', 'unapproved', 'offline', 'needs-sign-in']);
+const providerStandInStates = new Set<SourceStatus['state']>(['denied', 'unreadable']);
 
 function projectJson(value: unknown) {
   return JSON.stringify(value, null, 2) + '\n';
