@@ -305,7 +305,8 @@ try {
   await laptop.locator('.book-check-panel').getByRole('button', { name: 'Locate Folder…' }).waitFor();
   await laptop.keyboard.press('Escape');
   const checkedHere = await laptop.evaluate(async () => window.imageflow.checkBook((await window.imageflow.currentProject()).value.id, {}));
-  const findings = checkedHere.value.diagnostics.filter(({ occurrences }) => occurrences);
+  // The starter's two example empty boxes are one finding with places too (photo-box-empty).
+  const findings = checkedHere.value.diagnostics.filter(({ code, occurrences }) => occurrences && code !== 'photo-box-empty');
   assert.deepEqual(findings.map(({ code, severity, occurrences }) => [code, severity, occurrences.map(({ spread, page, box, source }) => [spread, page, box, source])]),
     [['source-unavailable', 'warning', [['arriving', 'left', 'hero', linked]]]], JSON.stringify(checkedHere.value.diagnostics));
   await answer('Export PDF with cached previews?', 'cancel');
