@@ -2460,7 +2460,7 @@ export async function startRender(root: HTMLElement) {
       const photo = state && box ? scopeState(state, page)?.boxes[box]?.photo : undefined;
       errors.push({ ...(spread ? located(spread, '') : {}), message: 'Could not decode photo ' + (images[i].alt || box) + '.',
         code: 'photo-decode-failed', box, ...onPage(page), source: photo,
-        suggestion: 'Replace the original with a valid JPEG, PNG or WebP file, or assign another photo.' });
+        suggestion: 'Replace the original with a valid JPEG, PNG, WebP, AVIF or HEIC file, or assign another photo.' });
     }
     for (const { spread, page, anchor, found } of lookups.values()) {
       warnings.push(found ? {

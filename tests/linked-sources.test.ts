@@ -67,34 +67,75 @@ test('document default links all three source kinds while per-import copy remain
   assert.equal(sourceEntries(copied.book).filter((entry) => !!sourceFile(entry)?.linked).length, 3);
 });
 
-test('a HEIC photo is imported as a stored JPEG copy, also into a book that links its files (UI-013)', { skip: process.platform !== 'darwin' }, async (t) => {
+// A HEIC as an iPhone hands it over (made with ImageIO): stored 300 × 200 in Display P3 and turned upright by its
+// orientation (90° clockwise), so the blue square in its top-left corner shows top right, with a capture time and place.
+const turnedHeic = resolve('tests/fixtures/turned.heic');
+async function heicDecoder(t: { after: (fn: () => Promise<void>) => void }) {
+  // Imported from where it is, not bundled, so it finds desktop/native/photos.mm.
+  const script = (await import('node:url')).pathToFileURL(resolve('scripts/build-mac-header.mjs')).href;
+  const { buildPhotos } = await import(script) as { buildPhotos: (destination: string) => Promise<void> };
+  const { providePhotosLibrary } = await import('../desktop/photos-library');
+  const { createRequire } = await import('node:module');
+  const build = await mkdtemp(join(tmpdir(), 'if-photos-addon-'));
+  await buildPhotos(build);
+  providePhotosLibrary(createRequire(import.meta.url)(join(build, 'native', 'photos.node')));
+  t.after(async () => { providePhotosLibrary(null); await rm(build, { recursive: true, force: true }); });
+}
+async function pixel(file: string, left: number, top: number) {
+  return [...await sharp(file).extract({ left, top, width: 1, height: 1 }).removeAlpha().raw().toBuffer()];
+}
+
+test('a HEIC photo is linked or stored as it is, and macOS decodes it for every rendition (#328)', { skip: process.platform !== 'darwin' }, async (t) => {
   const f = await fixture(t);
+  await heicDecoder(t);
+  const heic = join(f.external, 'IMG_0001.HEIC');
+  await cp(turnedHeic, heic);
   const policy = structuredClone({ project: f.book.project, photoIndex: f.book.photoIndex });
   policy.project.importMode = 'link';
   f.book = await updateProject(f.book, policy);
-  const jpeg = join(f.external, 'source.jpg');
-  await sharp({ create: { width: 120, height: 80, channels: 3, background: '#2060a0' } }).jpeg().toFile(jpeg);
-  const heic = join(f.external, 'IMG_0001.HEIC');
-  // macOS writes HEIC itself; the test makes one as an iPhone would hand it over.
-  const { execFileSync } = await import('node:child_process');
-  execFileSync('/usr/bin/sips', ['-s', 'format', 'heic', jpeg, '--out', heic], { stdio: 'ignore' });
-  const old = new Date('2024-05-01T10:00:00Z');
-  await utimes(heic, old, old);
-  const conversions = async () => (await readdir(tmpdir())).filter((name) => name.startsWith('imageflow-heic-')).sort();
-  const before = await conversions();
-  const result = await importIntoProject(f.book, { kind: 'photo' }, [heic]);
-  assert.equal(result.counts.photos, 1);
-  assert.equal(result.counts.converted, 1);
-  const entry = sourceEntries(result.book).find((item) => item.id === result.imported[0])!;
-  const file = sourceFile(entry)!;
-  assert.equal(file.linked, false);
-  assert.match(file.path, /^photos\/ph-[0-9a-f-]+-IMG_0001\.jpg$/);
-  assert.equal(result.book.photoIndex[entry.id].title, 'IMG_0001');
-  const stored = join(f.folder, file.path);
-  assert.equal((await sharp(stored).metadata()).format, 'jpeg');
-  assert.equal((await stat(stored)).mtime.getTime(), old.getTime());
-  // The JPEG made on the way is not left behind.
-  assert.deepEqual(await conversions(), before);
+  const linked = await importIntoProject(f.book, { kind: 'photo' }, [heic]);
+  assert.equal(linked.counts.photos, 1);
+  const linkedId = linked.imported[0];
+  assert.deepEqual(sourceFile(sourceEntries(linked.book).find((entry) => entry.id === linkedId)!), { path: heic, linked: true });
+  // Into a book that stores its files, the HEIC is copied as it is.
+  const stored = await importIntoProject(linked.book, { kind: 'photo', mode: 'copy' }, [heic]);
+  const storedId = stored.imported[0];
+  assert.match(sourceFile(sourceEntries(stored.book).find((entry) => entry.id === storedId)!)!.path, /^photos\/ph-[0-9a-f-]+-IMG_0001\.HEIC$/);
+  const book = await loadProject(f.folder, f.cache);
+  for (const id of [linkedId, storedId]) {
+    const photo = book.photos.get(id)!;
+    assert.deepEqual([photo.width, photo.height], [200, 300], 'upright');
+    assert.equal(photo.passthrough, false, 'never printed from the HEIC itself');
+    assert.deepEqual(photo.captured, { dateTime: '2026-08-14T18:30:05', offset: '+02:00' });
+    assert.deepEqual(photo.location, { latitude: 47.37, longitude: 8.54 });
+    for (const rendition of ['thumb', 'preview', 'export'] as const) {
+      const file = await photoFile(photo, rendition);
+      const metadata = await sharp(file).metadata();
+      assert.equal(metadata.format, 'jpeg');
+      assert.deepEqual([metadata.width, metadata.height], rendition === 'thumb' ? [160, 240] : [200, 300], rendition);
+      const [r, , b] = await pixel(file, metadata.width! - 5, 5);
+      assert.ok(b > 200 && r < 60, rendition + ' is upright');
+    }
+  }
+  // An export reads every photo from a private copy, which keeps the HEIC's extension, so it decodes the same way.
+  const pinned = await loadProject(f.folder, f.cache, false, true);
+  for (const id of [linkedId, storedId]) {
+    const photo = pinned.photos.get(id)!;
+    assert.match(photo.original, /\.heic$/);
+    assert.deepEqual([photo.width, photo.height], [200, 300]);
+    assert.deepEqual([(await sharp(await photoFile(photo, 'export')).metadata()).width], [200]);
+  }
+});
+
+test('a HEIC that does not decode is not imported (#328)', { skip: process.platform !== 'darwin' }, async (t) => {
+  const f = await fixture(t);
+  await heicDecoder(t);
+  const bytes = await readFile(turnedHeic);
+  const truncated = join(f.external, 'cut.heic');
+  await writeFile(truncated, bytes.subarray(0, Math.floor(bytes.length * 0.8)));
+  const result = await importIntoProject(f.book, { kind: 'photo' }, [truncated]);
+  assert.equal(result.counts.photos, 0);
+  assert.equal(result.counts.failed, 1);
 });
 
 test('a large linked import checks photos concurrently, keeps the chosen order and reports progress', async (t) => {

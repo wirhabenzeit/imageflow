@@ -7,8 +7,12 @@ import sharp from 'sharp';
 import type { Photo } from '../src/project';
 import type { ProvidedMetadata } from '../src/asset-facts';
 import { captureMetadata } from '../src/photo-metadata';
+import { decodedNatively, decodeNatively, nativeImageInfo } from './photo-decode';
 
-export const photoExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp']);
+// The photo files sharp decodes. HEIC and HEIF photos, which macOS decodes, come along where it can (photo-decode.ts).
+// AVIF is a HEIF file too, coded with AV1, which sharp decodes.
+export const photoExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif']);
+const formats = 'JPEG, PNG, WebP, AVIF or HEIC';
 type Rendition = 'thumb' | 'preview' | 'export';
 // `provided`: the title, caption, credit and alt text of a photo's provider (ADR 0011), which the book's own values in
 // photos.json override field by field. `extra`: what its provider keeps with the fact, of which the editor shows only the
@@ -19,17 +23,22 @@ export type ProjectPhoto = Photo & { estimatedCapture?: string; original: string
 const observation = fileStamp;
 
 export async function photoDetails(original: string, maximumBytes: number | null = 50 * 1024 * 1024) {
-  if (!photoExtensions.has(extname(original).toLowerCase())) throw new Error('Use JPEG, PNG, or WebP images.');
+  const native = decodedNatively(original);
+  if (!native && !photoExtensions.has(extname(original).toLowerCase())) throw new Error('Use ' + formats + ' images.');
   const info = await stat(original, { bigint: true });
   if (!info.isFile() || (maximumBytes !== null && info.size > BigInt(maximumBytes))) throw new Error('Photos must be files up to 50 MB.');
+  // sharp reads a HEIC's EXIF without decoding it; its size and alpha come from ImageIO, which decodes it.
   const metadata = await sharp(original).metadata();
-  if (!['jpeg', 'png', 'webp'].includes(metadata.format ?? '') || !metadata.width || !metadata.height || (metadata.pages ?? 1) > 1) throw new Error('Expected a still JPEG, PNG or WebP image.');
+  const size = native ? nativeImageInfo(original) : undefined;
+  const still = native ? size!.count === 1 && metadata.format === 'heif' && metadata.compression === 'hevc'
+    : ['jpeg', 'png', 'webp'].includes(metadata.format ?? '') || (metadata.format === 'heif' && metadata.compression === 'av1');
+  if (!still || !metadata.width || !metadata.height || (metadata.pages ?? 1) > 1) throw new Error('Expected a still ' + formats + ' image.');
   const turned = (metadata.orientation ?? 1) >= 5;
   const capture = captureMetadata(metadata.exif);
   return {
-    width: turned ? metadata.height : metadata.width,
-    height: turned ? metadata.width : metadata.height,
-    alpha: !!metadata.hasAlpha,
+    width: size?.width ?? (turned ? metadata.height : metadata.width),
+    height: size?.height ?? (turned ? metadata.width : metadata.height),
+    alpha: size?.alpha ?? !!metadata.hasAlpha,
     // Read from the original on every load, never stored in photos.json: existing books get it without re-importing,
     // and a replaced or edited source refreshes it.
     ...capture,
@@ -44,9 +53,14 @@ export async function photoDetails(original: string, maximumBytes: number | null
 
 export async function importPhotoDetails(original: string) {
   const details = await photoDetails(original);
-  // Metadata alone can succeed on a truncated image. Validate its pixels before adding it to the book.
-  await sharp(original, { failOn: 'warning' }).resize({ width: 1, height: 1 }).toBuffer();
+  await checkPixels(original);
   return details;
+}
+
+/** Metadata alone can succeed on a truncated image: this decodes all of it, and fails where it can't. */
+export async function checkPixels(original: string) {
+  if (decodedNatively(original)) await decodeNatively(original);
+  else await sharp(original, { failOn: 'warning' }).resize({ width: 1, height: 1 }).toBuffer();
 }
 
 // Making a rendition decodes the whole original, about 100–300 ms for a large photo, and requests arrive by the
@@ -108,9 +122,16 @@ export async function photoFile(photo: ProjectPhoto, rendition: Rendition, width
     await mkdir(photo.cache, { recursive: true });
     const staging = await mkdtemp(join(photo.cache, '.render-'));
     try {
-      const image = sharp(photo.original).autoOrient().withIccProfile('srgb');
-      if (rendition !== 'export') {
-        const size = rendition === 'thumb' ? 240 : 1400;
+      const size = rendition === 'thumb' ? 240 : rendition === 'preview' ? 1400 : undefined;
+      // A HEIC is decoded by macOS first, upright, and only as large as a thumbnail or preview needs (photo-decode.ts).
+      let input = photo.original;
+      if (decodedNatively(photo.original)) {
+        input = join(staging, 'decoded.tiff');
+        // Twice the size, so the last step down is sharp's, as for any photo.
+        await decodeNatively(photo.original, { file: input, ...(size ? { size: size * 2 } : {}) });
+      }
+      const image = sharp(input).autoOrient().withIccProfile('srgb');
+      if (size) {
         image.resize({ width: size, height: size, fit: 'inside', withoutEnlargement: true });
       } else if (resample) {
         // Never enlarged: a sync proxy that stands in for a missing original is smaller than the original it reports.

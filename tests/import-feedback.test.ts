@@ -16,11 +16,6 @@ test('unsupported, unreadable, and empty selections have distinct explanations',
   assert.match(importFeedback(0, empty), /No files found.*hidden files are ignored/);
 });
 
-test('HEIC photos converted on import are named, as a JPEG copy the book stores (UI-013)', () => {
-  assert.equal(importFeedback(2, { ...empty, photos: 2, converted: 1 }), 'Imported 2 photos. 1 HEIC photo was converted to JPEG and stored in the book.');
-  assert.equal(importFeedback(3, { ...empty, photos: 3, converted: 3 }), 'Imported 3 photos. 3 HEIC photos were converted to JPEG and stored in the book.');
-});
-
 test('files already in the book are counted, not imported again (F-044)', () => {
   assert.equal(importFeedback(216, { ...empty, photos: 53, existing: 163 }), 'Imported 53 photos; 163 files are already in this book.');
   assert.equal(importFeedback(1, { ...empty, existing: 1 }), '1 file is already in this book; nothing new to import.');

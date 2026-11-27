@@ -162,9 +162,8 @@ export type ProjectSummary = ProjectFiles & {
   sources?: Record<string, SourceStatus>;
 };
 // `existing`: files the book already holds, linked or copied, found by path or by content; they are not added again.
-// `heic`: how many of the skipped files are HEIC photos, which the notice names (where they can't be converted).
-// `converted`: how many of the photos were HEIC photos, stored in the book as JPEGs (UI-013).
-export type ImportCounts = { photos: number; texts: number; files: number; skipped: number; failed: number; existing?: number; heic?: number; converted?: number };
+// `heic`: how many of the skipped files are HEIC photos, which the notice names (where this Mac cannot decode them).
+export type ImportCounts = { photos: number; texts: number; files: number; skipped: number; failed: number; existing?: number; heic?: number };
 export type Result<T> = { value: T } | { error: string; code?: 'BOOK_BUSY' };
 /**
  * Settings → Sync (#281; `available` is always true since #283). The renderer sends an access key to the main

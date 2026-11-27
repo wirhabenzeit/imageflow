@@ -32,7 +32,7 @@ These flows can be tested in the editor now. Page-level MCP mutation commands ar
 
 ## Photos
 
-- **Import:** use **Assets → Import…**, the Sources strip's **Import** menu, or drop JPEG, PNG, WebP or HEIC files onto the strip or a photo box. HEIC photos, as iPhones take them, are converted to a high-quality JPEG on import and stored in the book, even when the book links its files; the capture time, location and colour profile stay with it. Photos in Apple Photos are better added from there (drag them in), which links them instead.
+- **Import:** use **Assets → Import…**, the Sources strip's **Import** menu, or drop JPEG, PNG, WebP, AVIF or HEIC files onto the strip or a photo box. HEIC photos, as iPhones take them, are linked or stored as they are, like any photo; macOS draws them, and an export prints them at full resolution. Photos in Apple Photos are better added from there (drag them in), which also brings along the edits made in Photos.
 - **Place:** drag a photo from the strip onto a photo box. Drag an unselected placed photo onto another box to swap them.
 - **Crop:** click a placed photo, then drag to reposition it. Pinch, Control-scroll or use the toolbar slider to zoom. Each gesture is one undoable edit.
 - **Caption:** click a caption printed on the page to type it there (an empty one shows "Add caption" while **Show caption** is on), select a placed photo and choose **Caption…**, or right-click it and choose **Edit Caption…**. Typing on the page works in templates whose pages mark their captions, such as the starter. The caption belongs to the photo, wherever it is placed; whether a page prints it is a setting of the template.

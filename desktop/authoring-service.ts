@@ -25,7 +25,7 @@ import { spreadByPrefix } from '../src/preview';
 import type { InspectionRequest } from '../src/inspection';
 import { inspectionPrints } from '../src/photo-resolution';
 import { photoExtensions } from './photos';
-import { importablePhotoExtensions } from './heic';
+import { importablePhotoExtensions } from './photo-decode';
 import { heicAdvice, isHeic } from '../src/import-feedback';
 import { captureFields } from '../src/photo-metadata';
 import type { CaptureMetadata } from '../src/photo-metadata';
@@ -1073,8 +1073,8 @@ export function createAuthoringService(hooks: Hooks) {
         notice: 'The source already has this name. Nothing was changed.' };
       result = { state: 'ready', project: session.handle, committed: true, revision: null, ...renamed(next!, entry.id) };
     } else {
-      // HEIC photos where this Mac converts them to JPEG on import (UI-013).
-      const extensions = args.kind === 'photo' ? await importablePhotoExtensions(photoExtensions) : new Set(args.kind === 'markdown' ? ['.md'] : args.accept);
+      // HEIC photos where macOS decodes them here (#328).
+      const extensions = args.kind === 'photo' ? importablePhotoExtensions(photoExtensions) : new Set(args.kind === 'markdown' ? ['.md'] : args.accept);
       const paths: string[] = [];
       let size = 0;
       for (const path of args.paths as string[]) {

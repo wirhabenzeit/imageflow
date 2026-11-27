@@ -14,7 +14,7 @@ import { cloneFile, fileFailure, observeFile, within } from './providers/files';
 import type { ClonedFile, ObservedFile } from './providers/files';
 import type { Observed, SourceRef } from './source-provider';
 import { readSourceRegistry } from './source-identity';
-import { photoDetails } from './photos';
+import { checkPixels, photoDetails } from './photos';
 import { isRenditionPath, renditionCacheFor } from './rendition-cache';
 
 let persistentRoot: string | undefined;
@@ -187,11 +187,14 @@ export class SourceStore {
         const digest = await hashFile(temporary);
         let dimensions: { width?: number; height?: number; modified?: string } = {};
         if (source.kind === 'photo') {
-          const metadata = await sharp(temporary, { failOn: 'warning' }).metadata();
-          if (!['.jpg', '.jpeg', '.png', '.webp'].includes(extname(file.path).toLowerCase()) || !metadata.width || !metadata.height || (metadata.pages ?? 1) > 1) throw new Error('Expected a still JPEG, PNG or WebP image.');
-          const turned = (metadata.orientation ?? 1) >= 5;
-          await sharp(temporary, { failOn: 'warning' }).resize({ width: 1, height: 1 }).toBuffer();
-          dimensions = { modified: observed.modified, width: turned ? metadata.height : metadata.width, height: turned ? metadata.width : metadata.height };
+          // The copy is named by the original's extension, as the snapshot will be: a HEIC is checked by what decodes it.
+          const named = temporary + extname(file.path).toLowerCase();
+          await rename(temporary, named);
+          try {
+            const { width, height } = await photoDetails(named, null);
+            await checkPixels(named);
+            dimensions = { modified: observed.modified, width, height };
+          } finally { await rename(named, temporary); }
         }
         const snapshot = join(directory, digest + extname(file.path).toLowerCase());
         if (!privatePin) this.pins.add(snapshot);

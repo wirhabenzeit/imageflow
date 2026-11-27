@@ -39,6 +39,10 @@ export interface PhotosLibrary {
   pick(window: Buffer): Promise<string[]>;
   /** Closes the picker, which then answers []: for its window closing while it is open. */
   cancelPick(): void;
+  /** An image file's upright size, alpha and number of pictures, read by ImageIO without decoding; null where it can't (#328). */
+  imageInfo(path: string): { width: number; height: number; alpha: boolean; count: number } | null;
+  /** Decodes an image file through ImageIO, upright, into a TIFF at `file` (at most `size` px), or only checks it decodes (#328). */
+  decode(path: string, options?: { file?: string; size?: number }): Promise<{ width: number; height: number }>;
 }
 
 let loaded: PhotosLibrary | null | undefined;
@@ -50,6 +54,9 @@ export function photosLibrary(): PhotosLibrary | undefined {
   }
   return loaded ?? undefined;
 }
+
+/** Uses `library` as the addon: for tests, which run outside the staged app and load the built addon themselves. */
+export function providePhotosLibrary(library: PhotosLibrary | null) { loaded = library; }
 
 /** The part of a path that names a Photos library bundle, if the path is inside one. */
 export const photosLibraryOf = (path: string) => /^(.*?\.photoslibrary)(?:\/|$)/i.exec(path)?.[1];
