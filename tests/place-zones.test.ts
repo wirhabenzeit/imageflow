@@ -27,3 +27,24 @@ test('facts take the offset of their place only where they have none, and a plac
   assert.equal(await withPlaceOffset(sea, async () => null), sea);
   assert.equal(await withPlaceOffset(facts, undefined), facts, 'nothing to ask on another platform');
 });
+
+test('after a failed lookup none is asked for a while, so a slow network stalls a load once; an aborted one asks nothing', async () => {
+  forgetPlaceZones();
+  let clock = 0, asked = 0, online = false;
+  const now = () => clock;
+  const lookup = async () => { asked++; return online ? 'Asia/Bishkek' : undefined; };
+  const facts = (latitude: number) => ({ width: 1, height: 1, captured: { dateTime: '2026-08-26T06:38:32', offset: null }, location: { latitude, longitude: 75.86 } });
+  for (const latitude of [40.7, 41.7, 42.7]) assert.equal((await withPlaceOffset(facts(latitude), lookup, { now })).captured?.offset, null);
+  assert.equal(asked, 1, 'one failure, then a pause');
+  online = true;
+  clock += 4 * 60_000;
+  assert.equal((await withPlaceOffset(facts(40.7), lookup, { now })).captured?.offset, null);
+  assert.equal(asked, 1, 'still paused');
+  clock += 2 * 60_000;
+  assert.equal((await withPlaceOffset(facts(40.7), lookup, { now })).captured?.offset, '+06:00');
+  assert.equal(asked, 2);
+  const aborted = new AbortController();
+  aborted.abort();
+  assert.equal((await withPlaceOffset(facts(43.7), lookup, { now, signal: aborted.signal })).captured?.offset, null);
+  assert.equal(asked, 2, 'nothing asked once aborted');
+});

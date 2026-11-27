@@ -46,7 +46,7 @@ import { AutomaticRuns, AutoSync, autoSyncTiming, SyncInterruptedError } from '.
 import { SettingsStore } from '../desktop/settings';
 import { syncPatchError, syncSetupPatch } from '../desktop/sync-settings';
 import type { FolderSyncBackend, S3SyncBackend, SyncBackend } from '../src/settings';
-import { blobKeyPattern, bookPrefix, capturedAhead, changedProperties, commitKey, contentBlobKey, coverBlobKey, decideSync, deletedMarkerKey, deriveTips, factsAhead, isUnlocatedPath, NewerSyncFormatError, noProperties, originalBlobKey, portableManifests, projectManifests, proxyBlobKey, readBookTombstone, readCommitHeader, readRemoteIdentity, stateBlobSchema, tombstoneKey } from '../src/sync-snapshot';
+import { blobKeyPattern, bookPrefix, capturedAhead, changedProperties, commitKey, contentBlobKey, coverBlobKey, decideSync, deletedMarkerKey, deriveTips, factsAhead, isUnlocatedPath, NewerSyncFormatError, noProperties, originalBlobKey, portableManifests, projectManifests, proxyBlobKey, readBookTombstone, readCommitHeader, readRemoteIdentity, stateBlobSchema, tombstoneKey, withCaptureOf } from '../src/sync-snapshot';
 import type { CommitHeader, StateBlob } from '../src/sync-snapshot';
 import type { PhotoIndex, ProjectFiles } from '../src/project';
 import { printProblem } from '../src/source-locations';
@@ -172,7 +172,7 @@ const proxyFile = async (mac: Mac, digest: string) => {
 /** The laptop starts as a Finder or AirDrop copy of the desktop's book, with no sync record of its own. */
 const copyBook = (from: Mac, to: Mac) => cp(from.folder, to.folder, { recursive: true });
 
-core('a capture time zone known better here survives a pull, and only a later, own one counts (API-020, 27 Nov)', () => {
+core('a capture time zone known better here survives a pull: an own one over a guess or none, a later own one over another (API-020, 27 Nov)', () => {
   const fact = (dateTime: string, offset: string | null, verified: string, extra?: Record<string, unknown>): AssetFact =>
     ({ digest: 'a'.repeat(64), width: 3024, height: 4032, captured: { dateTime, offset }, verified, ...(extra ? { extra } : {}) });
   const stamped = fact('2026-08-21T09:36:46', '+02:00', '2026-11-26T07:20:00.000Z');
@@ -180,6 +180,17 @@ core('a capture time zone known better here survives a pull, and only a later, o
   assert.equal(capturedAhead(read, stamped), true);
   assert.equal(capturedAhead(stamped, read), false, 'an older observation is not ahead');
   assert.equal(capturedAhead({ ...read, verified: stamped.verified }, stamped), false, 'nor one of the same time');
+  // An own offset beats a guessed one, and a missing one, however much later the other was observed (another Mac
+  // guessing again after a restart, or a clock ahead), and confirms a guess of the same offset.
+  const guessed = { ...stamped, verified: '2026-11-28T09:00:00.000Z', extra: { offsetGuessed: true, fileName: 'IMG_5480.HEIC' } };
+  assert.equal(capturedAhead(read, guessed), true);
+  assert.equal(capturedAhead({ ...stamped, verified: read.verified }, guessed), true, 'the same offset, no longer a guess');
+  assert.equal(capturedAhead({ ...stamped, verified: read.verified }, { ...stamped, verified: stamped.verified }), false, 'the same own offset: nothing to say');
+  assert.equal(capturedAhead(fact('2026-08-26T06:38:32', '+06:00', stamped.verified), fact('2026-08-26T06:38:32', null, read.verified)), true);
+  // The corrected fact loses the mark of a guess, so the next guess on that Mac does not replace it.
+  assert.deepEqual(withCaptureOf(guessed, read), { ...guessed, captured: read.captured, verified: read.verified, extra: { fileName: 'IMG_5480.HEIC' } });
+  const { extra: _, ...bare } = guessed;
+  assert.deepEqual(withCaptureOf({ ...bare, extra: { offsetGuessed: true } }, read), { ...bare, captured: read.captured, verified: read.verified });
   assert.equal(capturedAhead({ ...read, extra: { offsetGuessed: true } }, stamped), false, 'nor a guess');
   assert.equal(capturedAhead(fact('2026-08-21T13:36:47', '+06:00', read.verified), stamped), false, 'nor another moment');
   // A time without an offset (a drone's, through Lightroom) takes the offset of its place, at the same camera time.
@@ -1445,6 +1456,9 @@ test('the marks’ digests stay out of sync.json, which a build before them read
   const synced = await readFile(path, 'utf8');
   await writeFile(path, JSON.stringify({ ...JSON.parse(synced), fromANewerBuild: true }));
   await assert.rejects(readSyncState(a.folder), /synced by a newer version of ImageFlow.*Update ImageFlow/);
+  // So is a later version of the record, whatever else it holds.
+  await writeFile(path, JSON.stringify({ ...JSON.parse(synced), version: 2, enabled: 'yes' }));
+  await assert.rejects(readSyncState(a.folder), /synced by a newer version of ImageFlow/);
   await writeFile(path, JSON.stringify({ ...JSON.parse(synced), enabled: 'yes' }));
   await assert.rejects(readSyncState(a.folder), /sync record is damaged\. Keep a copy of .*sync\.json/);
   await writeFile(path, synced);

@@ -12,6 +12,10 @@ export type PlaceZone = (latitude: number, longitude: number) => Promise<string 
 
 // Zones looked up, by cell of about 10 km: a trip's photos ask a handful of times. Failed lookups are not kept.
 const zones = new Map<string, string | null>();
+// After a lookup that failed (offline, a captive portal, throttled: each waits up to 15 s in the addon), none is asked
+// for this long: a load of many such photos then waits for one failure, not one per photo, and asks again later.
+const failurePause = 5 * 60_000;
+let failedAt = -Infinity;
 const cell = (latitude: number, longitude: number) => (Math.round(latitude * 10) / 10) + ',' + (Math.round(longitude * 10) / 10);
 
 /** The addon's lookup, or undefined where it is not there (another platform, or an addon without it). */
@@ -49,12 +53,17 @@ export function offsetAtWallTime(zone: string, dateTime: string) {
   return second === undefined ? undefined : formatted(second);
 }
 
-/** The zone at a place: from those looked up already, else asked. Undefined where it could not be looked up now. */
-async function zoneOf(lookup: PlaceZone, latitude: number, longitude: number) {
+/**
+ * The zone at a place: from those looked up already, else asked. Undefined where it could not be looked up now, and
+ * without asking while lookups pause after a failure.
+ */
+async function zoneOf(lookup: PlaceZone, latitude: number, longitude: number, now: () => number) {
   const key = cell(latitude, longitude);
   if (zones.has(key)) return zones.get(key);
+  if (now() - failedAt < failurePause) return undefined;
   const zone = await lookup(latitude, longitude).catch(() => undefined);
   if (zone !== undefined) zones.set(key, zone);
+  else failedAt = now();
   return zone;
 }
 
@@ -62,13 +71,14 @@ async function zoneOf(lookup: PlaceZone, latitude: number, longitude: number) {
  * `facts` with the offset of the place it was taken where its capture time has none and it has a location; as it is
  * otherwise, and where the place could not be looked up.
  */
-export async function withPlaceOffset(facts: ProvidedFacts, lookup: PlaceZone | undefined = addonZone()): Promise<ProvidedFacts> {
+export async function withPlaceOffset(facts: ProvidedFacts, lookup: PlaceZone | undefined = addonZone(),
+  { signal, now = Date.now }: { signal?: AbortSignal; now?: () => number } = {}): Promise<ProvidedFacts> {
   const { captured, location } = facts;
-  if (!lookup || !captured || captured.offset || !location) return facts;
-  const zone = await zoneOf(lookup, location.latitude, location.longitude);
+  if (!lookup || !captured || captured.offset || !location || signal?.aborted) return facts;
+  const zone = await zoneOf(lookup, location.latitude, location.longitude, now);
   const offset = zone ? offsetAtWallTime(zone, captured.dateTime) : undefined;
   return offset ? { ...facts, captured: { ...captured, offset } } : facts;
 }
 
-/** Forgets the zones looked up, for tests. */
-export function forgetPlaceZones() { zones.clear(); }
+/** Forgets the zones looked up and any failure, for tests. */
+export function forgetPlaceZones() { zones.clear(); failedAt = -Infinity; }

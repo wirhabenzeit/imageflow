@@ -119,11 +119,7 @@ export function diagnosticsSince(seen: Map<string, ReadonlySet<string>>, session
   { full = false, remember = true }: { full?: boolean; remember?: boolean } = {}) {
   const keys = diagnostics.map(findingKey);
   const before = seen.get(session);
-  if (remember) {
-    seen.delete(session);
-    seen.set(session, new Set(keys));
-    for (const oldest of seen.keys()) { if (seen.size <= sessionsKept) break; seen.delete(oldest); }
-  }
+  if (remember) rememberFindings(seen, session, diagnostics);
   if (full || !before) return { diagnostics };
   const fresh = diagnostics.filter((_, index) => !before.has(keys[index]));
   const known = diagnostics.filter((_, index) => before.has(keys[index]));
@@ -133,6 +129,17 @@ export function diagnosticsSince(seen: Map<string, ReadonlySet<string>>, session
   const count = (severity: string) => known.filter((diagnostic) => diagnostic.severity === severity).length;
   return { diagnostics: fresh, diagnosticsUnchanged: { errors: count('error'), warnings: count('warning'), ...(resolved ? { resolved } : {}),
     note: 'Findings this connection was given before and that are still there are counted, not listed; check_book with include: ["occurrences"] lists every finding.' } };
+}
+
+/**
+ * Records `diagnostics` as what this connection was last given (`diagnosticsSince`). A reply that may still fail after
+ * it was built (a source changed meanwhile) records them only once it is sure to be sent: findings it never delivered
+ * would otherwise be counted as seen on the retry.
+ */
+export function rememberFindings(seen: Map<string, ReadonlySet<string>>, session: string, diagnostics: readonly AuthoringDiagnostic[]) {
+  seen.delete(session);
+  seen.set(session, new Set(diagnostics.map(findingKey)));
+  for (const oldest of seen.keys()) { if (seen.size <= sessionsKept) break; seen.delete(oldest); }
 }
 
 type PhotoRecord = { id: string; captured?: CaptureMetadata['captured']; usage?: unknown[]; [field: string]: unknown };
@@ -922,8 +929,6 @@ export function createAuthoringService(hooks: Hooks) {
         // and capabilities it would repeat are tens of kilobytes the agent already has from its first call.
         // One for topics or examples alone never comes here (isReferenceCall).
         const requestedOnly = !args.includeTemplate && !!args.includeSource?.length;
-        // Context always lists every finding, and later replies on this connection count from them.
-        diagnosticsSince(shownDiagnostics, client.session, diagnostics, { full: true });
         if (requestedOnly) {
           result = { project: session.handle, ...revisions, root: session.book.folder, guide: contextGuide,
             templateIdentity, diagnostics, checks: report.checks, sources,
@@ -1013,7 +1018,7 @@ export function createAuthoringService(hooks: Hooks) {
           } : {}),
           ...(image ? { image } : {}),
           ...(view === 'parameters' ? { document: { values: project?.params, declarations: template?.parameters } } : {}),
-          ...diagnosticsSince(shownDiagnostics, client.session, diagnostics), checks: report.checks, history: session.history };
+          ...diagnosticsSince(shownDiagnostics, client.session, diagnostics, { remember: false }), checks: report.checks, history: session.history };
       }
       await verifySources?.();
       const observedAfter = await Promise.allSettled([templateObservation(folder, signal)]);
@@ -1040,6 +1045,8 @@ export function createAuthoringService(hooks: Hooks) {
         const sync = hooks.syncState?.();
         if (sync) result.sync = sync;
       }
+      // Sure to be sent now: later replies on this connection count from these findings. Context lists every one.
+      rememberFindings(shownDiagnostics, client.session, diagnostics);
       return result;
     }
     if (name === 'rebuild_dependencies') {

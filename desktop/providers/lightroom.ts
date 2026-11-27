@@ -246,7 +246,7 @@ export function lightroomProvider(bridge: LightroomPort, { placeZone }: { placeZ
             if (!row) { results[index] = gone; continue; }
             const revisions = revisionsOf(row, known(ref));
             if (revisions.contentRevision) hashes.set(hashKey(ref.locator), revisions);
-            results[index] = { state: 'available', revisions, facts: await withPlaceOffset(lightroomFacts(row), placeZone) };
+            results[index] = { state: 'available', revisions, facts: await withPlaceOffset(lightroomFacts(row), placeZone, { signal }) };
           }
         } catch (error) { for (const { index } of chunk) results[index] = failure(error); }
       }

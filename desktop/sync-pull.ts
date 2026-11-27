@@ -146,12 +146,14 @@ async function readMarks(path: string, text: string) {
 }
 
 /**
- * Why a sync record does not read. Fields this build does not know mean a newer ImageFlow wrote it: on 27 Nov an old
- * build that macOS opened instead of the current one told the user to remove a sound record. Updating opens the book
- * again; removing the record is only for one that is damaged.
+ * Why a sync record does not read. A later `version`, or fields this build does not know, mean a newer ImageFlow wrote
+ * it: on 27 Nov an old build that macOS opened instead of the current one told the user to remove a sound record.
+ * Updating opens the book again; removing the record is only for one that is damaged.
  */
-export function unreadableSyncRecord(path: string, issues: readonly { code: string }[]) {
-  if (issues.length && issues.every(({ code }) => code === 'unrecognized_keys')) {
+export function unreadableSyncRecord(path: string, issues: readonly { code: string }[], value?: unknown) {
+  const version = value && typeof value === 'object' ? (value as { version?: unknown }).version : undefined;
+  const newer = typeof version === 'number' && version > 1;
+  if (newer || (issues.length && issues.every(({ code }) => code === 'unrecognized_keys'))) {
     return new Error('This book was synced by a newer version of ImageFlow than this one. Update ImageFlow to open it. If an older copy of ImageFlow opened instead of the current one, quit it and open the current one.');
   }
   return new Error('This book’s sync record is damaged. Keep a copy of ' + path + ', then remove it to sync the book again from scratch.');
@@ -163,8 +165,9 @@ export async function readSyncState(folder: string): Promise<SyncState> {
   let text: string;
   try { text = await readFile(join(path, 'sync.json'), 'utf8'); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1 }; throw error; }
-  const parsed = storedSyncStateSchema.safeParse(JSON.parse(text));
-  if (!parsed.success) throw unreadableSyncRecord(join(path, 'sync.json'), parsed.error.issues);
+  const value: unknown = JSON.parse(text);
+  const parsed = storedSyncStateSchema.safeParse(value);
+  if (!parsed.success) throw unreadableSyncRecord(join(path, 'sync.json'), parsed.error.issues, value);
   const state = parsed.data;
   const marks = (state.lastSynced || state.pull) && await readMarks(path, text);
   if (!marks) return state;

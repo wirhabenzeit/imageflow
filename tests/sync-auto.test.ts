@@ -375,7 +375,8 @@ test('an open book looks at the remote every poll, not while a pull waits or a b
   host.looks.push('pull');
   await wait(35);
   await auto.settled();
-  assert.deepEqual(host.calls, ['start', 'look', 'look', 'sync'], 'a poll that finds a fast-forward pulls');
+  // A poll every 25 ms may look once more before the test reads the calls: only their start is fixed.
+  assert.deepEqual(host.calls.slice(0, 4), ['start', 'look', 'look', 'sync'], 'a poll that finds a fast-forward pulls');
   // A pull that waits for the gate is not looked at again meanwhile.
   host.blocking = 'The book is being edited.';
   host.looks.push('pull');
@@ -388,7 +389,7 @@ test('an open book looks at the remote every poll, not while a pull waits or a b
   host.blocking = undefined;
   await wait(20);
   await auto.settled();
-  assert.equal(host.calls.at(-1), 'sync');
+  assert.ok(host.calls.slice(waiting).includes('sync'), 'the waiting pull runs once the gate opens: ' + host.calls.slice(waiting).join(', '));
   // A book that may not sync by itself is neither looked at nor refreshed by a poll.
   host.isAllowed = false;
   const before = host.calls.length;
