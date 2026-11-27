@@ -158,7 +158,7 @@ export type McpToolArguments = { [Name in McpToolName]: z.output<typeof mcpToolS
 // Descriptions say what each tool is for and when to call it; the facts about each argument are on its schema field.
 export const mcpTools: { name: McpToolName; title: string; description: string; readOnly: boolean }[] = [
   { name: 'list_projects', title: 'List open books', readOnly: true,
-    description: 'List authorized open books with their handles and revisions. Call first.' },
+    description: 'List authorized open books: handles, revisions, sync state. Call first.' },
   { name: 'get_authoring_context', title: 'Get authoring context', readOnly: true,
     description: 'Read parsed declarations, template identity and files. Before editing a template, request reference topics, examples and source files: those calls return just what they request.' },
   { name: 'inspect_book', title: 'Inspect book', readOnly: true,

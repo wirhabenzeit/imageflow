@@ -105,7 +105,26 @@ test('content reloads preserve history while external manifest changes clear inc
   await session.undo('undo');
   assert.equal(session.history.redo, 'Human edit');
   session.adoptExternal({ ...session.book, ...withTitle(session.book, 'External') });
+  assert.deepEqual(session.history, { undo: undefined, redo: undefined, reset: 'outside-change' });
+});
+
+test('a sync pull that replaces the book ends Undo and Redo and says so until the next step (LOG-089)', async (t) => {
+  const session = await fixture(t);
+  // Nothing to end: a pull into a book without steps says nothing.
+  session.adoptExternal(await writeManifests({ ...session.book, ...withTitle(session.book, 'Pulled first') }), 'sync-pull');
   assert.deepEqual(session.history, { undo: undefined, redo: undefined });
+  await session.save(withTitle(session.book, 'Agent'), 'Agent title edit');
+  // Each step restores a whole snapshot: undoing it after the pull would revert the other Mac's change too.
+  session.adoptExternal(await writeManifests({ ...session.book, ...withTitle(session.book, 'Other Mac') }), 'sync-pull');
+  assert.deepEqual(session.history, { undo: undefined, redo: undefined, reset: 'sync-pull' });
+  // A pull that changes nothing keeps the history.
+  await session.save(withTitle(session.book, 'Next'), 'Next edit');
+  assert.deepEqual(session.history, { undo: 'Next edit', redo: undefined });
+  session.adoptExternal(session.book, 'sync-pull');
+  assert.deepEqual(session.history, { undo: 'Next edit', redo: undefined });
+  await session.undo('undo');
+  assert.equal(session.book.project.title, 'Other Mac', 'a step after the pull undoes onto the pulled book');
+  assert.deepEqual(session.history, { undo: undefined, redo: 'Next edit' });
 });
 
 test('imported source registries and files survive earlier Undo and Redo', async (t) => {

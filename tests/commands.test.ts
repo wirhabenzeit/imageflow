@@ -22,6 +22,11 @@ test('menus and toolbar share history labels and export restrictions', () => {
   assert.equal(commandState('export', { ...book, canExport: false }).enabled, false);
   assert.equal(commandState('export', { ...book, busy: true }).enabled, false);
 });
+test('after a sync pull ended the history, Undo says why it is unavailable (LOG-089)', () => {
+  const pulled = commandState('undo', { ...book, history: { reset: 'sync-pull' } });
+  assert.deepEqual([pulled.label, pulled.enabled], ['Can’t Undo After Sync', false]);
+  assert.equal(commandState('undo', { ...book, history: { reset: 'outside-change' } }).label, 'Undo');
+});
 test('typing, busy and read-only states protect spread operations', () => {
   for (const patch of [{ editing: true }, { busy: true }, { writable: false }]) {
     for (const id of ['delete-spread', 'duplicate-spread', 'add-spread'] as const) assert.equal(commandState(id, { ...book, ...patch }).enabled, false);

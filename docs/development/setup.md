@@ -28,7 +28,7 @@ Sync ships ([ADR 0012](../decisions/0012-sync-backend-and-library.md)): **Settin
 
 `IMAGEFLOW_SYNC_CREDENTIALS=memory` keeps a bucket's key in memory instead of the keychain in a development build.
 
-`IMAGEFLOW_SYNC_IDLE_MS=<ms>` shortens how long a development build waits after a save before a book pushes by itself (30 s otherwise), and `IMAGEFLOW_SYNC_TEST_SLOW_MS=<ms>` makes each automatic sync wait that long at its start while it holds the book, as a slow remote would, so an edit can meet it. A packaged app ignores both.
+`IMAGEFLOW_SYNC_IDLE_MS=<ms>` shortens how long a development build waits after a save before a book pushes by itself (30 s otherwise), and `IMAGEFLOW_SYNC_TEST_SLOW_MS=<ms>` makes each automatic sync wait that long at its start while it holds the book, as a slow remote would, so an edit can meet it. `IMAGEFLOW_SYNC_POLL_MS=<ms>` shortens how often an open book looks at the remote by itself (every 5 minutes otherwise). A packaged app ignores all three.
 
 ## Build the app
 

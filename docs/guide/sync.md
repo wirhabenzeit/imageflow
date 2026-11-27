@@ -44,15 +44,16 @@ If you set up sync with an earlier version of ImageFlow, the books that synced g
 
 A book that syncs keeps itself current, with **Sync automatically** on in **Settings → Sync** (it is on unless you turn it off):
 
-- When the book opens, and when its window comes to the front, it takes what your other Macs synced. With iCloud, a change from another Mac also reaches a book that is open in the background.
+- When the book opens, when its window comes to the front, and every few minutes while it is open, it looks for what your other Macs synced and takes it. Looking costs one quick question to iCloud or your bucket; nothing is downloaded when nothing changed. With iCloud, a change from another Mac also reaches a book that is open in the background right away.
 - After you edit, it sends your changes once you have stopped for about 30 seconds, and when you close the book. Closing waits a few seconds at most: what did not go up by then goes up the next time the book syncs. Originals follow in the background.
-- It takes changes only when nothing is being edited: while you type in a field, while a text is open in its own editor, while an inline editor is open, while the book exports or an agent changes it, the changes wait and arrive once you are done.
+- It takes changes only when nothing is being edited: while you type in a field, while a text is open in its own editor, while an inline editor is open, while the book exports or an agent changes it, the changes wait and arrive once you are done. Before an agent saves a change to a book with changes to fetch, the book takes them first, so the agent's change does not leave the book changed on two Macs; the agent then looks at the book again before it saves.
+- Taking changes from another Mac starts **Undo** over: each Undo step brings back the whole book as it was, so undoing an earlier step would also undo the other Mac's changes. The status bar says so, and **Edit → Undo** reads **Can’t Undo After Sync** until your next edit. Edits you make after that can be undone as usual.
 - Editing always comes first: an edit you make while the book syncs by itself is never refused. Sending stops and starts again once you pause. Only when the book is just then taking changes from another Mac does your edit wait a moment, and if it was made on the version before those changes, ImageFlow says so and you make it again.
 - It never decides for you. A book changed on two Macs at once shows **Changed on two Macs** and waits for you.
 - When the other Macs cannot be reached (offline, iCloud unavailable), the status bar says so and the book tries again later, sooner once the network changes. No dialog interrupts you.
 - When your iCloud storage is full, the book itself goes on syncing while it fits; its originals wait until **Sync Now**, or until you open the book again.
 
-**File → Sync → Sync Now** syncs the open book at once, and the status bar shows how it stands. With **Sync automatically** off, books sync only then. Sync Now on a book changed on two Macs at once keeps both versions: the other Mac's continues, and this Mac's is saved beside it as a copy.
+**File → Sync → Sync Now** syncs the open book at once, and the status bar shows how it stands. With **Sync automatically** off, books sync only then: the status bar still shows **Changes to fetch** when you come back to the book, and an agent is told so before it saves. Sync Now on a book changed on two Macs at once keeps both versions: the other Mac's continues, and this Mac's is saved beside it as a copy.
 
 ## What syncs
 

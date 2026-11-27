@@ -19,6 +19,12 @@ const history = z.looseObject({
   redo: z.string().optional().describe('Name of the step Redo would apply.'),
 }).describe('The app\'s shared Undo history after this call.');
 
+// A book's sync between Macs (API-025, desktop/agent-sync.ts): the state in the app's words. Like history.reset (LOG-089),
+// `sync` in list_projects, the inspect_book summary and write results is described in docs/mcp.md only: the advertised
+// output schemas have a size budget, and these objects are loose.
+export const agentSyncStates = ['in-sync', 'to-fetch', 'to-send', 'diverged', 'arriving', 'interrupted', 'needs-update', 'unavailable',
+  'removed', 'syncing', 'unknown'] as const;
+
 // `occurrences`, the places of a finding that is one problem in many places, is described in docs/mcp.md only: this schema is
 // repeated in most tools, and the advertised list has a size budget.
 export const diagnosticSchema = z.looseObject({

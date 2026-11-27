@@ -152,6 +152,8 @@ export class AuthoringError extends Error {
 type Hooks = {
   session: () => ProjectSession | undefined;
   activeEditor?: () => ActiveBookEditor | undefined;
+  // The book's sync between Macs (desktop/agent-sync.ts), only for a book that syncs on this Mac (API-025).
+  syncState?: () => object | undefined;
   cache: string;
   // The app's docs folder: template API topics in template-api/ (listed in topics.json) and example templates in examples/.
   docs: string;
@@ -739,8 +741,9 @@ export function createAuthoringService(hooks: Hooks) {
       if (!session) return { projects: [] };
       let current: string | null = null;
       try { current = (await session.inputs.capture({ signal })).revision; } catch { signal.throwIfAborted(); }
+      const sync = hooks.syncState?.();
       return { projects: [{ project: session.handle, title: session.book.project.title, folder: session.book.folder,
-        writable: !session.book.readOnly, revision: current, history: session.history }], scope: 'The currently open, authorized book. Handles expire when closed or reopened.' };
+        writable: !session.book.readOnly, revision: current, history: session.history, ...(sync ? { sync } : {}) }], scope: 'The currently open, authorized book. Handles expire when closed or reopened.' };
     }
     const session = get(args.project);
     if (isReferenceCall(name, args)) {
@@ -1010,6 +1013,8 @@ export function createAuthoringService(hooks: Hooks) {
       if (name === 'inspect_book' && args.view === 'summary') {
         const activeEditor = hooks.activeEditor?.();
         if (activeEditor) result.activeEditor = activeEditor;
+        const sync = hooks.syncState?.();
+        if (sync) result.sync = sync;
       }
       return result;
     }

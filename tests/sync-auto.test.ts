@@ -362,3 +362,52 @@ test('originals an automatic sync downloaded are placed only once nothing blocks
   closing = true;
   assert.equal(await closed, false, 'a closing book places nothing');
 });
+
+test('an open book looks at the remote every poll, not while a pull waits or a backoff lasts, and never reads the status of a book that does not sync by itself (API-025)', async (t) => {
+  const host = new Host();
+  const auto = new AutoSync(host, { ...timing, poll: 25 });
+  t.after(() => auto.close());
+  assert.equal(auto.state.polling, false, 'polls only once the book opened');
+  auto.opened();
+  await auto.settled();
+  assert.deepEqual(host.calls, ['start', 'look']);
+  assert.equal(auto.state.polling, true);
+  host.looks.push('pull');
+  await wait(35);
+  await auto.settled();
+  assert.deepEqual(host.calls, ['start', 'look', 'look', 'sync'], 'a poll that finds a fast-forward pulls');
+  // A pull that waits for the gate is not looked at again meanwhile.
+  host.blocking = 'The book is being edited.';
+  host.looks.push('pull');
+  await wait(30);
+  await auto.settled();
+  const waiting = host.calls.length;
+  assert.equal(auto.state.waitingForGate, true);
+  await wait(60);
+  assert.equal(host.calls.length, waiting, 'no look while the pull waits');
+  host.blocking = undefined;
+  await wait(20);
+  await auto.settled();
+  assert.equal(host.calls.at(-1), 'sync');
+  // A book that may not sync by itself is neither looked at nor refreshed by a poll.
+  host.isAllowed = false;
+  const before = host.calls.length;
+  await wait(60);
+  await auto.settled();
+  assert.equal(host.calls.length, before);
+  // A failure backs off; polls do not shorten the wait.
+  host.isAllowed = true;
+  host.looks.push(failing(), failing());
+  await wait(30);
+  await auto.settled();
+  assert.equal(auto.state.failures, 1);
+  const failed = host.calls.length;
+  auto.close();
+  await wait(60);
+  assert.equal(host.calls.length, failed, 'a closed book stops polling');
+  assert.equal(auto.state.polling, false);
+});
+
+test('the shipped timing polls every five minutes', () => {
+  assert.equal(autoSyncTiming.poll, 5 * 60_000);
+});
