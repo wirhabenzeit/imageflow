@@ -266,6 +266,7 @@ Layout findings use one envelope: `code`, `severity`, `stage`, `message`, an opt
 | `text-box-unused` | A box of the text chain that the text ends before, so it prints nothing; `part`, `parts`, `path`. One warning per empty box. |
 | `text-band-too-tall` | A box drawn over several rectangles with `alignHeads`, on a rectangle after the first that is too short for the room the opening head takes; `rect` (1-based), `path`. A warning: that rectangle holds no text and the text goes on in the next box. |
 | `text-frontmatter-invalid` | First box of the chain and its source; `line` of the YAML problem in the file, `path`. A warning: the layout renders without the header's fields. |
+| `text-lang-invalid` | First box of the chain and its source; `path`. A warning: the text's `lang` header is not a BCP 47 language tag, so the text is set in the language of its box. |
 | `photo-resolution-low` | Photo box and source; `ppi`, `minimumPpi`, `boxWidthMm`, `boxHeightMm`. |
 | `photo-missing`, `photo-decode-failed` | Photo box and source. |
 | `font-load-failed` | `family` of a `@font-face` whose file could not be loaded or decoded. The book renders with a fallback font. A font file that does not exist is a `template-compile-error`. |

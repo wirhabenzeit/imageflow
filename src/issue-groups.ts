@@ -42,6 +42,7 @@ const texts: Record<string, CheckText> = {
   'text-overflows-box': { title: 'Text runs out of its box' },
   'text-stroked': { title: 'Stroked text' },
   'text-frontmatter-invalid': { title: 'Text header can’t be read' },
+  'text-lang-invalid': { title: 'Text language not recognized', fix: 'Write a language such as de or de-CH in the text’s lang header.' },
   'cover-text-near-fold': { title: 'Cover text near a fold' },
   'rendered-image-failed': { title: 'Picture not drawn' },
   'rendered-image-raster': { title: 'Picture prints as pixels' },

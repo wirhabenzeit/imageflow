@@ -59,7 +59,7 @@ Without the MCP server, type-check with the template's generated `.imageflow-sdk
 | Report a problem with the template's own input | `issue()` | [template-findings](references/template-findings.md) |
 | Compute page, safe-area and grid rectangles | `geometry.page`, `geometry.grid`, `geometry.design` | [geometry](references/geometry.md) |
 | Render photos, Markdown, elements and editable text | `PhotoBox`, `MarkdownBox`, `Element`, `ctx.Text`, `ctx.Caption` | [platform-components](references/platform-components.md) |
-| Style with CSS, fonts and Markdown typography | `styles.css`, geometry CSS variables | [css-contract](references/css-contract.md) |
+| Style with CSS, fonts and Markdown typography; set the book's language for hyphenation | `styles.css`, geometry CSS variables, `language`, `lang`, `hyphens` | [css-contract](references/css-contract.md) |
 | Know what fails validation | load and render checks | [validation](references/validation.md) |
 | Understand saved spread data | `project.json` spreads, boxes, crops | [stored-data](references/stored-data.md) |
 | Type-check, split layouts into files, preview limits | `.imageflow-sdk`, `tsconfig.json` | [compatibility](references/compatibility.md) |

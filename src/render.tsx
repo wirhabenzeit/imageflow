@@ -30,6 +30,7 @@ import { frameView, scopeSpread, scopeState } from './project';
 import type { FixtureMarking, PageSide, RenderProject, SpreadState, Values } from './project';
 import { composeHtml, markdownToHtml } from './markdown';
 import { splitFrontmatter } from './frontmatter';
+import { languageHint, languageTag } from './language';
 import { isParameterValue, parameterWarnings, resolveParams, resolveValue } from './parameters';
 import type { ListItem } from './parameters';
 import { fileErrors } from './file-findings';
@@ -2205,6 +2206,8 @@ export async function startRender(root: HTMLElement) {
       throw new DeclarationError('Template' + (first.path ? ' → ' + first.path.split('.').join(' → ') : '') + ': ' + first.message, issues);
     }
     const template = chooseFormat(declared.data, book.project.format);
+    // Every view of the book, from the editor to export, sets its text in the template's language (API-024).
+    document.documentElement.lang = template.language ?? 'en';
     // Known before the ID check, so a failed load still reports the declared ID (the template library reads it).
     info = templateInfo(template);
     // A fork may take an ID of its own and name the template the book was made from as `basedOn` (API-003).
@@ -2520,7 +2523,7 @@ export async function startRender(root: HTMLElement) {
           suggestion: 'Restore ' + (book.project.texts[source] ? sourcePath(book.project.texts[source]) : 'the Markdown file') + ', or assign another text to box ' + first.box + '.' });
         continue;
       }
-      const header = splitFrontmatter(book.texts[source]).error;
+      const { error: header, meta } = splitFrontmatter(book.texts[source]);
       if (header) {
         const path = book.project.texts[source] ? sourcePath(book.project.texts[source]) : source;
         warnings.push({ ...located(first.spread, 'The header of ' + path + ' cannot be read: ' + header.message + ' (line ' + header.line + ').'),
@@ -2536,6 +2539,18 @@ export async function startRender(root: HTMLElement) {
       });
       const boxes = stages.map(({ node }) => node);
       const path = book.project.texts[source] ? sourcePath(book.project.texts[source]) : source;
+      // A `lang` header sets the text's language in every box it flows through, before the flow measures it (API-024).
+      const textLang = meta?.lang === undefined ? undefined : languageTag(meta.lang);
+      if (meta?.lang !== undefined && !textLang) {
+        warnings.push({ ...located(first.spread, 'The lang header of ' + path + ' is not a language tag: ' + JSON.stringify(meta.lang) + '.'),
+          code: 'text-lang-invalid', ...onPage(first.page), box: first.box, source, details: { path },
+          suggestion: languageHint + ' Until then the text is set in the language of its box.' });
+      }
+      for (const node of boxes) {
+        const lang = textLang ?? node.dataset.boxLang;
+        if (lang) node.lang = lang;
+        else node.removeAttribute('lang');
+      }
       // The box a text starts in decides its composition. A later box that names another is styled for a structure
       // the text does not have there.
       const named = (name?: string) => name ? 'composition ' + name : 'no composition';

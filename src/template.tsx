@@ -35,6 +35,7 @@ import { controlProblems, controlsSchema } from './controls';
 import type { ControlItem } from './controls';
 import { previewPath } from './template-preview';
 import { fonts } from './fonts';
+import { langAttribute, languageHint, languageTag } from './language';
 
 export { inch, mm, p, printFormat, pt };
 export type { PrintFormat, ResolvedFormat, Span } from './format';
@@ -508,6 +509,9 @@ export const templateSchema = z.preprocess(withSpans, z.object({
   // An image inside the template folder that the New Book picker shows instead of a render of the opening spread.
   preview: z.string().refine((path) => previewPath(path) !== undefined,
     'Use a PNG, JPEG or WebP file inside the template folder, such as ./preview.jpg, without .. or a leading dot.').optional(),
+  // The book's language, a BCP 47 tag set as `lang` on every rendered page, so hyphenation and :lang() follow it (API-024).
+  language: z.string().refine((tag) => languageTag(tag) !== undefined, 'This is not a language tag. ' + languageHint)
+    .transform((tag) => languageTag(tag)!).optional(),
   contract: z.literal(1),
   // Optional extensions beyond the contract-1 baseline. Baseline names in older templates remain valid.
   requires: z.array(z.string()).optional().superRefine((required, context) => {
@@ -698,7 +702,7 @@ type DeclaredCover = Omit<CoverLayout, 'parameters' | 'boxes' | 'elements'> & {
 const spreadBuilder = <T,>(definition: T) => definition;
 const pageBuilder = <T extends object>(definition: T) => ({ ...definition, span: 'page' as const });
 export type TemplateDeclaration = {
-  id: string; version: string; label?: string; description?: string; basedOn?: { id: string; version: string }; preview?: string; contract: 1; requires?: string[]; network?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
+  id: string; version: string; label?: string; description?: string; basedOn?: { id: string; version: string }; preview?: string; language?: string; contract: 1; requires?: string[]; network?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
   parameters?: Parameters;
   controls?: ControlItem[];
   layoutFamilies?: Record<string, { label: string; picker?: { label?: string } & (
@@ -767,11 +771,13 @@ function useSpread() {
 }
 
 type Styling = { className?: string; style?: CSSProperties };
+// The language of a part of the book, overriding the template's `language` there (API-024).
+type Language = { lang?: string };
 // `rect` positions a platform component absolutely, in millimetres; properties in `style` win over it.
 type Placement = { rect?: Rect };
 const place = (rect: Rect | undefined, style: CSSProperties | undefined) => rect ? { ...geometry.css(rect), ...style } : style;
 
-function Sheet({ format, className, style, children, ...marker }: Styling & IssueMarker & { format: ResolvedFormat; children?: ReactNode }) {
+function Sheet({ format, className, style, lang, children, ...marker }: Styling & IssueMarker & Language & { format: ResolvedFormat; children?: ReactNode }) {
   const { trim } = format;
   // Inset variables follow the format's own side names: outside and binding with facing pages, left and right without.
   const sides = format.facingPages
@@ -785,7 +791,7 @@ function Sheet({ format, className, style, children, ...marker }: Styling & Issu
   } as unknown as CSSProperties;
   return (
     <div className="if-sheet" data-pages={format.facingPages ? undefined : 'single'} style={{ width: cssMM(format.spreadWidth), height: cssMM(format.height) }}>
-      <div className={['if-spread', className].filter(Boolean).join(' ')} style={{ ...style, ...geometry }} {...issueOn(marker)}>
+      <div className={['if-spread', className].filter(Boolean).join(' ')} style={{ ...style, ...geometry }} lang={langAttribute(lang, 'Spread')} {...issueOn(marker)}>
         {children}
       </div>
     </div>
@@ -1017,8 +1023,8 @@ function LayoutGlyph({ kind }: { kind: 'photo' | 'text' }) {
 // `rects` draws one box over several rectangles, such as the two pages of a spread: the text flows through them in
 // order, each with `columns` columns. With `alignHeads`, a head that opens the box leaves the same room at the top of every
 // rectangle, so the columns on both pages start on one line below it.
-export function MarkdownBox({ id, className, style, rect, rects, alignHeads, columns = 1, decorative, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker &
-  IssueMarker & DecorativeMarker & { id: string; columns?: number | `${number}`; rects?: readonly Rect[]; alignHeads?: boolean }) {
+export function MarkdownBox({ id, className, style, rect, rects, alignHeads, columns = 1, decorative, lang, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker &
+  IssueMarker & DecorativeMarker & Language & { id: string; columns?: number | `${number}`; rects?: readonly Rect[]; alignHeads?: boolean }) {
   const { spread, book, definition } = useSpread();
   const text = spread.boxes[id]?.text;
   const count = Math.max(1, Math.min(6, Math.round(Number(columns)) || 1));
@@ -1027,18 +1033,20 @@ export function MarkdownBox({ id, className, style, rect, rects, alignHeads, col
   const shapes = rects ?? [rect];
   const empty = !(text !== undefined && book.texts[text] !== undefined);
   const classes = ['if-markdown', className].filter(Boolean).join(' ');
+  // A text's own `lang` header replaces this one where it flows (render.tsx); `data-box-lang` keeps the box's own.
+  const language = langAttribute(lang, 'MarkdownBox ' + id);
   return (<>
     <div data-box={id} data-box-type="markdown" data-columns={count > 1 ? count : undefined}
       data-edit={editTarget(book, 'boxes.' + id + '.', definition.boxes[id]?.parameters, marked)}
       data-empty={empty ? '' : undefined} data-align-heads={rects && rects.length > 1 && alignHeads ? '' : undefined}
-      className={classes} style={place(shapes[0], style)} {...decorativeOn(decorative)} {...issueOn(marker)}>
+      className={classes} style={place(shapes[0], style)} lang={language} data-box-lang={language} {...decorativeOn(decorative)} {...issueOn(marker)}>
       {renderView(book) === 'canvas' && empty &&
         <span className="if-placeholder">{text ? 'Missing Markdown' : 'Drop a Markdown file'}</span>}
       {renderView(book) === 'layout-preview' && empty && <LayoutGlyph kind="text" />}
     </div>
     {shapes.slice(1).map((shape, i) => (
       <div key={i} data-box-rect={id} data-rect={i + 1} data-box-type="markdown" data-columns={count > 1 ? count : undefined}
-        data-empty={empty ? '' : undefined} className={classes} style={place(shape, style)} {...decorativeOn(decorative)}>
+        data-empty={empty ? '' : undefined} className={classes} style={place(shape, style)} lang={language} data-box-lang={language} {...decorativeOn(decorative)}>
         {renderView(book) === 'layout-preview' && empty && <LayoutGlyph kind="text" />}
       </div>))}
   </>);
@@ -1083,11 +1091,11 @@ export function textComposition(template: Template, book: RenderProject, name: s
 }
 
 // In the editor an element is also an edit target for its own parameters and any it is marked with.
-export function Element({ id, className, style, rect, children, decorative, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker & IssueMarker & DecorativeMarker &
-  { id: string; children?: ReactNode }) {
+export function Element({ id, className, style, rect, children, decorative, lang, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker & IssueMarker & DecorativeMarker &
+  Language & { id: string; children?: ReactNode }) {
   const { book, definition } = useSpread();
   return <div data-element={id} data-edit={editTarget(book, 'elements.' + id + '.', definition.elements[id]?.parameters, marked)}
-    className={className} style={place(rect, style)} {...decorativeOn(decorative)} {...issueOn(marker)}>{children}</div>;
+    className={className} style={place(rect, style)} lang={langAttribute(lang, 'Element ' + id)} {...decorativeOn(decorative)} {...issueOn(marker)}>{children}</div>;
 }
 
 export type TextTag = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'p' | 'span' | 'div' | 'blockquote' | 'figcaption';
@@ -1108,8 +1116,8 @@ function parameterAt({ definition, documentParameters, values }: Pick<NonNullabl
 }
 
 // Shows a string parameter and marks the node for editing. Empty, it shows an editor-only placeholder.
-export function Text({ parameter, as = 'p', presentation, placeholder, fallback, fallbackLabel = 'inherited text', hidden = false, decorative, className, style, rect, ...marker }: Styling & Placement & IssueMarker & DecorativeMarker &
-  { parameter: string; as?: TextTag; presentation?: EditorPresentation; placeholder?: string; fallback?: string; fallbackLabel?: string; hidden?: boolean }) {
+export function Text({ parameter, as = 'p', presentation, placeholder, fallback, fallbackLabel = 'inherited text', hidden = false, decorative, lang, className, style, rect, ...marker }: Styling & Placement & IssueMarker & DecorativeMarker &
+  Language & { parameter: string; as?: TextTag; presentation?: EditorPresentation; placeholder?: string; fallback?: string; fallbackLabel?: string; hidden?: boolean }) {
   const data = useSpread();
   const { param, value } = parameterAt(data, parameter);
   if (!param) throw new Error('Text shows parameter ' + parameter + ', which this layout does not declare.');
@@ -1118,6 +1126,7 @@ export function Text({ parameter, as = 'p', presentation, placeholder, fallback,
   if (presentation !== undefined && presentation !== 'inline' && presentation !== 'dialog') throw new Error("Text presentation must be 'inline' or 'dialog'.");
   const inline = presentation === 'inline';
   if (inline && param.type !== 'string') throw new Error('Inline Text needs a string parameter: ' + parameter + '.');
+  const language = langAttribute(lang, 'Text ' + parameter);
   if (hidden) return null;
   const saved = value === undefined ? '' : String(value);
   const inherited = !saved.trim() && !!fallback?.trim();
@@ -1129,7 +1138,7 @@ export function Text({ parameter, as = 'p', presentation, placeholder, fallback,
   return <Tag data-edit={parameter} data-empty={empty ? '' : undefined} data-inline-text={inline ? '' : undefined}
     data-multiline={inline && param.type === 'string' && param.multiline ? '' : undefined}
     data-text-fallback={fallback?.trim() ? fallback : undefined} data-text-fallback-label={fallback?.trim() ? fallbackLabel : undefined}
-    className={className} style={place(rect, style)} {...decorativeOn(decorative)} {...issueOn(marker)}>
+    className={className} style={place(rect, style)} lang={language} {...decorativeOn(decorative)} {...issueOn(marker)}>
     {empty ? <span className="if-text-placeholder">{hint}</span> : inherited && renderView(data.book) === 'canvas'
       ? <span className="if-text-inherited" title={'Using ' + fallbackLabel}>{text}</span>
       : !inherited && param.type === 'string' && param.markdown === 'inline' ? <FormattedText value={text} /> : text}
@@ -1141,19 +1150,20 @@ export function Text({ parameter, as = 'p', presentation, placeholder, fallback,
 // box, which has no photo to own a caption, nor while the box's Show caption switch (`shows: 'caption'`) is off, so the
 // switch and the printed caption always agree. Empty, it shows `placeholder` on the interactive canvas only, as ctx.Text
 // does: thumbnails, layout previews, checks, presentation and export get an empty node.
-export function Caption({ box, as = 'p', placeholder = 'Add caption', decorative, className, style, rect, ...marker }: Styling & Placement & IssueMarker & DecorativeMarker &
-  { box: string; as?: TextTag; placeholder?: string }) {
+export function Caption({ box, as = 'p', placeholder = 'Add caption', decorative, lang, className, style, rect, ...marker }: Styling & Placement & IssueMarker & DecorativeMarker &
+  Language & { box: string; as?: TextTag; placeholder?: string }) {
   const data = useSpread();
   const declared = Object.hasOwn(data.definition.boxes, box) ? data.definition.boxes[box] : undefined;
   if (!declared || declared.type === 'markdown') throw new Error('Caption shows the caption of photo box ' + box + ', which this layout does not declare.');
   if (!textTags.has(as)) throw new Error('Caption cannot render as ' + as + '. Use one of ' + [...textTags].join(', ') + '.');
+  const language = langAttribute(lang, 'Caption ' + box);
   const resolved = Object.hasOwn(data.values.boxes, box) ? data.values.boxes[box] : undefined;
   const toggle = captionSwitch(declared.parameters);
   if (!resolved?.photo || (toggle !== undefined && resolved.params[toggle] !== true)) return null;
   const text = resolved.photo.caption ?? '';
   const empty = !text.trim() && renderView(data.book) === 'canvas';
   const Tag = as;
-  return <Tag data-caption={box} data-empty={empty ? '' : undefined} className={className} style={place(rect, style)} {...decorativeOn(decorative)} {...issueOn(marker)}>
+  return <Tag data-caption={box} data-empty={empty ? '' : undefined} className={className} style={place(rect, style)} lang={language} {...decorativeOn(decorative)} {...issueOn(marker)}>
     {empty ? <span className="if-text-placeholder">{placeholder}</span> : text.trim() ? text : null}
   </Tag>;
 }
@@ -1237,14 +1247,14 @@ export function issue(found: TemplateIssue): Required<IssueMarker> {
   return { 'data-issue': found.message, 'data-issue-info': JSON.stringify(found) };
 }
 
-export function Spread(props: Styling & IssueMarker & { children?: ReactNode }) {
+export function Spread(props: Styling & IssueMarker & Language & { children?: ReactNode }) {
   const { format, page } = useSpread();
   if (page) throw new Error('A page layout must render <Page>, not <Spread>.');
   return <Sheet {...props} format={format} />;
 }
 
 /** Page-local artwork. The platform supplies its sheet and clips the two halves at the fold. */
-export function Page({ className, style, children, ...marker }: Styling & IssueMarker & { children?: ReactNode }) {
+export function Page({ className, style, lang, children, ...marker }: Styling & IssueMarker & Language & { children?: ReactNode }) {
   const { format, page, side } = useSpread();
   if (!side) throw new Error('<Page> requires a page layout. Declare it with page().');
   const facing = format.facingPages;
@@ -1257,7 +1267,7 @@ export function Page({ className, style, children, ...marker }: Styling & IssueM
       '--safe-right': cssMM(side === 'left' ? format.safe.binding : format.safe.outside) } : {}),
   } as CSSProperties;
   const content = <div className={['if-page', className].filter(Boolean).join(' ')} data-side={side}
-    style={{ position: 'relative', width: cssMM(format.trim.width), height: cssMM(format.trim.height), ...style, ...vars }} {...issueOn(marker)}>{children}</div>;
+    style={{ position: 'relative', width: cssMM(format.trim.width), height: cssMM(format.trim.height), ...style, ...vars }} lang={langAttribute(lang, 'Page')} {...issueOn(marker)}>{children}</div>;
   if (page) return content;
   return <Sheet format={format}><div style={{ position: 'absolute', left: cssMM(facing && side === 'right' ? format.trim.width : 0) }}>{content}</div></Sheet>;
 }
