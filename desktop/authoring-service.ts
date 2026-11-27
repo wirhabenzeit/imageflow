@@ -920,7 +920,9 @@ export function createAuthoringService(hooks: Hooks) {
             fixtures: { cases: [...fixtureCases], maxLayouts: fixtureLimits.layouts, maxFormats: fixtureLimits.formats,
               maxFixturesPerFormat: fixtureLimits.cellsPerFormat, maxPreviewFixtures: fixtureLimits.previewCells },
             pageAddressing: true, pagePairInsertion: true, elementInspection: true, detailPreviews: true, maxContactSheetSpreads: 12,
-            templateApi: { contract: 1, baseline: [...contract1Capabilities], capabilities: [...templateCapabilities], exports: [...runtimeExports] },
+            // The supported features are the baseline and its `extensions`: one list in full repeated the other (#136 budget).
+            templateApi: { contract: 1, baseline: [...contract1Capabilities],
+              extensions: [...templateCapabilities].filter((name) => !(contract1Capabilities as readonly string[]).includes(name)), exports: [...runtimeExports] },
             diagnostics: 'Codes, locations, measurements and suggested fixes.',
             draftProtection: 'Active editors block saves and imports (EDIT_IN_PROGRESS). Dry runs and checks can read saved inputs.',
             imports: 'Use project/inbox. Files are validated together and kept for Undo.',

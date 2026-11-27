@@ -46,6 +46,22 @@ function diagnostic(issue: Issue, severity: 'error' | 'warning'): AuthoringDiagn
   };
 }
 
+/**
+ * Empty photo boxes as one finding with their places, where there are several: a new book has dozens, and each alone
+ * repeated the same message and suggestion. The first stays where the others were.
+ */
+export function emptyBoxes(diagnostics: AuthoringDiagnostic[]): AuthoringDiagnostic[] {
+  const empty = diagnostics.filter(({ code }) => code === 'photo-box-empty');
+  if (empty.length < 2) return diagnostics;
+  const occurrences = empty.map(({ location }) => Object.fromEntries(Object.entries(location ?? {})
+    .filter(([key]) => ['spread', 'page', 'box', 'where'].includes(key))) as NonNullable<AuthoringDiagnostic['occurrences']>[number]);
+  const merged: AuthoringDiagnostic = { code: 'photo-box-empty', stage: 'render', severity: 'warning',
+    message: empty.length + ' photo boxes are empty, so they print nothing.', occurrences,
+    suggestion: 'Place photos in them, or choose layouts without those boxes.' };
+  const first = diagnostics.indexOf(empty[0]);
+  return diagnostics.flatMap((item, index) => index === first ? [merged] : item.code === 'photo-box-empty' ? [] : [item]);
+}
+
 /** Placed photos drawn as empty frames because their previews are still being fetched: one finding for all of them. */
 function loadingPreviews(book: OpenProject): AuthoringDiagnostic[] {
   const photos = [...placedPhotos(book)].filter((id) => book.sources?.['photo:' + id]?.pending);
@@ -170,7 +186,7 @@ export async function checkProject(
       ...types?.diagnostics ?? [],
       // Originals that are elsewhere are one finding with its places, not one per photo and box (#308); `render` keeps each.
       ...found.errors.map((issue) => diagnostic(issue, 'error')),
-      ...found.warnings.map((issue) => diagnostic(issue, 'warning')),
+      ...emptyBoxes(found.warnings.map((issue) => diagnostic(issue, 'warning'))),
       ...awayDiagnostics(found.notes),
       ...loadingPreviews(rendered),
     ];

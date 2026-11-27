@@ -251,7 +251,7 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, … })
 
 Use `requires` for extensions beyond the contract-1 baseline. Unsupported extensions are rejected when the template loads, with an update hint. Listing baseline features in `requires` is also valid.
 
-`capabilities` lists all supported features. `get_authoring_context` reports the contract, `baseline`, `capabilities` and module `exports` in `capabilities.templateApi`. The baseline is defined in `src/runtime-exports.ts`.
+`capabilities` lists all supported features. `get_authoring_context` reports the contract, `baseline`, the supported capabilities beyond it as `extensions`, and module `exports` in `capabilities.templateApi`. The baseline is defined in `src/runtime-exports.ts`.
 
 An app update never rewrites a project's template folder. Renaming an ID, moving a parameter to another scope or changing an ID's type needs an explicit migration in the template and in `project.json`; ImageFlow never reinterprets or deletes saved values on its own.
 
