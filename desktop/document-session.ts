@@ -52,7 +52,7 @@ import type { CheckDraft } from './check';
 import { captureBookPreview, checkBookRender, checkCoverRender } from './preview';
 import { ProjectSession } from './project-session';
 import { createAuthoringService, AuthoringError, isReferenceCall } from './authoring-service';
-import { afterSyncStep, agentSyncState, beforeAgentWrite, notPulledWarning } from './agent-sync';
+import { afterPullAttempt, afterSyncStep, agentSyncState, beforeAgentWrite, notPulledWarning } from './agent-sync';
 import type { AgentWriteSync } from './agent-sync';
 import type { McpClientSession } from './mcp-connection';
 import { AuthoringQueue } from './authoring-queue';
@@ -928,8 +928,7 @@ export class DocumentSession {
     if (step !== 'pull') return step;
     try {
       const outcome = await this.syncNow({ automatic: { pushOnly: false, signal, agent: true } });
-      if (outcome?.pulled && outcome.changed) return { pulled: true };
-      return { warning: notPulledWarning(this.pullBlocked({ agent: true })) };
+      return afterPullAttempt(outcome, this.pullBlocked({ agent: true }));
     } catch (error) {
       signal.throwIfAborted();
       return { warning: notPulledWarning(errorMessage(error)) };
@@ -1133,7 +1132,9 @@ export class DocumentSession {
         const mutation = (name === 'apply_project_changes' && args.dryRun !== true) || name === 'import_sources' || name === 'rename_source';
         let locked = false;
         // A book behind another Mac takes its changes before the write, or the reply says it is behind (API-025).
-        const synced = mutation ? await this.syncBeforeAgentWrite(queuedSignal) : undefined;
+        // Not for a retry of a request this session committed already: its stored reply is answered as it was.
+        const replay = typeof args.idempotencyKey === 'string' && this.projectSession.receipts.has(args.idempotencyKey);
+        const synced = mutation && !replay ? await this.syncBeforeAgentWrite(queuedSignal) : undefined;
         try {
           if (mutation) await this.agentLease(queuedSignal, agentFootprint(name, args), name === 'import_sources' || name === 'rename_source');
           queuedSignal.throwIfAborted();

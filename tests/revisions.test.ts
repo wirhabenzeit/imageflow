@@ -248,6 +248,21 @@ test('warm captures and title/template edits read no unchanged photo bytes', asy
   assert.ok(index.metrics.cacheHits > 0);
 });
 
+test('an index names the inputs that differ between two revisions it captured lately (27 Nov)', async (t) => {
+  const folder = await makeProject(t);
+  const index = new ProjectInputIndex(folder);
+  t.after(() => index.close());
+  const first = await index.capture();
+  await writeFile(join(folder, 'project.json'), JSON.stringify({ ...project, title: 'Edited title' }));
+  index.invalidate('project.json');
+  await writeFile(join(folder, 'template/styles.css'), newCss);
+  index.invalidate('template/styles.css');
+  const edited = await index.capture();
+  assert.deepEqual(index.changedBetween(first.revision, edited.revision), ['project.json', 'template/styles.css']);
+  assert.deepEqual(index.changedBetween(edited.revision, edited.revision), []);
+  assert.equal(index.changedBetween('0'.repeat(64), edited.revision), undefined, 'a revision it never captured');
+});
+
 test('metadata reconciliation catches an unwatched equal-size photo edit with restored mtime', async (t) => {
   const folder = await makeProject(t);
   const index = new ProjectInputIndex(folder);

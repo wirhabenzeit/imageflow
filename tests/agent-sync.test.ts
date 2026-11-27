@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
-import { afterSyncStep, agentSyncState, beforeAgentWrite, notPulledWarning } from '../desktop/agent-sync';
+import { afterPullAttempt, afterSyncStep, agentSyncState, beforeAgentWrite, notPulledWarning } from '../desktop/agent-sync';
 import type { AgentSyncState } from '../desktop/agent-sync';
 import { AuthoringError, createAuthoringService } from '../desktop/authoring-service';
 import { checkProject } from '../desktop/check';
@@ -47,6 +47,19 @@ test('a write to a book with changes to fetch pulls first only when the book syn
 });
 
 const state: AgentSyncState = { state: 'in-sync', automatic: true };
+test('a pull before a write is judged by what the sync found, not by the status it acted on', () => {
+  assert.deepEqual(afterPullAttempt({ action: 'fast-forward', pulled: 'c2', changed: true }), { pulled: true });
+  // Taken meanwhile, or only its own changes to send: nothing is left to fetch, and the reply says nothing.
+  assert.equal(afterPullAttempt({ action: 'in-sync', changed: false }), undefined);
+  assert.equal(afterPullAttempt({ action: 'push', changed: false }), undefined);
+  // Changed on both Macs since the status was read: never pulled by itself, so not "once it can".
+  assert.match(afterPullAttempt({ action: 'diverged', changed: false })!.warning!, /File → Sync → Sync Now/);
+  assert.doesNotMatch(afterPullAttempt({ action: 'diverged', changed: false })!.warning!, /once it can/);
+  // Did not run, or deferred: the changes are still to fetch, with the reason where there is one.
+  assert.equal(afterPullAttempt(undefined, 'The user is editing.')!.warning, notPulledWarning('The user is editing.'));
+  assert.equal(afterPullAttempt({ action: 'deferred', changed: false })!.warning, notPulledWarning());
+});
+
 test('after a pull a write planned at the old revision fails with REVISION_CONFLICT that names the pull; a write that commits says what sync did', async () => {
   const conflict = () => Promise.reject(new AuthoringError('REVISION_CONFLICT', 'Inputs changed. Inspect or check the book again before editing.', { currentRevision: 'b'.repeat(64) }));
   await assert.rejects(afterSyncStep({ pulled: true }, () => state, conflict), (error: AuthoringError) =>

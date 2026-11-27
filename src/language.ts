@@ -3,9 +3,10 @@
 
 /** The tag in its canonical form (`de-ch` → `de-CH`), or undefined when it is not a well-formed BCP 47 language tag. */
 export function languageTag(value: unknown): string | undefined {
-  if (typeof value !== 'string' || !value.trim() || value.length > 64) return undefined;
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (!trimmed || trimmed.length > 64) return undefined;
   try {
-    const [canonical] = Intl.getCanonicalLocales(value.trim());
+    const [canonical] = Intl.getCanonicalLocales(trimmed);
     return canonical;
   } catch {
     return undefined;

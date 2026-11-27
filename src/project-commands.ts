@@ -155,7 +155,7 @@ export type ProjectOperation = z.input<typeof projectOperationSchema>;
 export type ProjectOperations = z.input<typeof projectOperationsSchema>;
 export type ProjectCommandResult = {
   files: ProjectFiles; changes: string[];
-  /** Commands that asked for what the book already had, such as assigning a photo to the box that holds it. */
+  /** `assign_source` commands that assigned a source to the box that already holds it. */
   unchanged?: string[];
   /** The spreads the batch inserted, removed, moved or changed, in book order. A removed spread stands where it was. */
   affectedSpreads: string[]; affectedCover?: true; references: Record<string, string>; reflow: boolean;

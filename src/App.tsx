@@ -1,4 +1,5 @@
 import { useCanvasGestures } from './useCanvasGestures';
+import { unlabeledControl } from './editor-label';
 import { useDelayed } from './useDelayed';
 import { pageSelectionRect, pageSelectionSide, pageSideAt, stepPageSelection } from './page-selection';
 import { canSwapPages, editableSpread, keptItems, layoutMime, placeKeptContent, shownContentTargets } from './page-editor';
@@ -122,7 +123,7 @@ function focusedEditorLabel(node: Element | null): string | undefined {
   const placeholder = node.getAttribute('placeholder')?.trim();
   const area = node.parentElement?.closest('[aria-label], [role="region"][aria-labelledby]');
   const where = area?.getAttribute('aria-label') || (area && document.getElementById(area.getAttribute('aria-labelledby') ?? '')?.textContent?.trim());
-  return (placeholder ? '"' + placeholder + '" ' + kind : 'a ' + kind) + (where ? ' in ' + where : '') + ' (focused)';
+  return unlabeledControl(kind, placeholder || undefined, where || undefined);
 }
 
 function formatOf(template?: TemplateInfo) {

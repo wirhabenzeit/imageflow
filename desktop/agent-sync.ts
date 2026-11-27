@@ -1,4 +1,5 @@
 import type { SyncStatus, SyncView } from '../src/desktop';
+import type { SyncOutcome } from './sync-engine';
 import type { agentSyncStates } from '../src/mcp-results';
 import { AuthoringError } from './authoring-service';
 
@@ -46,7 +47,7 @@ export function agentSyncState(view: SyncView | undefined, { automatic, checked,
  */
 export function beforeAgentWrite(state: AgentSyncStateName | undefined, { automatic, allowed, backoff }:
   { automatic: boolean; allowed: boolean; backoff: boolean }): 'pull' | { warning: string } | undefined {
-  if (state === 'diverged') return { warning: 'This book changed here and on another Mac, so it does not sync by itself. Ask the user to choose File → Sync → Sync Now, which keeps both versions.' };
+  if (state === 'diverged') return { warning: divergedWarning };
   if (state !== 'to-fetch') return undefined;
   if (!automatic) return { warning: fetchWarning + ' Sync automatically is off, so ImageFlow did not take them. Saving now makes the book differ on two Macs; ask the user to sync first (File → Sync → Sync Now).' };
   if (!allowed) return { warning: fetchWarning + ' This book does not sync by itself now, so ImageFlow did not take them. Ask the user to sync first (File → Sync → Sync Now).' };
@@ -54,9 +55,23 @@ export function beforeAgentWrite(state: AgentSyncStateName | undefined, { automa
   return 'pull';
 }
 const fetchWarning = 'This book has changes to fetch from another Mac.';
+const divergedWarning = 'This book changed here and on another Mac, so it does not sync by itself. Ask the user to choose File → Sync → Sync Now, which keeps both versions.';
 
 /** What the pull before a write did, for its reply. */
 export type AgentWriteSync = { pulled?: true; warning?: string };
+/**
+ * What a pull before a write came to, for its reply: the status it acted on may be up to a minute old, so the sync's own
+ * outcome decides. Changes taken are `pulled`; a sync that found nothing to take (`in-sync`, or only sent its own) says
+ * nothing; a book that changed on both Macs meanwhile gets the diverged warning; only a sync that did not run, or was
+ * deferred, leaves the changes to fetch.
+ */
+export function afterPullAttempt(outcome: Pick<SyncOutcome, 'action' | 'pulled' | 'changed'> | undefined, blocked?: string): AgentWriteSync | undefined {
+  if (outcome?.pulled && outcome.changed) return { pulled: true };
+  if (outcome?.action === 'diverged') return { warning: divergedWarning };
+  if (outcome && outcome.action !== 'deferred') return undefined;
+  return { warning: notPulledWarning(blocked) };
+}
+
 /** A pull before a write that did not change the book, in words: why the changes are still to be fetched. */
 export const notPulledWarning = (reason?: string) => fetchWarning + ' ImageFlow could not take them now' + (reason ? ' (' + reason.replace(/\.$/, '') + ')' : '') + '; it takes them once it can.';
 
