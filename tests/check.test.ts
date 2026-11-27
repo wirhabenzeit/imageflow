@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
-import { checkProject } from '../desktop/check';
+import { checkProject, emptyBoxes } from '../desktop/check';
 import { loadProject } from '../desktop/project';
 import { captureProjectRevision, ProjectInputIndex } from '../desktop/revisions';
 import type { RenderStatus } from '../src/desktop';
@@ -272,4 +272,17 @@ test('a preview target may be the start of a spread ID, and one that names no sp
     assert.match(result.diagnostics[0].message, message);
   }
   assert.deepEqual(rendered, [], 'nothing was rendered');
+});
+
+test('several empty photo boxes are one finding with their places', () => {
+  const empty = (spread: string, box: string) => ({ code: 'photo-box-empty', stage: 'render' as const, severity: 'warning' as const,
+    message: 'Photo box ' + box + ' is empty, so it prints nothing.', location: { spread, page: 'right' as const, box, where: 'Pages 16–17' } });
+  const other = { code: 'text-overflow', stage: 'render' as const, severity: 'warning' as const, message: 'Does not fit.' };
+  const one = [empty('details', 'third')];
+  assert.equal(emptyBoxes(one), one);
+  const merged = emptyBoxes([other, empty('details', 'third'), empty('details', 'fourth')]);
+  assert.deepEqual(merged.map(({ code }) => code), ['text-overflow', 'photo-box-empty']);
+  assert.equal(merged[1].message, '2 photo boxes are empty, so they print nothing.');
+  assert.deepEqual(merged[1].occurrences, [{ spread: 'details', page: 'right', box: 'third', where: 'Pages 16–17' },
+    { spread: 'details', page: 'right', box: 'fourth', where: 'Pages 16–17' }]);
 });

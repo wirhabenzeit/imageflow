@@ -809,7 +809,10 @@ test('context reports the installed template API and returns shipped examples on
   const plain = await call('get_authoring_context');
   // Examples are always listed; only requested ones carry their source.
   assert.deepEqual(plain.examples, [{ name: 'a-minimal', description: 'The smallest template.' }, { name: 'b-grid', description: 'A grid.' }]);
-  const api = (plain.capabilities as { templateApi: { contract: number; baseline: string[]; capabilities: string[]; exports: string[] } }).templateApi;
+  const reported = (plain.capabilities as { templateApi: { contract: number; baseline: string[]; extensions: string[]; exports: string[] } }).templateApi;
+  // Every supported feature is in the baseline or among the extensions, never in both.
+  assert.ok(reported.extensions.every((name) => !reported.baseline.includes(name)));
+  const api = { ...reported, capabilities: [...reported.baseline, ...reported.extensions] };
   assert.equal(api.contract, 1);
   assert.ok(api.capabilities.includes('anchors') && api.exports.includes('geometry'));
   // Agents can distinguish guaranteed features from later extensions without writing redundant requires lists.
