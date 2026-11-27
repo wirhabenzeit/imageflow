@@ -6,6 +6,7 @@ import { closest, declarationWarnings as check } from '../src/declaration-check'
 import type { Schema } from '../src/declaration-check';
 import { formatSchema, mm, printFormat, pt, resolveFormat } from '../src/format';
 import { geometry } from '../src/geometry';
+import { languageTag } from '../src/language';
 import { p } from '../src/parameters';
 import { projectSchema } from '../src/project';
 import type { RenderProject } from '../src/project';
@@ -331,4 +332,45 @@ test('parameter descriptions survive normalization at every scope and change not
   assert.equal(templateSchema.safeParse(declared('   ')).success, false);
   assert.equal(templateSchema.safeParse(declared('x'.repeat(1001))).success, false);
   assert.equal(templateSchema.safeParse(declared('x'.repeat(1000))).success, true);
+});
+
+test('language is a BCP 47 tag, kept in its canonical form (API-024)', () => {
+  assert.equal(languageTag('de'), 'de');
+  assert.equal(languageTag('de-ch'), 'de-CH');
+  assert.equal(languageTag(' en-GB '), 'en-GB');
+  assert.equal(languageTag('sr-Latn-RS'), 'sr-Latn-RS');
+  for (const bad of ['', ' ', 'de_CH', 'x', 'de--CH', 42, null]) assert.equal(languageTag(bad), undefined, String(bad));
+  const declared = (language: unknown) => templateSchema.safeParse({ id: 'lang', version: '1', contract: 1, format, language,
+    spreads: { main: { label: 'Main', render: () => null } } });
+  const parsed = declared('de-ch');
+  assert.ok(parsed.success);
+  assert.equal(parsed.data.language, 'de-CH');
+  assert.equal(chooseFormat(parsed.data).language, 'de-CH');
+  const wrong = declared('German (Swiss)');
+  assert.ok(!wrong.success);
+  assert.deepEqual(wrong.error.issues[0].path, ['language']);
+  assert.match(wrong.error.issues[0].message, /BCP 47 language tag such as 'de', 'de-CH'/);
+  assert.equal(declared(['de']).success, false);
+  assert.equal(declared(undefined).success, true);
+  // The property is declared, so it is not reported as unknown.
+  assert.deepEqual(declarationWarnings({ id: 'lang', version: '1', contract: 1, format, language: 'de', spreads: { main: { label: 'Main', render: () => null } } }), []);
+});
+
+test('lang on platform components overrides the book language for a part (API-024)', () => {
+  const html = renderSpread((ctx) => createElement(runtime.Spread, { lang: 'de' },
+    createElement(ctx.MarkdownBox, { id: 'story', lang: 'de-ch', rects: [{ x: 0, y: 0, width: 10, height: 10 }, { x: 20, y: 0, width: 10, height: 10 }] }),
+    createElement(ctx.Element, { id: 'note', lang: 'en' }),
+    createElement(ctx.Text, { parameter: 'document.title', lang: 'fr' }),
+    createElement(ctx.PhotoBox, { id: 'hero' })), 'export');
+  assert.match(html, /class="if-spread"[^>]*lang="de"/);
+  assert.equal(html.match(/data-box-type="markdown"[^>]*lang="de-CH" data-box-lang="de-CH"/g)?.length, 2);
+  assert.match(html, /data-element="note"[^>]*lang="en"/);
+  assert.match(html, /<p data-edit="document.title"[^>]*lang="fr"/);
+  assert.doesNotMatch(html, /data-box="hero"[^>]*lang=/);
+  // Without `lang`, nothing is set: the page's own language applies.
+  assert.doesNotMatch(renderSpread((ctx) => createElement(runtime.Spread, null, createElement(ctx.Text, { parameter: 'document.title' })), 'export'), /lang=/);
+  assert.throws(() => renderSpread(() => createElement(runtime.Spread, { lang: 'Deutsch (Schweiz)' }), 'export'),
+    /Spread lang "Deutsch \(Schweiz\)" is not a language tag\. Use a BCP 47 language tag/);
+  assert.throws(() => renderSpread((ctx) => createElement(runtime.Spread, null, createElement(ctx.Text, { parameter: 'heading', lang: 'de_DE' })), 'export'),
+    /Text heading lang "de_DE" is not a language tag/);
 });

@@ -32,7 +32,7 @@ This page is generated from the topic files in [`template-api/`](template-api), 
 - [Template findings](#template-findings): Report input problems with issue().
 - [Geometry helpers](#geometry-helpers): Insets, grids and design coordinates.
 - [Platform components](#platform-components): Spread, boxes, Element, Text and Caption.
-- [CSS contract](#css-contract): Fonts, CSS variables and print styling.
+- [CSS contract](#css-contract): Fonts, CSS variables, language and hyphenation, and print styling.
 - [Validation](#validation): Template load and render checks.
 - [Stored project data](#stored-project-data): Saved layouts, crops and parameters.
 - [Authoring and compatibility details](#authoring-and-compatibility-details): SDK types, enum maps and preview limits.
@@ -245,6 +245,7 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, … })
 | `app-controls` | `<Choice>`: ImageFlow's own segmented choice for element editors and layout-family pickers ([App controls](#app-controls)). |
 | `text-metadata` | `text.meta` on Markdown boxes: the fields of the source's YAML header, the same on every box of the chain ([Text metadata](#text-metadata)); every placed text in `ctx.book.texts` ([Texts](#texts)); and `boxes` in `anchors`. |
 | `template-lineage` | `basedOn`: the template a fork was copied from, so a fork can take an ID of its own ([Forks and starter updates](#forks-and-starter-updates)). |
+| `book-language` | `language`: the book's language as `lang` on every rendered page; `lang` on platform components; a Markdown text's `lang` header ([Language and hyphenation](#language-and-hyphenation)). |
 | `text-composition` | `compositions`: named functions that compose a text from its blocks, adding, replacing or wrapping them; a Markdown box names one with `composition` ([Composing a text](#composing-a-text)). |
 
 
@@ -272,6 +273,8 @@ export default defineTemplate({
   basedOn: { id: 'imageflow-starter', version: '0.13.1' },
   // Optional: what New Book shows for the template. Without it, a render of the first opening spread.
   preview: './preview.jpg',
+  // Optional: the book's language, for hyphenation and :lang() (see CSS contract). Default 'en'.
+  language: 'de-CH',
   contract: 1,
 
   // One print format, or several named `formats` the user chooses between; see below.
@@ -527,8 +530,9 @@ render: (ctx) => {
 ```
 
 - **Recognising a header.** The first line of the file is exactly `---`, a later line is `---` or `...`, and the lines between are a YAML mapping. Anything else, such as a file that starts with a thematic break followed by a paragraph, stays Markdown. A file that starts `---`, then `key: value` lines and `---`, is a header even though it would otherwise read as a rule and a heading.
-- **Values.** `meta` holds what JSON can: strings, numbers, booleans, `null`, lists and objects. YAML 1.2's core schema applies, so `2024-05-01` and `no` stay strings. A source without a header has `meta: {}`. ImageFlow does not check the fields: read the keys your layout understands, check their shape, and fall back to the layout's normal rendering otherwise. Report a field you cannot use with [`issue()`](#template-findings).
+- **Values.** `meta` holds what JSON can: strings, numbers, booleans, `null`, lists and objects. YAML 1.2's core schema applies, so `2024-05-01` and `no` stay strings. A source without a header has `meta: {}`. ImageFlow does not check the fields, except `lang` (below): read the keys your layout understands, check their shape, and fall back to the layout's normal rendering otherwise. Report a field you cannot use with [`issue()`](#template-findings).
 - **One source, every box.** `meta` is read from the saved file before any spread renders and is the same object for every box of the chain, whatever the flow puts in it, so a layout may size or style its boxes from it. Two sources on a spread each keep their own `meta`; the layout decides which one, if any, styles the page around them. Other pages read it through [`ctx.book.texts`](#texts), and `anchors` through `boxes`. In layout previews a Markdown box has no flow position, so its `text` is `null` there.
+- **Language.** One field is ImageFlow's own: `lang`, a BCP 47 tag such as `lang: fr`, sets the language of the text in every box it flows through, over the box's own `lang` and the template's `language`, so hyphenation follows it ([Language and hyphenation](#language-and-hyphenation)). A value that is not a language tag is a `text-lang-invalid` warning on the text's first box, and the text keeps the box's language. It stays in `meta` like any other field.
 - **Unreadable headers.** A header whose YAML cannot be read is a `text-frontmatter-invalid` warning on the text's first box. The header is still left out of the text, and `meta` is `{}`.
 - **Editing.** ImageFlow does not change the header. Edit it in the Markdown editor or the linked file.
 
@@ -1452,6 +1456,7 @@ Rules:
 - Each shown layout renders one root: `<Spread>` for a spread layout, `<Page>` for a page layout.
 - Each declared box is rendered exactly once through its component; each declared element at most once.
 - Boxes and elements are positioned and sized by template CSS on the component's element (`className`, `style`), or by `rect` (see Geometry helpers).
+- `lang` on `<Spread>`, `<Page>`, `<MarkdownBox>`, `<Element>`, `<ctx.Text>` and `<ctx.Caption>` sets the language of that part, overriding the template's `language`, as a BCP 47 tag (see [Language and hyphenation](#language-and-hyphenation)).
 - `decorative` marks a component's text as ornament, so the Book check does not report it for the safe area, size or overlap (see [CSS contract](#fonts-and-output)).
 - An empty box keeps its area in edit mode so it can receive drops. In export, its wrapper remains but the edit placeholder is omitted, as it is in thumbnails; templates can style `[data-empty]`. Layout previews mark each empty box with a small photo or text glyph instead, so a spread without content still shows which boxes take photos and which take text.
 
@@ -1538,12 +1543,32 @@ The spread's content box is the two trims side by side (`2 × --trim-width` by `
 
 Template CSS styles the elements inside a `MarkdownBox`: `p`, `h1`–`h6`, `em`, `strong`, `a`, `ul`, `ol`, `li`, `blockquote`. The platform adds and owns:
 
-- `overflow-wrap: break-word` on Markdown boxes.
+- `overflow-wrap: break-word` and `hyphens: manual` on Markdown boxes (set `hyphens: auto` to hyphenate in the book's language, see [Language and hyphenation](#language-and-hyphenation)).
 - Multi-column and fragmentation properties on Markdown boxes (`column-*`, `break-*` are set by the platform; `orphans`, `widows` may be set by templates).
 - Continuation classes: `.split` on the part of an element that continues in a later box, `.cont` on the continuing part. Defaults: a continued paragraph has no first-line indent, a continued list item has no marker, and a split justified paragraph justifies its last line. Templates may restyle these.
 - List markers stay inside the box (`list-style-position` or sufficient padding, checked by the platform).
 
 Not allowed in Markdown boxes: CSS counters for list numbering, `float`, `position: absolute` on content, transitions and animations.
+
+### Language and hyphenation
+
+Declare the book's language as `language` on the template, a BCP 47 tag such as `'de'`, `'de-CH'` or `'en-GB'` (capability `book-language`, included in the contract-1 baseline):
+
+```tsx
+export default defineTemplate({ id: 'alpenbuch', version: '1.0.0', contract: 1, language: 'de-CH', /* format, spreads … */ });
+```
+
+ImageFlow sets it as `lang` on the root element of every page it renders: the editor's book view and thumbnails, layout previews, the Book check, the presentation, MCP artwork and the exported PDF, so the text is set the same way everywhere. Without it the language is `en`. CSS that depends on the language follows it: `hyphens: auto` hyphenates by the language's rules, `:lang(de)` selects, and `quotes` and `text-transform` use the language's conventions. A tag that is not well-formed is a template error when the template loads; the tag is kept in its canonical form (`de-ch` becomes `de-CH`).
+
+A part of the book can be in another language. `lang` on `<Spread>`, `<Page>`, `<MarkdownBox>`, `<Element>`, `<ctx.Text>` and `<ctx.Caption>` sets it inside that component, and on the template's own elements HTML's `lang` attribute does the same. A malformed tag on a component fails the spread's render with a template error that names the component. A Markdown text can declare its own language in its header, `lang: fr`, which sets it in every box the text flows through, over the box's `lang` (see [Text metadata](#text-metadata)).
+
+Markdown boxes default to `hyphens: manual`: only soft hyphens (`&shy;`) break words. Opt into automatic hyphenation in the template's CSS, for the boxes or the elements inside them:
+
+```css
+.story p { hyphens: auto; hyphenate-limit-chars: 6 3 3; }
+```
+
+The text flow measures with the same hyphenation as the printed page, because it lays the text out in the boxes themselves. ImageFlow renders with Chromium on macOS, which hyphenates by the rules macOS ships: German (also `de-CH`), English, French, Italian, Spanish, Portuguese, Dutch, Danish, Swedish, Norwegian, Finnish, Polish, Czech and Russian among others. A language without rules is set without hyphens.
 
 ### Fonts and output
 

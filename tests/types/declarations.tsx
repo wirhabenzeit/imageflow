@@ -551,3 +551,19 @@ defineTemplate({ id: 'composed-photo', version: '1', contract: 1, format,
     a: spread({ label: 'A', boxes: { hero: { type: 'photo', label: 'Hero', composition: 'story' } }, render: () => <Spread /> }),
   }),
 });
+
+// The book's language (API-024): declared once on the template, overridden per part with `lang`.
+defineTemplate({ id: 'language', version: '1', contract: 1, format, language: 'de-CH',
+  parameters: { title: p.string({ label: 'Title', default: '' }) },
+  spreads: ({ spread, page }) => ({
+    a: spread({ label: 'A', boxes: { hero: box.photo('Hero'), story: box.markdown('Story') }, elements: { grid: { label: 'Grid' } },
+      render: (ctx) => <Spread lang="de">
+        <ctx.MarkdownBox id="story" lang="de-CH" />
+        <ctx.Element id="grid" lang="en" />
+        <ctx.Text parameter="document.title" lang="fr" />
+        <ctx.Caption box="hero" lang="it" />
+      </Spread> }),
+    b: page({ label: 'B', render: () => <Page lang="en-GB" /> }),
+  }) });
+// @ts-expect-error A language is a tag string, not a list.
+defineTemplate({ id: 'languages', version: '1', contract: 1, format, language: ['de', 'en'], spreads: { a: imported } });

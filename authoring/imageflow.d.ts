@@ -682,6 +682,12 @@ export type Decorative = { decorative?: boolean };
  * in `style` win over the ones `rect` sets, so `style={{ height: 'auto' }}` lets a heading grow.
  */
 type Placement = { rect?: Rect };
+/**
+ * The language of this part of the book, a BCP 47 tag such as `'de'` or `'en-GB'`, set as its `lang` attribute. It
+ * overrides the template's `language` inside the component, for hyphenation (`hyphens: auto`), quotes and `:lang()`.
+ * A malformed tag fails the render of the spread with a template error.
+ */
+export type Language = { lang?: string };
 /** HTML tags `Text` can render. */
 export type TextTag = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'p' | 'span' | 'div' | 'blockquote' | 'figcaption';
 /**
@@ -692,7 +698,7 @@ export type TextTag = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'p' | 'span' | '
  * `presentation="inline"` opts a string parameter into on-page typing (included in the contract-1 baseline), the same word
  * as an editor's `presentation`. Without it, or with `'dialog'`, the node opens the parameter panel. Multiline inline strings default to preserving line breaks; template CSS and `style` take precedence.
  */
-export type TextProps<Path extends string = string> = Styling & Placement & IssueMarker & Decorative & { parameter: Path; as?: TextTag; presentation?: EditorPresentation; placeholder?: string; fallback?: string; fallbackLabel?: string; hidden?: boolean };
+export type TextProps<Path extends string = string> = Styling & Placement & IssueMarker & Decorative & Language & { parameter: Path; as?: TextTag; presentation?: EditorPresentation; placeholder?: string; fallback?: string; fallbackLabel?: string; hidden?: boolean };
 /**
  * Props of `ctx.Caption`. It shows the caption of the photo in photo box `box` in an `as` tag (default `p`) and marks
  * it, so clicking it in the editor types the caption on the page. The caption is the photo's, saved with it and shown
@@ -701,7 +707,7 @@ export type TextProps<Path extends string = string> = Styling & Placement & Issu
  * thumbnails, previews, checks, presentation and export show an empty node. Line breaks show as typed
  * (`white-space: pre-wrap`); template CSS and `style` take precedence.
  */
-export type CaptionProps<Box extends string = string> = Styling & Placement & IssueMarker & Decorative & { box: Box; as?: TextTag; placeholder?: string };
+export type CaptionProps<Box extends string = string> = Styling & Placement & IssueMarker & Decorative & Language & { box: Box; as?: TextTag; placeholder?: string };
 
 /** In page layouts, page() is local to ctx.side and spread() throws. Otherwise the format is applied: `ctx.geometry.page('left', 'bleed')`. */
 export type BoundGeometry = {
@@ -774,9 +780,9 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
     children?: (photo: PhotoRender, box: PhotoBoxState<I, ValuesOf<S['boxes'][I]>>) => ImageFlowNode;
   }): ImageFlowElement;
   /** `MarkdownBox` limited to this layout's Markdown box IDs. */
-  MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: BoxIds<S, 'markdown'>; columns?: Columns; rects?: readonly Rect[]; alignHeads?: boolean }): ImageFlowElement;
+  MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & Language & { id: BoxIds<S, 'markdown'>; columns?: Columns; rects?: readonly Rect[]; alignHeads?: boolean }): ImageFlowElement;
   /** `Element` limited to this layout's element IDs. */
-  Element(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: keyof S['elements'] & string; children?: ImageFlowNode }): ImageFlowElement;
+  Element(props: Styling & Placement & EditMarker & IssueMarker & Decorative & Language & { id: keyof S['elements'] & string; children?: ImageFlowNode }): ImageFlowElement;
   /**
    * Shows a string parameter and makes it editable by clicking it: `<ctx.Text parameter="heading" as="h2" rect={...} />`.
    * Use `ctx.edit` for nodes that combine several parameters or show more than the value.
@@ -848,7 +854,7 @@ export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issu
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
   'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'page-layouts' | 'editor-context' | 'document-editors' |
   'editor-network' | 'rendered-images' | 'rendered-vectors' | 'font-coverage' | 'book-credits' | 'inline-editors' | 'inline-text' | 'inline-caption' | 'list-parameters' | 'template-preview' | 'photo-render' |
-  'formatted-text' | 'app-controls' | 'text-metadata' | 'text-composition' | 'template-lineage' | 'physical-covers';
+  'formatted-text' | 'app-controls' | 'text-metadata' | 'text-composition' | 'template-lineage' | 'book-language' | 'physical-covers';
 /** All features this app provides, including the contract-1 baseline and any later extensions. */
 export const capabilities: readonly Capability[];
 
@@ -873,6 +879,7 @@ export type TemplateDeclaration = {
   description?: string;
   basedOn?: { id: string; version: string };
   preview?: string;
+  language?: string;
   contract: 1;
   /** Optional extensions beyond the contract-1 baseline. Older lists of baseline features remain accepted. */
   requires?: readonly Capability[];
@@ -953,6 +960,14 @@ type TemplateBase<D extends Parameters, L extends string = string, C extends str
    * be read, the library shows its render of the opening spread. Included in the contract-1 baseline.
    */
   preview?: string;
+  /**
+   * The book's language, a BCP 47 tag such as `'de'`, `'de-CH'` or `'en-GB'`. Every page is rendered with it as `lang`,
+   * in the editor, previews, the Book check, the presentation and the exported PDF alike, so `hyphens: auto`, quotes and
+   * `:lang()` follow it. Default `'en'`. `lang` on `Spread`, `Page`, `MarkdownBox`, `Element`, `ctx.Text` and
+   * `ctx.Caption` overrides it for a part, and a Markdown text's `lang` header for that text. Included in the contract-1
+   * baseline.
+   */
+  language?: string;
   contract: 1;
   /**
    * Optional extensions beyond the contract-1 baseline.
@@ -1089,8 +1104,8 @@ type Styling = { className?: string; style?: CSSProperties };
 
 /** The root of every spread. Sets `--trim-width`, `--trim-height`, `--bleed-*`, and `--safe-*` CSS variables. */
 /** Page-local artwork, rendered into a sheet and clipped at the fold by ImageFlow. */
-export function Page(props: Styling & IssueMarker & { children?: ImageFlowNode }): ImageFlowElement;
-export function Spread(props: Styling & IssueMarker & { children?: ImageFlowNode }): ImageFlowElement;
+export function Page(props: Styling & IssueMarker & Language & { children?: ImageFlowNode }): ImageFlowElement;
+export function Spread(props: Styling & IssueMarker & Language & { children?: ImageFlowNode }): ImageFlowElement;
 /**
  * What a PhotoBox render callback receives about its photo. Lengths are CSS pixels (96 per inch) of the printed page,
  * with the origin at the box's top-left corner; they match the box's layout size whatever the editor's zoom.
@@ -1165,12 +1180,12 @@ export type TextComposition<D extends Parameters = Parameters> = {
  * columns; set the gap with the `columnGap` style. Text fills each column before continuing in the next box.
  * In the editor, clicking it edits the box's parameters and any others it is marked with: `{...ctx.edit('textSize')}`.
  */
-export function MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: string; columns?: Columns; rects?: readonly Rect[]; alignHeads?: boolean }): ImageFlowElement;
+export function MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & Language & { id: string; columns?: Columns; rects?: readonly Rect[]; alignHeads?: boolean }): ImageFlowElement;
 /**
  * Generated content with parameters, such as a calendar grid. In the editor, clicking it edits the element's
  * parameters and any others it is marked with: `<Element id="grid" {...ctx.edit('month')}>`.
  */
-export function Element(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: string; children?: ImageFlowNode }): ImageFlowElement;
+export function Element(props: Styling & Placement & EditMarker & IssueMarker & Decorative & Language & { id: string; children?: ImageFlowNode }): ImageFlowElement;
 // Reusable declarations
 
 /**
