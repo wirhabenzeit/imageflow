@@ -1,4 +1,5 @@
 import { useCanvasGestures } from './useCanvasGestures';
+import { unlabeledControl } from './editor-label';
 import { useDelayed } from './useDelayed';
 import { pageSelectionRect, pageSelectionSide, pageSideAt, stepPageSelection } from './page-selection';
 import { canSwapPages, editableSpread, keptItems, layoutMime, placeKeptContent, shownContentTargets } from './page-editor';
@@ -115,7 +116,14 @@ function focusedEditorLabel(node: Element | null): string | undefined {
   }
   if (!node.matches('input, textarea, select, [contenteditable="true"]')) return;
   const labels = node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement || node instanceof HTMLSelectElement ? node.labels : null;
-  return node.getAttribute('aria-label') || labels?.[0]?.textContent?.trim() || 'focused editor control';
+  const named = node.getAttribute('aria-label') || labels?.[0]?.textContent?.trim();
+  if (named) return named;
+  // Without a label of its own, say what it is and where (27 Nov: "focused editor control" alone told the agent nothing).
+  const kind = node.matches('select') ? 'menu' : node.matches('[contenteditable="true"]') ? 'text' : 'field';
+  const placeholder = node.getAttribute('placeholder')?.trim();
+  const area = node.parentElement?.closest('[aria-label], [role="region"][aria-labelledby]');
+  const where = area?.getAttribute('aria-label') || (area && document.getElementById(area.getAttribute('aria-labelledby') ?? '')?.textContent?.trim());
+  return unlabeledControl(kind, placeholder || undefined, where || undefined);
 }
 
 function formatOf(template?: TemplateInfo) {

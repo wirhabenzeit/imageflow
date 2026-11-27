@@ -290,6 +290,8 @@ test('no-op operations preserve state and do not report changes', () => {
   ]);
   assert.deepEqual(result.files, original);
   assert.deepEqual(result.changes, []);
+  // Named apart from the changes, so the lists account for every command (27 Nov).
+  assert.deepEqual(result.unchanged, ['Photo p2 was already in hero on two']);
   assert.deepEqual(result.affectedSpreads, []);
   assert.equal(result.reflow, false);
 });

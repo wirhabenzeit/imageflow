@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { declaredKey, declaredName, declaredNodes, findDeclared, ownerOf, ownTarget, pageOf } from '../src/page-scope';
+import { declaredKey, declaredName, declaredNodes, findDeclared, notDrawnMessage, ownerOf, ownTarget, pageOf } from '../src/page-scope';
 
 // The render frame finds boxes and elements by page as well as ID (ADR 0009). Unit tests run without a DOM, so this
 // is a minimal element tree with the few DOM methods the lookups use: attribute selectors, closest and dataset.
@@ -60,6 +60,14 @@ test('a lookup finds only the box on the page it names', () => {
   assert.deepEqual(findDeclared(sheet, { box: 'hero' }), [], 'no page means the spread layout, which this sheet does not draw');
   assert.deepEqual(findDeclared(sheet, { element: 'grid', page: 'left' }), []);
   assert.equal(findDeclared(asDom<HTMLElement>(whole), { box: 'hero' })[0].boxType, 'photo');
+});
+
+test('a target looked for without its page names the page that draws it (27 Nov)', () => {
+  const sheet = asDom<HTMLElement>(split);
+  assert.equal(notDrawnMessage(sheet, { element: 'grid' }, 's3'), 'Element grid is on the right page of spread s3, which shows page layouts: add "page": "right".');
+  assert.equal(notDrawnMessage(sheet, { box: 'hero' }, 's3'), 'Both pages of spread s3 draw box hero: add "page": "left" or "right".');
+  assert.equal(notDrawnMessage(sheet, { element: 'grid', page: 'left' }, 's3'), 'Element grid is not rendered on the left page of spread s3.');
+  assert.equal(notDrawnMessage(sheet, { element: 'map' }, 's3'), 'The requested box or element is not rendered on spread s3.');
 });
 
 test('findings and edit targets name the page of their box or element', () => {

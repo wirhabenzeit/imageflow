@@ -30,6 +30,7 @@ import { frameView, scopeSpread, scopeState } from './project';
 import type { FixtureMarking, PageSide, RenderProject, SpreadState, Values } from './project';
 import { composeHtml, markdownToHtml } from './markdown';
 import { splitFrontmatter } from './frontmatter';
+import { languageHint, languageTag } from './language';
 import { isParameterValue, parameterWarnings, resolveParams, resolveValue } from './parameters';
 import type { ListItem } from './parameters';
 import { fileErrors } from './file-findings';
@@ -44,7 +45,7 @@ import { resolveEditPath } from './editing';
 import { declaredInTemplate, editorLayoutPreviews, editorLayoutTarget, familyLayouts } from './layouts';
 import type { VariantTags } from './layouts';
 import { markedEdits, markedNodes, numberOccurrences } from './edit-targets';
-import { declaredName, declaredNode, declaredNodes, findDeclared, onPage, ownerOf, ownTarget, pageAttribute, pageOf } from './page-scope';
+import { declaredName, declaredNode, declaredNodes, findDeclared, notDrawnMessage, onPage, ownerOf, ownTarget, pageAttribute, pageOf } from './page-scope';
 import { captionKey, captionParameter, textEditorOwner } from './inline-text';
 import { inlineTextFrame } from './inline-text-frame';
 import { readEdit } from './editing';
@@ -1093,7 +1094,8 @@ function typographyOf(node: HTMLElement) {
 function inspectElements(sheet: HTMLElement, spread: SpreadState, template: Template, format: ResolvedFormat,
   request: ReturnType<typeof inspectionSchema.parse>, photos: Record<string, Dimensions>): ElementInspection {
   const nodes = request.box ? findDeclared(sheet, { box: request.box, page: request.page }) : request.element ? findDeclared(sheet, { element: request.element, page: request.page }) : declaredNodes(sheet).filter(node => !request.page || node.page === request.page);
-  if ((request.box || request.element) && !nodes.length) throw new PreviewError('preview-target-not-found', 'The requested box or element is not rendered on spread ' + spread.id + '.');
+  if ((request.box || request.element) && !nodes.length) throw new PreviewError('preview-target-not-found',
+    notDrawnMessage(sheet, request.box ? { box: request.box, page: request.page } : { element: request.element!, page: request.page }, spread.id));
   const items: ElementMeasurement[] = nodes.slice(request.offset, request.offset + request.limit).map(({ node, kind: declared, id, page }) => {
     // A node on a page belongs to that page's layout and state (validated before inspection); a page that draws a box
     // or element shows a declared layout, never the blank page.
@@ -1242,7 +1244,7 @@ function renderArtwork(root: HTMLElement, sheets: HTMLElement[], spreads: Spread
     const request = artwork.target;
     const box = 'box' in request ? request.box : undefined, element = 'element' in request ? request.element : undefined;
     const node = findDeclared(sheets[index], box ? { box, page: request.page } : { element: element!, page: request.page })[0]?.node;
-    if (!node) throw new PreviewError('preview-target-not-found', 'The requested box or element is not rendered on spread ' + spread + '.');
+    if (!node) throw new PreviewError('preview-target-not-found', notDrawnMessage(sheets[index], box ? { box, page: request.page } : { element: element!, page: request.page }, spread));
     const rect = measuredBounds(node, sheets[index], format), padding = request.paddingMm;
     const x = Math.max(crop.x, rect.x - padding), y = Math.max(crop.y, rect.y - padding);
     const right = Math.min(crop.x + crop.widthMm, rect.x + rect.width + padding);
@@ -2205,6 +2207,8 @@ export async function startRender(root: HTMLElement) {
       throw new DeclarationError('Template' + (first.path ? ' → ' + first.path.split('.').join(' → ') : '') + ': ' + first.message, issues);
     }
     const template = chooseFormat(declared.data, book.project.format);
+    // Every view of the book, from the editor to export, sets its text in the template's language (API-024).
+    document.documentElement.lang = template.language ?? 'en';
     // Known before the ID check, so a failed load still reports the declared ID (the template library reads it).
     info = templateInfo(template);
     // A fork may take an ID of its own and name the template the book was made from as `basedOn` (API-003).
@@ -2438,6 +2442,10 @@ export async function startRender(root: HTMLElement) {
         const assignment = spread.boxes[box];
         const id = declaration.type === 'photo' ? assignment?.photo : assignment?.text;
         const kind = declaration.type === 'photo' ? 'photo' : 'markdown';
+        // An empty photo box prints nothing: a full-bleed one, a blank page (beta session of 27 November, page 99).
+        if (declaration.type === 'photo' && !id) warnings.push({ ...located(spread.id, 'Photo box ' + declaration.label + ' is empty, so it prints nothing.'),
+          code: 'photo-box-empty', ...onPage(page), box,
+          suggestion: 'Place a photo in box ' + box + ' on ' + spread.id + ', or choose a layout without it.' });
         const state = id ? book.sources?.[kind + ':' + id] : undefined;
         const unavailable = printProblem(state);
         if (unavailable) errors.push({
@@ -2520,7 +2528,7 @@ export async function startRender(root: HTMLElement) {
           suggestion: 'Restore ' + (book.project.texts[source] ? sourcePath(book.project.texts[source]) : 'the Markdown file') + ', or assign another text to box ' + first.box + '.' });
         continue;
       }
-      const header = splitFrontmatter(book.texts[source]).error;
+      const { error: header, meta } = splitFrontmatter(book.texts[source]);
       if (header) {
         const path = book.project.texts[source] ? sourcePath(book.project.texts[source]) : source;
         warnings.push({ ...located(first.spread, 'The header of ' + path + ' cannot be read: ' + header.message + ' (line ' + header.line + ').'),
@@ -2536,6 +2544,18 @@ export async function startRender(root: HTMLElement) {
       });
       const boxes = stages.map(({ node }) => node);
       const path = book.project.texts[source] ? sourcePath(book.project.texts[source]) : source;
+      // A `lang` header sets the text's language in every box it flows through, before the flow measures it (API-024).
+      const textLang = meta?.lang === undefined ? undefined : languageTag(meta.lang);
+      if (meta?.lang !== undefined && !textLang) {
+        warnings.push({ ...located(first.spread, 'The lang header of ' + path + ' is not a language tag: ' + JSON.stringify(meta.lang) + '.'),
+          code: 'text-lang-invalid', ...onPage(first.page), box: first.box, source, details: { path },
+          suggestion: languageHint + ' Until then the text is set in the language of its box.' });
+      }
+      for (const node of boxes) {
+        const lang = textLang ?? node.dataset.boxLang;
+        if (lang) node.lang = lang;
+        else node.removeAttribute('lang');
+      }
       // The box a text starts in decides its composition. A later box that names another is styled for a structure
       // the text does not have there.
       const named = (name?: string) => name ? 'composition ' + name : 'no composition';

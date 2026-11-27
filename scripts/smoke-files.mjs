@@ -84,7 +84,9 @@ try {
   await w.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
   // The fixture assigns a sample track: drawn, no issues. The other panorama has none and shows an empty frame.
   assert.equal(await trackLine(), 1);
-  assert.equal((await status()).errors.length + (await status()).warnings.length, 0);
+  // Empty photo boxes of the fixture are reported as such, and nothing else.
+  const clean = await status();
+  assert.deepEqual([...clean.errors, ...clean.warnings].filter(({ code }) => code !== 'photo-box-empty'), []);
   assert.equal(await frame.locator('[data-spread="headlands"] [data-element="route"]').getAttribute('class'), 'route-map empty');
 
   // The route map saves each zoom/move while open; each action is undoable.

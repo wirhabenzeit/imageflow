@@ -40,6 +40,22 @@ export function findDeclared(root: ParentNode, target: DeclaredTarget): Declared
   return declaredNodes(root).filter((found) => found.kind === kind && found.id === id && found.page === target.page);
 }
 
+/**
+ * Why `target` was not found on a spread, for a preview or an inspection that asked for it: where a spread shows page
+ * layouts, a box or element without a page is looked for in the spread's own layout only, so the message names the page
+ * that draws it (27 Nov: a close-up of `{ spread, element: "map" }` on a split spread said only "not rendered").
+ */
+export function notDrawnMessage(root: ParentNode, target: DeclaredTarget, spread: string) {
+  const kind: DeclaredKind = target.box !== undefined ? 'box' : 'element';
+  const id = (target.box ?? target.element)!;
+  const name = (kind === 'box' ? 'Box ' : 'Element ') + id;
+  if (target.page) return name + ' is not rendered on the ' + target.page + ' page of spread ' + spread + '.';
+  const pages = [...new Set(declaredNodes(root).filter((found) => found.kind === kind && found.id === id && found.page).map((found) => found.page!))];
+  if (pages.length === 1) return name + ' is on the ' + pages[0] + ' page of spread ' + spread + ', which shows page layouts: add "page": "' + pages[0] + '".';
+  if (pages.length > 1) return 'Both pages of spread ' + spread + ' draw ' + kind + ' ' + id + ': add "page": "left" or "right".';
+  return 'The requested box or element is not rendered on spread ' + spread + '.';
+}
+
 /** The declared box or element that contains a node, with its page, for locating findings inside a spread. */
 export function ownerOf(node: Element): { box?: string; element?: string; page?: PageSide } {
   // A further rectangle of a box (`rects`) belongs to that box, though it is not a declared node of its own.

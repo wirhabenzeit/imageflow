@@ -28,7 +28,9 @@ export type ProjectInputCapture = { revision: ProjectRevision; observation: stri
    * The files a loaded book still reads or depends on: everything but the two manifests and the photos without a file.
    * While it is equal, a book loaded before is drawn as it was loaded, whatever was saved to its manifests since.
    */
-  files: string };
+  files: string;
+  /** Each input path with the digest of what the revision counts of it: which inputs differ between two revisions. */
+  parts?: Map<string, string> };
 export type InputIndexMetrics = { captures: number; filesHashed: number; bytesHashed: number; cacheHits: number;
   photoFilesHashed: number; photoBytesHashed: number };
 type IndexedDigest = { state: ExistingInput; digest: string };
@@ -265,6 +267,7 @@ async function capture(folder: string, signal?: AbortSignal, index?: IndexState)
   const hash = createHash('sha256').update('imageflow-project-revision-1\n');
   const observation = createHash('sha256').update('imageflow-project-observation-1\n');
   const content = createHash('sha256'), files = createHash('sha256');
+  const parts = new Map<string, string>();
   for (const { input, state, digest, children } of [...entries.values()].sort((a, b) => a.input.path < b.input.path ? -1 : 1)) {
     signal?.throwIfAborted();
     const { path } = input;
@@ -274,7 +277,9 @@ async function capture(folder: string, signal?: AbortSignal, index?: IndexState)
       throw new ProjectRevisionError('source-changed', path);
     }
     const actual = isExisting(state) ? portable(relative(root, state.actual)) : null;
-    hash.update(JSON.stringify([portable(path), input.external ?? null, state.kind, actual, state.kind === 'provided' ? state.token : digest ?? null]) + '\n');
+    const line = JSON.stringify([portable(path), input.external ?? null, state.kind, actual, state.kind === 'provided' ? state.token : digest ?? null]) + '\n';
+    hash.update(line);
+    parts.set(portable(path), createHash('sha256').update(line).digest('hex').slice(0, 16));
     let stamp: string | null = null;
     if (isExisting(current)) {
       const { dev, ino, size, mtimeNs, ctimeNs } = current.info;
@@ -297,7 +302,7 @@ async function capture(folder: string, signal?: AbortSignal, index?: IndexState)
     files.update('generation:' + generation!.files);
     for (const path of index.entries.keys()) if (!entries.has(path)) index.entries.delete(path);
   }
-  return { revision: hash.digest('hex'), observation: observation.digest('hex'), metadataObservation, content: content.digest('hex'), files: files.digest('hex') };
+  return { revision: hash.digest('hex'), observation: observation.digest('hex'), metadataObservation, content: content.digest('hex'), files: files.digest('hex'), parts };
 }
 
 /** One bounded digest index per open project. Watchers invalidate it immediately, while every capture
@@ -308,6 +313,8 @@ export class ProjectInputIndex {
   private pending: Promise<unknown> = Promise.resolve();
   // Recent watcher events, newest last, so a check that gave up can say what kept changing (API-007).
   private changes: { at: number; path?: string }[] = [];
+  // The inputs of the last revisions captured, oldest first, so a stale revision can say what changed since (27 Nov).
+  private recent = new Map<string, Map<string, string>>();
   constructor(readonly folder: string) {}
 
   get metrics(): InputIndexMetrics { return { ...this.state.metrics }; }
@@ -336,7 +343,15 @@ export class ProjectInputIndex {
     // Concurrent UI/MCP checks share completed digests instead of each starting a cold multi-GB scan.
     const task = this.pending.then(async () => {
       for (let attempt = 1; ; attempt++) {
-        try { return await capture(this.folder, signal, this.state); }
+        try {
+          const result = await capture(this.folder, signal, this.state);
+          if (result.parts) {
+            this.recent.delete(result.revision);
+            this.recent.set(result.revision, result.parts);
+            while (this.recent.size > 8) this.recent.delete(this.recent.keys().next().value!);
+          }
+          return result;
+        }
         catch (error) {
           if (this.state.closed || !(error instanceof ProjectRevisionError) || error.code !== 'source-changed' || attempt >= attempts) throw error;
         }
@@ -344,6 +359,16 @@ export class ProjectInputIndex {
     });
     this.pending = task.catch(() => {});
     return task;
+  }
+
+  /**
+   * The input paths that differ between two revisions this index captured lately, added and removed ones included, in
+   * path order; undefined where it no longer knows one of them.
+   */
+  changedBetween(from: string, to: string) {
+    const before = this.recent.get(from), after = this.recent.get(to);
+    if (!before || !after) return undefined;
+    return [...new Set([...before.keys(), ...after.keys()])].filter((path) => before.get(path) !== after.get(path)).sort();
   }
 
   /** Input paths the watcher reported changed since `time`, at most `limit`. An unnamed change is the project folder. */

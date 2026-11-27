@@ -8,7 +8,7 @@ import { checkedOutput } from './mcp-output-check';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import sharp from 'sharp';
-import { AuthoringError, compactDiagnostics, compactRender, createAuthoringService, isReferenceCall, offsetGuessOf, pixelsOf } from '../desktop/authoring-service';
+import { AuthoringError, changedList, compactDiagnostics, compactRender, createAuthoringService, diagnosticsOnce, isReferenceCall, offsetGuessOf, pixelsOf } from '../desktop/authoring-service';
 import { checkProject } from '../desktop/check';
 import { importIntoProject, loadProject } from '../desktop/project';
 import { ProjectSession } from '../desktop/project-session';
@@ -1084,4 +1084,25 @@ test('the sources view marks a capture time at a guessed offset (API-020, 26 Nov
   assert.deepEqual(offsetGuessOf({ extra: { offsetGuessed: true, type: 'public.heic' } }), { capturedOffsetGuessed: true });
   assert.deepEqual(offsetGuessOf({ extra: { type: 'public.heic' } }), {});
   assert.deepEqual(offsetGuessOf(undefined), {});
+});
+
+test('a preview repeats no diagnostics this connection was just given for the same revision (API-005, 27 Nov)', () => {
+  const seen = new WeakMap<object, string>();
+  const one = {}, other = {};
+  const found = [{ code: 'text-overflow', stage: 'render', severity: 'error', message: 'Does not fit.' },
+    { code: 'source-unavailable', stage: 'render', severity: 'warning', message: 'Lightroom is closed.' }] as Parameters<typeof diagnosticsOnce>[3];
+  // A full check lists them; a preview right after it at the same revision does not, and says how many there are.
+  assert.equal(diagnosticsOnce(seen, one, 'r1', found, false).diagnostics, found);
+  const again = diagnosticsOnce(seen, one, 'r1', found, true);
+  assert.deepEqual(again.diagnostics, []);
+  assert.deepEqual({ ...(again as { diagnosticsUnchanged: object }).diagnosticsUnchanged, note: undefined }, { errors: 1, warnings: 1, note: undefined });
+  // Another connection, another revision, or other findings: listed in full.
+  assert.equal(diagnosticsOnce(seen, other, 'r1', found, true).diagnostics, found);
+  assert.equal(diagnosticsOnce(seen, one, 'r2', found, true).diagnostics, found);
+  assert.equal(diagnosticsOnce(seen, one, 'r2', found.slice(1), true).diagnostics.length, 1);
+});
+
+test('a revision conflict names the first few changed files, then how many more', () => {
+  assert.equal(changedList(['project.json']), 'project.json');
+  assert.equal(changedList(['a.md', 'b.md', 'c.md', 'd.md', 'e.md', 'f.md', 'g.md']), 'a.md, b.md, c.md, d.md, e.md and 2 more');
 });

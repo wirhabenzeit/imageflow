@@ -16,6 +16,8 @@ export default defineTemplate({
   basedOn: { id: 'imageflow-starter', version: '0.13.1' },
   // Optional: what New Book shows for the template. Without it, a render of the first opening spread.
   preview: './preview.jpg',
+  // Optional: the book's language, for hyphenation and :lang() (see CSS contract). Default 'en'.
+  language: 'de-CH',
   contract: 1,
 
   // One print format, or several named `formats` the user chooses between; see below.

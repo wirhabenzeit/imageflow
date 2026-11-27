@@ -198,6 +198,11 @@ test('the check_book contract scopes batch references and revisions to drafts', 
   assert.deepEqual((parsed.args.preview as { target: unknown }).target, { spread: '$chapter' });
 });
 
+test('a preview target key put beside the target says where it belongs (27 Nov)', () => {
+  assert.throws(() => parseMcpArguments('check_book', { project: 'handle', preview: { target: { spreads: ['s1', 's2'] }, columns: 2 } }),
+    /preview: "columns" belongs inside preview\.target/);
+});
+
 test('draft aliases resolve consistently for contact sheets and focused inspection', async (t) => {
   const { renders, call, revision, folder } = await fixture(t);
   const before = await readFile(join(folder, 'project.json'), 'utf8');

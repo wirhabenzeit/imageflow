@@ -52,6 +52,8 @@ import type { CheckDraft } from './check';
 import { captureBookPreview, checkBookRender, checkCoverRender } from './preview';
 import { ProjectSession } from './project-session';
 import { createAuthoringService, AuthoringError, isReferenceCall } from './authoring-service';
+import { afterPullAttempt, afterSyncStep, agentSyncState, beforeAgentWrite, notPulledWarning } from './agent-sync';
+import type { AgentWriteSync } from './agent-sync';
 import type { McpClientSession } from './mcp-connection';
 import { AuthoringQueue } from './authoring-queue';
 import { authoringErrorResult } from './authoring-errors';
@@ -135,7 +137,8 @@ export async function chooseSyncTip(owner: BrowserWindow, tips: CommitHeader[]) 
  * the first sync by itself when it opens, and `automatic` a sync nobody asked for (#284), which applies only a
  * fast-forward, with `pushOnly` without changing the book, and stops with `signal`.
  */
-export type SyncRequest = { start?: boolean; auto?: boolean; trust?: boolean; automatic?: { pushOnly: boolean; signal?: AbortSignal } };
+/** `automatic.agent`: the pull before an agent's write (API-025), which the agent's own queued request does not block. */
+export type SyncRequest = { start?: boolean; auto?: boolean; trust?: boolean; automatic?: { pushOnly: boolean; signal?: AbortSignal; agent?: boolean } };
 
 /** How a failed automatic sync is taken (`AutoSync`): what may not sync by itself stops, a full remote waits, a busy book tries again soon. */
 export function automaticFailure(error: unknown): AutoFailure {
@@ -256,6 +259,7 @@ export class DocumentSession {
     this.service = createAuthoringService({
       session: () => this.closing ? undefined : this.projectSession, cache, docs: join(app.getAppPath(), 'docs'),
       activeEditor: () => parseActiveEditor(this.menuState?.activeEditor),
+      syncState: () => this.agentSync(),
       check: (...args) => this.checkOpenBook(...args),
       changed: (next) => this.notify({ value: this.activate(next) }),
       recovery: (message) => this.notify({ error: message }),
@@ -429,7 +433,7 @@ export class DocumentSession {
         });
         const outcome = await syncBook({ remote, book: this.book, fetchOriginals: options.fetchOriginals, chooseTip: (tips) => this.chooseTip(tips), cover: this.cover, device: macName(),
           fastForwardOnly: options.fastForwardOnly, pushOnly: options.pushOnly, signal: options.signal, ahead: options.ahead, beforeApply: options.beforeApply });
-        if (outcome.changed) this.notify({ value: this.activate(await loadProject(this.book.folder, this.cache), true) });
+        if (outcome.changed) this.notify({ value: this.activate(await loadProject(this.book.folder, this.cache), 'sync-pull') });
         return outcome;
       } catch (error) {
         if (error instanceof StoreFullError) options.full?.(error);
@@ -437,7 +441,7 @@ export class DocumentSession {
         // is on disk now, so its next edit does not fail as a change made outside ImageFlow.
         if (await mark() !== before) {
           const next = await loadProject(this.book.folder, this.cache).catch(() => undefined);
-          if (next) this.notify({ value: this.activate(next, true) });
+          if (next) this.notify({ value: this.activate(next, 'sync-pull') });
         }
         throw error;
       } finally { this.watchProject(this.book); }
@@ -569,9 +573,9 @@ export class DocumentSession {
    * Why a pull may not change the book now (#284), or undefined: it reloads the book and resets Undo and Redo, so it
    * waits for edits in flight or unsaved, an export, a copy, a check, an agent, and an open text or element editor.
    */
-  pullBlocked({ holding = false }: { holding?: boolean } = {}): string | undefined {
+  pullBlocked({ holding = false, agent = false }: { holding?: boolean; agent?: boolean } = {}): string | undefined {
     const menu = this.menuState;
-    if ((this.busy && !holding) || this.exportJob || this.copyJob || this.checkJobs.size || this.agentLeases.size || !this.queue.idle) return 'The book is busy.';
+    if ((this.busy && !holding) || this.exportJob || this.copyJob || this.checkJobs.size || (!agent && (this.agentLeases.size || !this.queue.idle))) return 'The book is busy.';
     if (menu && (menu.busy || menu.saving || menu.textEditing || menu.activeEditor)) return 'The book is being edited.';
     if (this.textEditorsOpen?.()) return 'A text of the book is open in its editor.';
     return undefined;
@@ -738,6 +742,8 @@ export class DocumentSession {
     return task;
   }
   private syncTask?: Promise<SyncOutcome | undefined>;
+  /** When this window last pulled and pushed the book, for agents (`agentSync`). */
+  private syncTimes: { lastPull?: string; lastPush?: string } = {};
   /** The sync that runs, as what turns sync off sees it: one `stopped` before it holds the book ends without a sync. */
   private syncRun?: { stopped: boolean };
   /** Stop Syncing being written; a sync it stopped ends after it, so nothing starts again before. */
@@ -813,6 +819,8 @@ export class DocumentSession {
     this.publishSync({ ...this.syncView, folder: connection.name, syncing: true, message: undefined });
     let message: string | undefined;
     let synced = false;
+    // Whether Undo had steps a pull would end (LOG-089).
+    const undoable = !!(this.projectSession.history.undo || this.projectSession.history.redo);
     try {
       // Originals come after the sync, in the background (`downloadSyncedOriginals`), so the book stays usable.
       const manage = this.syncService.kind === 'icloud' ? { manage: true as const } : {};
@@ -847,11 +855,16 @@ export class DocumentSession {
           unless: (now) => run.stopped || (now.enabled === false && state.enabled !== false), full: (error) => { this.storageFull = { message: error.message, ...manage }; },
           ...(automatic && begun ? { fastForwardOnly: true, pushOnly: automatic.pushOnly, signal: begun.run.job.signal,
             // The gate is read again as the pull is applied: an editor may have opened while the sync read the remote.
-            beforeApply: () => begun.mayApply(() => this.closing || !!this.pullBlocked({ holding: true })) } : {}) });
+            beforeApply: () => begun.mayApply(() => this.closing || !!this.pullBlocked({ holding: true, agent: automatic.agent })) } : {}) });
       } finally { begun?.end(); }
       // Errors keep their class (`hold`): a tombstone is a `BookDeletedError`, and the app asks what becomes of the book.
       // An automatic sync says only what changed the book; the status bar shows the rest.
       message = !automatic || result.changed ? describeOutcome(result) : undefined;
+      // A pull ends Undo and Redo, whose steps would undo the other Mac's changes too: the status bar says so once.
+      if (message && result.pulled && undoable && this.projectSession.history.reset === 'sync-pull') message += ' Undo starts over here: earlier steps would also undo the other Mac’s changes.';
+      const now = new Date().toISOString();
+      if (result.pulled && result.changed) this.syncTimes.lastPull = now;
+      if (result.pushed.length) this.syncTimes.lastPush = now;
       synced = !automatic || (result.action !== 'deferred' && !(result.action === 'diverged' && !result.pulled));
       if (synced) this.removed = false;
       return result;
@@ -893,6 +906,33 @@ export class DocumentSession {
   /** The remote said something changed (an iCloud push, #284): a look like a focus, for every book on that remote. */
   notified() {
     if (!this.closing && this.automatic()) this.autoSync.notified();
+  }
+
+  /** The book's sync as agents see it (API-025): undefined for a book that does not sync on this Mac. */
+  agentSync() {
+    return agentSyncState(this.syncView, { automatic: this.automatic(), checked: this.statusRead || undefined, ...this.syncTimes });
+  }
+  /**
+   * Before an agent's write (API-025): a book with changes to fetch that syncs by itself takes them first, as a focus
+   * would, so the write does not make it differ on two Macs; otherwise the reply warns. The status is read again when
+   * it is older than a minute. A pull here is not held back by the agent's own request, only by the user's editing.
+   */
+  private async syncBeforeAgentWrite(signal: AbortSignal): Promise<AgentWriteSync | undefined> {
+    // A sync that runs (`syncing`) is not waited for: one that sends may take minutes, and the write goes ahead as before.
+    if (this.closing || !this.syncView || this.syncView.syncing || this.book.readOnly) return undefined;
+    if (Date.now() - this.statusRead > 60_000) await this.refreshSync().catch(() => {});
+    signal.throwIfAborted();
+    const automatic = this.automatic();
+    const step = beforeAgentWrite(this.agentSync()?.state, { automatic, allowed: automatic && await this.autoAllowed(),
+      backoff: this.autoSync.state.backoffUntil > Date.now() });
+    if (step !== 'pull') return step;
+    try {
+      const outcome = await this.syncNow({ automatic: { pushOnly: false, signal, agent: true } });
+      return afterPullAttempt(outcome, this.pullBlocked({ agent: true }));
+    } catch (error) {
+      signal.throwIfAborted();
+      return { warning: notPulledWarning(errorMessage(error)) };
+    }
   }
 
   /** Waits until a sync of the book that is running has ended (Delete from Sync waits for it before it deletes). */
@@ -1091,6 +1131,10 @@ export class DocumentSession {
         requestSignal = queuedSignal;
         const mutation = (name === 'apply_project_changes' && args.dryRun !== true) || name === 'import_sources' || name === 'rename_source';
         let locked = false;
+        // A book behind another Mac takes its changes before the write, or the reply says it is behind (API-025).
+        // Not for a retry of a request this session committed already: its stored reply is answered as it was.
+        const replay = typeof args.idempotencyKey === 'string' && this.projectSession.receipts.has(args.idempotencyKey);
+        const synced = mutation && !replay ? await this.syncBeforeAgentWrite(queuedSignal) : undefined;
         try {
           if (mutation) await this.agentLease(queuedSignal, agentFootprint(name, args), name === 'import_sources' || name === 'rename_source');
           queuedSignal.throwIfAborted();
@@ -1099,7 +1143,7 @@ export class DocumentSession {
             this.busy = true;
             locked = true;
           }
-          return await this.service(name, args, queuedSignal, client);
+          return await afterSyncStep(synced, () => this.agentSync(), () => this.service(name, args, queuedSignal, client));
         } finally {
           if (mutation) {
             if (locked) this.busy = false;
@@ -1189,9 +1233,10 @@ export class DocumentSession {
       if (outcome.pushed.length) void service.uploadAfterSync(this.book.folder, { automatic: true }).catch(() => {});
     } finally { clearTimeout(timer); }
   }
-  activate(book: OpenProject, external = false): ProjectSummary {
+  /** `external`: the book changed outside its history, which starts over; `sync-pull` when a sync pull changed it. */
+  activate(book: OpenProject, external: boolean | 'sync-pull' = false): ProjectSummary {
     if (this.closing) throw new AuthoringError('PROJECT_CLOSED', 'The book window closed.');
-    if (external) this.projectSession.adoptExternal(book);
+    if (external) this.projectSession.adoptExternal(book, external === 'sync-pull' ? 'sync-pull' : undefined);
     else this.projectSession.book = book;
     const previous = this.active;
     const id = randomUUID();

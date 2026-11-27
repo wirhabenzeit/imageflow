@@ -158,7 +158,7 @@ export type McpToolArguments = { [Name in McpToolName]: z.output<typeof mcpToolS
 // Descriptions say what each tool is for and when to call it; the facts about each argument are on its schema field.
 export const mcpTools: { name: McpToolName; title: string; description: string; readOnly: boolean }[] = [
   { name: 'list_projects', title: 'List open books', readOnly: true,
-    description: 'List authorized open books with their handles and revisions. Call first.' },
+    description: 'List authorized open books: handles, revisions, sync state. Call first.' },
   { name: 'get_authoring_context', title: 'Get authoring context', readOnly: true,
     description: 'Read parsed declarations, template identity and files. Before editing a template, request reference topics, examples and source files: those calls return just what they request.' },
   { name: 'inspect_book', title: 'Inspect book', readOnly: true,
@@ -214,6 +214,16 @@ function previewTargetIssues(issue: z.core.$ZodIssue, args: unknown): z.core.$Zo
   return fitting ? fitting.map((inner) => ({ ...inner, path: [...issue.path, ...inner.path] })) : [{ ...issue, message: previewTargets }];
 }
 
+// Keys of a preview target an agent may put beside it, in `preview` itself (27 Nov: `preview.columns`): the message says
+// where they belong instead of only that they are not expected there.
+const previewTargetKeys = new Set(['spread', 'spreads', 'columns', 'side', 'page', 'box', 'element', 'paddingMm', 'cover', 'picker', 'family', 'current', 'choose']);
+function misplacedKeys(issue: z.core.$ZodIssue) {
+  if (issue.code !== 'unrecognized_keys' || issue.path.at(-1) !== 'preview') return undefined;
+  const misplaced = issue.keys.filter((key) => previewTargetKeys.has(key));
+  return misplaced.length ? misplaced.map((key) => '"' + key + '"').join(', ') + (misplaced.length === 1 ? ' belongs' : ' belong') +
+    ' inside preview.target, such as { "target": { "spreads": [...], "columns": 3 } }.' : undefined;
+}
+
 export function parseMcpArguments(name: string, args: unknown): { name: McpToolName; args: Record<string, unknown> } {
   if (!Object.hasOwn(mcpToolSchemas, name)) throw new Error('Unknown ImageFlow tool ' + name + '.');
   const tool = name as McpToolName;
@@ -226,6 +236,8 @@ export function parseMcpArguments(name: string, args: unknown): { name: McpToolN
       const error = (message: string) => path ? path + ': ' + message : message;
       const draft = issue.path[0] === 'draft';
       const [field, index, key] = draft ? issue.path.slice(1) : issue.path;
+      const misplaced = misplacedKeys(issue);
+      if (misplaced) return error(misplaced);
       if (field !== 'operations' || typeof index !== 'number') return error(issue.message.slice(0, 300));
       const input = args as { operations?: { op?: unknown }[]; draft?: { operations?: { op?: unknown }[] } };
       const op = (draft ? input.draft?.operations : input.operations)?.[index]?.op;

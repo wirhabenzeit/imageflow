@@ -19,6 +19,12 @@ const history = z.looseObject({
   redo: z.string().optional().describe('Name of the step Redo would apply.'),
 }).describe('The app\'s shared Undo history after this call.');
 
+// A book's sync between Macs (API-025, desktop/agent-sync.ts): the state in the app's words. Like history.reset (LOG-089),
+// `sync` in list_projects, the inspect_book summary and write results is described in docs/mcp.md only: the advertised
+// output schemas have a size budget, and these objects are loose.
+export const agentSyncStates = ['in-sync', 'to-fetch', 'to-send', 'diverged', 'arriving', 'interrupted', 'needs-update', 'unavailable',
+  'removed', 'syncing', 'unknown'] as const;
+
 // `occurrences`, the places of a finding that is one problem in many places, is described in docs/mcp.md only: this schema is
 // repeated in most tools, and the advertised list has a size budget.
 export const diagnosticSchema = z.looseObject({
@@ -108,11 +114,12 @@ const checkedRevision = z.string().optional().describe('The revision of diagnost
 const reportFields = { revision, diagnostics: z.array(diagnosticSchema), checks: checksSchema };
 const commandFields = {
   changes: z.array(z.string()).optional().describe('One line per change, as shown in Undo.'),
+  unchanged: z.array(z.string()).optional(),
   affectedSpreads: z.array(z.string()).optional().describe('Spreads inserted, removed, moved or changed, in book order.'),
-  renumbered: z.string().optional().describe('Other spreads that only moved pages, e.g. "41 spreads, now pages 5–86".'),
+  renumbered: z.string().optional().describe('Spreads that only moved pages, e.g. "41 spreads, now pages 5–86".'),
   affectedCover: z.literal(true).optional(),
   references: z.record(z.string(), z.string()).optional().describe('Spread IDs created for $alias batch references.'),
-  reflow: z.boolean().optional().describe('Whether text flow may have moved on other spreads.'),
+  reflow: z.boolean().optional().describe('Whether text may reflow on other spreads.'),
 };
 
 const revisionMoved = z.looseObject({ expectedRevision: z.string(), revision: z.string() }).optional()

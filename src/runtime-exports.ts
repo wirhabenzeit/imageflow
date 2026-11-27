@@ -64,6 +64,9 @@ export const contract1Capabilities = [
   'text-composition',
   // `basedOn`: the template a fork was copied from, so it can take an ID of its own in a book made from that one.
   'template-lineage',
+  // `language`: the book's language as `lang` on every rendered page, `lang` on platform components and a Markdown
+  // text's `lang` header, so hyphenation and :lang() follow it (API-024).
+  'book-language',
 ] as const;
 // All supported features, including the baseline names accepted in older templates' `requires` lists. Until the
 // first public release the baseline stays open and new features join it (ADR 0008); after it, additive extensions

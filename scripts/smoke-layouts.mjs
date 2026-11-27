@@ -273,7 +273,9 @@ try {
   assert.equal(await frame.locator('[data-spread="settlements"] [data-box]').count(), 9);
   assert.equal(await layout('Photo grid').getAttribute('aria-checked'), 'true');
   assert.equal(await picker.getByRole('radio').count(), 13);
-  assert.deepEqual((await status()).warnings, []);
+  // The grid has more boxes than the spread had photos: the empty ones are reported, and nothing else.
+  const gridWarnings = (await status()).warnings;
+  assert.ok(gridWarnings.length > 0 && gridWarnings.every(({ code, spread }) => code === 'photo-box-empty' && spread === 'settlements'), JSON.stringify(gridWarnings));
   await rerendered(() => button('Undo').click());
   assert.deepEqual(await settlements(), state);
 

@@ -42,12 +42,32 @@ The spread's content box is the two trims side by side (`2 × --trim-width` by `
 
 Template CSS styles the elements inside a `MarkdownBox`: `p`, `h1`–`h6`, `em`, `strong`, `a`, `ul`, `ol`, `li`, `blockquote`. The platform adds and owns:
 
-- `overflow-wrap: break-word` on Markdown boxes.
+- `overflow-wrap: break-word` and `hyphens: manual` on Markdown boxes (set `hyphens: auto` to hyphenate in the book's language, see [Language and hyphenation](#language-and-hyphenation)).
 - Multi-column and fragmentation properties on Markdown boxes (`column-*`, `break-*` are set by the platform; `orphans`, `widows` may be set by templates).
 - Continuation classes: `.split` on the part of an element that continues in a later box, `.cont` on the continuing part. Defaults: a continued paragraph has no first-line indent, a continued list item has no marker, and a split justified paragraph justifies its last line. Templates may restyle these.
 - List markers stay inside the box (`list-style-position` or sufficient padding, checked by the platform).
 
 Not allowed in Markdown boxes: CSS counters for list numbering, `float`, `position: absolute` on content, transitions and animations.
+
+## Language and hyphenation
+
+Declare the book's language as `language` on the template, a BCP 47 tag such as `'de'`, `'de-CH'` or `'en-GB'` (capability `book-language`, included in the contract-1 baseline):
+
+```tsx
+export default defineTemplate({ id: 'alpenbuch', version: '1.0.0', contract: 1, language: 'de-CH', /* format, spreads … */ });
+```
+
+ImageFlow sets it as `lang` on the root element of every page it renders: the editor's book view and thumbnails, layout previews, the Book check, the presentation, MCP artwork and the exported PDF, so the text is set the same way everywhere. Without it the language is `en`. CSS that depends on the language follows it: `hyphens: auto` hyphenates by the language's rules, `:lang(de)` selects, and `quotes` and `text-transform` use the language's conventions. A tag that is not well-formed is a template error when the template loads; the tag is kept in its canonical form (`de-ch` becomes `de-CH`).
+
+A part of the book can be in another language. `lang` on `<Spread>`, `<Page>`, `<MarkdownBox>`, `<Element>`, `<ctx.Text>` and `<ctx.Caption>` sets it inside that component, and on the template's own elements HTML's `lang` attribute does the same. A malformed tag on a component fails the spread's render with a template error that names the component. A Markdown text can declare its own language in its header, `lang: fr`, which sets it in every box the text flows through, over the box's `lang` (see [Text metadata](boxes-and-elements.md#text-metadata)).
+
+Markdown boxes default to `hyphens: manual`: only soft hyphens (`&shy;`) break words. Opt into automatic hyphenation in the template's CSS, for the boxes or the elements inside them:
+
+```css
+.story p { hyphens: auto; hyphenate-limit-chars: 6 3 3; }
+```
+
+The text flow measures with the same hyphenation as the printed page, because it lays the text out in the boxes themselves. ImageFlow renders with Chromium on macOS, which hyphenates by the rules macOS ships: German (also `de-CH`), English, French, Italian, Spanish, Portuguese, Dutch, Danish, Swedish, Norwegian, Finnish, Polish, Czech and Russian among others. A language without rules is set without hyphens.
 
 ## Fonts and output
 

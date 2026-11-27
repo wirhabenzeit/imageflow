@@ -24,6 +24,8 @@ export class ProjectSession {
   private past: Entry[] = [];
   private opened: ProjectFiles;
   private future: Entry[] = [];
+  /** Why the history was cleared, while nothing was recorded since (`HistoryState.reset`). */
+  private resetBy?: HistoryState['reset'];
   readonly receipts = new Map<string, { request: string; result: Record<string, unknown> }>();
   constructor(public book: OpenProject) {
     this.inputs = new ProjectInputIndex(book.folder);
@@ -51,12 +53,19 @@ export class ProjectSession {
   }
 
   get history(): HistoryState {
-    return { undo: this.past.at(-1)?.label, redo: this.future.at(-1)?.label };
+    return { undo: this.past.at(-1)?.label, redo: this.future.at(-1)?.label,
+      ...(this.resetBy && !this.past.length && !this.future.length ? { reset: this.resetBy } : {}) };
   }
 
-  adoptExternal(book: OpenProject) {
+  /**
+   * Takes a book changed outside this history: a sync pull, or files changed on disk. Undo and Redo start over, since
+   * each step restores a whole snapshot of the book, which would revert that change too (LOG-089); `history.reset` says
+   * so when there were steps.
+   */
+  adoptExternal(book: OpenProject, reason: NonNullable<HistoryState['reset']> = 'outside-change') {
     if (!same(this.book, book)) {
       this.invalidateManifests(book);
+      if (this.past.length || this.future.length) this.resetBy = reason;
       this.past = [];
       this.future = [];
     }
@@ -73,6 +82,7 @@ export class ProjectSession {
       this.past.push({ files: filesOf(this.book), membership, label: label.slice(0, 160) || 'Project edit' });
       if (this.past.length > 100) this.past.shift();
       this.future = [];
+      this.resetBy = undefined;
     }
     this.invalidateManifests(book);
     this.book = book;

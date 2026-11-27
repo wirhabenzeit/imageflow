@@ -14,7 +14,8 @@ const property = (id: string): Spec => {
   return { label: spec.viewLabel, enabled: book, checked: (s) => showsProperty(s.photoView, spec) };
 };
 export const commandRegistry = {
-  undo: { label: s => s.history?.undo ? 'Undo ' + s.history.undo : 'Undo', accelerator: 'CmdOrCtrl+Z', enabled: s => writable(s) && !!s.history?.undo },
+  // After a sync pull replaced the book, its earlier steps cannot be undone (LOG-089): the menu says why.
+  undo: { label: s => s.history?.undo ? 'Undo ' + s.history.undo : s.history?.reset === 'sync-pull' ? 'Can’t Undo After Sync' : 'Undo', accelerator: 'CmdOrCtrl+Z', enabled: s => writable(s) && !!s.history?.undo },
   redo: { label: s => s.history?.redo ? 'Redo ' + s.history.redo : 'Redo', accelerator: 'CmdOrCtrl+Shift+Z', enabled: s => writable(s) && !!s.history?.redo },
   export: { label: s => s.view === 'cover' ? 'Export Cover PDF…' : s.view === 'content' ? 'Export Content PDF…' : 'Export PDF…',
     accelerator: 'CmdOrCtrl+E', enabled: s => book(s) && s.canExport },

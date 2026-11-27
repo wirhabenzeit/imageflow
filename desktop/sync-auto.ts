@@ -5,6 +5,9 @@
  * - **Open, focus and a push from iCloud** look at the remote (the sync status: one listing of the book's commits) and
  *   sync only when it shows something to do: a fast-forward to pull, or changes of this Mac to push. A status that shows
  *   nothing to do costs no sync.
+ * - **Every `poll` (5 min) while the book is open** it looks too (API-025), so a book left open in the background, which
+ *   an agent may be editing, does not wait for a focus to take another Mac's changes. Not while anything else waits or
+ *   runs, a backoff lasts or a pull waits for the gate, and never for a book that does not sync by itself.
  * - **A save** pushes once the book has been idle for `idle` (30 s), when the book changed since its last sync. Reading
  *   that is local and sends no request.
  * - **A pull waits** while it would disturb the user (`AutoSyncHost.blocked`: edits in flight, an export, an agent, an
@@ -57,13 +60,14 @@ export type AutoSyncHost = {
   upload?(): Promise<void>;
 };
 
-export type AutoSyncTiming = { idle: number; gate: number; notified: number; backoff: (failures: number) => number };
-export const autoSyncTiming: AutoSyncTiming = { idle: 30_000, gate: 2_000, notified: 1_000,
+/** `poll`: how often an open book looks at the remote by itself; none without. */
+export type AutoSyncTiming = { idle: number; gate: number; notified: number; poll?: number; backoff: (failures: number) => number };
+export const autoSyncTiming: AutoSyncTiming = { idle: 30_000, gate: 2_000, notified: 1_000, poll: 5 * 60_000,
   backoff: (failures) => Math.min(15 * 60_000, 30_000 * 2 ** Math.max(0, failures - 1)) };
 
 /** What a trigger asks for, in rising order: a later one of higher rank takes the place of a lower one that waits. */
-type Intent = 'push' | 'look' | 'pull' | 'open';
-const rank: Record<Intent, number> = { push: 1, look: 2, pull: 3, open: 4 };
+type Intent = 'push' | 'poll' | 'look' | 'pull' | 'open';
+const rank: Record<Intent, number> = { push: 1, poll: 2, look: 3, pull: 4, open: 5 };
 
 export class AutoSync {
   private wanted?: Intent;
@@ -74,6 +78,7 @@ export class AutoSync {
   private notifyTimer?: ReturnType<typeof setTimeout>;
   private gateTimer?: ReturnType<typeof setTimeout>;
   private uploadTimer?: ReturnType<typeof setTimeout>;
+  private pollTimer?: ReturnType<typeof setInterval>;
   /** A pull that waits for nothing to block it. */
   private waitingForGate = false;
   private failures = 0;
@@ -85,15 +90,29 @@ export class AutoSync {
   constructor(private readonly host: AutoSyncHost, private readonly timing: AutoSyncTiming = autoSyncTiming, private readonly now: () => number = Date.now) {}
 
   /** The book opened: its first sync by itself, then a look at the remote. */
-  opened() { this.want('open'); }
+  opened() { this.startPolling(); this.want('open'); }
   /**
    * The book's window came to the front (the caller throttles it). It looks at the remote; when it cannot now (stopped,
    * waiting for a backoff, or the book does not sync by itself, see `attempt`) it still reads the status.
    */
   focused() {
     if (this.stopped === 'closed') return;
+    this.startPolling();
     if (this.stopped || this.until > this.now()) void this.host.refresh?.().catch(() => {});
     this.want('look');
+  }
+  /**
+   * The periodic look (API-025): like a focus, but only when nothing else waits or runs, no backoff lasts and no pull
+   * waits for the gate, and without reading the status for a book that does not sync by itself.
+   */
+  polled() {
+    if (this.stopped || this.wanted || this.running || this.waitingForGate || this.until > this.now()) return;
+    this.want('poll');
+  }
+  private startPolling() {
+    if (!this.timing.poll || this.pollTimer || this.stopped === 'closed') return;
+    this.pollTimer = setInterval(() => this.polled(), this.timing.poll);
+    (this.pollTimer as { unref?: () => void }).unref?.();
   }
   /** The remote said something changed (an iCloud push); several at once count as one. */
   notified() {
@@ -126,6 +145,8 @@ export class AutoSync {
   /** Stops for good: what waits is dropped, and a sync that runs is aborted. Resolves once it has ended. */
   close() {
     this.stopped = 'closed';
+    clearInterval(this.pollTimer);
+    this.pollTimer = undefined;
     for (const timer of [this.timer, this.idleTimer, this.notifyTimer, this.gateTimer, this.uploadTimer]) clearTimeout(timer);
     this.wanted = undefined;
     this.job?.abort(new Error('The book closed.'));
@@ -153,7 +174,7 @@ export class AutoSync {
 
   /** For tests and the status: what waits, and until when. */
   get state() {
-    return { wanted: this.wanted, running: !!this.running, waitingForGate: this.waitingForGate, failures: this.failures,
+    return { polling: !!this.pollTimer, wanted: this.wanted, running: !!this.running, waitingForGate: this.waitingForGate, failures: this.failures,
       backoffUntil: this.until, uploadFailures: this.uploadFailures, stopped: this.stopped };
   }
   /** Resolves once nothing runs. */

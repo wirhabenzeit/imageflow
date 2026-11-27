@@ -80,6 +80,7 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, … })
 | `app-controls` | `<Choice>`: ImageFlow's own segmented choice for element editors and layout-family pickers ([App controls](layout-families.md#app-controls)). |
 | `text-metadata` | `text.meta` on Markdown boxes: the fields of the source's YAML header, the same on every box of the chain ([Text metadata](boxes-and-elements.md#text-metadata)); every placed text in `ctx.book.texts` ([Texts](anchors-and-index.md#texts)); and `boxes` in `anchors`. |
 | `template-lineage` | `basedOn`: the template a fork was copied from, so a fork can take an ID of its own ([Forks and starter updates](template-library.md#forks-and-starter-updates)). |
+| `book-language` | `language`: the book's language as `lang` on every rendered page; `lang` on platform components; a Markdown text's `lang` header ([Language and hyphenation](css-contract.md#language-and-hyphenation)). |
 | `text-composition` | `compositions`: named functions that compose a text from its blocks, adding, replacing or wrapping them; a Markdown box names one with `composition` ([Composing a text](boxes-and-elements.md#composing-a-text)). |
 
 
