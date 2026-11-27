@@ -188,7 +188,12 @@ export type BookStorage = { bytes: number; originals: number; previews: number; 
 export type UnusedStorage = { now: number; later: number; from?: number; until?: number };
 export type SyncCleanUpPlan = { bytes: number; objects: number; books: number; deletedBooks: number; skipped: number };
 export type SyncConnectionReport = { conditionalWrites: 'enforced' | 'ignored' | 'unsupported'; checksums: 'verified' | 'not-verified'; addressing: 'path' | 'virtual' };
-export type HistoryState = { undo?: string; redo?: string };
+/**
+ * The shared Undo history. `reset` says why it is empty although the book had steps (LOG-089): a sync pull from another
+ * Mac (`sync-pull`) or a change made outside ImageFlow (`outside-change`) replaced the book, and the earlier steps,
+ * whole snapshots of the book, would have reverted that change too. Shown until the next step.
+ */
+export type HistoryState = { undo?: string; redo?: string; reset?: 'sync-pull' | 'outside-change' };
 // How an MCP client starts ImageFlow's stdio bridge. It does not change when the connection is enabled again.
 export type McpLaunch = { command: string; args: string[]; env: Record<string, string> };
 export type McpSettings = { enabled: boolean; clients: { name: string }[]; launch: McpLaunch; claudeCode: string };

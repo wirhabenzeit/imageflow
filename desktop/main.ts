@@ -2241,6 +2241,9 @@ void app.whenReady().then(async () => {
   // Tests of automatic sync wait less for a book to be idle; a packaged app always waits 30 s.
   const idle = Number(process.env.IMAGEFLOW_SYNC_IDLE_MS);
   if (!app.isPackaged && Number.isFinite(idle) && idle > 0) DocumentSession.autoSyncTiming = { ...DocumentSession.autoSyncTiming, idle };
+  // And look at the remote by themselves sooner than every 5 minutes (API-025).
+  const poll = Number(process.env.IMAGEFLOW_SYNC_POLL_MS);
+  if (!app.isPackaged && Number.isFinite(poll) && poll > 0) DocumentSession.autoSyncTiming = { ...DocumentSession.autoSyncTiming, poll };
   const slow = Number(process.env.IMAGEFLOW_SYNC_TEST_SLOW_MS);
   if (!app.isPackaged && Number.isFinite(slow) && slow > 0) DocumentSession.automaticSyncDelay = slow;
   const sending = Number(process.env.IMAGEFLOW_SYNC_TEST_SENDING_MS);
