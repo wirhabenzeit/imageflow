@@ -155,6 +155,8 @@ export type ProjectOperation = z.input<typeof projectOperationSchema>;
 export type ProjectOperations = z.input<typeof projectOperationsSchema>;
 export type ProjectCommandResult = {
   files: ProjectFiles; changes: string[];
+  /** Commands that asked for what the book already had, such as assigning a photo to the box that holds it. */
+  unchanged?: string[];
   /** The spreads the batch inserted, removed, moved or changed, in book order. A removed spread stands where it was. */
   affectedSpreads: string[]; affectedCover?: true; references: Record<string, string>; reflow: boolean;
   /**
@@ -193,6 +195,8 @@ export function applyProjectCommands(
   const { project, photoIndex } = next;
   const references: Record<string, string> = {};
   const changes: string[] = [];
+  // Commands that asked for what the book already had, such as assigning a photo to the box that holds it.
+  const unchanged: string[] = [];
   const affected = new Set<string>();
   let affectedCover = false, removedSources = false;
   let reflow = false;
@@ -637,7 +641,11 @@ export function applyProjectCommands(
         requireSource(operation.kind, operation.source);
         const before = own(state.boxes, operation.box);
         const source = operation.kind === 'photo' ? before?.photo : before?.text;
-        if (source === operation.source && !before?.crops && !before?.focus) break;
+        // It changes nothing, and says so in `unchanged`, so a batch's lists account for each of its commands (27 Nov).
+        if (source === operation.source && !before?.crops && !before?.focus) {
+          unchanged.push(operation.kind[0].toUpperCase() + operation.kind.slice(1) + ' ' + operation.source + ' was already in ' + operation.box + ' on ' + spread.id);
+          break;
+        }
         const replacement = { ...boxBase(before), ...(operation.kind === 'photo' ? { photo: operation.source } : { text: operation.source }) };
         state.boxes[operation.box] = replacement;
         changed('Assigned ' + operation.kind + ' ' + operation.source + ' to ' + operation.box, [spread.id], operation.kind === 'text');
@@ -755,7 +763,7 @@ export function applyProjectCommands(
     operationIndex++;
   }
   const renumbered = renumberedSpreads(files.project.spreads, template.format, project.spreads, format, template.spreads, affected);
-  return { files: next, changes, affectedSpreads: inBookOrder(affected, files.project.spreads, project.spreads),
+  return { files: next, changes, ...(unchanged.length ? { unchanged } : {}), affectedSpreads: inBookOrder(affected, files.project.spreads, project.spreads),
     ...(renumbered ? { renumbered } : {}), ...(affectedCover ? { affectedCover: true as const } : {}),
     ...(removedSources ? { removedSources: true as const } : {}), references, reflow };
 }

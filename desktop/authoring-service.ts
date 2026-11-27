@@ -104,6 +104,22 @@ export function compactDiagnostics(diagnostics: AuthoringDiagnostic[], all = fal
 }
 const shownOccurrences = 3;
 
+/**
+ * The diagnostics of a check_book reply, or none where this connection was just given the same ones for the same
+ * revision: a run of previews (contact sheets, close-ups) repeated them all, about 4 KB each (API-005, 27 Nov). `seen`
+ * remembers what the connection was last given. A full check always lists them; so does a preview that asks for
+ * occurrences.
+ */
+export function diagnosticsOnce(seen: WeakMap<object, string>, client: object, revision: unknown, diagnostics: AuthoringDiagnostic[], preview: boolean) {
+  const key = createHash('sha256').update(JSON.stringify([revision, diagnostics])).digest('hex');
+  const same = seen.get(client) === key;
+  seen.set(client, key);
+  if (!preview || !same || !diagnostics.length) return { diagnostics };
+  const count = (severity: string) => diagnostics.filter((diagnostic) => diagnostic.severity === severity).length;
+  return { diagnostics: [], diagnosticsUnchanged: { errors: count('error'), warnings: count('warning'),
+    note: 'The same diagnostics as this connection\'s last check of this revision; check without preview to list them again.' } };
+}
+
 type PhotoRecord = { id: string; captured?: CaptureMetadata['captured']; usage?: unknown[]; [field: string]: unknown };
 /** The photos an inspection asks for (API-015): those named, in that order, or else by capture time, undated ones last. */
 export function chosenPhotos(photos: PhotoRecord[], { photos: named, unplaced, captured }: PhotoChoice) {
@@ -318,6 +334,11 @@ export const loadedPhoto = (book: OpenProject) => (id: string) => {
  * original's offset, and place, ImageFlow has not read yet. The time is then right as an instant but its wall clock may
  * be hours off.
  */
+/** Changed input paths for a message: the first few, then how many more. */
+export function changedList(paths: readonly string[], shown = 5) {
+  const named = paths.slice(0, shown).join(', ');
+  return paths.length > shown ? named + ' and ' + (paths.length - shown) + ' more' : named;
+}
 export const offsetGuessOf = (photo: { extra?: Record<string, unknown> } | undefined) => photo?.extra?.offsetGuessed === true ? { capturedOffsetGuessed: true } : {};
 /** A photo's size in pixels for the sources view, where it is known. */
 export const pixelsOf = (photo: { width?: number; height?: number } | undefined) =>
@@ -330,6 +351,8 @@ const contextGuide = 'Start with docs: ["authoring-workflow"]. Use docs for topi
 export function createAuthoringService(hooks: Hooks) {
   // Calls without a connection, such as tests, share one session for this service.
   const unattached: McpClientSession = { name: 'MCP client', session: randomUUID() };
+  // What each agent connection was last given as diagnostics (diagnosticsOnce).
+  const shownDiagnostics = new WeakMap<object, string>();
   let cachedCheck: { session: ProjectSession; inputs: ProjectInputCapture; result: AuthoringCheckResult } | undefined;
   let cachedTemplateHash: { session: ProjectSession; observation: string; files: string; hash: string } | undefined;
   const get = (handle: unknown) => {
@@ -396,7 +419,12 @@ export function createAuthoringService(hooks: Hooks) {
   };
   const revision = async (session: ProjectSession, expected: unknown, signal: AbortSignal) => {
     const current = await session.inputs.capture({ signal });
-    if (current.revision !== expected) throw new AuthoringError('REVISION_CONFLICT', 'Inputs changed. Inspect or check the book again before editing.', { currentRevision: current.revision });
+    if (current.revision !== expected) {
+      // What changed since the revision the agent read, where this window still knows it (27 Nov: "Inputs changed" alone).
+      const changed = typeof expected === 'string' ? session.inputs.changedBetween(expected, current.revision) : undefined;
+      throw new AuthoringError('REVISION_CONFLICT', (changed?.length ? 'Changed since that revision: ' + changedList(changed) + '.' : 'Inputs changed.') +
+        ' Inspect or check the book again before editing.', { currentRevision: current.revision, ...(changed?.length ? { changed: changed.slice(0, 50) } : {}) });
+    }
     return current;
   };
   const prepareMutation = async (session: ProjectSession, expected: unknown, signal: AbortSignal) => {
@@ -447,7 +475,7 @@ export function createAuthoringService(hooks: Hooks) {
       return {
         book: drafted, preview: preview && target ? { ...preview, target } : undefined,
         inspect: inspect?.spread ? { ...inspect, spread: resolve(inspect.spread) } : inspect,
-        summary: { applied: true, committed: false, changes: planned.changes, affectedSpreads: planned.affectedSpreads,
+        summary: { applied: true, committed: false, changes: planned.changes, ...(planned.unchanged ? { unchanged: planned.unchanged } : {}), affectedSpreads: planned.affectedSpreads,
           ...(planned.renumbered ? { renumbered: planned.renumbered } : {}), ...(planned.affectedCover ? { affectedCover: true } : {}), references: planned.references, reflow: planned.reflow },
       };
     };
@@ -759,14 +787,16 @@ export function createAuthoringService(hooks: Hooks) {
           ? await checked(session, signal, { expectedRevision: args.expectedRevision, preview: args.preview, ...(args.cover ? { cover: args.cover } : {}),
             ...(args.inspect ? { inspect: args.inspect } : {}), ...(args.typescript !== undefined ? { typescript: args.typescript } : {}) }, true)
           : await movedDraftCheck();
-      const diagnostics = compactDiagnostics(report.diagnostics, args.include?.includes('occurrences'));
+      const once = diagnosticsOnce(shownDiagnostics, client, report.revision,
+        compactDiagnostics(report.diagnostics, args.include?.includes('occurrences')), !!args.preview && !args.include?.includes('occurrences'));
+      const diagnostics = once.diagnostics;
       // The photos of an inspected spread with their pixels and ppi; measured by the render, or estimated (API-021, 26 Nov).
       const inspection = report.render?.inspection && inspectionPrints(report.render.inspection, loadedPhoto(session.book));
       const { template: _template, render: rendered, ...rest } = report;
       const render = rendered && inspection ? { ...rendered, inspection } : rendered;
-      if (args.includeTemplate) return { ...report, ...(render ? { render } : {}), diagnostics };
+      if (args.includeTemplate) return { ...report, ...(render ? { render } : {}), diagnostics, ...('diagnosticsUnchanged' in once ? { diagnosticsUnchanged: once.diagnosticsUnchanged } : {}) };
       // Keep full declarations in the internal check cache for planning and context, not in every agent reply.
-      const full = { ...rest, diagnostics };
+      const full = { ...rest, diagnostics, ...('diagnosticsUnchanged' in once ? { diagnosticsUnchanged: once.diagnosticsUnchanged } : {}) };
       const compact = full.fixtures ? { ...full, fixtures: compactFixtures(full.fixtures) } : full;
       if (!render) return compact;
       return { ...compact, render: compactRender(render, report, args) };
@@ -1043,7 +1073,7 @@ export function createAuthoringService(hooks: Hooks) {
         throw error;
       }
       result = { state: 'ready', project: session.handle, revision: inputs.revision, changes: planned.changes,
-        affectedSpreads: planned.affectedSpreads, ...(planned.renumbered ? { renumbered: planned.renumbered } : {}),
+        ...(planned.unchanged ? { unchanged: planned.unchanged } : {}), affectedSpreads: planned.affectedSpreads, ...(planned.renumbered ? { renumbered: planned.renumbered } : {}),
         references: planned.references, reflow: planned.reflow,
         ...(planned.affectedCover ? { affectedCover: true } : {}),
         committed: !args.dryRun, dryRun: !!args.dryRun };

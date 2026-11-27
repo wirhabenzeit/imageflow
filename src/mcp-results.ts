@@ -108,11 +108,12 @@ const checkedRevision = z.string().optional().describe('The revision of diagnost
 const reportFields = { revision, diagnostics: z.array(diagnosticSchema), checks: checksSchema };
 const commandFields = {
   changes: z.array(z.string()).optional().describe('One line per change, as shown in Undo.'),
+  unchanged: z.array(z.string()).optional(),
   affectedSpreads: z.array(z.string()).optional().describe('Spreads inserted, removed, moved or changed, in book order.'),
-  renumbered: z.string().optional().describe('Other spreads that only moved pages, e.g. "41 spreads, now pages 5–86".'),
+  renumbered: z.string().optional().describe('Spreads that only moved pages, e.g. "41 spreads, now pages 5–86".'),
   affectedCover: z.literal(true).optional(),
   references: z.record(z.string(), z.string()).optional().describe('Spread IDs created for $alias batch references.'),
-  reflow: z.boolean().optional().describe('Whether text flow may have moved on other spreads.'),
+  reflow: z.boolean().optional().describe('Whether text may reflow on other spreads.'),
 };
 
 const revisionMoved = z.looseObject({ expectedRevision: z.string(), revision: z.string() }).optional()

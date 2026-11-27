@@ -26,6 +26,7 @@ const texts: Record<string, CheckText> = {
   'cover-page-sequence': { title: 'Pages don’t fit the cover' },
   'cover-layout-unavailable': { title: 'No cover layout', fix: 'Choose a cover layout in the Inspector.' },
   'cover-box-empty': { title: 'Empty photo on the cover', fix: 'Choose a photo in the Inspector.' },
+  'photo-box-empty': { title: 'Empty photo box', detail: 'It prints nothing, so the page may print blank where it is.', fix: 'Place a photo, or choose a layout without the box.' },
   'photo-resolution-low': { title: 'Low resolution', detail: 'Too few pixels for the size it prints at.', fix: 'Zoom the crop out, use a larger photo, or choose a layout with a smaller box.' },
   'photo-missing': { title: 'Photo missing', detail: 'The photo can’t be found, and nothing stands in for it.', fix: 'Locate the original, or choose another photo.' },
   'text-source-missing': { title: 'Text missing', detail: 'The text’s file can’t be found.', fix: 'Locate it, or choose another text.' },

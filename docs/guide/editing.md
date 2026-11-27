@@ -49,7 +49,7 @@ Drag a text box that holds a text onto another text box to swap the two texts, o
 
 **New Text** in the Texts strip creates a source inside the book. A source's pencil button opens a Markdown editor with a live preview. Changes save after a short pause. Linked sources offer a choice to edit the original or copy it into the book first.
 
-External changes reload automatically unless you have pending edits; then the editor asks you to resolve the conflict.
+External changes reload automatically unless you have pending edits; then the editor asks you to resolve the conflict. Changes made to a text or template file outside ImageFlow, by you or an agent, are not steps of the book's Undo: Undo only goes back through the book's own edits. Keep a copy of the files before a larger outside pass.
 
 ## Settings and on-page editing
 
